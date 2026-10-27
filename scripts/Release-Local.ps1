@@ -40,6 +40,18 @@ function Invoke-Checked([string]$Exe, [string[]]$Arguments) {
     } finally { $ErrorActionPreference = $prior }
     if ($exitCode -ne 0) { throw "$Exe failed ($exitCode)" }
 }
+function Install-PhoneApk([string]$Device, [string]$Package) {
+    $output = Join-Path $logs "release-local-$version-build$buildNumber-install.log"
+    $errors = Join-Path $logs "release-local-$version-build$buildNumber-install-error.log"
+    $installer = Start-Process -FilePath $adb -ArgumentList @('-s',$Device,'install','-r',('"' + $Package + '"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput $output -RedirectStandardError $errors
+    if (-not $installer.WaitForExit(120000)) {
+        # Stop only our waiting adb client, not the daemon, phone app or installer UI.
+        $installer.Kill(); $installer.WaitForExit()
+        throw 'Phone installation is waiting for system confirmation; the APK remains in Download/GlobalSend-latest.apk'
+    }
+    Get-Content -LiteralPath $output,$errors | Write-Output
+    if ($installer.ExitCode -ne 0) { throw "Phone installation was not completed ($($installer.ExitCode)); APK retained for manual installation" }
+}
 try {
     $env:APPDATA = $config
     $env:TEMP = $temp; $env:TMP = $temp
@@ -133,7 +145,7 @@ try {
             $report.phoneInstallSkipped=$true
             $report.phoneError='Push only: the previous installation was rejected by the phone'
         } else {
-            Invoke-Checked $adb @('-s',$Serial,'install','-r',$apk)
+            Install-PhoneApk $Serial $apk
             Invoke-Checked $adb @('-s',$Serial,'shell','am','start','-n','dev.globalsend.globalsend/.MainActivity')
             $report.androidInstalled=$true; $report.phonePending=$false
             $report.lastConfirmedPhoneVersion=$version
