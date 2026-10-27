@@ -31,6 +31,9 @@ main,extension=targets['Runner'],targets['ShareExtension']
 assert extension['productType']=='com.apple.product-type.app-extension'
 assert any(objects[dep]['target']==next(key for key,value in objects.items() if value is extension) for dep in main['dependencies'])
 assert any(objects[phase].get('dstSubfolderSpec')=='13' and any(objects[item]['fileRef']==extension['productReference'] for item in objects[phase]['files']) for phase in main['buildPhases'])
+embed=next(phase for phase in main['buildPhases'] if objects[phase].get('dstSubfolderSpec')=='13')
+thin=next(phase for phase in main['buildPhases'] if objects[phase].get('name')=='Thin Binary')
+assert main['buildPhases'].index(embed)<main['buildPhases'].index(thin),'Embedding must precede the script that reads/processes the host Info.plist'
 for target in [main,extension]:
  configs=objects[target['buildConfigurationList']]['buildConfigurations'];assert len(configs)==3
  for config in configs:
