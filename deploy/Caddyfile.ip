@@ -1,0 +1,41 @@
+{
+  # IP-literal clients commonly omit SNI. Still present this IP's valid cert.
+  default_sni {$PUBLIC_HOST}
+  # This Compose deployment publishes TCP only; do not advertise UDP HTTP/3.
+  servers {
+    protocols h1 h2
+  }
+  log {
+    format filter {
+      wrap json
+      fields {
+        request>uri delete
+        request>headers>Authorization delete
+      }
+    }
+  }
+}
+
+https://{$PUBLIC_HOST} {
+  tls {
+    issuer acme {
+      dir {$ACME_CA}
+      profile shortlived
+    }
+  }
+  encode zstd gzip
+  redir /globalsend /globalsend/app/ 308
+  handle /globalsend/releases {
+    respond "Package hosting is disabled." 410
+  }
+  handle_path /globalsend/releases/* {
+    respond "Package hosting is disabled." 410
+  }
+  @globalsend path /globalsend/*
+  handle @globalsend {
+    reverse_proxy app:8787
+  }
+  handle {
+    respond "Not found" 404
+  }
+}

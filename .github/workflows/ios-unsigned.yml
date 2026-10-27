@@ -1,0 +1,61 @@
+name: iPad unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'client/**'
+      - 'scripts/package-ios-unsigned.sh'
+      - '.github/workflows/ios-unsigned.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+      - name: Toolchain
+        run: |
+          flutter --version
+          xcodebuild -version
+      - name: Resolve dependencies
+        working-directory: client
+        run: flutter pub get --enforce-lockfile
+      - name: Build for physical iPad / iPhone
+        working-directory: client
+        run: flutter build ios --release --no-codesign --no-pub
+      - name: Package unsigned IPA
+        run: bash scripts/package-ios-unsigned.sh
+      - name: Downloadable IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlobalSend-iPad-unsigned-${{ github.run_number }}
+          path: artifacts/releases/GlobalSend-iPad-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Build summary
+        run: |
+          {
+            echo '## GlobalSend iPad'
+            echo 'Download **GlobalSend-iPad-unsigned** from the artifacts below.'
+            echo 'This is an **unsigned physical-device IPA**, not a Simulator build.'
+            echo 'Extract the artifact ZIP, then sign the IPA with your own tool before installing.'
+            echo 'No Apple signing secrets or TestFlight upload are used by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"

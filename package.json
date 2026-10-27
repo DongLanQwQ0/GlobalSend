@@ -1,0 +1,17 @@
+{
+  "name": "globalsend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted cross-device text and file dock",
+  "engines": { "node": ">=24.19.0 <25" },
+  "scripts": {
+    "setup": "npm ci --prefix server && npm ci --prefix web",
+    "build": "npm run build --prefix web && npm run build --prefix server",
+    "test": "npm test --prefix server && npm test --prefix web",
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/start.mjs",
+    "client:windows": "node scripts/client.mjs",
+    "release:local": "powershell.exe -NoProfile -NonInteractive -File scripts/Release-Local.ps1",
+    "backup:local": "node scripts/backup.mjs"
+  }
+}

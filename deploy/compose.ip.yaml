@@ -1,0 +1,13 @@
+# IP certificate and /globalsend deployment. Keep ports 80/443 reachable
+# for ACME validation and Caddy's automatic short-lived renewal.
+services:
+  caddy:
+    environment:
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+    volumes:
+      - ./deploy/Caddyfile.ip:/etc/caddy/Caddyfile:ro
+volumes:
+  caddy_data:
+    # Use a separate value for staging so an untrusted test certificate is
+    # never reused when switching to the production CA.
+    name: ${CADDY_DATA_VOLUME:-globalsend_caddy_data}

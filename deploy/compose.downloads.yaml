@@ -1,0 +1,4 @@
+# Compatibility no-op. Package hosting is disabled at the user's request.
+# Existing four-file management commands remain valid; future recreations no
+# longer mount the public package directory. Do not add package mounts here.
+services: {}

@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.dart_tool
+**/build
+.git
+.env
+data
+server/data
+backups
+artifacts
+deploy/bootstrap-secret.txt
+client
+tests
+*.log

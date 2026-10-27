@@ -1,0 +1,20 @@
+{
+  "upstream": "https://github.com/google/fonts/tree/main/ofl/notosanssc",
+  "license": "SIL Open Font License 1.1; reserved name Source is not used by this derivative",
+  "subset": "GB2312, Latin, numbers, Chinese/fullwidth/general punctuation, and every supported UI source character; missing content glyphs use platform fallback",
+  "generator": "client/tool/build_ui_fonts.py",
+  "outputs": [
+    {
+      "file": "GlobalSendSans-Regular.ttf",
+      "weight": 400,
+      "bytes": 2350700,
+      "characters": 7812
+    },
+    {
+      "file": "GlobalSendSans-Semibold.ttf",
+      "weight": 600,
+      "bytes": 2348952,
+      "characters": 7812
+    }
+  ]
+}

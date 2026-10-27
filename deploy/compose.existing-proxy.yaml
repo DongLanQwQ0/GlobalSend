@@ -1,0 +1,7 @@
+# Use with compose.yaml when an existing host reverse proxy terminates TLS.
+# docker compose -f compose.yaml -f deploy/compose.existing-proxy.yaml up -d --build app
+# Specify service `app` so this does not start the bundled Caddy.
+services:
+  app:
+    ports:
+      - "127.0.0.1:8787:8787"

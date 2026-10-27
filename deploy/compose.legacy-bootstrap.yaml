@@ -1,0 +1,3 @@
+# Compatibility no-op: new enrollment uses group passwords only.
+# Existing device tokens remain valid; no bootstrap file is mounted or read.
+services: {}

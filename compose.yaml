@@ -1,0 +1,103 @@
+name: globalsend
+services:
+  app:
+    image: globalsend:0.1.0
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
+      SERVER_NAME: ${SERVER_NAME:-GlobalSend}
+      WEB_ENABLED: "${WEB_ENABLED:-true}"
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-2147483648}
+      TOTAL_QUOTA: ${TOTAL_QUOTA:-10737418240}
+      TTL_SECONDS: ${TTL_SECONDS:-86400}
+      DISK_RESERVE: ${DISK_RESERVE:-67108864}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      STUN_URLS: ${STUN_URLS:-}
+    expose:
+      - "8787"
+    volumes:
+      - app_data:/data
+      - relay_data:/relay
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "let p=new URL(process.env.PUBLIC_BASE_URL).pathname;while(p.endsWith('/'))p=p.slice(0,-1);fetch('http://127.0.0.1:8787'+p+'/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  # Optional address discovery only. No TURN allocation or file relay.
+  stun:
+    image: coturn/coturn:4.18.0-r0
+    profiles: [stun]
+    restart: unless-stopped
+    init: true
+    entrypoint: ["/usr/bin/turnserver"]
+    command:
+      - -n
+      - --stun-only
+      - --no-tcp
+      - --no-tls
+      - --listening-ip=0.0.0.0
+      - --listening-port=3478
+      - --relay-threads=0
+      - --log-file=stdout
+      - --pidfile=/tmp/turnserver.pid
+    ports:
+      - "3478:3478/udp"
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+      - /var/lib/coturn:size=8m,uid=65534,gid=65534
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  app_data:
+  relay_data:
+  caddy_data:
+  caddy_config:

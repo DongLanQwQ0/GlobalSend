@@ -1,0 +1,130 @@
+<# Builds and publishes the native clients to the user's local test devices. #>
+[CmdletBinding()]
+param([string]$Serial = $env:GLOBALSEND_ADB_SERIAL, [switch]$PublishOnly, [switch]$KeepRunning, [switch]$PushOnlyPhone)
+$ErrorActionPreference = 'Stop'
+$root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$client = Join-Path $root 'client'
+$versionText = Get-Content -LiteralPath (Join-Path $client 'pubspec.yaml') -Raw
+if ($versionText -notmatch '(?m)^version:\s*(\d+\.\d+\.\d+)\+(\d+)') { throw 'Missing native version' }
+$version = $Matches[1]
+$buildNumber = [int]$Matches[2]
+$target = [IO.Path]::GetFullPath('E:\Programs\GlobalSend')
+$releases = Join-Path $root 'artifacts\releases'
+$logs = Join-Path $root 'artifacts\logs'
+$config = Join-Path $client 'build\release-local-tool-config'
+$temp = Join-Path $root 'artifacts\tmp\release-local'
+if (-not $env:GLOBALSEND_DATA_DIR) {
+    $installedPointer = Join-Path $target 'globalsend-data.json'
+    if (Test-Path -LiteralPath $installedPointer) {
+        $env:GLOBALSEND_DATA_DIR = (Get-Content -LiteralPath $installedPointer -Raw | ConvertFrom-Json).dataDirectory
+    }
+    if (-not $env:GLOBALSEND_DATA_DIR) { $env:GLOBALSEND_DATA_DIR = Join-Path $root 'artifacts\native-state' }
+}
+New-Item -ItemType Directory -Path $releases,$logs,$config,$temp -Force | Out-Null
+$previousRelease = $null
+if (Test-Path -LiteralPath (Join-Path $releases 'latest-local.json')) {
+    $previousRelease = Get-Content -LiteralPath (Join-Path $releases 'latest-local.json') -Raw | ConvertFrom-Json
+}
+if ((Test-Path -LiteralPath $target) -and ((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Installation folder must not be a link' }
+$oldAppData = $env:APPDATA
+$dart = 'E:\Programs\flutter\bin\cache\dart-sdk\bin\dart.exe'
+$snapshot = 'E:\Programs\flutter\bin\cache\flutter_tools.snapshot'
+$adb = 'F:\Android\Sdk\platform-tools\adb.exe'
+function Invoke-Checked([string]$Exe, [string[]]$Arguments) {
+    $prior = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5 treats ordinary native stderr as ErrorRecords.
+        $ErrorActionPreference = 'Continue'
+        & $Exe @Arguments 2>&1 | ForEach-Object { Write-Output "$_" }
+        $exitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prior }
+    if ($exitCode -ne 0) { throw "$Exe failed ($exitCode)" }
+}
+try {
+    $env:APPDATA = $config
+    $env:TEMP = $temp; $env:TMP = $temp
+    $env:PUB_CACHE = 'F:\Caches\PubCache'
+    $env:GRADLE_USER_HOME = 'F:\Android\GradleCache'
+    $env:ANDROID_HOME = 'F:\Android\Sdk'; $env:JAVA_HOME = 'D:\Minecraft\java21'
+    $env:CI = 'true'; $env:FLUTTER_SUPPRESS_ANALYTICS = 'true'
+    $settings = @{ 'build-dir' = "build/local-release/$version"; 'enable-windows-desktop' = $true } | ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $config '.flutter_settings'), $settings, (New-Object Text.UTF8Encoding($false)))
+    if (-not $PublishOnly) {
+    Push-Location $client
+    try {
+        Invoke-Checked $dart @($snapshot,'build','windows','--release','--no-pub') *> (Join-Path $logs "release-local-$version-windows.log")
+        Invoke-Checked $dart @($snapshot,'build','apk','--release','--no-pub','--target-platform=android-arm64','--android-project-arg=globalsendCompressNative=true','--android-project-arg=globalsendAbi=arm64-v8a','--android-project-arg=disable-abi-filtering=true') *> (Join-Path $logs "release-local-$version-android.log")
+    } finally { Pop-Location }
+    }
+    $windows = Join-Path $client "build\local-release\$version\windows\x64\runner\Release"
+    $apk = Join-Path $releases "GlobalSend-$version-android-arm64-v8a.apk"
+    Copy-Item -LiteralPath (Join-Path $client 'build\app\outputs\flutter-apk\app-release.apk') -Destination $apk -Force
+    Invoke-Checked 'F:\Android\Sdk\build-tools\36.0.0\apksigner.bat' @('verify',$apk)
+    Compress-Archive -Path "$windows\*" -DestinationPath (Join-Path $releases "GlobalSend-$version-windows-x64.zip") -Force
+
+    # Stop only GlobalSend, never other Flutter/Node/Java applications.
+    $running = @(Get-Process -Name globalsend -ErrorAction SilentlyContinue)
+    foreach ($instance in $running) { Stop-Process -Id $instance.Id -Force }
+    foreach ($instance in $running) { $instance.WaitForExit() }
+    # New history migrations must have a cold, independently restorable input.
+    $stateBackup = $null
+    if (Test-Path -LiteralPath $env:GLOBALSEND_DATA_DIR -PathType Container) {
+        $stateBackup = Join-Path $root ('backups\native-state\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-pre-' + $version)
+        New-Item -ItemType Directory -Path (Split-Path -Parent $stateBackup) -Force | Out-Null
+        Copy-Item -LiteralPath $env:GLOBALSEND_DATA_DIR -Destination $stateBackup -Recurse
+    }
+    if (Test-Path -LiteralPath $target) {
+        $backup = Join-Path $root ('backups\windows-installed\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        New-Item -ItemType Directory -Path (Split-Path -Parent $backup) -Force | Out-Null
+        Copy-Item -LiteralPath $target -Destination $backup -Recurse
+    }
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+    Get-ChildItem -LiteralPath $windows | Copy-Item -Destination $target -Recurse -Force
+    $env:APPDATA = $oldAppData
+    if (-not $env:GLOBALSEND_DATA_DIR) { $env:GLOBALSEND_DATA_DIR = Join-Path $root 'artifacts\native-state' }
+    [IO.File]::WriteAllText((Join-Path $target 'globalsend-data.json'),
+        (@{ dataDirectory = $env:GLOBALSEND_DATA_DIR } | ConvertTo-Json),
+        (New-Object Text.UTF8Encoding($false)))
+    $process = Start-Process -FilePath (Join-Path $target 'globalsend.exe') -WorkingDirectory $target -WindowStyle Normal -PassThru
+    # Persist Windows publication even when the phone disconnects during build.
+    $report = @{ version=$version; buildNumber=$buildNumber; windowsVersion=$version; windows=$target; windowsPid=$process.Id; stateBackup=$stateBackup; apk=$apk; apkBytes=(Get-Item -LiteralPath $apk).Length; serial=$Serial; androidInstalled=$false; phonePending=$true; lastConfirmedPhoneVersion=$previousRelease.lastConfirmedPhoneVersion; lastConfirmedPhoneBuildNumber=$previousRelease.lastConfirmedPhoneBuildNumber; publishedAt=(Get-Date).ToString('o') }
+    $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releases 'latest-local.json') -Encoding UTF8
+
+    try {
+        for ($attempt = 0; $attempt -lt 3; $attempt++) {
+            $devices = @(& $adb devices | ForEach-Object { if ($_ -match '^(\S+)\s+device$' -and $Matches[1] -notlike 'emulator-*') { $Matches[1] } })
+            if ($Serial -and $devices -contains $Serial) { break }
+            $usb = @($devices | Where-Object { $_ -notmatch ':' })
+            if ($usb.Count -eq 1) { $Serial = $usb[0]; break }
+            if (-not $Serial -and $devices.Count -eq 1) { $Serial = $devices[0]; break }
+            # Reconnect only the address explicitly supplied by the user. No port scanning.
+            if ($Serial -match '^\d+\.\d+\.\d+\.\d+:\d+$') {
+                & $adb connect $Serial 2>&1 | ForEach-Object { Write-Output "$_" }
+            }
+            if ($attempt -lt 2) { Start-Sleep -Seconds 2 }
+        }
+        if (-not $Serial) { throw 'No single authorized phone is connected' }
+        Invoke-Checked $adb @('-s',$Serial,'push',$apk,'/sdcard/Download/GlobalSend-latest.apk')
+        $report.apkPushed=$true
+        $report.deviceCopy='/sdcard/Download/GlobalSend-latest.apk'
+        $report.serial=$Serial
+        if ($PushOnlyPhone) {
+            $report.phoneInstallSkipped=$true
+            $report.phoneError='Push only: the previous installation was rejected by the phone'
+        } else {
+            Invoke-Checked $adb @('-s',$Serial,'install','-r',$apk)
+            Invoke-Checked $adb @('-s',$Serial,'shell','am','start','-n','dev.globalsend.globalsend/.MainActivity')
+            $report.androidInstalled=$true; $report.phonePending=$false
+            $report.lastConfirmedPhoneVersion=$version
+            $report.lastConfirmedPhoneBuildNumber=$buildNumber
+            $report.completedAt=(Get-Date).ToString('o')
+        }
+    } catch {
+        # An unattended phone failure must not block the other release targets.
+        $report.phoneError=$_.Exception.Message
+        Write-Warning "Phone update pending; APK retained at $apk. $($report.phoneError)"
+    }
+    $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releases 'latest-local.json') -Encoding UTF8
+    $report | ConvertTo-Json
+    if ($KeepRunning) { Wait-Process -Id $process.Id }
+} finally { $env:APPDATA = $oldAppData }
