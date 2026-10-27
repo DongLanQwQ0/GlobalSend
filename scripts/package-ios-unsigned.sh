@@ -9,7 +9,7 @@ if [[ "$platform" != 'iPhoneOS' ]]; then
   exit 1
 fi
 executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
-xcrun lipo -verify_arch arm64 "$app/$executable"
+xcrun lipo "$app/$executable" -verify_arch arm64
 
 mkdir -p "$root/artifacts/tmp" "$root/artifacts/releases"
 stage=$(mktemp -d "$root/artifacts/tmp/ios-unsigned.XXXXXX")
