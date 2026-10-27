@@ -79,6 +79,16 @@ try {
         Copy-Item -LiteralPath $target -Destination $backup -Recurse
     }
     New-Item -ItemType Directory -Path $target -Force | Out-Null
+    # Asset removals must also reach the installed bundle. Merging the new
+    # assets over the old directory would leave retired font files behind.
+    $installedAssets = [IO.Path]::GetFullPath((Join-Path $target 'data\flutter_assets'))
+    if (-not $installedAssets.StartsWith($target.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Installed assets escaped the application folder' }
+    if (Test-Path -LiteralPath $installedAssets) {
+        $assetEntries = @(Get-Item -LiteralPath $installedAssets -Force) + @(Get-ChildItem -LiteralPath $installedAssets -Recurse -Force)
+        $assetLinks = @($assetEntries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
+        if ($assetLinks.Count) { throw 'Installed assets contain links; refusing to replace them' }
+        Remove-Item -LiteralPath $installedAssets -Recurse -Force
+    }
     Get-ChildItem -LiteralPath $windows | Copy-Item -Destination $target -Recurse -Force
     $env:APPDATA = $oldAppData
     if (-not $env:GLOBALSEND_DATA_DIR) { $env:GLOBALSEND_DATA_DIR = Join-Path $root 'artifacts\native-state' }

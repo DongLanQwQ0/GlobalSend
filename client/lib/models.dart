@@ -45,8 +45,9 @@ class ServerProfile {
     this.autoReceive = true,
     this.sendRoutePreference = 'auto',
     this.receiveRoutePreference = 'auto',
-    this.cellularAllowed = false,
+    this.cellularAllowed = true,
     this.relayConfirmMiB = 32,
+    this.transferConcurrency = 4,
     this.storageId = '',
     this.legacyPeerIdentity = true,
   });
@@ -58,6 +59,7 @@ class ServerProfile {
   bool autoReceive;
   bool cellularAllowed;
   int relayConfirmMiB;
+  int transferConcurrency;
   String sendRoutePreference, receiveRoutePreference;
   String get key => profileKey(baseUrl, instanceId);
   String get storageKey {
@@ -80,6 +82,7 @@ class ServerProfile {
     'receiveRoutePreference': receiveRoutePreference,
     'cellularAllowed': cellularAllowed,
     'relayConfirmMiB': relayConfirmMiB,
+    'transferConcurrency': transferConcurrency,
     'storageId': storageId,
     'legacyPeerIdentity': legacyPeerIdentity,
   };
@@ -93,8 +96,9 @@ class ServerProfile {
     autoReceive: j['autoReceive'] ?? true,
     sendRoutePreference: j['sendRoutePreference'] ?? 'auto',
     receiveRoutePreference: j['receiveRoutePreference'] ?? 'auto',
-    cellularAllowed: j['cellularAllowed'] ?? false,
+    cellularAllowed: j['cellularAllowed'] ?? true,
     relayConfirmMiB: j['relayConfirmMiB'] ?? 32,
+    transferConcurrency: j['transferConcurrency'] ?? 4,
     storageId: j['storageId'] ?? '',
     legacyPeerIdentity: j['legacyPeerIdentity'] ?? true,
   );
@@ -109,6 +113,9 @@ class DockEntry {
     this.text = '',
     this.editedAt = '',
     this.editCursor = 0,
+    this.contentId = '',
+    this.contentRevision = 0,
+    this.contentDigest = '',
     this.status = 'ready',
     this.transferId = '',
     this.fileId = '',
@@ -145,6 +152,8 @@ class DockEntry {
   final String id, kind, title, source, transferId, fileId;
   String text, editedAt;
   int editCursor;
+  String contentId, contentDigest;
+  int contentRevision;
   final int size;
   final int createdAtMillis;
   int receivedAtMillis;
@@ -198,6 +207,9 @@ class DockEntry {
     'text': text,
     'editedAt': editedAt,
     'editCursor': editCursor,
+    'contentId': contentId,
+    'contentRevision': contentRevision,
+    'contentDigest': contentDigest,
     'status': status,
     'error': error,
     'transferId': transferId,
@@ -234,6 +246,9 @@ class DockEntry {
     text: j['text'] ?? '',
     editedAt: j['editedAt'] ?? '',
     editCursor: j['editCursor'] ?? 0,
+    contentId: j['contentId'] ?? '',
+    contentRevision: j['contentRevision'] ?? 0,
+    contentDigest: j['contentDigest'] ?? '',
     status: j['status'],
     error: j['error'] ?? '',
     transferId: j['transferId'] ?? '',

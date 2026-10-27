@@ -130,6 +130,19 @@ class ReceiveDestination {
     });
   }
 
+  /// Keep a continuing transfer attached to its migrated root, even if the
+  /// user left unrelated files in the old directory.
+  static Future<void> relocateFolderRoots(Map<String, String> locations) =>
+      _windowsRegistry((owned) async {
+        for (final key
+            in owned.keys
+                .where((key) => key.startsWith('@folder-root:'))
+                .toList()) {
+          final next = locations[owned[key]];
+          if (next != null) owned[key] = next;
+        }
+      });
+
   static Future<String> _directory(
     String parent,
     String name, {

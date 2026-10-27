@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import 'local_ip_addresses.dart';
@@ -49,7 +51,7 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                 IconButton(
                   tooltip: '关闭',
                   onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
+                  icon: const AppIcon(Icons.close),
                 ),
               ],
             ),

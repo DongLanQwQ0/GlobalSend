@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -75,7 +77,7 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                   key: const ValueKey('refresh-reachability'),
                   tooltip: '立即检测',
                   onPressed: running || !monitor.connected ? null : refresh,
-                  icon: const Icon(Icons.refresh),
+                  icon: const AppIcon(Icons.refresh),
                 ),
               ],
             ),
@@ -326,7 +328,7 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
             children: [
               Row(
                 children: [
-                  Icon(
+                  AppIcon(
                     !result.tested
                         ? Icons.schedule
                         : result.reachable

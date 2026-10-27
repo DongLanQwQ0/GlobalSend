@@ -66,7 +66,7 @@ export class RtcFileStore {
   async open(key:string,file:TransferFile,expires:number) {await this.ready;return (await this.call('open',{key,name:file.name,mimeType:file.mimeType,size:file.size,sha256:file.sha256,expires,relativePath:file.relativePath,entryKind:file.entryKind,transferId:key.split(':')[0]})).offset as number;}
   async directory(key:string,file:TransferFile){const {meta}=await this.call('directory',{key,name:file.name,size:0,mimeType:'inode/directory',relativePath:file.relativePath,transferId:key.split(':')[0],expires:Date.now()+86400000});this.receivedTimes.set(key,new Date(meta.receivedAt).toISOString());return meta;}
   async destination(){return this.call<{id:string;name:string}>('destination-get',{});}
-  async setDestination(handle?:FileSystemDirectoryHandle){return this.call<{id:string;name:string}>('destination-set',handle?{handle,id:crypto.randomUUID()}:{});}
+  async setDestination(handle?:FileSystemDirectoryHandle){return this.call<{id:string;name:string;moved:number;cleanupPending:boolean;relocated?:{scope:string;key:string}[]}>('destination-set',handle?{handle,id:crypto.randomUUID()}:{});}
   async write(key:string,offset:number,bytes:ArrayBuffer) {return (await this.call('write',{key,offset,bytes},[bytes])).offset as number;}
   async finish(key:string) {return (await this.call('finish',{key})).file as File;}
   async confirm(key:string) {const result=await this.call('confirm',{key});this.expiries.set(key,result.expires);if(result.receivedAt)this.receivedTimes.set(key,new Date(result.receivedAt).toISOString());}

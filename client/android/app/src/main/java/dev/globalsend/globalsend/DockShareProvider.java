@@ -22,13 +22,18 @@ public final class DockShareProvider extends ContentProvider {
     }
     private static final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
     static Uri register(android.content.Context context, File file, String label) throws Exception {
+        return register(context,file,label,true);
+    }
+    static Uri registerForShare(android.content.Context context,File file,String label) throws Exception {
+        return register(context,file,label,false);
+    }
+    private static Uri register(android.content.Context context, File file, String label,boolean requireOwned) throws Exception {
         File canonical = file.getCanonicalFile();
         String path = canonical.getPath(), data = context.getDataDir().getCanonicalPath() + File.separator;
         File external = context.getExternalFilesDir(null);
         boolean allowed = path.startsWith(data) || (external != null && path.startsWith(external.getCanonicalPath() + File.separator));
-        if (!allowed || !canonical.isFile() || !canonical.canRead()) throw new SecurityException("Only app-owned saved files may be exported");
+        if ((requireOwned&&!allowed) || !canonical.isFile() || !canonical.canRead()) throw new SecurityException("文件不存在或无法读取");
         entries.entrySet().removeIf(e -> e.getValue().expires < System.currentTimeMillis());
-        if (entries.size() >= 64) throw new IllegalStateException("Too many pending drag exports");
         String id = UUID.randomUUID().toString(); entries.put(id, new Entry(canonical, label));
         return new Uri.Builder().scheme("content").authority(context.getPackageName() + ".dock-files").appendPath("share").appendPath(id).build();
     }

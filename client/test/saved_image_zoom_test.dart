@@ -1,3 +1,4 @@
+import 'system_font_fixture.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -10,6 +11,7 @@ import 'package:globalsend/saved_image_preview.dart';
 import 'package:globalsend/ui_tokens.dart';
 
 void main() {
+  setUpAll(loadSystemTestFonts);
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory fixtures;
   final files = <String, File>{};
@@ -23,27 +25,6 @@ void main() {
   setUpAll(() async {
     fixtures = await Directory('build/test-fixtures/image-zoom')
         .create(recursive: true);
-    for (final name in ['Regular', 'Semibold']) {
-      await (FontLoader('GlobalSendSans')..addFont(
-            Future.value(
-              ByteData.sublistView(
-                await File('assets/fonts/GlobalSendSans-$name.ttf')
-                    .readAsBytes(),
-              ),
-            ),
-          ))
-          .load();
-    }
-    await (FontLoader('MaterialIcons')..addFont(
-          Future.value(
-            ByteData.sublistView(
-              await File(
-                'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-              ).readAsBytes(),
-            ),
-          ),
-        ))
-        .load();
     for (final (name, size) in [
       ('landscape', const Size(1200, 600)),
       ('portrait', const Size(600, 1200)),

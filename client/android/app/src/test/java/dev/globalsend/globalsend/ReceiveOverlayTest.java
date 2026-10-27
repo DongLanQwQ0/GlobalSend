@@ -36,8 +36,8 @@ public class ReceiveOverlayTest {
         assertNotEquals(0, layout.flags & WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL);
         assertEquals(0, layout.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         float dp = context.getResources().getDisplayMetrics().density;
-        assertTrue(layout.width <= Math.round(272*dp));
-        assertTrue(layout.height <= Math.round(184*dp));
+        assertTrue(layout.width <= Math.round(244*dp));
+        assertTrue(layout.height <= Math.round(156*dp));
         assertTrue(acks.isEmpty()); // addView alone is not presentation acknowledgement.
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
         assertTrue(root.isAttachedToWindow());
@@ -56,6 +56,8 @@ public class ReceiveOverlayTest {
         assertEquals(2,row.getChildCount());
         overlay.hide();
         assertNull(field(overlay,"root"));
+        assertNotEquals(0,((WindowManager.LayoutParams)root.getLayoutParams()).flags & WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200));
         assertFalse(root.isAttachedToWindow());
     }
     @Test public void closeCarriesOnlyDisplayedVersionsAndDoesNotStartAnActivity() throws Exception {
@@ -92,7 +94,7 @@ public class ReceiveOverlayTest {
         root.measure(View.MeasureSpec.makeMeasureSpec(size.width,View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(size.height,View.MeasureSpec.EXACTLY));
         root.layout(0,0,size.width,size.height);
-        root.setAlpha(1); root.setTranslationX(0);
+        root.setAlpha(1); root.setTranslationX(0); root.setScaleX(1); root.setScaleY(1);
         android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(size.width,size.height,android.graphics.Bitmap.Config.ARGB_8888);
         root.draw(new android.graphics.Canvas(image));
         assertTrue(size.height < context.getResources().getDisplayMetrics().heightPixels / 2);
@@ -106,5 +108,115 @@ public class ReceiveOverlayTest {
             }
         }
         overlay.hide();
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200));
+    }
+
+    private ReceiveOverlay receiver() {
+        return new ReceiveOverlay(RuntimeEnvironment.getApplication(),new ReceiveOverlay.Actions() {
+            public void open(String id) { }
+            public void copy(String id) { }
+            public void dismiss(Map<String,String> versions,long generation) { }
+        });
+    }
+    private void show(ReceiveOverlay overlay,String id,long generation) {
+        overlay.show(new ReceiveNotifications.Receipt(id,"1","电脑",id,null,null,0),generation,shown -> { });
+    }
+    private void draw(View root) {
+        WindowManager.LayoutParams layout = (WindowManager.LayoutParams)root.getLayoutParams();
+        root.measure(View.MeasureSpec.makeMeasureSpec(layout.width,View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(layout.height,View.MeasureSpec.EXACTLY));
+        root.layout(0,0,layout.width,layout.height);
+        root.getViewTreeObserver().dispatchOnPreDraw();
+    }
+
+    @Test public void oldExitCannotRemoveNewWindowAndLateFirstFrameCannotResurrectOldWindow() throws Exception {
+        ReceiveOverlay overlay = receiver();
+        show(overlay,"old",1);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        View old = (View)field(overlay,"root");
+        // Hide during the first-frame/enter interval, then immediately receive again.
+        overlay.hide();
+        old.animate().cancel(); // Cancellation must not cancel ownership cleanup.
+        show(overlay,"new",2);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        View current = (View)field(overlay,"root");
+        assertNotSame(old,current);
+        draw(old); draw(current);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(250));
+        assertFalse(old.isAttachedToWindow());
+        assertSame(current,field(overlay,"root"));
+        assertTrue(current.isAttachedToWindow());
+        assertEquals(1f,current.getAlpha(),.001f);
+        overlay.hide();
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200));
+    }
+
+    @Test public void sameItemUpdateKeepsScrollAndDoesNotReplayEntrance() throws Exception {
+        ReceiveOverlay overlay = receiver();
+        show(overlay,"one",1); show(overlay,"two",2); show(overlay,"three",3);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        View root = (View)field(overlay,"root");
+        draw(root);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(250));
+        android.widget.HorizontalScrollView scroll = (android.widget.HorizontalScrollView)field(overlay,"scroll");
+        scroll.scrollTo(50,0);
+        int before = scroll.getScrollX();
+        assertTrue(before > 0);
+        overlay.show(new ReceiveNotifications.Receipt("one","2","电脑","编辑正文",null,null,0),4,shown -> { });
+        assertSame(root,field(overlay,"root"));
+        draw(root);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        assertEquals(before,scroll.getScrollX());
+        assertEquals(1f,root.getAlpha(),.001f);
+        assertEquals(0f,root.getTranslationX(),.001f);
+        assertEquals(3,((LinearLayout)field(overlay,"row")).getChildCount());
+        overlay.hide();
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200));
+    }
+
+    @Test public void hideBeforeAttachDoesNotLeaveAnUnownedWindow() throws Exception {
+        ReceiveOverlay overlay = receiver();
+        show(overlay,"one",1);
+        View old = (View)field(overlay,"root");
+        overlay.hide();
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1));
+        assertNull(field(overlay,"root"));
+        assertFalse(old.isAttachedToWindow());
+    }
+
+    @Test public void arrivalAfterADeferredCloseIsPresentedAfterNativeDragEnds() throws Exception {
+        ReceiveOverlay overlay = receiver();
+        show(overlay,"old",1);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        View old = (View)field(overlay,"root");
+        View card = ((LinearLayout)field(overlay,"row")).getChildAt(0);
+        Class<?> sessionClass = Class.forName("dev.globalsend.globalsend.DockCoordinator$LocalDrag");
+        java.lang.reflect.Constructor<?> constructor = sessionClass.getDeclaredConstructor(View.class,String.class,String.class);
+        constructor.setAccessible(true);
+        Object session = constructor.newInstance(card,null,"old");
+        java.lang.reflect.Field active = DockCoordinator.class.getDeclaredField("activeExport");
+        active.setAccessible(true); active.set(null,session);
+        try {
+            overlay.hide(); // Must leave the drag's source view attached until system drag finishes.
+            java.util.List<Boolean> received = new java.util.ArrayList<>();
+            overlay.show(new ReceiveNotifications.Receipt("new","1","手机","新消息",null,null,0),2,received::add);
+            assertSame(old,field(overlay,"root"));
+            assertTrue(old.isAttachedToWindow());
+            assertTrue(received.isEmpty());
+            java.lang.reflect.Method finish = DockCoordinator.class.getDeclaredMethod("finishExport",sessionClass);
+            finish.setAccessible(true); finish.invoke(null,session);
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            View current = (View)field(overlay,"root");
+            assertNotSame(old,current);
+            draw(current);
+            assertEquals(java.util.List.of(true),received);
+            assertEquals(1,((LinearLayout)field(overlay,"row")).getChildCount());
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(250));
+            assertFalse(old.isAttachedToWindow());
+            assertTrue(current.isAttachedToWindow());
+        } finally {
+            active.set(null,null); overlay.hide();
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200));
+        }
     }
 }

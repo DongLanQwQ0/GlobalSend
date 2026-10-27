@@ -126,6 +126,20 @@ public class AndroidDragTest {
     }
 
     @Test @Config(shadows = NativeDragView.class)
+    public void bulkSystemDragIncludesEveryFileAndTextAndReturnsThemToQueueWithoutImportCopies() throws Exception {
+        NativeDragView.resetFixture();View source=new View(activity);activity.setContentView(source);queueBounds();
+        List<String> paths=new ArrayList<>();for(int i=0;i<70;i++){File file=new File(activity.getFilesDir(),"drag"+i+".bin");Files.write(file.toPath(),("content"+i).getBytes(java.nio.charset.StandardCharsets.UTF_8));paths.add(file.getPath());}
+        assertTrue(DockCoordinator.startDrag(source,paths,List.of("first","second"),"72 项"));
+        assertEquals(72,NativeDragView.clips.get(0).getItemCount());
+        DockCoordinator.LocalDrag local=(DockCoordinator.LocalDrag)NativeDragView.states.get(0);
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_STARTED,local,0,0));
+        assertTrue(coordinator.acceptDrag(localEvent(DragEvent.ACTION_DROP,local,100,200)));
+        MethodCall drop=events.stream().filter(call->call.method.equals("nativeDrop")).findFirst().get();Map<?,?> value=(Map<?,?>)drop.arguments;
+        assertEquals(paths,value.get("paths"));assertEquals(List.of("first","second"),value.get("texts"));assertTrue(((List<?>)value.get("temporaryPaths")).isEmpty());
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,local,0,0));
+    }
+
+    @Test @Config(shadows = NativeDragView.class)
     public void refusedSystemStartIsReportedAndDoesNotPoisonTheNextDrag() throws Exception {
         NativeDragView.resetFixture();
         View source = new View(activity);
@@ -184,6 +198,9 @@ public class AndroidDragTest {
         DockCoordinator.LocalDrag local = (DockCoordinator.LocalDrag) NativeDragView.states.get(0);
         coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED, local, 0, 0));
         assertNull(ReflectionHelpers.getField(overlay, "root"));
+        // The current source is released immediately, but the old view stays
+        // attached for its 150 ms exit animation before independent removal.
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(180, TimeUnit.MILLISECONDS);
         assertFalse(root.isAttachedToWindow());
         assertEquals(false, coordinator.status().get("localSessionActive"));
     }

@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -10,6 +12,7 @@ import 'text_viewer.dart';
 import 'web_links.dart';
 import 'text_selection_surface.dart';
 import 'received_order.dart';
+import 'bulk_file_drag.dart';
 
 class ReceivedContentPreview extends StatelessWidget {
   const ReceivedContentPreview({
@@ -74,7 +77,7 @@ class ReceivedContentPreview extends StatelessWidget {
                           color: const Color(0xffe9f2ec),
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        child: Icon(
+                        child: AppIcon(
                           platformIcon,
                           size: 25,
                           color: const Color(0xff176b50),
@@ -111,7 +114,7 @@ class ReceivedContentPreview extends StatelessWidget {
                             key: const ValueKey('expand-receipt'),
                             tooltip: '全屏',
                             onPressed: onExpand,
-                            icon: const Icon(
+                            icon: const AppIcon(
                               Icons.open_in_full_rounded,
                               size: 20,
                             ),
@@ -122,7 +125,7 @@ class ReceivedContentPreview extends StatelessWidget {
                           key: const ValueKey('close-receipt'),
                           tooltip: '关闭',
                           onPressed: onClose,
-                          icon: const Icon(Icons.close),
+                          icon: const AppIcon(Icons.close),
                         ),
                       ),
                     ],
@@ -175,7 +178,7 @@ class ReceivedContentPreview extends StatelessWidget {
                           FilledButton.icon(
                             key: const ValueKey('copy-receipt'),
                             onPressed: onCopy,
-                            icon: const Icon(Icons.copy, size: 17),
+                            icon: const AppIcon(Icons.copy, size: 17),
                             label: const Text('复制'),
                           ),
                         )
@@ -183,7 +186,7 @@ class ReceivedContentPreview extends StatelessWidget {
                         control(
                           OutlinedButton.icon(
                             onPressed: onOpen,
-                            icon: const Icon(Icons.open_in_new, size: 17),
+                            icon: const AppIcon(Icons.open_in_new, size: 17),
                             label: const Text('打开'),
                           ),
                         ),
@@ -244,18 +247,35 @@ class ReceivedBatchPreview extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
+                    BulkFileDrag(
+                      key: const ValueKey('receipt-drag-all'),
+                      paths: entries
+                          .where(
+                            (entry) =>
+                                entry.kind == 'file' &&
+                                entry.localPath.isNotEmpty,
+                          )
+                          .map((entry) => entry.localPath)
+                          .toList(),
+                      onError: (error) =>
+                          ScaffoldMessenger.maybeOf(context)
+                              ?.showSnackBar(SnackBar(content: Text('$error'))),
+                    ),
                     if (onExpand != null)
                       IconButton(
                         key: const ValueKey('expand-receipt'),
                         tooltip: '全屏',
                         onPressed: onExpand,
-                        icon: const Icon(Icons.open_in_full_rounded, size: 20),
+                        icon: const AppIcon(
+                          Icons.open_in_full_rounded,
+                          size: 20,
+                        ),
                       ),
                     IconButton(
                       key: const ValueKey('close-receipt'),
                       tooltip: '关闭',
                       onPressed: onClose,
-                      icon: const Icon(Icons.close),
+                      icon: const AppIcon(Icons.close),
                     ),
                   ],
                 ),
@@ -372,7 +392,7 @@ class _ReceivedFileBodyState extends State<_ReceivedFileBody> {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(
+        const AppIcon(
           Icons.insert_drive_file_outlined,
           size: 70,
           color: Color(0xff7b9c88),

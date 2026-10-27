@@ -1,3 +1,5 @@
+import 'system_font_fixture.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -34,48 +36,22 @@ Map<String, dynamic> dockPayload(int generation, List<String> ids) => {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(loadSystemTestFonts);
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   final boundaryKey = GlobalKey();
   final frames = <Map<String, dynamic>>[];
-  final nativeRows = <String>[];
-  setUpAll(() async {
-    final fonts = FontLoader('GlobalSendSans');
-    for (final name in ['Regular', 'Semibold']) {
-      fonts.addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File('assets/fonts/GlobalSendSans-$name.ttf').readAsBytes(),
-          ),
-        ),
-      );
-    }
-    await fonts.load();
-    await (FontLoader('MaterialIcons')..addFont(
-          Future.value(
-            ByteData.sublistView(
-              await File(
-                'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-              ).readAsBytes(),
-            ),
-          ),
-        ))
-        .load();
-  });
   tearDown(
     () => messenger.setMockMethodCallHandler(ReceiveDockApp.channel, null),
   );
   tearDownAll(() async {
     final report = File(
-      '../artifacts/reports/receive-dock-region-frames-1.0.19.json',
+      '../artifacts/reports/receive-dock-pane-frames-final.json',
     );
     await report.parent.create(recursive: true);
     await report.writeAsString(
       const JsonEncoder.withIndent('  ').convert(frames),
     );
-    await File(
-      '../artifacts/reports/receive-dock-region-native-samples-1.0.19.txt',
-    ).writeAsString(nativeRows.join('\n'));
   });
 
   test('receipt ordering uses actual completion time with a stable in-progress placeholder', () {
@@ -196,19 +172,12 @@ void main() {
     List<Map<String, dynamic>> regions, {
     bool screenshot = false,
   }) async {
-    final region = regions.last;
-    final rects = (region['rects'] as List)
-        .map(
-          (r) => Rect.fromLTRB(
-            (r['left'] as num).toDouble(),
-            (r['top'] as num).toDouble(),
-            (r['right'] as num).toDouble(),
-            (r['bottom'] as num).toDouble(),
-          ),
-        )
-        .toList();
-    var missing = 0;
-    Offset? example;
+    expect(
+      regions,
+      isEmpty,
+      reason: 'no per-card native cut-out geometry is sent',
+    );
+    final backgroundAlpha = <int>[];
     await tester.runAsync(() async {
       final image =
           await (boundaryKey.currentContext!.findRenderObject()!
@@ -217,31 +186,22 @@ void main() {
       final data = (await image.toByteData(
         format: ui.ImageByteFormat.rawRgba,
       ))!;
-      final points = <Offset>[];
-      for (var y = 0; y < image.height; y += 2) {
-        for (var x = 0; x < image.width; x += 2) {
-          if (data.getUint8((y * image.width + x) * 4 + 3) < 24) continue;
-          final p = Offset(x.toDouble(), y.toDouble());
-          points.add(p);
-          if (!rects.any((r) => r.contains(p))) {
-            missing++;
-            example ??= p;
-          }
-        }
-      }
-      nativeRows.add('FRAME $name ${rects.length} ${points.length}');
-      for (final r in rects) {
-        nativeRows.add(
-          '${r.left.round()} ${r.top.round()} ${r.right.round()} ${r.bottom.round()}',
+      for (final point in [
+        const Offset(2, 2),
+        const Offset(310, 15),
+        const Offset(475, 90),
+        const Offset(310, 182),
+      ]) {
+        backgroundAlpha.add(
+          data.getUint8(
+            (point.dy.toInt() * image.width + point.dx.toInt()) * 4 + 3,
+          ),
         );
-      }
-      for (final p in points) {
-        nativeRows.add('${p.dx.round()} ${p.dy.round()}');
       }
       if (screenshot) {
         final png = (await image.toByteData(format: ui.ImageByteFormat.png))!;
         final file = File(
-          '../artifacts/screenshots/receive-dock-$name-1.0.19.png',
+          '../artifacts/screenshots/receive-dock-pane-$name-final.png',
         );
         await file.parent.create(recursive: true);
         await file.writeAsBytes(png.buffer.asUint8List());
@@ -250,16 +210,14 @@ void main() {
     });
     frames.add({
       'frame': name,
-      'maskUpdates': regions.length,
-      'rects': region['rects'],
-      'missingPaintSamples': missing,
-      'example': example == null ? null : [example!.dx, example!.dy],
+      'legacyGeometryMessages': regions.length,
+      'backgroundAlpha': backgroundAlpha,
     });
-    return missing;
+    return backgroundAlpha.where((alpha) => alpha != 179).length;
   }
 
   testWidgets(
-    'six dock cards remain inside the native mask on every horizontal scroll frame',
+    'six dock cards scroll over one unchanged translucent pane without native cut-outs',
     (tester) async {
       final regions = <Map<String, dynamic>>[], methods = <String>[];
       await mount(
@@ -285,13 +243,13 @@ void main() {
       expect(
         misses,
         everyElement(0),
-        reason: 'any painted pixel removed by SetWindowRgn appears as an artificial hard cut',
+        reason: 'scrolling must not replace the pane with clear holes or opaque fill',
       );
     },
   );
 
   testWidgets(
-    'new dock card drops and old cards shift without stale native mask or repeated presentation',
+    'new dock card drops and old cards shift over the same pane without repeated presentation',
     (tester) async {
       final regions = <Map<String, dynamic>>[], methods = <String>[];
       await mount(

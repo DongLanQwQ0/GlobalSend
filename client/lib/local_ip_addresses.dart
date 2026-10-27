@@ -90,6 +90,12 @@ List<LocalIpAddress> addressesFromInterfaces(
   final result = <LocalIpAddress>[];
   for (final network in interfaces) {
     final name = network['name'] as String? ?? '';
+    if (network['loopback'] == true ||
+        RegExp(
+          r'^(lo\d*|loopback(?:\s.*)?)$',
+          caseSensitive: false,
+        ).hasMatch(name))
+      continue;
     final source = LocalIpSource(
       id: network['id']?.toString() ?? name,
       name: name,

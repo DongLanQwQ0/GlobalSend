@@ -50,6 +50,7 @@ export class LocalLibraryView {
   private token=0;
   private previewToken=0;
   private refreshing:Promise<void>|null=null;
+  private dragPreparingToken=-1;
   private pressTimer=0;
   private pressStart:{x:number;y:number}|null=null;
   private pressedId='';
@@ -86,6 +87,7 @@ export class LocalLibraryView {
         this.cleanup=rules;
         if(!this.cleanupDirty){this.cleanupDraft={...rules,categories:[...rules.categories]};this.retentionUnit=rules.retentionHours%24===0?'days':'hours';this.retentionValue=String(rules.retentionHours/(this.retentionUnit==='days'?24:1));}
         this.entries=entries;const ids=new Set(entries.map(entry=>entry.id));
+        void this.prepareDragFiles();
         this.actions.inventory(entries);
         for(const id of this.selected)if(!ids.has(id))this.selected.delete(id);
         for(const [id,url] of this.thumbnails)if(!ids.has(id)){URL.revokeObjectURL(url);this.thumbnails.delete(id);}
@@ -95,6 +97,14 @@ export class LocalLibraryView {
       finally{if(token===this.token){this.loading=false;this.actions.changed();}}
     })();
     this.refreshing=refresh;try{await refresh;}finally{if(this.refreshing===refresh)this.refreshing=null;}
+  }
+  async refreshLocations(){
+    const preview=this.previewFile?.entry.id;
+    this.token++;this.refreshing=null;this.closePreview();
+    for(const url of this.thumbnails.values())URL.revokeObjectURL(url);
+    this.thumbnails.clear();this.files.clear();this.snippets.clear();this.loadingThumbnails.clear();
+    await this.refresh();
+    if(preview && this.opened)await this.preview(preview);
   }
   closePreview() {if(this.previewFile?.url)URL.revokeObjectURL(this.previewFile.url);this.previewFile=null;this.previewToken++;this.textScroll=0;this.textSelection=[0,0];}
   back() {
@@ -186,6 +196,17 @@ export class LocalLibraryView {
     return `保留 ${this.cleanup.retentionHours%24===0?`${this.cleanup.retentionHours/24} 天`:`${this.cleanup.retentionHours} 小时`}`;
   }
   fileForDrag(id:string){return this.files.get(id);}
+  filesForBulkDrag(){return this.entries.filter(entry=>entry.entryKind!=='directory' && (!this.editing || this.selected.has(entry.id))).flatMap(entry=>{const file=this.files.get(entry.id);return file?[file]:[];});}
+  private async prepareDragFiles(){
+    if(this.dragPreparingToken===this.token || !this.service)return;
+    const token=this.token;this.dragPreparingToken=token;
+    try{
+      const entries=this.entries.filter(entry=>entry.entryKind!=='directory' && !this.files.has(entry.id));
+      for(let index=0;index<entries.length && token===this.token;index+=4)await Promise.all(entries.slice(index,index+4).map(async entry=>{
+        try{const file=await this.service!.get(entry.id);if(token===this.token)this.files.set(entry.id,file);}catch{/* The next inventory reconciles files removed outside the app. */}
+      }));
+    }finally{if(this.dragPreparingToken===token)this.dragPreparingToken=-1;if(token===this.token)this.actions.changed();}
+  }
   private date(value:number){return compactTime(value);}
   html(embedded=false) {
     const peers=this.actions.peers(),pending=this.actions.pendingForward();
@@ -195,15 +216,15 @@ export class LocalLibraryView {
     ${this.error?`<p class="library-error" role="alert">${e(this.error)}</p>`:''}
     ${preview?this.previewHtml(preview):`${this.toolbarHtml(peers,pending)}${this.renameId?`<form id="library-rename-form" class="library-rename-form"><label class="field" for="library-rename-name">文件名<input id="library-rename-name" value="${e(this.renameName)}" maxlength="255" required></label><button class="primary" type="submit" ${this.busy?'disabled':''}>保存</button><button class="quiet" type="button" data-library-action="cancel-rename">取消</button></form>`:''}
     ${this.loading && !this.entries.length?'<div class="library-empty">读取中…</div>':!this.entries.length?'<div class="library-empty">暂无已保存文件</div>':`<div class="library-grid">${sortLocalFiles(this.entries,this.sort).map(entry=>this.cardHtml(entry)).join('')}</div>`}
-    ${this.cleanupHtml()}`}${this.menuId?`<div class="content-menu" role="menu" style="left:${this.menuPosition.x}px;top:${this.menuPosition.y}px">${[['preview','详情'],['download','下载'],['requeue','加入待发送'],['rename','重命名'],['delete','删除']].map(([action,label])=>`<button data-library-command="${action}" role="menuitem">${label}</button>`).join('')}</div>`:''}</section>${embedded?'':'</div>'}`;
+    ${this.cleanupHtml()}`}${this.menuId?`<div class="content-menu" role="menu" style="left:${this.menuPosition.x}px;top:${this.menuPosition.y}px">${[['preview','打开'],['requeue','加入待发送'],['download','下载'],['rename','重命名'],['delete','删除'],['preview','详情']].map(([action,label])=>`<button data-library-command="${action}" role="menuitem">${label}</button>`).join('')}</div>`:''}</section>${embedded?'':'</div>'}`;
   }
   private cleanupHtml() {
     const labels=['图片','视频','音频','文本','压缩包','其他'];
-    return `<details class="advanced-join library-cleanup settings-card"><summary>自动清理 <span class="cleanup-value">${this.cleanupLabel()}</span></summary><form id="library-cleanup-form"><label class="library-retention" for="library-retention">保留时长<span><input id="library-retention" type="number" min="1" step="1" inputmode="numeric" value="${e(this.retentionValue)}" required><select id="library-retention-unit" aria-label="保留时长单位"><option value="days" ${this.retentionUnit==='days'?'selected':''}>天</option><option value="hours" ${this.retentionUnit==='hours'?'selected':''}>小时</option></select></span></label><div class="library-categories" aria-label="清理类别">${FILE_CATEGORIES.map((category,index)=>`<label><input type="checkbox" data-library-category="${category}" ${this.cleanupDraft.categories.includes(category)?'checked':''}>${labels[index]}</label>`).join('')}</div><label class="library-cleanup-size" for="library-size-rule">文件大小<span><select id="library-size-rule"><option value="any" ${this.cleanupDraft.sizeRule==='any'?'selected':''}>不限</option><option value="greater" ${this.cleanupDraft.sizeRule==='greater'?'selected':''}>大于</option><option value="smaller" ${this.cleanupDraft.sizeRule==='smaller'?'selected':''}>小于</option></select><input id="library-size-mib" type="number" min="0" step="any" inputmode="decimal" aria-label="清理大小 MiB" value="${this.cleanupDraft.sizeMiB}" ${this.cleanupDraft.sizeRule==='any'?'disabled':''}><span>MiB</span></span></label><div class="library-cleanup-footer"><p>只清理符合规则的过期文件，不影响下载副本。</p><button class="secondary" type="submit" ${this.busy?'disabled':''} ${this.cleanupDirty?'':'hidden'}>保存</button></div></form></details>`;
+    return `<details class="advanced-join library-cleanup settings-card"><summary>自动清理 <span class="cleanup-value">${this.cleanupLabel()}</span></summary><form id="library-cleanup-form"><label class="library-retention" for="library-retention">保留时长<span><input id="library-retention" type="number" min="1" step="1" inputmode="numeric" value="${e(this.retentionValue)}" required><select id="library-retention-unit" aria-label="保留时长单位"><option value="days" ${this.retentionUnit==='days'?'selected':''}>天</option><option value="hours" ${this.retentionUnit==='hours'?'selected':''}>小时</option></select></span></label><div class="library-categories" aria-label="清理类别">${FILE_CATEGORIES.map((category,index)=>`<label><input type="checkbox" data-library-category="${category}" ${this.cleanupDraft.categories.includes(category)?'checked':''}>${labels[index]}</label>`).join('')}</div><label class="library-cleanup-size" for="library-size-rule">文件大小<span><select id="library-size-rule"><option value="any" ${this.cleanupDraft.sizeRule==='any'?'selected':''}>不限</option><option value="greater" ${this.cleanupDraft.sizeRule==='greater'?'selected':''}>大于</option><option value="smaller" ${this.cleanupDraft.sizeRule==='smaller'?'selected':''}>小于</option><option value="atMost" ${this.cleanupDraft.sizeRule==='atMost'?'selected':''}>不大于</option></select><input id="library-size-mib" type="number" min="0" step="any" inputmode="decimal" aria-label="清理大小 KB" value="${this.cleanupDraft.sizeMiB*1048576/1000}" ${this.cleanupDraft.sizeRule==='any'?'disabled':''}><span>KB</span></span></label><div class="library-cleanup-footer"><p>只清理符合规则的过期文件，不影响下载副本。</p><button class="secondary" type="submit" ${this.busy?'disabled':''} ${this.cleanupDirty?'':'hidden'}>保存</button></div></form></details>`;
   }
   private toolbarHtml(peers:Device[],pending:boolean) {
     const count=this.selected.size;
-    return `<div class="library-toolbar"><label class="toolbar-field" for="library-sort"><span>排序</span><select id="library-sort" data-library-sort aria-label="文件排序"><option value="received" ${this.sort==='received'?'selected':''}>最新接收</option><option value="oldest" ${this.sort==='oldest'?'selected':''}>最早接收</option><option value="name" ${this.sort==='name'?'selected':''}>名称</option><option value="size" ${this.sort==='size'?'selected':''}>大小</option></select></label><button class="quiet" data-library-action="refresh" aria-label="刷新文件库" ${this.loading?'disabled':''}>${icon('retry')}</button><button class="secondary" data-library-action="edit" ${this.busy || pending || !this.entries.length?'disabled':''}>${this.editing?'完成':'编辑'}</button></div>
+    return `<div class="library-toolbar">${this.filesForBulkDrag().length?`<button class="icon-button quiet" draggable="true" data-drag-all="library" aria-label="全部拖拽" title="拖出 ${this.filesForBulkDrag().length} 个本地文件">${icon('drag')}</button>`:''}<label class="toolbar-field" for="library-sort"><span>排序</span><select id="library-sort" data-library-sort aria-label="文件排序"><option value="received" ${this.sort==='received'?'selected':''}>最新接收</option><option value="oldest" ${this.sort==='oldest'?'selected':''}>最早接收</option><option value="name" ${this.sort==='name'?'selected':''}>名称</option><option value="size" ${this.sort==='size'?'selected':''}>大小</option></select></label><button class="quiet" data-library-action="refresh" aria-label="刷新文件库" ${this.loading?'disabled':''}>${icon('retry')}</button><button class="secondary" data-library-action="edit" ${this.busy || pending || !this.entries.length?'disabled':''}>${this.editing?'完成':'编辑'}</button></div>
     ${this.editing?`<div class="library-selection"><span>已选 ${count} 项</span><button class="quiet" data-library-action="select-all">${count===this.entries.length?'取消全选':'全选'}</button><div class="item-actions"><button class="quiet" data-library-action="rename" ${count!==1 || this.busy || pending?'disabled':''}>重命名</button><button class="quiet danger" data-library-action="delete" ${!count || this.busy || pending?'disabled':''}>删除</button></div>${this.actions.signedIn()?`<div class="library-forward"><label class="toolbar-field" for="library-target"><span>转发到</span><select id="library-target" data-library-target aria-label="转发到在线设备" ${!peers.length || this.busy || pending?'disabled':''}>${!peers.length?'<option value="">暂无在线设备</option>':peers.map(device=>`<option value="${e(device.deviceId)}" ${this.target===device.deviceId?'selected':''}>${e(device.name)}</option>`).join('')}</select></label><button class="primary" data-library-action="forward" ${!count || !this.target || this.busy?'disabled':''}>${this.busy?'处理中…':pending?'重试转发':'转发'}</button>${pending?'<button class="quiet" data-library-action="discard-forward">取消</button>':''}</div>`:''}</div>`:''}`;
   }
   private cardHtml(entry:LocalFileEntry) {
@@ -243,7 +264,7 @@ export class LocalLibraryView {
     root.querySelector<HTMLInputElement>('#library-retention')?.addEventListener('input',event=>{this.retentionValue=(event.target as HTMLInputElement).value;dirty();});
     root.querySelector<HTMLSelectElement>('#library-retention-unit')?.addEventListener('change',event=>{this.retentionUnit=(event.target as HTMLSelectElement).value as 'hours'|'days';dirty();});
     root.querySelector<HTMLSelectElement>('#library-size-rule')?.addEventListener('change',event=>{this.cleanupDraft.sizeRule=(event.target as HTMLSelectElement).value as CleanupPreferences['sizeRule'];const input=root.querySelector<HTMLInputElement>('#library-size-mib');if(input)input.disabled=this.cleanupDraft.sizeRule==='any';dirty();});
-    root.querySelector<HTMLInputElement>('#library-size-mib')?.addEventListener('input',event=>{this.cleanupDraft.sizeMiB=Number((event.target as HTMLInputElement).value);dirty();});
+    root.querySelector<HTMLInputElement>('#library-size-mib')?.addEventListener('input',event=>{this.cleanupDraft.sizeMiB=Number((event.target as HTMLInputElement).value)*1000/1048576;dirty();});
     root.querySelectorAll<HTMLInputElement>('[data-library-category]').forEach(node=>node.addEventListener('change',()=>{const category=node.dataset.libraryCategory as FileCategory;this.cleanupDraft.categories=node.checked?[...this.cleanupDraft.categories,category]:this.cleanupDraft.categories.filter(value=>value!==category);dirty();}));
     root.querySelectorAll<HTMLElement>('[data-library-id]').forEach(node=>{
       const id=node.dataset.libraryId!;

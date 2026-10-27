@@ -17,12 +17,16 @@ class SendUiSession {
   bool settingsOpen = false, composeOpen = false;
   bool multiSend = false;
   bool development = false, showKey = false, retentionInDays = true;
-  Set<SavedFileCategory> cleanupCategories = SavedFileCategory.values.toSet();
-  SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.any;
+  Set<SavedFileCategory> cleanupCategories = Set.of(
+    SavedFileCleanupFilter().categories,
+  );
+  SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.atMost;
   String? clipboardChoice;
   final sendTargets = <String>{};
   int? composeIndex;
   String readerId = '';
+  String? detailsId;
+  int detailsRequest = 0;
   int? receiptSerial;
   int notificationSerial = 0;
   DockEntry? pendingReceipt;

@@ -1,3 +1,4 @@
+import 'system_font_fixture.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -315,6 +316,7 @@ PreviewController signedIn() => PreviewController()
   ..connected = true;
 
 void main() {
+  setUpAll(loadSystemTestFonts);
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -324,29 +326,6 @@ void main() {
             return {'presentation': 'main', 'shown': true};
           return null;
         });
-  });
-  setUpAll(() async {
-    final uiFonts = FontLoader('GlobalSendSans');
-    for (final name in ['Regular', 'Semibold']) {
-      uiFonts.addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File('assets/fonts/GlobalSendSans-$name.ttf').readAsBytes(),
-          ),
-        ),
-      );
-    }
-    await uiFonts.load();
-    await (FontLoader('MaterialIcons')..addFont(
-          Future.value(
-            ByteData.sublistView(
-              await File(
-                'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-              ).readAsBytes(),
-            ),
-          ),
-        ))
-        .load();
   });
   Future<void> show(
     WidgetTester tester,
@@ -1437,7 +1416,7 @@ void main() {
       );
       await secondary.up();
       await tester.pumpAndSettle();
-      for (final label in ['详情', '系统打开', '定位文件', '加入待发送', '删除']) {
+      for (final label in ['详情', '打开', '定位文件', '加入待发送', '删除']) {
         expect(find.text(label), findsOneWidget);
       }
       await tester.tap(find.text('加入待发送'));
@@ -1447,7 +1426,7 @@ void main() {
         find.descendant(of: card, matching: find.byTooltip('更多')),
       );
       await tester.pumpAndSettle();
-      for (final label in ['详情', '系统打开', '定位文件', '加入待发送', '删除']) {
+      for (final label in ['详情', '打开', '定位文件', '加入待发送', '删除']) {
         expect(find.text(label), findsOneWidget);
       }
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);

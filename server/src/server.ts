@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { type WebSocket } from "ws";
 import { RtcRegistry, type RtcAttempt, type RtcScope } from "./rtc.ts";
 import { RtcProbeRegistry } from "./rtc_probes.ts";
+import { TextContents } from "./text_content.ts";
 import {
   PROTOCOL_VERSION,
   DEFAULT_CHUNK_SIZE,
@@ -262,6 +263,7 @@ export async function buildApp(options: Options = {}) {
       throw e;
     }
   };
+  const textContents = new TextContents(db);
   run(
     "INSERT OR IGNORE INTO groups(id,created) SELECT group_id,MIN(created) FROM devices GROUP BY group_id",
   );
@@ -640,7 +642,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true },
+    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -1039,6 +1041,12 @@ export async function buildApp(options: Options = {}) {
         b = req.body as any;
       target(d, b.targetDeviceId);
       const old = get("SELECT * FROM events WHERE id=?", b.eventId);
+      const delivered = textContents.delivery(b.eventId);
+      if (!old && delivered) {
+        if (delivered.source !== d.id || delivered.target !== b.targetDeviceId || delivered.request_text !== b.text || b.clipboard !== undefined)
+          fail("ID_CONFLICT", "Event ID already used with different content", 409);
+        return { event: { cursor: delivered.cursor, protocolVersion: PROTOCOL_VERSION, eventId: b.eventId, type: 'text.created', sourceDeviceId: delivered.source, targetDeviceId: delivered.target, createdAt: delivered.created, expiresAt: iso(delivered.expires), payload: textContents.document(delivered.content_id) }, replayed: true };
+      }
       if (old) {
         const priorPayload = JSON.parse(old.payload);
         const matchingClipboard = b.clipboard !== undefined
@@ -1048,7 +1056,7 @@ export async function buildApp(options: Options = {}) {
           old.type !== "text.created" ||
           old.source !== d.id ||
           old.target !== b.targetDeviceId ||
-          priorPayload.text !== b.text || !matchingClipboard
+          (delivered?.request_text ?? priorPayload.text) !== b.text || !matchingClipboard
         )
           fail(
             "ID_CONFLICT",
@@ -1070,17 +1078,22 @@ export async function buildApp(options: Options = {}) {
         }
       }
       reply.code(201);
-      return {
-        event: emit(
+      return tx(() => {
+        const event = emit(
           "text.created",
           d.id,
           b.targetDeviceId,
           payload,
           b.eventId,
           b.clipboard !== undefined ? 300 : limits.ttlSeconds,
-        ),
-        replayed: false,
-      };
+        );
+        if (b.clipboard === undefined) {
+          const document = textContents.attach(get('SELECT * FROM events WHERE id=?', b.eventId)!, b.text, d.group_id);
+          event.payload = {...event.payload as object,...document};
+          run('UPDATE events SET payload=? WHERE id=?', JSON.stringify(event.payload), b.eventId);
+        }
+        return {event,replayed:false};
+      });
     },
   );
   app.patch(`${api}/texts/:eventId`, {
@@ -1100,6 +1113,21 @@ export async function buildApp(options: Options = {}) {
     if (text === payload.text) return { event: eventView(original) };
     const editedAt = iso();
     const event = tx(() => {
+      if (!payload.clipboard) {
+        textContents.attach(original, payload.text, d.group_id);
+        const result = textContents.edit(original.id, text);
+        let response: Event | undefined;
+        for (const delivery of result.deliveries) {
+          // Preserve each original delivery and its own acknowledgement/expiry.
+          const update = emit('text.updated', delivery.source, delivery.target, {
+            ...textContents.document(result.document.contentId, delivery.target),
+            sourceEventId: delivery.event_id,
+            sourceEventIds: [delivery.event_id],
+          });
+          if (delivery.event_id === eventId) response = update;
+        }
+        return response!;
+      }
       run("UPDATE events SET payload=? WHERE id=?", JSON.stringify({ ...payload, text, editedAt }), original.id);
       return emit("text.updated", d.id, original.target, {
         sourceEventId: original.id, text, editedAt,
@@ -1107,6 +1135,7 @@ export async function buildApp(options: Options = {}) {
     });
     return { event };
   });
+  app.get(`${api}/texts/latest`, async (req) => ({ documents: textContents.latest(device(req).id) }));
   app.get(`${api}/events`, async (req) => {
     const d = device(req),
       q = req.query as any;

@@ -1,4 +1,5 @@
 import 'dart:ui' show Rect, Size;
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,21 @@ void main() {
         .setMockMethodCallHandler(SystemBridge.channel, null),
   );
 
+  test(
+    'one gesture snapshot reaches native export without leaking to later drags',
+    () async {
+      final preview = NativeDragPreview(Uint8List.fromList([1, 2, 3, 4]), 1, 1);
+      await SystemBridge.withDragPreview(
+        preview,
+        () => SystemBridge.dragOut(text: '卡片'),
+      );
+      expect(calls.single.arguments['previewRgba'], [1, 2, 3, 4]);
+      expect(calls.single.arguments['previewWidth'], 1);
+      expect(calls.single.arguments['previewHeight'], 1);
+      await SystemBridge.dragOut(text: '下一次');
+      expect(calls.last.arguments.containsKey('previewRgba'), false);
+    },
+  );
   test(
     'file export carries the actual touch or pen source to Windows',
     () async {

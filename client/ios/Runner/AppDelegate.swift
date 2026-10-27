@@ -16,6 +16,8 @@ import Security
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     let messenger = engineBridge.applicationRegistrar.messenger()
+    let sharing = FileSharing.shared.install(messenger)
+    engineBridge.applicationRegistrar.register(BulkDragFactory(messenger: messenger), withId: "dev.globalsend/drag-handle")
     let system = FlutterMethodChannel(name: "dev.globalsend/system", binaryMessenger: messenger)
     system.setMethodCallHandler { call, result in
       switch call.method {
@@ -55,7 +57,12 @@ import Security
         result(FlutterError(code: "VAULT_FAILED", message: "无法访问本机登录凭据", details: nil))
       }
     }
-    nativeChannels = [system, vault]
+    nativeChannels = [system, vault, sharing]
+  }
+
+  override func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+    if url.isFileURL { FileSharing.shared.importURLs([url]); return true }
+    return super.application(app, open: url, options: options)
   }
 
   private static func vaultKey() throws -> SymmetricKey {

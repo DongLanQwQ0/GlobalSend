@@ -1,3 +1,5 @@
+import 'native_drag_render_fixture.dart';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -72,19 +74,19 @@ void main() {
           await tester.pump(const Duration(milliseconds: 650));
           expect(menus, 0);
           await drag.moveBy(const Offset(35, 0));
-          await tester.pump();
+          await pumpNativeDrag(tester);
           expect(
             find.byKey(const ValueKey('drag-feedback-touch-context')),
             findsOneWidget,
           );
           await drag.moveTo(const Offset(830, 200));
-          await tester.pump();
+          await pumpNativeDrag(tester);
           expect(exports, List.filled(repeat + 1, kind.name));
           await drag.up();
-          await tester.pump();
+          await pumpNativeDrag(tester);
         }
         await tester.tap(find.text('复制'));
-        await tester.pump();
+        await pumpNativeDrag(tester);
         expect(copies, 1);
         final right = await tester.startGesture(
           origin,
@@ -144,7 +146,7 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 30));
       await finger.moveBy(const Offset(0, -70));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       await finger.moveBy(const Offset(0, -70));
       await finger.up();
       await tester.pumpAndSettle();

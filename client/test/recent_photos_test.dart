@@ -1,3 +1,4 @@
+import 'system_font_fixture.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -53,30 +54,8 @@ Future<void> until(bool Function() condition) async {
 }
 
 void main() {
+  setUpAll(loadSystemTestFonts);
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUpAll(() async {
-    final fonts = FontLoader('GlobalSendSans');
-    for (final weight in ['Regular', 'Semibold']) {
-      fonts.addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File('assets/fonts/GlobalSendSans-$weight.ttf').readAsBytes(),
-          ),
-        ),
-      );
-    }
-    await fonts.load();
-    await (FontLoader('MaterialIcons')..addFont(
-          Future.value(
-            ByteData.sublistView(
-              await File(
-                'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-              ).readAsBytes(),
-            ),
-          ),
-        ))
-        .load();
-  });
   late Directory folder;
   late Gallery gallery;
   late RecentPhotos photos;

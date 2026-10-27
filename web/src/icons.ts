@@ -1,4 +1,5 @@
 const paths: Record<string,string> = {
+  drag:'<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
   undo:'<path d="M8 5 3 10l5 5M3 10h10a7 7 0 0 1 7 7v3"/>',
   redo:'<path d="m16 5 5 5-5 5m5-5H11a7 7 0 0 0-7 7v3"/>',
   trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',

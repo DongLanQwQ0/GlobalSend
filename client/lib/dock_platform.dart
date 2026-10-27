@@ -92,9 +92,17 @@ class DockPlatform {
   static Future<void> startDrag({
     String? text,
     String? path,
+    List<String>? paths,
+    List<String>? texts,
     String label = 'GlobalSend',
   }) => channel.invokeMethod('startDrag', {
-    if (path != null) 'path': path else 'text': text ?? '',
+    if (paths != null || texts != null) ...{
+      'paths': paths ?? const <String>[],
+      'texts': texts ?? (text == null ? const <String>[] : [text]),
+    } else if (path != null)
+      'path': path
+    else
+      'text': text ?? '',
     'label': label,
   });
 }

@@ -4,7 +4,7 @@ export type { ServerInfo, Device, FileStatus, TransferFile, Transfer } from '../
 import type { FileStatus } from '../../packages/protocol/src/index.ts';
 export interface Session { deviceToken: string; device: Device; groupId?: string }
 export interface WireEvent extends ProtocolEvent {
-  payload: { text?: string; sourceEventId?: string; editedAt?: string; transferId?: string; deviceId?: string; clipboard?:{originDeviceId:string;sourceEventId:string} };
+  payload: { text?: string; sourceEventId?: string; sourceEventIds?:string[]; contentId?:string; revision?:number; editedAt?: string; transferId?: string; deviceId?: string; clipboard?:{originDeviceId:string;sourceEventId:string} };
 }
 export interface StoredState { cursor: number; events: WireEvent[]; hidden?: Record<string,number>; receivedAt?:Record<string,string> }
 
@@ -62,12 +62,27 @@ export function mergeEvents(current: WireEvent[], incoming: WireEvent[], now = D
   const ordered=[...map.values()].sort((a,b) => a.cursor-b.cursor);
   for(const update of ordered) {
     if(update.type!=='text.updated')continue;
-    const original=map.get(update.payload.sourceEventId || '');
-    if(original?.type==='text.created' && original.sourceDeviceId===update.sourceDeviceId) {
-      map.set(original.eventId,{...original,payload:{...original.payload,text:update.payload.text,editedAt:update.payload.editedAt}});
+    const ids=new Set(update.payload.sourceEventIds || [update.payload.sourceEventId || '']);
+    for(const original of map.values())if(original.type==='text.created' &&
+        (ids.has(original.eventId) || update.payload.contentId && original.payload.contentId===update.payload.contentId) &&
+        (update.payload.contentId || original.sourceDeviceId===update.sourceDeviceId) &&
+        (update.payload.revision ?? Infinity)>=(original.payload.revision ?? 0)) {
+      map.set(original.eventId,{...original,payload:{...original.payload,text:update.payload.text,editedAt:update.payload.editedAt,
+        ...(update.payload.contentId?{contentId:update.payload.contentId,revision:update.payload.revision}:{})}});
     }
   }
   return ordered.map(event=>map.get(event.eventId)!).slice(-1500);
+}
+export interface TextDocument {contentId:string;revision:number;text:string;editedAt:string;sourceEventIds:string[];}
+export function applyTextDocuments(events:WireEvent[],documents:TextDocument[]):WireEvent[] {
+  const byId=new Map(documents.flatMap(document=>document.sourceEventIds.map(id=>[id,document] as const)));
+  const byContent=new Map(documents.map(document=>[document.contentId,document]));
+  return events.map(event=>{
+    if(event.type!=='text.created')return event;
+    const document=byId.get(event.eventId) || byContent.get(event.payload.contentId || '');
+    if(!document || document.revision<(event.payload.revision || 0))return event;
+    return {...event,payload:{...event.payload,...document}};
+  });
 }
 export function safeDownloadUrl(baseUrl: string, path: string): string {
   if (!/^\/api\/v1\/downloads\/[a-zA-Z0-9_-]+$/.test(path)) throw new Error('服务器返回了无效的下载地址。');

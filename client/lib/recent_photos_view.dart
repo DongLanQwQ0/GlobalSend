@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import 'recent_photos.dart';
@@ -34,7 +36,7 @@ class RecentPhotosView extends StatelessWidget {
               tooltip: '忽略这些图片',
               visualDensity: VisualDensity.compact,
               onPressed: enabled ? onDismiss : null,
-              icon: const Icon(Icons.close_rounded, size: 17),
+              icon: const AppIcon(Icons.close_rounded, size: 17),
             ),
           ],
         ),
@@ -67,7 +69,7 @@ class RecentPhotosView extends StatelessWidget {
                             child: CircleAvatar(
                               radius: 12,
                               backgroundColor: Colors.white,
-                              child: Icon(
+                              child: AppIcon(
                                 Icons.add_rounded,
                                 size: 18,
                                 color: Ui.green,

@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 
 import 'api.dart';
 import 'models.dart';
+import 'content_groups.dart';
 import 'network_bridge.dart';
 import 'peer.dart';
 import 'vault.dart';
@@ -48,10 +49,19 @@ String newGroupKey() {
 }
 
 class TransferGate {
+  TransferGate({int limit = 4}) : _limit = limit;
+  int _limit;
+  int get limit => _limit;
+  set limit(int value) {
+    if (value < 1 || value > 16) throw RangeError.range(value, 1, 16);
+    _limit = value;
+    _drain();
+  }
+
   int active = 0;
   final List<Completer<void>> waiting = [];
   Future<void> enter() async {
-    if (active < 2) {
+    if (active < _limit && waiting.isEmpty) {
       active++;
       return;
     }
@@ -61,10 +71,14 @@ class TransferGate {
   }
 
   void leave() {
-    if (waiting.isNotEmpty) {
+    active--;
+    _drain();
+  }
+
+  void _drain() {
+    while (active < _limit && waiting.isNotEmpty) {
+      active++;
       waiting.removeAt(0).complete();
-    } else {
-      active--;
     }
   }
 }
@@ -119,7 +133,7 @@ class SendController extends ChangeNotifier {
   bool _reachabilityStarted = false;
   final Future<Directory> Function() documentsDirectory;
   final Future<Directory> Function() stateDirectory;
-  bool cellularUploads = false;
+  bool cellularUploads = true;
   final Map<String, String> nativeOperations = {};
   final Map<String, String> _sendingPush = {};
   final Map<String, String> _startedPushes = {};
@@ -250,6 +264,7 @@ class SendController extends ChangeNotifier {
   void useRemoteSharedText() => sharedDocument.useRemote();
   bool _sendingStaged = false;
   final Set<String> _nativeDropIds = {};
+  final Set<String> _sharedBatchIds = {};
   StreamSubscription<Map<String, dynamic>>? _dockSubscription;
   bool nativeDragActive = false, nativeImporting = false;
   bool nativeQueueDragActive = false;
@@ -316,6 +331,7 @@ class SendController extends ChangeNotifier {
         .where((entry) => _localHistory?.isHidden(owner.key, entry.id) != true)
         .toList();
     for (final entry in restored) {
+      _relocateSavedEntry(entry);
       _localHistory?.restoreLocalEdit(owner.key, entry);
     }
     return restored;
@@ -338,12 +354,22 @@ class SendController extends ChangeNotifier {
       final history = LocalHistoryStore(directory);
       await history.load(profiles);
       _localHistory = history;
+      _applyRelocatedSavedPaths();
     }());
   }
 
   Future<void> stageHistoryEntry(DockEntry entry) => requeueDockEntry(entry);
   Future<void> removeHistoryEntries(Iterable<DockEntry> entries) async {
-    for (final entry in entries.toList()) {
+    final keys = entries
+        .map((entry) => '${entry.outgoing}:${contentKey(entry)}')
+        .toSet();
+    for (final entry
+        in historyDock
+            .where(
+              (entry) =>
+                  keys.contains('${entry.outgoing}:${contentKey(entry)}'),
+            )
+            .toList()) {
       await deleteDockEntry(entry);
     }
   }
@@ -354,6 +380,7 @@ class SendController extends ChangeNotifier {
   Future<void> get persistenceIdle => _saveTail;
   final Set<String> busyFiles = {};
   final TransferGate _gate = TransferGate();
+  int get transferConcurrency => profile?.transferConcurrency ?? 4;
   String connection = '未连接', message = '';
   String rememberedCenter = '';
   bool busy = false, connected = false;
@@ -390,6 +417,10 @@ class SendController extends ChangeNotifier {
 
   String get receiveDirectoryLabel =>
       _savedFilesStore?.receiveDestinationLabel ?? '';
+  String receiveDirectoryMigrationStatus = '';
+  Completer<void>? _receiveDirectoryMigration;
+  int get receiveDirectoryCleanupPending =>
+      _savedFilesStore?.migrationCleanupPending ?? 0;
   bool get hasCustomReceiveDirectory =>
       _savedFilesStore?.receiveDestinationLocation.isNotEmpty ?? false;
   Future<void> chooseReceiveDirectory() async {
@@ -397,16 +428,104 @@ class SendController extends ChangeNotifier {
     if (selected == null) return;
     final store = await _savedStore();
     if (store == null) return;
-    await store.setReceiveDestination(
-      selected['location']!,
-      selected['label']!,
-    );
-    changed();
+    await changeReceiveDirectory(selected['location']!, selected['label']!);
   }
 
   Future<void> clearReceiveDirectory() async {
-    await (await _savedStore())?.setReceiveDestination('', '');
+    await changeReceiveDirectory('', '');
+  }
+
+  Future<void> changeReceiveDirectory(String location, String label) async {
+    if (_receiveDirectoryMigration != null) return;
+    if (_sendingStaged) throw StateError('请在本次发送完成后更改接收目录');
+    final barrier = Completer<void>();
+    _receiveDirectoryMigration = barrier;
+    try {
+      if (busyFiles.isNotEmpty) {
+        receiveDirectoryMigrationStatus = '等待当前传输完成';
+        changed();
+        final idle = Completer<void>();
+        void check() {
+          if (busyFiles.isEmpty && !idle.isCompleted) idle.complete();
+        }
+
+        addListener(check);
+        try {
+          check();
+          await idle.future;
+        } finally {
+          removeListener(check);
+        }
+      }
+      final store = await _savedStore();
+      if (store == null) return;
+      receiveDirectoryMigrationStatus = '正在迁移文件';
+      changed();
+      await store.setReceiveDestination(
+        location,
+        label,
+        onProgress: (done, total) {
+          receiveDirectoryMigrationStatus = '正在迁移 $done / $total';
+          changed();
+        },
+        onCommitted: () async {
+          _applyRelocatedSavedPaths();
+          await save();
+          changed();
+        },
+      );
+    } finally {
+      _applyRelocatedSavedPaths();
+      receiveDirectoryMigrationStatus = '';
+      _receiveDirectoryMigration = null;
+      barrier.complete();
+      changed();
+    }
+  }
+
+  Future<void> finishReceiveDirectoryCleanup() async {
+    await (await _savedStore())?.finishMigrationCleanup();
     changed();
+    if (receiveDirectoryCleanupPending > 0) {
+      throw const FileSystemException('旧文件仍被占用，请关闭占用程序后重试');
+    }
+  }
+
+  String _relocatedSavedPath(String path) =>
+      _savedFilesStore?.relocatedLocations[path] ?? path;
+
+  void _relocateSavedEntry(DockEntry entry) {
+    entry.localPath = _relocatedSavedPath(entry.localPath);
+    entry.sourceReference = _relocatedSavedPath(entry.sourceReference);
+  }
+
+  void _applyRelocatedSavedPaths() {
+    for (final entry in dock) {
+      _relocateSavedEntry(entry);
+    }
+    for (final record
+        in _localHistory?.records.values ?? <LocalHistoryRecord>[]) {
+      _relocateSavedEntry(record.entry);
+    }
+    sources.updateAll((key, path) => _relocatedSavedPath(path));
+    final directorySources = {
+      for (final item in _directorySources.entries)
+        _relocatedSavedPath(item.key): _relocatedSavedPath(item.value),
+    };
+    _directorySources
+      ..clear()
+      ..addAll(directorySources);
+    final directoryNames = {
+      for (final item in stagedDirectoryNames.entries)
+        _relocatedSavedPath(item.key): item.value,
+    };
+    stagedDirectoryNames
+      ..clear()
+      ..addAll(directoryNames);
+    for (var index = 0; index < stagedFiles.length; index++) {
+      stagedFiles[index] = _relocatedSavedPath(stagedFiles[index]);
+    }
+    _stagedBatchFiles = _stagedBatchFiles.map(_relocatedSavedPath).toList();
   }
 
   List<SavedFile> get savedFiles => _savedFilesStore?.items ?? [];
@@ -430,6 +549,7 @@ class SendController extends ChangeNotifier {
     final store = await _savedStore();
     if (store == null) return;
     final current = profile;
+    _applyRelocatedSavedPaths();
     var stalePaths = false;
     if (current != null) {
       for (final entry
@@ -896,6 +1016,7 @@ class SendController extends ChangeNotifier {
     try {
       await backgroundReceive.initialize();
       root = await stateDirectory();
+      await _loadStagedOutbox(restoreQueue: true);
       final file = File('${root!.path}/profiles.json');
       if (await file.exists()) {
         profiles = (jsonDecode(await file.readAsString()) as List)
@@ -938,6 +1059,9 @@ class SendController extends ChangeNotifier {
             );
             _temporarySources.addAll(
               List<String>.from(values['temporarySources'] ?? []),
+            );
+            _sharedBatchIds.addAll(
+              List<String>.from(values['sharedBatchIds'] ?? []),
             );
             _directorySources.addAll(
               Map<String, String>.from(values['directorySources'] ?? {}),
@@ -1006,11 +1130,20 @@ class SendController extends ChangeNotifier {
       return copy;
     }).toList();
     final historySources = Map<String, String>.from(sources);
+    final outboxJson = jsonEncode({
+      'files': List<String>.from(stagedFiles),
+      'texts': List<String>.from(stagedTexts),
+      'temporarySources': _temporarySources.toList(),
+      'directorySources': Map<String, String>.from(_directorySources),
+      'directoryNames': Map<String, String>.from(stagedDirectoryNames),
+      'sharedBatchIds': _sharedBatchIds.toList(),
+    });
     final state = <String, dynamic>{
       'sources': Map<String, String>.from(sources),
       'pendingTexts': Map<String, String>.from(pendingTexts),
       'hiddenDockIds': _hiddenDockIds.toList(),
       'temporarySources': _temporarySources.toList(),
+      'sharedBatchIds': _sharedBatchIds.toList(),
       'directorySources': Map<String, String>.from(_directorySources),
     };
     _saveTail = _saveTail.catchError((Object _) {}).then((_) async {
@@ -1033,6 +1166,7 @@ class SendController extends ChangeNotifier {
       }
 
       if (key != null) await write('$key.json', stateJson);
+      await write('outbox.json', outboxJson);
       await write('profiles.json', profileJson);
       if (key != null) {
         await write(
@@ -1080,6 +1214,7 @@ class SendController extends ChangeNotifier {
     profile = p;
     allowLegacyPeerIdentity = p.deviceId.isNotEmpty && p.legacyPeerIdentity;
     cellularUploads = p.cellularAllowed;
+    _gate.limit = p.transferConcurrency;
     info = data;
     dock = [];
     sources = {};
@@ -1100,10 +1235,12 @@ class SendController extends ChangeNotifier {
       pendingTexts = Map<String, String>.from(j['pendingTexts'] ?? {});
       _hiddenDockIds.addAll(List<String>.from(j['hiddenDockIds'] ?? []));
       _temporarySources.addAll(List<String>.from(j['temporarySources'] ?? []));
+      _sharedBatchIds.addAll(List<String>.from(j['sharedBatchIds'] ?? []));
       _directorySources.addAll(
         Map<String, String>.from(j['directorySources'] ?? {}),
       );
     }
+    await _loadStagedOutbox();
     dock = _restoreLocalHistoryEntries(p, dock);
     await refreshSavedFiles();
     if (disposed || request != _connectRequest) return;
@@ -1399,6 +1536,23 @@ class SendController extends ChangeNotifier {
         addressReader: localIpAddresses,
         pushEnabled: info['features']?['directPush'] == true,
         cellularPushAllowed: () => Platform.isAndroid && cellularUploads,
+        acquireSource: (fileId) async {
+          // A self-transfer already owns its receiver slot in this process.
+          if (dock.any(
+            (item) =>
+                item.fileId == fileId && item.targetDeviceId == p.deviceId,
+          ))
+            return false;
+          await _gate.enter();
+          try {
+            _requireSession(epoch, a, p);
+            return true;
+          } catch (_) {
+            _gate.leave();
+            rethrow;
+          }
+        },
+        releaseSource: _gate.leave,
         onProgress: (id, bytes, total, finished) {
           if (epoch != generation) return;
           final item = dock
@@ -1738,6 +1892,8 @@ class SendController extends ChangeNotifier {
                 ),
                 text: e['payload']['text'],
                 editedAt: e['payload']['editedAt'] ?? '',
+                contentId: e['payload']['contentId'] ?? '',
+                contentRevision: e['payload']['revision'] ?? 0,
                 outgoing: outgoing,
                 status: outgoing ? 'sent' : 'ready',
                 autoClipboard: automatic,
@@ -1787,6 +1943,13 @@ class SendController extends ChangeNotifier {
           }
         }
         more = j['hasMore'] == true;
+      }
+      if (info['features']?['textContentSync'] == true) {
+        final latest = await a.call('GET', '/texts/latest');
+        _requireSession(epoch, a, p);
+        for (final value in latest['documents'] as List) {
+          applyTextDocument(Map<String, dynamic>.from(value));
+        }
       }
       final transfers = await a.call('GET', '/transfers');
       if (epoch != generation) return;
@@ -1891,6 +2054,7 @@ class SendController extends ChangeNotifier {
         }
       }
       item.relativePath = f['relativePath'] ?? item.relativePath;
+      item.contentDigest = f['sha256'] ?? item.contentDigest;
       item.entryKind = f['entryKind'] ?? item.entryKind;
       if (outgoing) {
         final path = sources[id];
@@ -2255,10 +2419,6 @@ class SendController extends ChangeNotifier {
 
   Future<void> stageInputs(List<String> paths, List<String> texts) async {
     final epoch = generation;
-    if (stagedFiles.length + paths.length > 32 ||
-        stagedTexts.length + texts.length > 32) {
-      throw const FormatException('待发区最多保留 32 个文件或文件夹和 32 段文本');
-    }
     final prepared = <String>[];
     for (final path in paths) {
       final contentDirectory =
@@ -2306,6 +2466,60 @@ class SendController extends ChangeNotifier {
       final path = await FilePicker.getDirectoryPath(dialogTitle: '选择文件夹');
       if (path != null) await stageDirectory(path);
     }
+  }
+
+  Future<void> _loadStagedOutbox({bool restoreQueue = false}) async {
+    if (root == null) return;
+    final file = File('${root!.path}/outbox.json');
+    if (!await file.exists()) return;
+    final value = jsonDecode(await file.readAsString()) as Map;
+    _sharedBatchIds.addAll(List<String>.from(value['sharedBatchIds'] ?? []));
+    _temporarySources.addAll(
+      List<String>.from(value['temporarySources'] ?? []),
+    );
+    _directorySources.addAll(
+      Map<String, String>.from(value['directorySources'] ?? {}),
+    );
+    stagedDirectoryNames.addAll(
+      Map<String, String>.from(value['directoryNames'] ?? {}),
+    );
+    if (restoreQueue) {
+      stagedFiles
+        ..clear()
+        ..addAll(List<String>.from(value['files'] ?? []));
+      stagedTexts
+        ..clear()
+        ..addAll(List<String>.from(value['texts'] ?? []));
+    }
+  }
+
+  Future<bool> stageSharedInputs(
+    String batchId,
+    List<String> paths,
+    List<String> texts,
+    List<String> temporaryPaths,
+  ) async {
+    final epoch = generation;
+    if (!_sharedBatchIds.contains(batchId)) {
+      _temporarySources.addAll(temporaryPaths);
+      await stageInputs(
+        paths.where((path) => !stagedFiles.contains(path)).toList(),
+        texts.where((text) => !stagedTexts.contains(text)).toList(),
+      );
+      if (disposed || epoch != generation) return false;
+      _sharedBatchIds.add(batchId);
+      nativeSendNavigationSerial++;
+    }
+    try {
+      await save();
+    } catch (_) {
+      _sharedBatchIds.remove(batchId);
+      rethrow;
+    }
+    changed();
+    // Confirmed queued content (not an editor's unconfirmed draft) has its own
+    // installation-wide outbox, so sharing also survives before first enrollment.
+    return root != null;
   }
 
   Future<void> stageClipboard() async {
@@ -2358,7 +2572,11 @@ class SendController extends ChangeNotifier {
       return;
     _temporarySources.remove(path);
     _directorySources.remove(path);
-    if (await File(path).exists()) await File(path).delete();
+    try {
+      await File(path).delete();
+    } on PathNotFoundException {
+      // A provider or an external cleanup may already have removed the copy.
+    }
   }
 
   /// References to sent originals are not library-owned copies. Remove a
@@ -2585,6 +2803,7 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> sendStagedToMany(List<String> targets) async {
+    await _receiveDirectoryMigration?.future;
     if (_sendingStaged) throw StateError('待发区正在发送');
     final epoch = generation, a = api!, p = profile!;
     final files = List<String>.from(stagedFiles);
@@ -2755,6 +2974,10 @@ class SendController extends ChangeNotifier {
 
   void applyTextUpdate(Map<String, dynamic> event) {
     final payload = event['payload'] as Map;
+    if (payload['contentId'] is String) {
+      applyTextDocument(Map<String, dynamic>.from(payload), notify: true);
+      return;
+    }
     if (_isHiddenDockId(payload['sourceEventId'] as String) ||
         profile != null &&
             _localHistory?.hasLocalTextEdit(
@@ -2781,6 +3004,37 @@ class SendController extends ChangeNotifier {
     if (changedText) {
       _postReceivedNotice(item, '$cursor', text: item.text, updated: true);
     }
+  }
+
+  void applyTextDocument(Map<String, dynamic> document, {bool notify = false}) {
+    final ids = Set<String>.from(document['sourceEventIds'] ?? []);
+    final revision = document['revision'] as int;
+    final contentId = document['contentId'] as String;
+    final entries = {
+      ...dock,
+      ...?_localHistory?.records.values.map((record) => record.entry),
+    };
+    DockEntry? receipt;
+    for (final entry in entries) {
+      if (entry.kind != 'text' ||
+          !(ids.contains(entry.id) || entry.contentId == contentId) ||
+          revision < entry.contentRevision)
+        continue;
+      final edited = entry.text != document['text'];
+      entry.contentId = contentId;
+      entry.contentRevision = revision;
+      entry.text = document['text'] as String;
+      entry.editedAt = document['editedAt'] ?? '';
+      if (edited && !entry.outgoing && !_isHiddenDockId(entry.id))
+        receipt = entry;
+    }
+    if (notify && receipt != null)
+      _postReceivedNotice(
+        receipt,
+        '$contentId:$revision',
+        text: receipt.text,
+        updated: true,
+      );
   }
 
   Future<void> editSentText(DockEntry item, String text) async {
@@ -3046,6 +3300,14 @@ class SendController extends ChangeNotifier {
     changed();
   }
 
+  Future<void> setTransferConcurrency(int value) async {
+    if (value < 1 || value > 16) throw const FormatException('并发数需为 1–16');
+    profile!.transferConcurrency = value;
+    _gate.limit = value;
+    await save();
+    changed();
+  }
+
   Future<void> setRoutePreference(String mode, {required bool sending}) async {
     if (sending) {
       profile!.sendRoutePreference = mode;
@@ -3204,6 +3466,7 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> upload(DockEntry item) async {
+    await _receiveDirectoryMigration?.future;
     if (!busyFiles.add(item.fileId)) return;
     final epoch = generation, a = api!;
     await _gate.enter();
@@ -4046,6 +4309,7 @@ class SendController extends ChangeNotifier {
     String? routeOverride,
   }) async {
     if (item.locallyCanceled || item.relayConfirmationPending) return;
+    await _receiveDirectoryMigration?.future;
     if (!busyFiles.add(item.fileId)) return;
     final epoch = generation, a = api!, p = profile!;
     if (routeOverride == 'relay' ||

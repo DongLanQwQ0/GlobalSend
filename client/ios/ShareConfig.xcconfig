@@ -1,0 +1,3 @@
+// The app and its share extension must be signed for this same App Group.
+GLOBALSEND_APP_BUNDLE_ID=dev.globalsend.globalsend
+GLOBALSEND_APP_GROUP_ID=group.dev.globalsend.globalsend

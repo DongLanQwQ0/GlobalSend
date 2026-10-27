@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compactTime, baseFromLocation, centerWebSocketUrl, suggestedDeviceName, escapeHtml, formatBytes, mergeEvents, normalizeBaseUrl, safeDownloadUrl, storageKey } from '../src/model.ts';
 import type { WireEvent } from '../src/model.ts';
+import {applyTextDocuments} from '../src/model.ts';
 import { digestFile } from '../src/files.ts';
 import { emptyGroupData, publicSession, validateGroupKey } from '../src/group.ts';
 
@@ -19,6 +20,15 @@ test('manual repeated text remains independent; transport replay stays idempoten
 test('expiry filters both old state and incoming notifications',() => {
   const expired = {...event('old',1),expiresAt:'2026-10-23T00:00:00Z'};
   assert.deepEqual(mergeEvents([expired],[event('new',3)],Date.parse('2026-10-24')).map(item=>item.eventId),['new']);
+});
+test('canonical versions update all delivery cards and offline snapshots without stale rollback',()=>{
+  const a=event('a',1,'old'),b={...event('b',2,'old'),targetDeviceId:'other'};
+  const current=applyTextDocuments([a,b],[{contentId:'content',sourceEventIds:['a','b'],revision:3,text:'latest',editedAt:'today'}]);
+  assert.deepEqual(current.map(row=>row.payload.text),['latest','latest']);
+  const stale:WireEvent={...event('update',8),type:'text.updated',payload:{contentId:'content',sourceEventIds:['a'],sourceEventId:'a',revision:2,text:'stale',editedAt:'yesterday'}};
+  assert.deepEqual(mergeEvents(current,[stale]).filter(row=>row.type==='text.created').map(row=>row.payload.text),['latest','latest']);
+  const next={...stale,eventId:'update-new',cursor:9,payload:{...stale.payload,revision:4,text:'newest'}};
+  assert.deepEqual(mergeEvents(current,[next]).filter(row=>row.type==='text.created').map(row=>row.payload.text),['newest','newest']);
 });
 test('events are cursor ordered, including out-of-order websocket notifications',() => {
   assert.deepEqual(mergeEvents([event('c',3)],[event('a',1),event('b',2)],Date.parse('2026-10-24')).map(item=>item.cursor),[1,2,3]);

@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -13,6 +15,8 @@ import 'compact_content_card.dart';
 import 'compact_time.dart';
 import 'content_drag_surface.dart';
 import 'system_bridge.dart';
+import 'bulk_file_drag.dart';
+import 'file_share.dart';
 
 const _sortLabels = {
   SavedFilesSort.newest: '最新接收',
@@ -138,6 +142,41 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
     await ReceivedFileAccess.openExternal(file.path);
   }, '');
 
+  Future<void> details(SavedFile file) => showDialog<void>(
+    context: context,
+    builder: (dialog) => AlertDialog(
+      title: const Text('详情'),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              file.name,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${file.directory ? '文件夹' : bytesLabel(file.size)} · ${compactTime(file.receivedAt)}',
+            ),
+            const SizedBox(height: 12),
+            Text(
+              file.path,
+              style: const TextStyle(fontSize: 13, color: Ui.muted),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialog),
+          child: const Text('关闭'),
+        ),
+      ],
+    ),
+  );
+
   Future<void> rename() async {
     final file = c.savedFiles
         .where((file) => selected.contains(file.id))
@@ -221,7 +260,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                         itemBuilder: (context, index) {
                           final peer = peers[index];
                           return ListTile(
-                            leading: Icon(
+                            leading: AppIcon(
                               peer['platform'] == 'windows'
                                   ? Icons.desktop_windows_outlined
                                   : peer['platform'] == 'android'
@@ -232,7 +271,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                             subtitle: peer['online'] == true
                                 ? null
                                 : const Text('离线 · 可尝试'),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const AppIcon(Icons.chevron_right),
                             onTap: () => Navigator.pop(
                               context,
                               peer['deviceId'] as String,
@@ -324,6 +363,19 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                         ),
                       ),
                     ),
+                    BulkFileDrag(
+                      key: const ValueKey('library-drag-all'),
+                      paths: files
+                          .where(
+                            (file) => !selecting || selected.contains(file.id),
+                          )
+                          .map((file) => file.path)
+                          .toList(),
+                      enabled: !working,
+                      onError: (problem) {
+                        if (mounted) setState(() => error = '$problem');
+                      },
+                    ),
                     if (!selecting)
                       PopupMenuButton<SavedFilesSort>(
                         tooltip: '排序',
@@ -331,7 +383,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                         onSelected: (value) => setState(() => sort = value),
                         itemBuilder: (context) => _sortLabels.entries
                             .map(
-                              (entry) => CheckedPopupMenuItem(
+                              (entry) => AppCheckedPopupMenuItem(
                                 value: entry.key,
                                 checked: entry.key == sort,
                                 child: Text(entry.value),
@@ -351,7 +403,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                                 style: const TextStyle(fontSize: 13),
                               ),
                               const SizedBox(width: 5),
-                              const Icon(Icons.sort, size: 18),
+                              const AppIcon(Icons.sort, size: 18),
                             ],
                           ),
                         ),
@@ -404,7 +456,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
+                            AppIcon(
                               Icons.folder_open_rounded,
                               size: 48,
                               color: scheme.outline,
@@ -456,7 +508,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                         onPressed: working || selected.length != 1
                             ? null
                             : rename,
-                        icon: const Icon(
+                        icon: const AppIcon(
                           Icons.drive_file_rename_outline,
                           size: 19,
                         ),
@@ -466,14 +518,14 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                     Expanded(
                       child: TextButton.icon(
                         onPressed: working || selected.isEmpty ? null : delete,
-                        icon: const Icon(Icons.delete_outline, size: 19),
+                        icon: const AppIcon(Icons.delete_outline, size: 19),
                         label: const Text('删除'),
                       ),
                     ),
                     Expanded(
                       child: FilledButton.icon(
                         onPressed: working || selected.isEmpty ? null : forward,
-                        icon: const Icon(Icons.send_outlined, size: 18),
+                        icon: const AppIcon(Icons.send_outlined, size: 18),
                         label: const Text('转发'),
                       ),
                     ),
@@ -528,6 +580,8 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                   : c.stageInputs([file.path], []),
               '',
             );
+          if (action == 'share')
+            await perform(() => FileShareBridge.share(paths: [file.path]), '');
           if (action == 'select') toggle(file);
           if (action == 'rename') {
             setState(() {
@@ -545,15 +599,19 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
             });
             await delete();
           }
+          if (action == 'details') await details(file);
         },
         itemBuilder: (_) => [
-          const PopupMenuItem(value: 'open', child: Text('系统打开')),
+          const PopupMenuItem(value: 'open', child: Text('打开')),
           if (windows)
             const PopupMenuItem(value: 'locate', child: Text('定位文件')),
           const PopupMenuItem(value: 'queue', child: Text('加入待发送')),
+          if (FileShareBridge.supported)
+            const PopupMenuItem(value: 'share', child: Text('分享')),
           const PopupMenuItem(value: 'rename', child: Text('重命名')),
           const PopupMenuItem(value: 'select', child: Text('多选')),
           const PopupMenuItem(value: 'delete', child: Text('删除')),
+          const PopupMenuItem(value: 'details', child: Text('详情')),
         ],
       ),
     );
@@ -577,7 +635,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Icon(
+        const AppIcon(
           Icons.insert_drive_file_outlined,
           size: 30,
           color: Color(0xff47795e),

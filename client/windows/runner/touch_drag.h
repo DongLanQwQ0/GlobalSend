@@ -25,7 +25,8 @@ void StartGlobalSendTouchDrag(std::wstring text, std::vector<std::wstring> paths
 void StartGlobalSendDesktopTouchDrag(std::wstring text,
     std::vector<std::wstring> paths, HWND source_owner,
     std::function<HRESULT(HBITMAP, DWORD*)> run_drag,
-    std::function<void(bool, const std::string&)> completed);
+    std::function<void(bool, const std::string&)> completed,
+    std::function<HBITMAP()> prepare_preview = {});
 bool GlobalSendDesktopTouchDragCancelled();
 INPUT GlobalSendTouchMouseInput(POINT screen_point, DWORD flags, RECT desktop);
 #ifdef GLOBALSEND_TOUCH_DRAG_TESTING

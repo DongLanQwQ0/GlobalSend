@@ -1,3 +1,4 @@
+import 'system_font_fixture.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -28,6 +29,7 @@ class DensityController extends fixture.PreviewController {
 }
 
 void main() {
+  setUpAll(loadSystemTestFonts);
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -35,29 +37,6 @@ void main() {
           SystemBridge.channel,
           (call) async => call.method == 'windowVisible' ? true : null,
         );
-  });
-  setUpAll(() async {
-    final font = FontLoader('GlobalSendSans');
-    for (final weight in ['Regular', 'Semibold']) {
-      font.addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File('assets/fonts/GlobalSendSans-$weight.ttf').readAsBytes(),
-          ),
-        ),
-      );
-    }
-    await font.load();
-    await (FontLoader('MaterialIcons')..addFont(
-          Future.value(
-            ByteData.sublistView(
-              await File(
-                'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-              ).readAsBytes(),
-            ),
-          ),
-        ))
-        .load();
   });
   Future<GlobalKey> show(
     WidgetTester tester,

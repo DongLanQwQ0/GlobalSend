@@ -82,16 +82,17 @@ final class NativeReceiveRuntime {
         new MethodChannel(engine.getDartExecutor().getBinaryMessenger(), "dev.globalsend/system")
             .invokeMethod("receiptPresentationChanged", state);
     }
-    void intent(android.content.Intent intent) { dockCoordinator.handleSharedIntent(intent); receivedNotifications.opened(intent); }
+    void intent(android.content.Intent intent) { if (!fileShare.handleIntent(intent)) dockCoordinator.handleSharedIntent(intent); receivedNotifications.opened(intent); }
     boolean activityResult(int requestCode,int resultCode,android.content.Intent data) {
         return dockCoordinator.onActivityResult(requestCode,resultCode,data) || receiveDirectory.onActivityResult(requestCode,resultCode,data);
     }
     void permissionChanged() { receivedNotifications.permissionChanged(); }
     private DockCoordinator dockCoordinator;
+    private FileShareBridge fileShare;
     private ReceiveDirectory receiveDirectory;
     private RtcDataBridge rtcDataBridge;
     private ReceiveNotificationBridge receivedNotifications;
-    private final ExecutorService transfers = Executors.newFixedThreadPool(2);
+    private final ExecutorService transfers = Executors.newFixedThreadPool(16);
     private final ExecutorService connectionChecks = Executors.newFixedThreadPool(2);
     private final java.util.concurrent.ScheduledExecutorService writeTimeouts = Executors.newSingleThreadScheduledExecutor();
     private final java.util.concurrent.ConcurrentHashMap<String, HttpsURLConnection> activeDownloads = new java.util.concurrent.ConcurrentHashMap<>();
@@ -99,6 +100,7 @@ final class NativeReceiveRuntime {
     private final java.util.concurrent.ConcurrentHashMap<String, Runnable> activeProbeCancellations = new java.util.concurrent.ConcurrentHashMap<>();
     private void installChannels() {
         dockCoordinator = new DockCoordinator(context, new MethodChannel(engine.getDartExecutor().getBinaryMessenger(), "dev.globalsend/dock"));
+        fileShare = new FileShareBridge(context,new MethodChannel(engine.getDartExecutor().getBinaryMessenger(),"dev.globalsend/share"),()->attachedActivity.get());
         receiveDirectory = new ReceiveDirectory(context, engine);
         rtcDataBridge = new RtcDataBridge(context, engine.getDartExecutor().getBinaryMessenger());
         receivedNotifications = new ReceiveNotificationBridge(context, engine.getDartExecutor().getBinaryMessenger());

@@ -2,9 +2,13 @@
 #include "../runner/drop_target.h"
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <thread>
+#include <atomic>
+#include <chrono>
 
 // Exercise the real Shell store and DragSourceHelper, not a mock that accepts
 // only the public payload. The helper also uses a private IStream format.
@@ -88,6 +92,17 @@ int main() {
   memcpy(bytes.data(), &header, sizeof(header));
   memcpy(bytes.data() + sizeof(header), names.data(), names.size() * sizeof(wchar_t));
   assert(SUCCEEDED(CreateGlobalSendDragData(CF_HDROP, bytes, &data)));
+  IDataObjectAsyncCapability* asynchronous = nullptr;
+  assert(SUCCEEDED(data->QueryInterface(IID_PPV_ARGS(&asynchronous))));
+  BOOL enabled = FALSE, running = FALSE;
+  assert(SUCCEEDED(asynchronous->GetAsyncMode(&enabled)) && enabled);
+  assert(SUCCEEDED(asynchronous->StartOperation(nullptr)));
+  assert(SUCCEEDED(asynchronous->InOperation(&running)) && running);
+  // Simulate source DoDragDrop returning while the target retains the actual
+  // Shell object. No file data was read/copied; even a missing fixture path is
+  // transported verbatim. Async-copy ownership must outlive source Release.
+  data->AddRef();
+  data->Release();
   FORMATETC files_format{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
   assert(SUCCEEDED(data->GetData(&files_format, &content)));
   assert(DragQueryFileW(static_cast<HDROP>(content.hGlobal), 0xffffffff, nullptr, 0) == 2);
@@ -95,7 +110,52 @@ int main() {
   DragQueryFileW(static_cast<HDROP>(content.hGlobal), 1, name, MAX_PATH);
   assert(std::wstring(name) == L"F:\\文件夹");
   ReleaseStgMedium(&content);
+  assert(SUCCEEDED(asynchronous->EndOperation(S_OK, nullptr, DROPEFFECT_COPY)));
+  assert(SUCCEEDED(asynchronous->InOperation(&running)) && !running);
+  asynchronous->Release();
   data->Release();
+
+  // Actual COM proxy, not a raw pointer handed to a worker. The STA remains
+  // able to process window messages throughout a slow async target operation.
+  assert(SUCCEEDED(CreateGlobalSendDragData(CF_HDROP, bytes, &data)));
+  IStream* marshaled = nullptr;
+  assert(SUCCEEDED(CoMarshalInterThreadInterfaceInStream(IID_IDataObject, data, &marshaled)));
+  data->Release(); // Only target/COM ownership survives from this point.
+  std::atomic<bool> finished{false};
+  auto window = CreateWindowExW(0, L"STATIC", L"Hidden async copy pump",
+      WS_POPUP, 0, 0, 30, 30, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+  assert(window);
+  SetTimer(window, 1, 10, nullptr);
+  int ticks = 0;
+  std::thread target_copy([&] {
+    assert(SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)));
+    IDataObject* target_data = nullptr;
+    assert(SUCCEEDED(CoGetInterfaceAndReleaseStream(marshaled, IID_PPV_ARGS(&target_data))));
+    IDataObjectAsyncCapability* target_async = nullptr;
+    assert(SUCCEEDED(target_data->QueryInterface(IID_PPV_ARGS(&target_async))));
+    assert(SUCCEEDED(target_async->StartOperation(nullptr)));
+    std::this_thread::sleep_for(std::chrono::milliseconds(180));
+    STGMEDIUM returned{};
+    auto requested = files_format;
+    assert(SUCCEEDED(target_data->GetData(&requested, &returned)));
+    assert(DragQueryFileW(static_cast<HDROP>(returned.hGlobal), 0xffffffff, nullptr, 0) == 2);
+    ReleaseStgMedium(&returned);
+    assert(SUCCEEDED(target_async->EndOperation(S_OK, nullptr, DROPEFFECT_COPY)));
+    target_async->Release(); target_data->Release();
+    CoUninitialize(); finished = true;
+  });
+  const auto deadline = GetTickCount64() + 5000;
+  while (!finished && GetTickCount64() < deadline) {
+    MSG message{};
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+      if (message.hwnd == window && message.message == WM_TIMER) ++ticks;
+      TranslateMessage(&message); DispatchMessageW(&message);
+    }
+    Sleep(1);
+  }
+  assert(finished && ticks >= 4);
+  target_copy.join();
+  DestroyWindow(window);
   OleUninitialize();
-  std::cout << "PASS real Shell IDataObject and target helper: Unicode, DragImageBits, private IStream, out/in queue return, multi-file CF_HDROP\n";
+  std::cout << "PASS real Shell IDataObject: Unicode, private image/stream, out/in, original file/folder references, async-copy mode and target lifetime\n";
 }

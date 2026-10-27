@@ -154,8 +154,12 @@ void main() {
       ))!;
       await store.rename(saved.id, item.$2);
     }
-    expect(store.cleanupFilter.categories, SavedFileCategory.values.toSet());
-    expect(store.cleanupFilter.sizeRule, SavedFileSizeRule.any);
+    expect(store.cleanupFilter.categories, {
+      SavedFileCategory.image,
+      SavedFileCategory.text,
+    });
+    expect(store.cleanupFilter.sizeRule, SavedFileSizeRule.atMost);
+    expect(store.cleanupFilter.sizeMiB * 1048576, 500000);
     await store.setCleanupFilter(
       SavedFileCleanupFilter(
         categories: {SavedFileCategory.image},
@@ -391,10 +395,7 @@ void main() {
     expect(c.connected, false);
     expect(c.savedFiles.single.fileId, 'recent');
     expect(await File(expired.localPath).exists(), false);
-    expect(
-      c.dock.where((entry) => entry.fileId == 'expired').single.localPath,
-      isEmpty,
-    );
+    expect(c.dock.where((entry) => entry.fileId == 'expired'), isEmpty);
     await c.renameSavedFile(c.savedFiles.single.id, '离线重命名.txt');
     await c.setSavedFileRetentionHours(72);
     c.dock.clear();

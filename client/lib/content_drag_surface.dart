@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
+import 'app_icon.dart';
 import 'content_preview.dart';
 import 'models.dart';
+import 'system_bridge.dart';
 import 'text_selection_surface.dart';
 import 'ui_tokens.dart';
 
@@ -19,11 +24,13 @@ class ContentDragSurface extends StatefulWidget {
     this.enabled = true,
     this.selectedText = false,
     this.touchDrags = true,
+    this.itemCount,
   });
   final DockEntry entry;
   final Widget child;
   final Future<void> Function(String kind) onExport;
   final bool enabled, selectedText, touchDrags;
+  final int? itemCount;
 
   /// Windows long-press touch/pen belongs to drag, not the mouse context menu.
   /// Real mouse/trackpad secondary clicks and other platforms retain menus.
@@ -44,6 +51,42 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   String pointerKind = 'mouse';
   int? sourcePointer;
   bool nativePending = false;
+  final previewKey = GlobalKey();
+
+  Future<NativeDragPreview?> capturePreview() async {
+    final element = previewKey.currentContext;
+    final boundary = element?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary || boundary.debugNeedsPaint)
+      return null;
+    var opacity = 1.0;
+    element!.visitAncestorElements((element) {
+      final ancestor = element.widget;
+      if (ancestor is Opacity) opacity *= ancestor.opacity;
+      return true;
+    });
+    final image = await boundary.toImage(
+      pixelRatio: MediaQuery.devicePixelRatioOf(context),
+    );
+    try {
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (bytes == null) return null;
+      final rgba = bytes.buffer.asUint8List();
+      if (opacity < 1) {
+        // rawRgba is premultiplied; the dock's ancestor opacity scales every
+        // channel, matching its in-window card rather than just the alpha.
+        for (var i = 0; i < rgba.length; i++)
+          rgba[i] = (rgba[i] * opacity).round();
+      }
+      return NativeDragPreview(rgba, image.width, image.height);
+    } finally {
+      image.dispose();
+    }
+  }
+
+  void preparePreview() {
+    external.value = false;
+  }
+
   @override
   void dispose() {
     external.dispose();
@@ -57,15 +100,22 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
             .inflate(2)
             .contains(details.globalPosition))
       return;
-    external.value = true;
     nativePending = true;
     // OLE owns the physical pointer from here. Retire only Flutter's pointer
     // stream so its avatar/recognizer cannot wait forever for an OS-consumed up.
-    final pointer = sourcePointer;
-    if (pointer != null) GestureBinding.instance.cancelPointer(pointer);
     unawaited(() async {
       try {
-        await widget.onExport(pointerKind);
+        // Refresh the pixels at the handoff: image decoding may have finished
+        // after the first drag frame. Keep the avatar mounted until readback.
+        final card = Platform.isWindows ? await capturePreview() : null;
+        if (!mounted) return;
+        external.value = true;
+        final pointer = sourcePointer;
+        if (pointer != null) GestureBinding.instance.cancelPointer(pointer);
+        await SystemBridge.withDragPreview(
+          card,
+          () => widget.onExport(pointerKind),
+        );
       } finally {
         nativePending = false;
         sourcePointer = null;
@@ -77,38 +127,50 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   Widget feedback() => ValueListenableBuilder<bool>(
     valueListenable: external,
     builder: (_, exporting, child) => exporting ? const SizedBox() : child!,
-    child: Opacity(
-      opacity: .9,
-      child: Material(
-        key: ValueKey('drag-feedback-${widget.entry.id}'),
-        color: Colors.white,
-        elevation: 8,
-        shadowColor: Colors.black26,
-        borderRadius: Ui.cardRadius,
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          width: 184,
-          height: 140,
-          child: Column(
-            children: [
-              Expanded(
-                child: ContentPreview(
-                  location: widget.entry.localPath,
-                  name: widget.entry.title,
-                  text: widget.entry.kind == 'text' ? widget.entry.text : null,
+    child: RepaintBoundary(
+      key: previewKey,
+      child: Opacity(
+        opacity: .9,
+        child: Material(
+          key: ValueKey('drag-feedback-${widget.entry.id}'),
+          color: Colors.white,
+          elevation: 8,
+          shadowColor: Colors.black26,
+          borderRadius: Ui.cardRadius,
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            width: 184,
+            height: 140,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: ContentPreview(
+                    borderRadius: BorderRadius.zero,
+                    location: widget.entry.localPath,
+                    name: widget.entry.title,
+                    text: widget.entry.kind == 'text'
+                        ? widget.entry.text
+                        : null,
+                  ),
                 ),
-              ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    Icon(Icons.add, size: 16, color: Ui.green),
-                    SizedBox(width: 6),
-                    Text('复制', style: TextStyle(fontSize: 12, color: Ui.green)),
-                  ],
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    children: [
+                      const AppIcon(Icons.add, size: 16, color: Ui.green),
+                      const SizedBox(width: 6),
+                      Text(
+                        widget.itemCount == null
+                            ? '复制'
+                            : '复制 ${widget.itemCount} 项',
+                        style: const TextStyle(fontSize: 12, color: Ui.green),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -153,7 +215,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
       feedback: feedback(),
       dragAnchorStrategy: pointerDragAnchorStrategy,
       feedbackOffset: const Offset(12, 12),
-      onDragStarted: () => external.value = false,
+      onDragStarted: preparePreview,
       onDragUpdate: update,
       onDragEnd: (_) {
         if (mounted) external.value = false;

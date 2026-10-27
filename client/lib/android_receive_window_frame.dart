@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -102,7 +104,11 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
                     width: double.infinity,
                     height: 28,
                     child: Center(
-                      child: Icon(Icons.drag_handle, size: 22, color: Ui.muted),
+                      child: AppIcon(
+                        Icons.drag_handle,
+                        size: 22,
+                        color: Ui.muted,
+                      ),
                     ),
                   ),
                 ),
@@ -134,7 +140,7 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
                     alignment: Alignment.bottomRight,
                     child: Padding(
                       padding: EdgeInsets.all(5),
-                      child: Icon(
+                      child: AppIcon(
                         Icons.south_east_rounded,
                         size: 17,
                         color: Ui.muted,

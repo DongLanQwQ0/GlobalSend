@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:async';
@@ -97,7 +99,7 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
         IconButton(
           tooltip: '用其他应用打开',
           onPressed: openExternal,
-          icon: const Icon(Icons.open_in_new),
+          icon: const AppIcon(Icons.open_in_new),
         ),
         const SizedBox(width: 4),
       ],
@@ -151,7 +153,7 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
             IconButton(
               tooltip: '缩小',
               onPressed: () => zoom(1 / 1.5),
-              icon: const Icon(Icons.remove),
+              icon: const AppIcon(Icons.remove),
             ),
             ValueListenableBuilder(
               valueListenable: transform,
@@ -166,7 +168,7 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
             IconButton(
               tooltip: '放大',
               onPressed: () => zoom(1.5),
-              icon: const Icon(Icons.add),
+              icon: const AppIcon(Icons.add),
             ),
             const SizedBox(width: 16),
             TextButton(

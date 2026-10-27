@@ -12,6 +12,8 @@ import 'system_bridge.dart';
 import 'ui_session.dart';
 import 'ui_tokens.dart';
 import 'receive_dock_window.dart';
+import 'ios_back_swipe.dart';
+import 'file_share.dart';
 
 void main(List<String> args) {
   if (Platform.isWindows && args.contains('--receive-dock')) {
@@ -21,8 +23,8 @@ void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks([
-      'GlobalSend Sans',
-    ], await rootBundle.loadString('assets/fonts/OFL.txt'));
+      'Google Material icon vectors',
+    ], await rootBundle.loadString('assets/licenses/material-icons.txt'));
   });
   runApp(GlobalSendApp(controller: SendController()));
 }
@@ -38,7 +40,11 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     with WidgetsBindingObserver {
   SendController get controller => widget.controller;
   SendUiSession session = SendUiSession();
+  final navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<Map<String, dynamic>>? windowSubscription;
+  StreamSubscription<void>? shareSubscription;
+  Future<void>? shareWork;
+  bool shareAgain = false;
   bool windowVisible = true;
   int receiptSerial = 0;
   String receiptPayload = '';
@@ -144,6 +150,21 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         case 'stage':
           if (entry != null) await controller.stageHistoryEntry(entry);
           await SystemBridge.activateWindow();
+        case 'reveal':
+          if (entry != null && entry.localPath.isNotEmpty)
+            await SystemBridge.revealFile(entry.localPath);
+        case 'delete':
+          if (entry != null) {
+            await controller.removeHistoryEntries([entry]);
+            controller.dismissReceipts([entry.id]);
+          }
+        case 'details':
+          if (entry != null) {
+            await SystemBridge.activateWindow();
+            session.detailsId = entry.id;
+            session.detailsRequest++;
+            controller.changed();
+          }
         case 'open':
           await SystemBridge.activateWindow();
           controller.receiptPresentedExternally = false;
@@ -180,6 +201,18 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   Future<void> initialize() async {
     await controller.init();
     if (!mounted) return;
+    if (FileShareBridge.supported) {
+      shareSubscription ??= FileShareBridge.incoming.listen(
+        (_) => unawaited(drainSharedInputs()),
+        onError: (Object error) {
+          if (mounted) {
+            controller.message = '未能导入分享内容：$error';
+            controller.changed();
+          }
+        },
+      );
+      await drainSharedInputs();
+    }
     if (Platform.isWindows) await SystemBridge.drainLaunchFiles();
     if (Platform.isWindows && controller.root != null) {
       await SystemBridge.configureWindowPersistence(
@@ -218,6 +251,43 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     }
   }
 
+  Future<void> drainSharedInputs() {
+    if (!FileShareBridge.supported || !mounted) return Future.value();
+    if (shareWork != null) {
+      shareAgain = true;
+      return shareWork!;
+    }
+    final owner = controller;
+    final work =
+        () async {
+          do {
+            shareAgain = false;
+            for (final batch in await FileShareBridge.pending()) {
+              if (!mounted || !identical(owner, controller)) return;
+              if (batch.error != null) {
+                owner.message = batch.error!;
+                owner.changed();
+                continue;
+              }
+              final stored = await owner.stageSharedInputs(
+                batch.batchId,
+                batch.paths,
+                batch.texts,
+                batch.temporaryPaths,
+              );
+              if (stored) await FileShareBridge.ack(batch.batchId);
+            }
+          } while (shareAgain && mounted);
+        }().catchError((Object error) {
+          if (mounted && identical(owner, controller)) {
+            owner.message = '未能导入分享内容：$error';
+            owner.changed();
+          }
+        });
+    shareWork = work;
+    return work.whenComplete(() => shareWork = null);
+  }
+
   void updateForeground(AppLifecycleState? state) {
     final active =
         windowVisible && (state == null || state == AppLifecycleState.resumed);
@@ -230,6 +300,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     updateForeground(state);
+    if (state == AppLifecycleState.resumed) unawaited(drainSharedInputs());
     if (Platform.isWindows &&
         state == AppLifecycleState.resumed &&
         windowVisible &&
@@ -257,6 +328,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   @override
   void dispose() {
     windowSubscription?.cancel();
+    shareSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(receiptChanged);
     controller.dispose();
@@ -270,14 +342,18 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           title: 'GlobalSend',
           debugShowCheckedModeBanner: false,
           navigatorObservers: [session.routes],
+          navigatorKey: navigatorKey,
           theme: Ui.theme(),
           builder: (context, navigator) => AnimatedBuilder(
             animation: controller,
             child: navigator,
-            builder: (context, child) => NativeDropFeedback(
-              active: controller.nativeDragActive,
-              importing: controller.nativeImporting,
-              child: child!,
+            builder: (context, child) => IosBackSwipe(
+              navigatorKey: navigatorKey,
+              child: NativeDropFeedback(
+                active: controller.nativeDragActive,
+                importing: controller.nativeImporting,
+                child: child!,
+              ),
             ),
           ),
           home: SendScreen(controller: controller, session: session),

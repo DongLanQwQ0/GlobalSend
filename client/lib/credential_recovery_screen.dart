@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import 'credential_recovery.dart';
@@ -31,7 +33,7 @@ class CredentialRecoveryScreen extends StatelessWidget {
           ListTile(
             shape: const RoundedRectangleBorder(borderRadius: Ui.cardRadius),
             tileColor: Colors.white,
-            leading: const Icon(Icons.history_outlined),
+            leading: const AppIcon(Icons.history_outlined),
             title: Text('${record.profile['name'] ?? '原设备'} · 只读'),
             subtitle: Text(
               DateTime.parse(record.createdAt)
@@ -40,7 +42,7 @@ class CredentialRecoveryScreen extends StatelessWidget {
                   .split('.')
                   .first,
             ),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const AppIcon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
                 builder: (_) =>
@@ -103,7 +105,7 @@ class _CredentialHistoryState extends State<_CredentialHistory> {
                   borderRadius: Ui.cardRadius,
                 ),
                 tileColor: Colors.white,
-                leading: Icon(
+                leading: AppIcon(
                   entry.kind == 'text'
                       ? Icons.notes_outlined
                       : Icons.insert_drive_file_outlined,

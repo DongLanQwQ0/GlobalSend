@@ -16,6 +16,7 @@
 #include <ole2.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <commctrl.h>
 #include <cstring>
 #include <algorithm>
 #include <memory>
@@ -38,6 +39,34 @@ std::vector<HWND> drop_windows;
 bool outgoing_drag = false;
 HWND outgoing_source_window = nullptr;
 HWND import_view = nullptr;
+bool native_paste_key_down = false;
+constexpr UINT_PTR kPasteSubclass = 0x47535041;
+
+bool HandleNativePaste(UINT message, WPARAM key) {
+  if (!channel) return false;
+  const bool control_v = message == WM_KEYDOWN && key == 'V' &&
+      (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+      !(GetKeyState(VK_SHIFT) & 0x8000) && !(GetKeyState(VK_LWIN) & 0x8000) &&
+      !(GetKeyState(VK_RWIN) & 0x8000);
+  if (message == WM_PASTE || control_v) {
+    if (control_v) native_paste_key_down = true;
+    channel->InvokeMethod("pasteRequested", std::make_unique<Value>());
+    return true;
+  }
+  if (message == WM_KEYUP && key == 'V' && native_paste_key_down) {
+    native_paste_key_down = false;
+    return true;
+  }
+  if (message == WM_CHAR && key == 0x16) return true;
+  if (message == WM_KILLFOCUS) native_paste_key_down = false;
+  return false;
+}
+
+LRESULT CALLBACK PasteSubclass(HWND window, UINT message, WPARAM key, LPARAM data,
+    UINT_PTR, DWORD_PTR) {
+  if (HandleNativePaste(message, key)) return 0;
+  return DefSubclassProc(window, message, key, data);
+}
 GlobalSendQueueDropRegion queue_drop;
 uint64_t drop_sequence = 0;
 uint64_t system_generation = 0;
@@ -196,12 +225,13 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
   if (paths != arguments.end() && std::get_if<flutter::EncodableList>(&paths->second)) {
     std::wstring names;
     const auto& files = std::get<flutter::EncodableList>(paths->second);
-    if (files.empty() || files.size() > 32) { result->Error("DRAG_FILES", "Select between 1 and 32 local files"); return; }
+    if (files.empty()) { result->Success(Value(false)); return; }
     for (const auto& item : files) {
       const auto* path = std::get_if<std::string>(&item); if (!path) { result->Error("DRAG_PATH", "Invalid file path"); return; }
       auto wide = Wide(*path);
-      const auto attributes = GetFileAttributesW(wide.c_str());
-      if (wide.empty() || attributes == INVALID_FILE_ATTRIBUTES) { result->Error("DRAG_PATH", "Only existing files or folders can be dragged"); return; }
+      // CF_HDROP references the source directly. Do not hydrate/stat network
+      // paths on Flutter's platform thread before the drop target opens them.
+      if (wide.empty()) { result->Error("DRAG_PATH", "Invalid file path"); return; }
       export_paths.push_back(wide);
       names.append(wide); names.push_back(L'\0');
     }
@@ -217,6 +247,22 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
     export_text = text;
   }
   const auto pointer_kind = String(arguments, "pointerKind");
+  std::function<HBITMAP()> prepare_preview;
+  const auto rgba = arguments.find(Value("previewRgba"));
+  if (rgba != arguments.end()) {
+    if (const auto* pixels = std::get_if<std::vector<uint8_t>>(&rgba->second)) {
+      const auto number = [&arguments](const char* key) {
+        const auto entry = arguments.find(Value(key));
+        if (entry == arguments.end()) return 0;
+        if (const auto* value = std::get_if<int32_t>(&entry->second)) return *value;
+        return 0;
+      };
+      prepare_preview = [pixels = *pixels, width = number("previewWidth"),
+          height = number("previewHeight")] {
+        return GlobalSendDragBitmapFromRgba(pixels, width, height);
+      };
+    }
+  }
   IDataObject* payload = nullptr;
   if (FAILED(CreateGlobalSendDragData(format, bytes, &payload))) {
     result->Error("DRAG_DATA", "Windows could not prepare drag content");
@@ -249,11 +295,13 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
         PublishDrag(false);
         if (error.empty()) completion->Success(Value(copied));
         else completion->Error("TOUCH_DRAG_FAILED", error);
-      });
+      }, std::move(prepare_preview));
     return;
   }
   auto* data = payload; auto* source = new DragSource();
-  InitializeGlobalSendDragPreview(data, source_window, export_text, export_paths);
+  HBITMAP bitmap = prepare_preview ? prepare_preview() : GlobalSendContentDragBitmap(export_text, export_paths);
+  InitializeGlobalSendDragPreviewFromBitmap(data, source_window, bitmap);
+  if (bitmap) DeleteObject(bitmap);
   DWORD effect = DROPEFFECT_NONE;
   outgoing_drag = true;
   outgoing_source_window = source_window;
@@ -448,12 +496,9 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       if (!ole_initialized) { result->Error("OLE_UNAVAILABLE", "Windows drag is unavailable"); return; }
       Drag(*arguments, std::move(result), owner);
     } else if (call.method_name() == "openWebUrl") {
-      const auto url = Wide(String(*arguments, "url"));
-      if (url.rfind(L"https://", 0) != 0 && url.rfind(L"http://", 0) != 0) {
-        result->Error("INVALID_URL", "网址无效"); return;
-      }
-      const auto status = reinterpret_cast<INT_PTR>(ShellExecuteW(owner, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
-      if (status > 32) result->Success();
+      const auto status = OpenGlobalSendWebUrl(owner, String(*arguments, "url"));
+      if (status == E_INVALIDARG) result->Error("INVALID_URL", "网址无效");
+      else if (SUCCEEDED(status)) result->Success();
       else result->Error("OPEN_URL_FAILED", "无法打开网址");
     } else if (call.method_name() == "revealFile") {
       RevealFile(Wide(String(*arguments, "path")),
@@ -472,10 +517,12 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       if (SUCCEEDED(RegisterDragDrop(target, drop_target))) drop_windows.push_back(target);
     }
   }
+  if (import_view) SetWindowSubclass(import_view, PasteSubclass, kPasteSubclass, 0);
 }
 
 bool HandleGlobalSendWindowMessage(UINT message, WPARAM wparam, LPARAM lparam,
                                   LRESULT* result) {
+  if (HandleNativePaste(message, wparam)) { *result = 0; return true; }
   if (message == kDestroyReceiveDock) {
     if (receive_dock && receive_dock->Generation() == static_cast<int64_t>(wparam)) {
       if (receive_dock->ClosingFinished()) {
@@ -518,6 +565,8 @@ bool HandleGlobalSendMessage(UINT message) {
 }
 
 void UnregisterGlobalSendSystem() {
+  if (import_view) RemoveWindowSubclass(import_view, PasteSubclass, kPasteSubclass);
+  native_paste_key_down = false;
   CompleteDockReplies();
   receive_dock.reset();
   receive_serial = -1;

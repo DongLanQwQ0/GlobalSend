@@ -579,7 +579,8 @@ void StartGlobalSendTouchDrag(std::wstring text, std::vector<std::wstring> paths
 void StartGlobalSendDesktopTouchDrag(std::wstring text,
     std::vector<std::wstring> paths, HWND source_owner,
     std::function<HRESULT(HBITMAP, DWORD*)> run_drag,
-    std::function<void(bool, const std::string&)> completed) {
+    std::function<void(bool, const std::string&)> completed,
+    std::function<HBITMAP()> prepare_preview) {
   if (operation) { completed(false, "已有拖拽正在进行"); return; }
   if (!contact || !contact_primary || owner_window != source_owner) {
     completed(false, "请长按后保持接触并拖动"); return;
@@ -597,14 +598,15 @@ void StartGlobalSendDesktopTouchDrag(std::wstring text,
   operation->run_drag = std::move(run_drag);
   const auto state = operation;
   try {
-    std::thread([state, text = std::move(text), paths = std::move(paths)] {
+    std::thread([state, text = std::move(text), paths = std::move(paths),
+        prepare_preview = std::move(prepare_preview)] {
       // This worker owns its COM apartment. Return to the UI with a window
       // message, not apartment_context after CoUninitialize (which would make
       // continuation marshaling fail on a fresh threadpool thread).
       const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
       HBITMAP bitmap = nullptr;
       std::string error;
-      try { bitmap = GlobalSendContentDragBitmap(text, paths); }
+      try { bitmap = prepare_preview ? prepare_preview() : GlobalSendContentDragBitmap(text, paths); }
       catch (const std::exception& failure) { error = failure.what(); }
       if (SUCCEEDED(initialized)) CoUninitialize();
       {

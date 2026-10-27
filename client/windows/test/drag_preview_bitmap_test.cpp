@@ -30,6 +30,20 @@ void Check(const std::wstring& text, int expected_height, const char* destinatio
 }
 
 int main() {
+  const std::vector<uint8_t> rgba{10, 20, 30, 40, 100, 110, 120, 130};
+  auto snapshot = GlobalSendDragBitmapFromRgba(rgba, 2, 1);
+  assert(snapshot);
+  DIBSECTION converted{};
+  assert(GetObjectW(snapshot, sizeof(converted), &converted) == sizeof(converted));
+  assert(converted.dsBm.bmWidth == 2 && converted.dsBm.bmHeight == 1);
+  const auto* pixels = static_cast<const uint8_t*>(converted.dsBm.bmBits);
+  const std::vector<uint8_t> expected{30, 20, 10, 40, 120, 110, 100, 130};
+  assert(std::equal(expected.begin(), expected.end(), pixels));
+  DeleteObject(snapshot);
+  assert(!GlobalSendDragBitmapFromRgba(rgba, 2, 2));
+  auto fallback = GlobalSendContentDragBitmap(L"", {L"Z:\\not-mounted\\image.jpg"});
+  assert(fallback);
+  DeleteObject(fallback);
   Check(L"192.168.1.12:8787", 88, "artifacts/tmp/windows-drag-final/short.bgra");
   Check(L"周六上午九点集合。\n新收到的内容可以拖出，正文也可以选择复制。更长的摘要应自然截断。", 132,
       "artifacts/tmp/windows-drag-final/long.bgra");

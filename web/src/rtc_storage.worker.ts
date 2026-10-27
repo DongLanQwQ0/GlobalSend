@@ -40,8 +40,8 @@ async function dataFile(meta:Metadata,target:Directory=directory){
   if(meta.entryKind==='directory'){const folder=new FolderStorage(target);const {parent,name}=await folder.parent(meta);await parent.getDirectoryHandle(name);return null;}
   return (await dataHandle(meta,target)).getFile();
 }
-async function removeData(meta:Metadata,target:Directory=directory){
-  if(meta.storagePath)await new FolderStorage(target).remove(meta);
+async function removeData(meta:Metadata,target:Directory=directory,cleanParents=false){
+  if(meta.storagePath)await new FolderStorage(target).remove(meta,cleanParents);
   else await target.removeEntry(keyName(meta.key)+'.data').catch(error=>{if(error.name!=='NotFoundError')throw error;});
 }
 async function close(key:string) {
@@ -106,20 +106,109 @@ async function removeOwned(meta:Metadata,target:Directory){
   owned.sort((a,b)=>(a.entryKind==='directory'?1:0)-(b.entryKind==='directory'?1:0) || (b.storagePath?.split('/').length || 0)-(a.storagePath?.split('/').length || 0));
   for(const child of owned){if(target===directory)await close(child.key);await removeLibraryFile(target,child.key);}
 }
+type MoveEntry={scope:string;old:Metadata;next:Metadata};
+type Migration={phase:'copying'|'commit';destinationId:string;entries:MoveEntry[]};
+const migrationName='destination-migration.json';
+async function writeMigration(value:Migration){
+  const handle=await appDirectory.getFileHandle(migrationName,{create:true}) as Handle,access=await handle.createSyncAccessHandle();
+  try{const bytes=new TextEncoder().encode(JSON.stringify(value));await access.truncate(0);await access.write(bytes,{at:0});await access.flush();}finally{await access.close();}
+}
+async function migrationRecord():Promise<Migration|undefined>{
+  try{return JSON.parse(await (await (await appDirectory.getFileHandle(migrationName)).getFile()).text());}
+  catch(error){if((error as Error).name==='NotFoundError')return undefined;throw error;}
+}
+function deepestFirst(entries:MoveEntry[],side:'old'|'next'){
+  return [...entries].sort((a,b)=>(a[side].entryKind==='directory'?1:0)-(b[side].entryKind==='directory'?1:0) || (b[side].storagePath?.split('/').length || 0)-(a[side].storagePath?.split('/').length || 0));
+}
+async function finishMigration(record:Migration){
+  if(record.phase==='copying'){
+    // A cancelled copy has not changed any source metadata or the selected
+    // destination. Remove only entries created by this migration, never a tree.
+    for(const entry of deepestFirst(record.entries,'next'))await removeData(entry.next,await appDirectory.getDirectoryHandle(entry.scope) as Directory,true);
+  }else{
+    for(const entry of record.entries){
+      const target=await appDirectory.getDirectoryHandle(entry.scope) as Directory;
+      await metadata(entry.next,target);
+      if(entry.next.relativePath){
+        const folder=new FolderStorage(target),roots=await folder.roots(),root=entry.next.relativePath.split('/')[0];
+        roots[JSON.stringify([record.destinationId,entry.next.transferId,root])]={name:entry.next.storagePath!.split('/')[0],destinationId:record.destinationId};
+        await folder.saveRoots(roots);
+      }
+    }
+    await destinationSetting('current',record.destinationId==='opfs'?'':record.destinationId,true);
+    // References now name durable new bytes. If an old directory temporarily
+    // loses permission, keep the journal so the next attempt can finish moving.
+    try{for(const entry of deepestFirst(record.entries,'old'))await removeData(entry.old,await appDirectory.getDirectoryHandle(entry.scope) as Directory,true);}
+    catch{return true;}
+  }
+  await appDirectory.removeEntry(migrationName);return false;
+}
+async function changeDestination(data:{id?:string;handle?:FileSystemDirectoryHandle}){
+  if(opened.size)throw new Error('请等待当前接收完成后再更改目录');
+  const pending=await migrationRecord();
+  if(pending && await finishMigration(pending))throw new Error('上次迁移已保存，原目录尚未清理，请重新授权原目录后重试');
+  const current=await receivingDestination();
+  const sameHandle=data.handle && current.handle && await current.handle.isSameEntry(data.handle);
+  const destinationId=data.handle?(sameHandle?current.id:data.id!):'opfs';
+  if(data.handle)await destinationSetting(destinationId,data.handle,true);
+  const record:Migration={phase:'copying',destinationId,entries:[]};
+  await writeMigration(record);
+  const relocated:{scope:string;key:string}[]=[];
+  try{
+    for await(const scopeHandle of appDirectory.values()){
+      if(scopeHandle.kind!=='directory')continue;
+      const target=scopeHandle as Directory,folder=new FolderStorage(target),roots=new Map<string,string>();
+      const metas:Metadata[]=[];
+      for await(const handle of target.values()){
+        if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
+        const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
+        if(typeof meta.key==='string' && handle.name===`${keyName(meta.key)}.json`)metas.push(meta);
+      }
+      // Parents precede their files, including intentionally empty directories.
+      metas.sort((a,b)=>(a.relativePath?.split('/').length || 0)-(b.relativePath?.split('/').length || 0));
+      for(const old of metas){
+        if(!old.storagePath && destinationId==='opfs')continue;
+        if(old.storagePath && await (await folder.base(old.destinationId)).isSameEntry(await folder.base(destinationId)))continue;
+        let file:File|null;
+        try{file=await dataFile(old,target);}catch(error){if((error as Error).name==='NotFoundError')continue;throw error;}
+        let location:StoredLocation;
+        if(old.relativePath){
+          const parts=old.relativePath.split('/'),key=JSON.stringify([old.transferId,parts[0]]);
+          let root=roots.get(key);
+          if(!root){root=await folder.reserveName(parts[0],destinationId);roots.set(key,root);}
+          location={storagePath:[root,...parts.slice(1)].join('/'),destinationId};
+        }else location=await folder.allocateFile(old.name,destinationId);
+        const next={...old,...location};
+        record.entries.push({scope:scopeHandle.name,old,next});await writeMigration(record);
+        if(old.entryKind==='directory')await folder.directory(next);
+        else{
+          const handle=await folder.file(next,true),access=await accessFile(handle,destinationId!=='opfs');
+          try{
+            await access.truncate(0);
+            for(let offset=0;offset<file!.size;offset+=262144){const bytes=new Uint8Array(await file!.slice(offset,offset+262144).arrayBuffer());if(await access.write(bytes,{at:offset})!==bytes.length)throw new Error('迁移空间不足');}
+            await access.flush();
+          }finally{await access.close();}
+          if((await handle.getFile()).size!==file!.size)throw new Error('文件迁移未完成');
+        }
+        relocated.push({scope:scopeHandle.name,key:old.key});
+      }
+    }
+  }catch(error){await finishMigration(record);throw error;}
+  record.phase='commit';await writeMigration(record);
+  const cleanupPending=await finishMigration(record),{id,name}=await receivingDestination();
+  return {id,name,moved:record.entries.length,cleanupPending,relocated};
+}
 async function execute(command:string,data:any):Promise<unknown> {
   switch(command) {
     case 'init': {
       const root=await navigator.storage.getDirectory();
       appDirectory=await root.getDirectoryHandle('globalsend-received-v1',{create:true}) as Directory;
+      const migration=await migrationRecord();if(migration)await finishMigration(migration);
       if(data.scope){directory=await appDirectory.getDirectoryHandle(data.scope,{create:true}) as Directory;await cleanup();}
       return {};
     }
     case 'destination-get': {const {id,name}=await receivingDestination();return {id,name};}
-    case 'destination-set': {
-      if(data.handle){await destinationSetting(data.id,data.handle,true);await destinationSetting('current',data.id,true);}
-      else await destinationSetting('current','',true);
-      const {id,name}=await receivingDestination();return {id,name};
-    }
+    case 'destination-set': return changeDestination(data);
     case 'directory': {
       let previous:Metadata|undefined;try{previous=await readMeta(data.key);}catch(error){if(!((error as Error).name==='NotFoundError'))throw error;}
       const location=previous?.storagePath?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId}:await new FolderStorage(directory).allocate(data.transferId,data.relativePath);
@@ -130,7 +219,7 @@ async function execute(command:string,data:any):Promise<unknown> {
       await close(data.key);
       let previous:Metadata|undefined;
       try{previous=await readMeta(data.key);}catch(error){if((error as Error).name!=='NotFoundError')throw error;}
-      const location=previous?.storagePath?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId}:data.relativePath?await new FolderStorage(directory).allocate(data.transferId,data.relativePath):{};
+      const location=previous?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId}:data.relativePath?await new FolderStorage(directory).allocate(data.transferId,data.relativePath):(await receivingDestination()).id==='opfs'?{}:await new FolderStorage(directory).allocateFile(data.name);
       const meta={...data,...location,complete:false} as Metadata;
       const handle=await dataHandle(meta,directory,true) as Handle;
       const access=await accessFile(handle,!!meta.destinationId && meta.destinationId!=='opfs');
@@ -239,7 +328,12 @@ let queue=Promise.resolve();
 self.onmessage=event=>{
   const {id,command,data}=event.data;
   queue=queue.then(async()=>{
-    try{self.postMessage({id,result:await execute(command,data)});}
+    try{
+      // The library and receiving session each own a worker. A destination move
+      // must not race a library cleanup or another worker's startup recovery.
+      const result=navigator.locks?await navigator.locks.request('globalsend-received-storage',()=>execute(command,data)):await execute(command,data);
+      self.postMessage({id,result});
+    }
     catch(error){self.postMessage({id,error:(error as Error).message,name:(error as Error).name});}
   });
 };

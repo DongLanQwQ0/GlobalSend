@@ -1,6 +1,9 @@
+import 'app_icon.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 /// Shared visual language; transfer, focus and persistence stay with callers.
 abstract final class Ui {
@@ -23,12 +26,27 @@ abstract final class Ui {
     const buttonShape = RoundedRectangleBorder(borderRadius: fieldRadius);
     return ThemeData(
       useMaterial3: true,
-      fontFamily: 'GlobalSendSans',
+      fontFamily: switch (defaultTargetPlatform) {
+        TargetPlatform.windows => 'Segoe UI',
+        TargetPlatform.iOS || TargetPlatform.macOS => '.AppleSystemUIFont',
+        _ => null,
+      },
       fontFamilyFallback: const [
-        'Noto Sans CJK SC',
         'Microsoft YaHei',
+        'PingFang SC',
         'sans-serif',
       ],
+      actionIconTheme: ActionIconThemeData(
+        backButtonIconBuilder: (context) => AppIcon(
+          Theme.of(context).platform == TargetPlatform.iOS ||
+                  Theme.of(context).platform == TargetPlatform.macOS
+              ? Icons.arrow_back_ios_new_rounded
+              : Icons.arrow_back,
+        ),
+        closeButtonIconBuilder: (_) => const AppIcon(Icons.close),
+        drawerButtonIconBuilder: (_) => const AppIcon(Icons.menu),
+        endDrawerButtonIconBuilder: (_) => const AppIcon(Icons.menu),
+      ),
       colorScheme: ColorScheme.fromSeed(seedColor: green, surface: Colors.white)
           .copyWith(
             primary: green,
@@ -64,7 +82,6 @@ abstract final class Ui {
         centerTitle: false,
         titleSpacing: 24,
         titleTextStyle: TextStyle(
-          fontFamily: 'GlobalSendSans',
           fontSize: 22,
           fontWeight: FontWeight.w600,
           color: ink,
@@ -130,27 +147,17 @@ abstract final class Ui {
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: radius),
         titleTextStyle: TextStyle(
-          fontFamily: 'GlobalSendSans',
           fontSize: 22,
           fontWeight: FontWeight.w600,
           color: ink,
         ),
-        contentTextStyle: TextStyle(
-          fontFamily: 'GlobalSendSans',
-          fontSize: 16,
-          height: 1.55,
-          color: ink,
-        ),
+        contentTextStyle: TextStyle(fontSize: 16, height: 1.55, color: ink),
       ),
       popupMenuTheme: const PopupMenuThemeData(
         color: Colors.white,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: fieldRadius),
-        textStyle: TextStyle(
-          fontFamily: 'GlobalSendSans',
-          fontSize: 15,
-          color: ink,
-        ),
+        textStyle: TextStyle(fontSize: 15, color: ink),
       ),
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: Colors.white,
@@ -247,7 +254,7 @@ Widget uiDisclosure({
     side: BorderSide(color: Ui.border),
   ),
   clipBehavior: Clip.antiAlias,
-  child: ExpansionTile(
+  child: AppExpansionTile(
     key: key,
     title: Text(
       title,
@@ -278,7 +285,7 @@ class UiEmpty extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 40, color: Ui.muted),
+          AppIcon(icon, size: 40, color: Ui.muted),
           const SizedBox(height: 16),
           Text(
             title,

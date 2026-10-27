@@ -82,6 +82,7 @@ class GlobalSendReceiveDock final : public Win32Window {
   std::function<void(int64_t)> closed_;
   std::unique_ptr<flutter::FlutterViewController> controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> system_channel_;
   IDropTarget* drop_target_ = nullptr;
   std::vector<HWND> drop_windows_;
   bool shown_ = false;

@@ -62,12 +62,14 @@ final class DockCoordinator {
     static final class LocalDrag {
         final String id = UUID.randomUUID().toString();
         final String path, text;
+        final List<String> paths,texts;
         final WeakReference<View> source;
         boolean dropped;
         boolean navigationSelected;
         View.OnAttachStateChangeListener detachListener;
         final List<Runnable> afterEnd = new ArrayList<>();
-        LocalDrag(View source, String path, String text) { this.source = new WeakReference<>(source); this.path = path; this.text = text; }
+        LocalDrag(View source, String path, String text) { this(source,path==null?java.util.Collections.emptyList():java.util.Collections.singletonList(path),path==null&&text!=null?java.util.Collections.singletonList(text):java.util.Collections.emptyList()); }
+        LocalDrag(View source,List<String> paths,List<String> texts) {this.source=new WeakReference<>(source);this.paths=new ArrayList<>(paths);this.texts=new ArrayList<>(texts);this.path=paths.isEmpty()?null:paths.get(0);this.text=texts.isEmpty()?null:String.join("\n",texts);}
     }
     private static LocalDrag activeExport;
     private static final String LOCAL_DRAG_SESSION = "dev.globalsend.localDrag";
@@ -127,7 +129,8 @@ final class DockCoordinator {
                         View view = findFlutterView(host().findViewById(android.R.id.content));
                         String path = call.argument("path"), text = call.argument("text"), label = call.argument("label");
                         if (view == null || !host().hasWindowFocus()) throw new IllegalStateException("Drag from a visible app view");
-                        result.success(startDrag(view, path, text, label == null ? "GlobalSend" : label)); break;
+                        List<String> paths=call.argument("paths"),texts=call.argument("texts");
+                        result.success(paths!=null||texts!=null?startDrag(view,paths==null?java.util.Collections.emptyList():paths,texts==null?java.util.Collections.emptyList():texts,label==null?"GlobalSend":label):startDrag(view, path, text, label == null ? "GlobalSend" : label)); break;
                     default: result.notImplemented();
                 }
             } catch (Exception e) {
@@ -370,8 +373,8 @@ final class DockCoordinator {
                 local.dropped = true;
                 Map<String, Object> drop = new HashMap<>();
                 drop.put("dropId", UUID.randomUUID().toString()); drop.put("local", true);
-                drop.put("paths", local.path == null ? new ArrayList<>() : java.util.Collections.singletonList(local.path));
-                drop.put("texts", local.path == null ? java.util.Collections.singletonList(local.text) : new ArrayList<>());
+                drop.put("paths", new ArrayList<>(local.paths));
+                drop.put("texts", new ArrayList<>(local.texts));
                 drop.put("temporaryPaths", new ArrayList<>());
                 synchronized (pending) { if (pending.size() < 32) pending.add(drop); }
                 channel.invokeMethod("nativeDrop", drop); return true;
@@ -510,23 +513,28 @@ final class DockCoordinator {
         return false;
     }
     static boolean startDrag(View view, String path, String text, String label) throws Exception {
+        return startDrag(view,path==null?java.util.Collections.emptyList():java.util.Collections.singletonList(path),path==null&&text!=null?java.util.Collections.singletonList(text):java.util.Collections.emptyList(),label);
+    }
+    static boolean startDrag(View view,List<String> paths,List<String> texts,String label) throws Exception {
         if (activeExport != null) return false; // A second long press must not re-enter a live system drag.
-        LocalDrag session = new LocalDrag(view, path, text);
-        ClipData clip;
+        LocalDrag session = new LocalDrag(view, paths,texts);
+        List<ClipData.Item> items=new ArrayList<>();java.util.LinkedHashSet<String> types=new java.util.LinkedHashSet<>();
         int flags = View.DRAG_FLAG_GLOBAL;
-        if (path != null) {
+        for(String path:paths) {
             Uri uri;
             if (path.startsWith("content://")) {
                 if (!ReceiveDirectory.isOwned(view.getContext(), path)) throw new SecurityException("Only registered received documents may be dragged out");
                 uri = Uri.parse(path);
             } else uri = DockShareProvider.register(view.getContext(), new File(path), label);
-            clip = ClipData.newUri(view.getContext().getContentResolver(), label, uri); flags |= View.DRAG_FLAG_GLOBAL_URI_READ;
+            items.add(new ClipData.Item(uri));String type=view.getContext().getContentResolver().getType(uri);types.add(type==null?"application/octet-stream":type);flags |= View.DRAG_FLAG_GLOBAL_URI_READ;
         }
-        else { if (text == null || text.length() > 100000) throw new IllegalArgumentException("Invalid drag text"); clip = ClipData.newPlainText(label, text); }
+        for(String text:texts){if(text==null||text.length()>100000)throw new IllegalArgumentException("Invalid drag text");items.add(new ClipData.Item(text));types.add("text/plain");}
+        if(items.isEmpty())throw new IllegalArgumentException("没有可拖动的内容");
+        ClipData clip=new ClipData(label,types.toArray(new String[0]),items.get(0));for(int i=1;i<items.size();i++)clip.addItem(items.get(i));
         PersistableBundle metadata = new PersistableBundle();
         metadata.putString(LOCAL_DRAG_SESSION, session.id);
         clip.getDescription().setExtras(metadata);
-        View shadow = new DragPreview(view, path, text, label);
+        View shadow = new DragPreview(view, session.path, session.text, label);
         int width = (int) (232 * view.getResources().getDisplayMetrics().density), height = (int) (104 * view.getResources().getDisplayMetrics().density);
         shadow.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)); shadow.layout(0, 0, width, height);
         session.detachListener = new View.OnAttachStateChangeListener() {

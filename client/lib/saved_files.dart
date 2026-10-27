@@ -10,7 +10,7 @@ enum SavedFilesSort { newest, oldest, name, largest, smallest }
 
 enum SavedFileCategory { image, video, audio, text, archive, other }
 
-enum SavedFileSizeRule { any, greater, smaller }
+enum SavedFileSizeRule { any, greater, smaller, atMost }
 
 SavedFileCategory savedFileCategory(String name) {
   final extension = name.split('.').last.toLowerCase();
@@ -101,10 +101,10 @@ SavedFileCategory savedFileCategory(String name) {
 class SavedFileCleanupFilter {
   SavedFileCleanupFilter({
     Set<SavedFileCategory>? categories,
-    this.sizeRule = SavedFileSizeRule.any,
-    this.sizeMiB = 0,
+    this.sizeRule = SavedFileSizeRule.atMost,
+    this.sizeMiB = 500000 / 1048576,
   }) : categories = Set.unmodifiable(
-         categories ?? SavedFileCategory.values.toSet(),
+         categories ?? {SavedFileCategory.image, SavedFileCategory.text},
        );
   final Set<SavedFileCategory> categories;
   final SavedFileSizeRule sizeRule;
@@ -116,6 +116,7 @@ class SavedFileCleanupFilter {
       SavedFileSizeRule.any => true,
       SavedFileSizeRule.greater => file.size > bytes,
       SavedFileSizeRule.smaller => file.size < bytes,
+      SavedFileSizeRule.atMost => file.size <= bytes,
     };
   }
 
@@ -177,6 +178,22 @@ class SavedFile {
     size: size,
     receivedAtMillis: receivedAtMillis,
     managedLocation: managedLocation,
+    directory: directory,
+    relativePath: relativePath,
+  );
+
+  SavedFile relocated(String location, {int? currentSize}) => SavedFile(
+    id: id,
+    profileKey: profileKey,
+    deviceId: deviceId,
+    groupId: groupId,
+    transferId: transferId,
+    fileId: fileId,
+    path: location,
+    name: name,
+    size: currentSize ?? size,
+    receivedAtMillis: receivedAtMillis,
+    managedLocation: true,
     directory: directory,
     relativePath: relativePath,
   );
@@ -251,6 +268,9 @@ class SavedFilesStore {
   int retentionHours = SavedFile.defaultRetentionHours;
   SavedFileCleanupFilter cleanupFilter = SavedFileCleanupFilter();
   String receiveDestinationLocation = '', receiveDestinationLabel = '';
+  final Map<String, String> relocatedLocations = {};
+  final List<SavedFile> _obsoleteLocations = [];
+  int get migrationCleanupPending => _obsoleteLocations.length;
   Future<void>? _loading;
   Future<void> _tail = Future<void>.value();
   List<SavedFile> get items => List.unmodifiable(_items.values);
@@ -271,12 +291,22 @@ class SavedFilesStore {
       }
       receiveDestinationLocation = decoded['receiveDestinationLocation'] ?? '';
       receiveDestinationLabel = decoded['receiveDestinationLabel'] ?? '';
+      relocatedLocations.addAll(
+        Map<String, String>.from(decoded['relocatedLocations'] ?? {}),
+      );
+      _obsoleteLocations.addAll(
+        (decoded['obsoleteLocations'] as List? ?? []).map(
+          (value) => SavedFile.fromJson(Map<String, dynamic>.from(value)),
+        ),
+      );
       values = decoded['files'] as List;
     }
     for (final value in values) {
       final item = SavedFile.fromJson(Map<String, dynamic>.from(value));
       _items[item.id] = item;
     }
+    if (relocatedLocations.isNotEmpty)
+      await ReceiveDestination.relocateFolderRoots(relocatedLocations);
   }();
 
   Future<T> _write<T>(Future<T> Function() action) {
@@ -297,6 +327,10 @@ class SavedFilesStore {
         'cleanupFilter': cleanupFilter.toJson(),
         'receiveDestinationLocation': receiveDestinationLocation,
         'receiveDestinationLabel': receiveDestinationLabel,
+        'relocatedLocations': relocatedLocations,
+        'obsoleteLocations': _obsoleteLocations
+            .map((item) => item.toJson())
+            .toList(),
         'files': _items.values.map((item) => item.toJson()).toList(),
       }),
       flush: true,
@@ -335,6 +369,7 @@ class SavedFilesStore {
     DateTime? receivedAt,
     bool managedLocation = false,
   }) => _write(() async {
+    entry.localPath = relocatedLocations[entry.localPath] ?? entry.localPath;
     if (entry.outgoing || entry.kind != 'file' || entry.localPath.isEmpty) {
       return null;
     }
@@ -407,12 +442,168 @@ class SavedFilesStore {
         await _persist();
       });
 
-  Future<void> setReceiveDestination(String location, String label) =>
-      _write(() async {
-        receiveDestinationLocation = location;
-        receiveDestinationLabel = label;
-        await _persist();
-      });
+  Future<void> setReceiveDestination(
+    String location,
+    String label, {
+    void Function(int done, int total)? onProgress,
+    Future<void> Function()? onCommitted,
+  }) => _write(() async {
+    if (_obsoleteLocations.isNotEmpty) {
+      await _finishMigrationCleanup();
+      if (_obsoleteLocations.isNotEmpty) {
+        throw const FileSystemException('部分旧文件尚未移除，请关闭占用文件的程序后重试');
+      }
+    }
+    if (_comparable(location) == _comparable(receiveDestinationLocation)) {
+      receiveDestinationLabel = label;
+      await _persist();
+      return;
+    }
+    final base = location.isEmpty
+        ? '${documentsDirectory.path}/GlobalSend'
+        : location;
+    if (!base.startsWith('content://'))
+      await Directory(base).create(recursive: true);
+    final originals = <SavedFile>[];
+    for (final item in _items.values) {
+      if (await ownsExisting(item)) originals.add(item);
+    }
+    originals.sort(
+      (a, b) => a.relativePath.length.compareTo(b.relativePath.length),
+    );
+    final moved = <SavedFile>[];
+    final copiedLocations = <String, SavedFile>{};
+    final created = <String>[];
+    final directories = <String>[];
+    try {
+      for (final item in originals) {
+        final existingCopy = copiedLocations[item.path];
+        if (existingCopy != null) {
+          moved.add(
+            item.relocated(existingCopy.path, currentSize: existingCopy.size),
+          );
+          onProgress?.call(moved.length, originals.length);
+          continue;
+        }
+        final relative = item.relativePath.isEmpty
+            ? item.name
+            : item.relativePath;
+        final transfer =
+            'migration:$base:${item.profileKey}:${item.deviceId}:${item.groupId}:${item.transferId}';
+        String target;
+        var currentSize = item.size;
+        if (item.directory) {
+          target = await ReceiveDestination.folderDirectory(
+            destinationLocation: base,
+            transferKey: transfer,
+            relativePath: relative,
+          );
+          directories.add(target);
+        } else {
+          var parent = base;
+          final parts = item.relativePath.split('/');
+          if (parts.length > 1) {
+            parent = await ReceiveDestination.folderDirectory(
+              destinationLocation: base,
+              transferKey: transfer,
+              relativePath: parts.take(parts.length - 1).join('/'),
+            );
+            directories.add(parent);
+          }
+          final handle = await ReceiveDestination.create(
+            destinationLocation: parent,
+            name: item.name,
+          );
+          target = handle.location;
+          created.add(target);
+          ReceivedFileAccess? source;
+          try {
+            source = await ReceivedFileAccess.open(item.path);
+            currentSize = await source.file.length();
+            await source.file.openRead().pipe(File(handle.ioPath).openWrite());
+          } finally {
+            await source?.close();
+            await ReceiveDestination.closeHandle(handle.handle);
+          }
+          if ((await ReceiveDestination.stat(target)).size != currentSize) {
+            throw FileSystemException('文件迁移未完成，原文件已保留', item.path);
+          }
+        }
+        final next = item.relocated(target, currentSize: currentSize);
+        moved.add(next);
+        copiedLocations[item.path] = next;
+        onProgress?.call(moved.length, originals.length);
+      }
+    } catch (_) {
+      for (final path in [
+        ...created.reversed,
+        ...directories.reversed.toSet(),
+      ]) {
+        await ReceiveDestination.delete(path);
+      }
+      rethrow;
+    }
+    final previousLocation = receiveDestinationLocation;
+    final previousLabel = receiveDestinationLabel;
+    final previousAliases = Map<String, String>.from(relocatedLocations);
+    for (var index = 0; index < originals.length; index++) {
+      final old = originals[index], next = moved[index];
+      _items[old.id] = next;
+      relocatedLocations.updateAll(
+        (key, value) => value == old.path ? next.path : value,
+      );
+      relocatedLocations[old.path] = next.path;
+    }
+    receiveDestinationLocation = location;
+    receiveDestinationLabel = label;
+    _obsoleteLocations.addAll(originals);
+    try {
+      // Commit every new reference before removing any old bytes. The
+      // pending-old list survives interruption and is safe to retry.
+      await _persist();
+    } catch (_) {
+      for (final item in originals) {
+        _items[item.id] = item;
+      }
+      relocatedLocations
+        ..clear()
+        ..addAll(previousAliases);
+      _obsoleteLocations.clear();
+      receiveDestinationLocation = previousLocation;
+      receiveDestinationLabel = previousLabel;
+      for (final path in [
+        ...created.reversed,
+        ...directories.reversed.toSet(),
+      ]) {
+        await ReceiveDestination.delete(path);
+      }
+      rethrow;
+    }
+    await ReceiveDestination.relocateFolderRoots(relocatedLocations);
+    await onCommitted?.call();
+    await _finishMigrationCleanup();
+    if (_obsoleteLocations.isNotEmpty) {
+      throw const FileSystemException('文件已迁移，部分旧文件被占用，关闭占用程序后重试清理');
+    }
+  });
+
+  Future<void> finishMigrationCleanup() => _write(_finishMigrationCleanup);
+
+  Future<void> _finishMigrationCleanup() async {
+    final pending = _obsoleteLocations.toList()
+      ..sort((a, b) => b.relativePath.length.compareTo(a.relativePath.length));
+    for (final item in pending) {
+      try {
+        if (await ownsExisting(item)) await _delete(item, recursive: false);
+        _obsoleteLocations.remove(item);
+      } on FileSystemException {
+        // Keep the journal entry while another application owns a file handle.
+      } on Exception {
+        // SAF provider failures keep the old reference for an explicit retry.
+      }
+    }
+    await _persist();
+  }
 
   Future<bool> _delete(
     SavedFile item, {

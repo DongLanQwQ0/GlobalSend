@@ -6,9 +6,60 @@
 #include <cstring>
 #include <gdiplus.h>
 #include <memory>
+#include <atomic>
 #pragma comment(lib, "gdiplus.lib")
 
 namespace {
+// SHCreateDataObject exposes AsyncCapability but this Shell implementation
+// accepts SetAsyncMode(TRUE) without enabling it. Forward its entire data store
+// (including private drag-image streams) and implement only async ownership.
+// OLE uses the standard IDataObject proxy; no raw COM pointer crosses threads.
+class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapability {
+ public:
+  explicit AsyncShellData(IDataObject* shell) : shell_(shell) {}
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** output) override {
+    if (!output) return E_POINTER;
+    *output = nullptr;
+    if (iid == IID_IUnknown || iid == IID_IDataObject)
+      *output = static_cast<IDataObject*>(this);
+    else if (iid == IID_IDataObjectAsyncCapability)
+      *output = static_cast<IDataObjectAsyncCapability*>(this);
+    else return E_NOINTERFACE;
+    AddRef(); return S_OK;
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+  ULONG STDMETHODCALLTYPE Release() override {
+    const auto left = --references_;
+    if (!left) delete this;
+    return left;
+  }
+  HRESULT STDMETHODCALLTYPE GetData(FORMATETC* f, STGMEDIUM* m) override { return shell_->GetData(f, m); }
+  HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC* f, STGMEDIUM* m) override { return shell_->GetDataHere(f, m); }
+  HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* f) override { return shell_->QueryGetData(f); }
+  HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC* f, FORMATETC* out) override { return shell_->GetCanonicalFormatEtc(f, out); }
+  HRESULT STDMETHODCALLTYPE SetData(FORMATETC* f, STGMEDIUM* m, BOOL own) override { return shell_->SetData(f, m, own); }
+  HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** out) override { return shell_->EnumFormatEtc(direction, out); }
+  HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC* f, DWORD flags, IAdviseSink* sink, DWORD* connection) override { return shell_->DAdvise(f, flags, sink, connection); }
+  HRESULT STDMETHODCALLTYPE DUnadvise(DWORD connection) override { return shell_->DUnadvise(connection); }
+  HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA** out) override { return shell_->EnumDAdvise(out); }
+  HRESULT STDMETHODCALLTYPE SetAsyncMode(BOOL value) override { enabled_ = value != FALSE; return S_OK; }
+  HRESULT STDMETHODCALLTYPE GetAsyncMode(BOOL* value) override { if (!value) return E_POINTER; *value = enabled_; return S_OK; }
+  HRESULT STDMETHODCALLTYPE StartOperation(IBindCtx*) override {
+    if (!running_.exchange(true)) AddRef();
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE InOperation(BOOL* value) override { if (!value) return E_POINTER; *value = running_; return S_OK; }
+  HRESULT STDMETHODCALLTYPE EndOperation(HRESULT, IBindCtx*, DWORD) override {
+    if (running_.exchange(false)) Release();
+    return S_OK;
+  }
+ private:
+  ~AsyncShellData() { shell_->Release(); }
+  std::atomic<ULONG> references_{1};
+  std::atomic<bool> enabled_{true}, running_{false};
+  IDataObject* shell_;
+};
+
 std::unique_ptr<Gdiplus::GraphicsPath> Rounded(float x, float y, float width, float height, float radius) {
   auto path = std::make_unique<Gdiplus::GraphicsPath>();
   const float diameter = radius * 2;
@@ -47,7 +98,7 @@ HRESULT CreateGlobalSendDragData(CLIPFORMAT format,
     data->Release();
     return result;
   }
-  *output = data;
+  *output = new AsyncShellData(data);
   return S_OK;
 }
 
@@ -115,17 +166,38 @@ HBITMAP GlobalSendTextDragBitmap(const std::wstring& text) {
   return bitmap;
 }
 
+HBITMAP GlobalSendDragBitmapFromRgba(const std::vector<uint8_t>& rgba,
+    int width, int height) {
+  if (width <= 0 || height <= 0 || width > 2048 || height > 2048 ||
+      rgba.size() != static_cast<size_t>(width) * height * 4) return nullptr;
+  BITMAPINFO info{};
+  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = width;
+  info.bmiHeader.biHeight = -height;
+  info.bmiHeader.biPlanes = 1;
+  info.bmiHeader.biBitCount = 32;
+  info.bmiHeader.biCompression = BI_RGB;
+  uint8_t* pixels = nullptr;
+  HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS,
+      reinterpret_cast<void**>(&pixels), nullptr, 0);
+  if (!bitmap) return nullptr;
+  for (size_t i = 0; i < rgba.size(); i += 4) {
+    pixels[i] = rgba[i + 2]; pixels[i + 1] = rgba[i + 1];
+    pixels[i + 2] = rgba[i]; pixels[i + 3] = rgba[i + 3];
+  }
+  return bitmap;
+}
+
 HBITMAP GlobalSendContentDragBitmap(const std::wstring& text,
     const std::vector<std::wstring>& paths) {
   if (paths.empty()) return GlobalSendTextDragBitmap(text);
-  HBITMAP bitmap = nullptr;
-  IShellItemImageFactory* factory = nullptr;
-  if (SUCCEEDED(SHCreateItemFromParsingName(paths.front().c_str(), nullptr,
-      IID_PPV_ARGS(&factory)))) {
-    factory->GetImage(SIZE{176, 136}, SIIGBF_BIGGERSIZEOK, &bitmap);
-    factory->Release();
-  }
-  return bitmap;
+  // A drag started before the first Flutter paint still gets a small card.
+  // Asking a shell thumbnail provider here could synchronously load a huge
+  // image or hydrate a remote file on the platform thread.
+  const auto separator = paths.front().find_last_of(L"\\/");
+  auto label = paths.front().substr(separator == std::wstring::npos ? 0 : separator + 1);
+  if (paths.size() > 1) label += L"  +" + std::to_wstring(paths.size() - 1);
+  return GlobalSendTextDragBitmap(label);
 }
 
 bool InitializeGlobalSendDragPreview(IDataObject* data, HWND source,

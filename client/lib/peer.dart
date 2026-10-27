@@ -50,6 +50,8 @@ class PeerTransport {
     this.pushEnabled = false,
     this.cellularPushAllowed,
     this.addressReader,
+    this.acquireSource,
+    this.releaseSource,
   });
   final CenterApi api;
   final String? Function(String fileId) sourcePath;
@@ -59,6 +61,9 @@ class PeerTransport {
   final bool pushEnabled;
   final bool Function()? cellularPushAllowed;
   final Future<List<LocalIpAddress>> Function()? addressReader;
+  final Future<bool> Function(String fileId)? acquireSource;
+  final void Function()? releaseSource;
+  bool _closed = false;
   final Map<String, PeerReceiveSlot> _receives = {};
   final Map<String, HttpClient> _pushClients = {};
   HttpServer? server;
@@ -106,6 +111,7 @@ class PeerTransport {
     Map<String, String> identity, {
     bool loopbackOnly = false,
   }) async {
+    _closed = false;
     _loopbackOnly = loopbackOnly;
     certificate = identity['certificate']!;
     fingerprint = certificateFingerprint(certificate);
@@ -241,6 +247,7 @@ class PeerTransport {
     String? sendingId;
     ReceivedFileAccess? source;
     var sent = 0, total = 0;
+    var sourcePermit = false;
     try {
       final push = request.uri.pathSegments;
       if (pushEnabled &&
@@ -303,6 +310,10 @@ class PeerTransport {
         request.response.statusCode = 410;
         return;
       }
+      canceledFiles.remove(parts[2]);
+      sourcePermit = await acquireSource?.call(parts[2]) ?? false;
+      if (_closed || canceledFiles.contains(parts[2]))
+        throw StateError('发送已结束');
       source = await ReceivedFileAccess.open(path);
       final file = source.file;
       if (await file.length() != grant['size']) {
@@ -369,7 +380,6 @@ class PeerTransport {
       total = grant['size'];
       sent = start;
       onProgress?.call(sendingId, start, total, false);
-      canceledFiles.remove(parts[2]);
       final stopwatch = Stopwatch()..start();
       var lastUpdate = 0;
       await request.response.addStream(
@@ -390,11 +400,15 @@ class PeerTransport {
         request.response.statusCode = 403;
       } catch (_) {}
     } finally {
-      await source?.close();
       try {
-        await request.response.close();
-      } catch (_) {}
-      if (sendingId != null) onProgress?.call(sendingId, sent, total, true);
+        await source?.close();
+        try {
+          await request.response.close();
+        } catch (_) {}
+        if (sendingId != null) onProgress?.call(sendingId, sent, total, true);
+      } finally {
+        if (sourcePermit) releaseSource?.call();
+      }
     }
   }
 
@@ -687,6 +701,7 @@ class PeerTransport {
   }
 
   Future<void> close() async {
+    _closed = true;
     for (final client in _pushClients.values) {
       client.close(force: true);
     }

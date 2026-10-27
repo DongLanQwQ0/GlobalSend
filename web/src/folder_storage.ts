@@ -18,20 +18,36 @@ async function json(directory:Directory,name:string){try{return JSON.parse(await
 async function saveJson(directory:Directory,name:string,data:unknown){const file=await directory.getFileHandle(name,{create:true}) as SyncFile,access=await file.createSyncAccessHandle();try{const bytes=new TextEncoder().encode(JSON.stringify(data));await access.truncate(0);await access.write(bytes,{at:0});await access.flush();}finally{await access.close();}}
 export class FolderStorage {
   constructor(private scope:Directory){}
-  private async base(destinationId='opfs'):Promise<Directory>{
+  async base(destinationId='opfs'):Promise<Directory>{
     if(destinationId==='opfs')return await this.scope.getDirectoryHandle('received',{create:true}) as Directory;
     const handle=await destinationSetting(destinationId) as PermissionHandle|undefined;
     if(!handle || await handle.queryPermission({mode:'readwrite'})!=='granted')throw Object.assign(new Error('请重新授权接收目录'),{name:'NotAllowedError'});
     return handle;
   }
+  async roots(){return json(this.scope,'folder-roots.json');}
+  async saveRoots(roots:Record<string,{name:string;destinationId:string}>){await saveJson(this.scope,'folder-roots.json',roots);}
+  async reserveName(name:string,destinationId:string){
+    const base=await this.base(destinationId),dot=name.lastIndexOf('.');
+    const stem=dot>0?name.slice(0,dot):name,extension=dot>0?name.slice(dot):'';
+    let candidate=name,index=0;
+    for(;;){
+      try{await base.getFileHandle(candidate);}
+      catch(error){if(missing(error))return candidate;if((error as Error).name!=='TypeMismatchError')throw error;}
+      candidate=`${stem} (${++index})${extension}`;
+    }
+  }
+  async allocateFile(name:string,destinationId?:string):Promise<StoredLocation>{
+    const destination=destinationId ?? (await receivingDestination()).id;
+    return {storagePath:await this.reserveName(name,destination),destinationId:destination};
+  }
   async allocate(transferId:string,relativePath:string):Promise<StoredLocation>{
-    const parts=pathSegments(relativePath),root=parts[0],key=JSON.stringify([transferId,root]);
+    const destination=await receivingDestination();
+    const parts=pathSegments(relativePath),root=parts[0],key=JSON.stringify([destination.id,transferId,root]);
     const roots=await json(this.scope,'folder-roots.json');
-    let reserved=roots[key];
+    const legacy=roots[JSON.stringify([transferId,root])];
+    let reserved=roots[key] || (legacy?.destinationId===destination.id?legacy:undefined);
     if(!reserved){
-      const destination=await receivingDestination(),base=await this.base(destination.id);
-      let name=root,index=0;
-      for(;;){try{await base.getDirectoryHandle(name);name=`${root} (${++index})`;}catch(error){if(missing(error))break;if((error as Error).name==='TypeMismatchError'){name=`${root} (${++index})`;continue;}throw error;}}
+      const name=await this.reserveName(root,destination.id);
       reserved={name,destinationId:destination.id};roots[key]=reserved;
       // Persist the reservation before creating bytes; re-opening this transfer
       // reuses exactly this root, including an interrupted zero-byte directory.
@@ -42,8 +58,17 @@ export class FolderStorage {
   async parent(location:StoredLocation,create=false){const parts=pathSegments(location.storagePath!);let parent=await this.base(location.destinationId);for(const part of parts.slice(0,-1))parent=await parent.getDirectoryHandle(part,{create}) as Directory;return {parent,name:parts.at(-1)!};}
   async directory(location:StoredLocation){const {parent,name}=await this.parent(location,true);await parent.getDirectoryHandle(name,{create:true});}
   async file(location:StoredLocation,create=false){const {parent,name}=await this.parent(location,create);return parent.getFileHandle(name,{create});}
-  async remove(location:StoredLocation){
+  async remove(location:StoredLocation,cleanParents=false){
     try{const {parent,name}=await this.parent(location);await parent.removeEntry(name);}
     catch(error){if(missing(error))return;if(location.entryKind==='directory' && ['InvalidModificationError','NoModificationAllowedError'].includes((error as Error).name))return;throw error;}
+    // Nested parents may have been made implicitly by a file receive rather
+    // than recorded as separate directory entries. Remove them only if empty.
+    if(!cleanParents)return;
+    const parts=pathSegments(location.storagePath!);
+    for(let depth=parts.length-1;depth>0;depth--){
+      const parentLocation={...location,storagePath:parts.slice(0,depth).join('/')};
+      try{const {parent,name}=await this.parent(parentLocation);await parent.removeEntry(name);}
+      catch(error){if(missing(error))continue;if(['InvalidModificationError','NoModificationAllowedError'].includes((error as Error).name))break;throw error;}
+    }
   }
 }

@@ -1,3 +1,6 @@
+import 'native_drag_render_fixture.dart';
+import 'system_font_fixture.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -35,30 +38,8 @@ Map<String, dynamic> payload(int generation, List<String> ids) => {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(loadSystemTestFonts);
   final captureKey = GlobalKey();
-  setUpAll(() async {
-    final fonts = FontLoader('GlobalSendSans');
-    for (final weight in ['Regular', 'Semibold']) {
-      fonts.addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File('assets/fonts/GlobalSendSans-$weight.ttf').readAsBytes(),
-          ),
-        ),
-      );
-    }
-    await fonts.load();
-    await (FontLoader('MaterialIcons')..addFont(
-          Future.value(
-            ByteData.sublistView(
-              await File(
-                'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-              ).readAsBytes(),
-            ),
-          ),
-        ))
-        .load();
-  });
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   Future<void> content(WidgetTester tester, Map<String, dynamic> data) async {
@@ -85,6 +66,44 @@ void main() {
     messenger.setMockMethodCallHandler(ReceiveDockApp.channel, null);
     messenger.setMockMethodCallHandler(SystemBridge.channel, null);
   });
+
+  testWidgets(
+    'dock URL click uses its system channel instead of a missing plugin',
+    (tester) async {
+      const text = 'https://example.com/中文?q=1';
+      final initial = payload(1, ['url']);
+      (initial['items'] as List).first['text'] = text;
+      final urls = <String>[];
+      messenger.setMockMethodCallHandler(ReceiveDockApp.channel, (call) async {
+        if (call.method == 'ready') return initial;
+        return null;
+      });
+      messenger.setMockMethodCallHandler(SystemBridge.channel, (call) async {
+        if (call.method == 'openWebUrl')
+          urls.add((call.arguments as Map)['url'] as String);
+        return null;
+      });
+      await mount(tester);
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find
+            .descendant(
+              of: find.byType(WebLinkText).first,
+              matching: find.byType(RichText),
+            )
+            .first,
+      );
+      final glyph = paragraph
+          .getBoxesForSelection(
+            const TextSelection(baseOffset: 0, extentOffset: 1),
+          )
+          .first
+          .toRect();
+      await tester.tapAt(paragraph.localToGlobal(glyph.center));
+      await tester.pumpAndSettle();
+      expect(urls, [Uri.parse(text).toString()]);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'readonly dock text drags instead of moving the window; copy and close stay controls',
@@ -122,11 +141,11 @@ void main() {
           kind: PointerDeviceKind.mouse,
         );
         await drag.moveBy(const Offset(35, 0));
-        await tester.pump();
+        await pumpNativeDrag(tester);
         await drag.moveTo(const Offset(500, 90));
-        await tester.pump();
+        await pumpNativeDrag(tester);
         await drag.up();
-        await tester.pump();
+        await pumpNativeDrag(tester);
       }
       expect(exports, hasLength(2));
       expect(exports.last, {
@@ -141,18 +160,18 @@ void main() {
           kind: PointerDeviceKind.mouse,
         );
         await drag.moveBy(const Offset(45, 0));
-        await tester.pump();
+        await pumpNativeDrag(tester);
         await drag.up();
-        await tester.pump();
+        await pumpNativeDrag(tester);
       }
       expect(exports, hasLength(2));
       expect(moves, isEmpty);
       expect(actions, isEmpty);
       await tester.tap(find.text('复制'));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(actions.single['action'], 'copy');
       await tester.tap(find.byIcon(Icons.close));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(actions.last['action'], 'close');
       expect(tester.takeException(), isNull);
     },
@@ -192,11 +211,11 @@ void main() {
         image.dispose();
       });
       await tester.tap(find.text('复制').first);
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(actions.single['action'], 'copy');
       expect(actions.single['id'], 'first');
       await tester.tap(find.byIcon(Icons.close));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(actions.last, containsPair('action', 'close'));
       expect(actions.last['arrivalGeneration'], 7);
       expect(actions.last['serial'], 14);
@@ -206,7 +225,7 @@ void main() {
   );
 
   testWidgets(
-    'dock clear pixels and native hit regions exclude gaps while controls remain translucent',
+    'dock has one translucent pane and no separate count or top button backgrounds',
     (tester) async {
       final regions = <Map<String, dynamic>>[];
       messenger.setMockMethodCallHandler(ReceiveDockApp.channel, (call) async {
@@ -216,20 +235,15 @@ void main() {
         return null;
       });
       await mount(tester);
-      bool accepts(Offset point) =>
-          (regions.last['rects'] as List).any((value) {
-            final rect = Map<String, dynamic>.from(value);
-            return Rect.fromLTRB(
-              (rect['left'] as num).toDouble(),
-              (rect['top'] as num).toDouble(),
-              (rect['right'] as num).toDouble(),
-              (rect['bottom'] as num).toDouble(),
-            ).contains(point);
-          });
-      expect(regions.last['width'], 480);
-      expect(regions.last['height'], 184);
-      expect(accepts(const Offset(310, 15)), isFalse);
-      expect(accepts(const Offset(50, 80)), isTrue);
+      expect(
+        regions,
+        isEmpty,
+        reason: 'the native pane no longer cuts out card gaps',
+      );
+      for (final key in ['dock-count', 'dock-open', 'dock-close']) {
+        final box = tester.widget<DecoratedBox>(find.byKey(ValueKey(key)));
+        expect((box.decoration as BoxDecoration).color, Colors.transparent);
+      }
       await tester.runAsync(() async {
         final image =
             await (captureKey.currentContext!.findRenderObject()
@@ -242,26 +256,55 @@ void main() {
             pixels.getUint8((y * image.width + x) * 4 + 3);
         expect(
           alpha(310, 80),
-          0,
-          reason: 'the window background is completely clear',
+          179,
+          reason: 'the whole pane shares the same 70-percent-alpha background',
         );
         expect(
           alpha(100, 110),
-          inExclusiveRange(0, 255),
-          reason: 'the preview itself must not paint an opaque background',
+          179,
+          reason: 'text preview has no additional independent surface',
         );
         image.dispose();
       });
       await tester.tap(find.byIcon(Icons.more_horiz));
       await tester.pumpAndSettle();
-      expect(
-        accepts(const Offset(310, 15)),
-        isTrue,
-        reason: 'menu routes remain usable outside card bounds',
+      expect(find.text('加入待发送'), findsOneWidget);
+      final menu = tester.getRect(
+        find
+            .ancestor(of: find.text('加入待发送'), matching: find.byType(Material))
+            .first,
       );
+      expect(menu.left, lessThan(148));
+      expect(
+        menu.right,
+        greaterThan(158),
+        reason: 'the menu crosses the former native card gap',
+      );
+      expect(menu.left, greaterThanOrEqualTo(0));
+      expect(menu.right, lessThanOrEqualTo(480));
+      expect(menu.top, greaterThanOrEqualTo(0));
+      expect(menu.bottom, lessThanOrEqualTo(184));
+      await tester.runAsync(() async {
+        final image =
+            await (captureKey.currentContext!.findRenderObject()
+                    as RenderRepaintBoundary)
+                .toImage();
+        final rgba = (await image.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        ))!;
+        // These columns straddle the old SetWindowRgn cut at x=148..158.
+        for (final x in [146, 150, 154, 158, 162]) {
+          final y = menu.center.dy.round();
+          expect(rgba.getUint8((y * image.width + x) * 4 + 3), 179);
+        }
+        final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!;
+        await File('../artifacts/screenshots/receive-dock-pane-menu-final.png')
+            .writeAsBytes(bytes.buffer.asUint8List());
+        image.dispose();
+      });
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      expect(accepts(const Offset(310, 15)), isFalse);
+      expect(regions, isEmpty);
     },
   );
 
@@ -282,7 +325,7 @@ void main() {
           kind: PointerDeviceKind.mouse,
         );
         await gesture.moveTo(const Offset(84, 18));
-        await tester.pump();
+        await pumpNativeDrag(tester);
         await gesture.up();
         await tester.pumpAndSettle();
       }
@@ -333,7 +376,7 @@ void main() {
         ),
         (_) {},
       );
-      await tester.pump();
+      await pumpNativeDrag(tester);
       await tester.pump(const Duration(milliseconds: 80));
       expect(tester.getTopLeft(old).dx, greaterThan(start));
       await tester.pumpAndSettle();
@@ -366,7 +409,7 @@ void main() {
       });
       await mount(tester);
       await tester.tap(find.byIcon(Icons.close));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       await content(tester, payload(8, ['new-a', 'new-b']));
       await content(tester, payload(6, ['stale']));
       expect(find.text('收到 2 项'), findsOneWidget);
@@ -412,8 +455,8 @@ void main() {
       kind: PointerDeviceKind.mouse,
     );
     await tester.pumpAndSettle();
-    expect(find.text('加入待发'), findsOneWidget);
-    await tester.tap(find.text('加入待发'));
+    expect(find.text('加入待发送'), findsOneWidget);
+    await tester.tap(find.text('加入待发送'));
     await tester.pumpAndSettle();
     expect(actions.single['action'], 'stage');
     expect(actions.single['id'], 'right-click');
@@ -440,9 +483,9 @@ void main() {
         buttons: kSecondaryButton,
       );
       await tester.pump(const Duration(milliseconds: 650));
-      expect(find.text('加入待发'), findsNothing);
+      expect(find.text('加入待发送'), findsNothing);
       await drag.moveTo(const Offset(510, 95));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(exports.single['pointerKind'], kind.name);
       await drag.up();
       await tester.pumpAndSettle();
@@ -483,7 +526,7 @@ void main() {
       });
       await tester.tap(find.byIcon(Icons.more_horiz));
       await tester.pumpAndSettle();
-      expect(find.text('加入待发'), findsNothing);
+      expect(find.text('加入待发送'), findsNothing);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(find.text('接收失败'), findsOneWidget);

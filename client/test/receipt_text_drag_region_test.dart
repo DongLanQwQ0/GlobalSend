@@ -1,3 +1,4 @@
+import 'system_font_fixture.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -20,31 +21,8 @@ final longText = List.generate(
 ).join('\n');
 
 void main() {
+  setUpAll(loadSystemTestFonts);
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUpAll(() async {
-    final textFont = FontLoader('GlobalSendSans');
-    for (final name in ['Regular', 'Semibold']) {
-      textFont.addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File('assets/fonts/GlobalSendSans-$name.ttf').readAsBytes(),
-          ),
-        ),
-      );
-    }
-    await textFont.load();
-    final icons = FontLoader('MaterialIcons')
-      ..addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File(
-              'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-            ).readAsBytes(),
-          ),
-        ),
-      );
-    await icons.load();
-  });
 
   Offset glyph(WidgetTester tester, Finder ancestor, {int index = 0}) {
     final paragraph = tester.renderObject<RenderParagraph>(

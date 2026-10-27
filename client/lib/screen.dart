@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -29,6 +31,9 @@ import 'text_selection_surface.dart';
 import 'content_drag_surface.dart';
 import 'compact_content_card.dart';
 import 'compact_time.dart';
+import 'content_groups.dart';
+import 'bulk_file_drag.dart';
+import 'file_share.dart';
 import 'local_ip_menu.dart';
 import 'received_order.dart';
 import 'recent_photos.dart';
@@ -89,7 +94,7 @@ class _SendScreenState extends State<SendScreen>
       text = TextEditingController(),
       relayLimit = TextEditingController(text: '32'),
       retention = TextEditingController(text: '1'),
-      cleanupSize = TextEditingController(text: '0');
+      cleanupSize = TextEditingController(text: '500');
   bool development = false, showKey = false;
   bool working = false,
       settingsOpen = false,
@@ -103,8 +108,10 @@ class _SendScreenState extends State<SendScreen>
   final Map<String, Timer> _sentFeedbackTimers = {};
   int _lastStagedCount = 0;
   bool retentionInDays = true;
-  Set<SavedFileCategory> cleanupCategories = SavedFileCategory.values.toSet();
-  SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.any;
+  Set<SavedFileCategory> cleanupCategories = Set.of(
+    SavedFileCleanupFilter().categories,
+  );
+  SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.atMost;
   String? target;
   final selected = <String>{};
   final draftFocus = FocusNode();
@@ -117,6 +124,7 @@ class _SendScreenState extends State<SendScreen>
   String get _sharedScope => '${c.profile?.key}:${c.profile?.groupId}';
   int _notificationOpenSerial = 0;
   bool _windowPasting = false;
+  StreamSubscription<void>? _nativePasteRequests;
   bool refreshingDevices = false, sendingTargets = false;
   bool _receiptOpen = false, _receiptScheduled = false;
   VoidCallback? _closeNativeDismissedReceipt;
@@ -128,6 +136,8 @@ class _SendScreenState extends State<SendScreen>
   int _nativeSendNavigationSerial = 0;
   bool _queueRouteVisible = true;
   bool _nativeLocalDragActive = false;
+  int _detailsRequest = 0;
+  bool _detailsScheduled = false;
   ModalRoute<dynamic>? _homeRoute;
   SendController get c => widget.controller;
   late final recentPhotos = RecentPhotos(directory: c.stateDirectory);
@@ -149,6 +159,7 @@ class _SendScreenState extends State<SendScreen>
     cleanupSizeRule = ui.cleanupSizeRule;
     clipboardChoice = ui.clipboardChoice;
     _notificationOpenSerial = ui.notificationSerial;
+    _detailsRequest = ui.detailsRequest;
     if (ui.pendingReceipt?.id == 'group-shared-text') ui.pendingReceipt = null;
     ui.pendingReceipts.remove('group-shared-text');
     collectReceipts(
@@ -182,11 +193,15 @@ class _SendScreenState extends State<SendScreen>
     sharedText.addListener(sharedEdited);
     if (Platform.isWindows) {
       FocusManager.instance.addEarlyKeyEventHandler(windowPasteKey);
+      _nativePasteRequests = SystemBridge.pasteRequests.listen(
+        (_) => pasteWindowClipboard(),
+      );
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       refreshDevices();
       refresh();
+      scheduleRequestedDetails();
       if (ui.composeOpen) {
         composeText(index: ui.composeIndex, restoring: true);
       } else if (ui.readerId.isNotEmpty) {
@@ -242,6 +257,19 @@ class _SendScreenState extends State<SendScreen>
     } finally {
       if (mounted) setState(() => refreshingDevices = false);
     }
+  }
+
+  void scheduleRequestedDetails() {
+    if (_detailsScheduled || ui.detailsId == null) return;
+    _detailsScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _detailsScheduled = false;
+      final id = ui.detailsId;
+      if (!mounted || id == null) return;
+      ui.detailsId = null;
+      final entry = c.historyDock.where((entry) => entry.id == id).firstOrNull;
+      if (entry != null) unawaited(fileAction('details', entry));
+    });
   }
 
   @override
@@ -331,6 +359,10 @@ class _SendScreenState extends State<SendScreen>
   }
 
   void refresh() {
+    if (ui.detailsRequest != _detailsRequest) {
+      _detailsRequest = ui.detailsRequest;
+      scheduleRequestedDetails();
+    }
     recentPhotos.setVisible(
       loggedIn &&
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
@@ -637,6 +669,7 @@ class _SendScreenState extends State<SendScreen>
     if (Platform.isWindows) {
       FocusManager.instance.removeEarlyKeyEventHandler(windowPasteKey);
     }
+    _nativePasteRequests?.cancel();
     c.removeListener(refresh);
     recentPhotos.removeListener(refreshPhotoSuggestions);
     recentPhotos.dispose();
@@ -764,7 +797,7 @@ class _SendScreenState extends State<SendScreen>
     final cleanup = c.savedFileCleanupFilter;
     cleanupCategories = Set.of(cleanup.categories);
     cleanupSizeRule = cleanup.sizeRule;
-    cleanupSize.text = cleanup.sizeMiB.toString();
+    cleanupSize.text = (cleanup.sizeMiB * 1048576 / 1000).toString();
     setState(() => settingsOpen = true);
   }
 
@@ -793,6 +826,7 @@ class _SendScreenState extends State<SendScreen>
       child: Scaffold(
         appBar: AppBar(
           toolbarHeight: wide ? kToolbarHeight : 48,
+          titleSpacing: wide ? 20 : 16,
           leading: settingsOpen
               ? BackButton(
                   onPressed: () => setState(() => settingsOpen = false),
@@ -823,24 +857,52 @@ class _SendScreenState extends State<SendScreen>
                   ),
                 ),
               if (wide && loggedIn && !settingsOpen) ...[
-                const SizedBox(width: 24),
+                const SizedBox(width: 12),
                 TextButton.icon(
                   key: const ValueKey('add-text'),
                   onPressed: working ? null : composeText,
-                  icon: const Icon(Icons.notes_rounded, size: 19),
+                  icon: const AppIcon(Icons.notes_rounded, size: 19),
                   label: const Text('文本'),
                 ),
                 const SizedBox(width: 8),
                 TextButton.icon(
                   key: const ValueKey('add-clipboard'),
                   onPressed: working ? null : () => perform(c.stageClipboard),
-                  icon: const Icon(Icons.content_paste_rounded, size: 19),
+                  icon: const AppIcon(Icons.content_paste_rounded, size: 19),
                   label: const Text('剪贴板'),
                 ),
               ],
             ],
           ),
           actions: [
+            if (wide && loggedIn && !settingsOpen)
+              Padding(
+                padding: const EdgeInsets.only(right: 20),
+                child: SizedBox(
+                  key: const ValueKey('desktop-content-navigation'),
+                  width: (MediaQuery.sizeOf(context).width - 56) * 11 / 21,
+                  child: Row(
+                    children: [
+                      Expanded(child: desktopContentTabs()),
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message: c.connection,
+                        child: connectionBadge(compact: true),
+                      ),
+                      IconButton(
+                        tooltip: '设置',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 44,
+                          height: 44,
+                        ),
+                        padding: const EdgeInsets.all(10),
+                        onPressed: openSettings,
+                        icon: const AppIcon(Icons.settings_outlined, size: 20),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             if (!loggedIn &&
                 (c.profile?.deviceId.isNotEmpty == true ||
                     c.savedFiles.isNotEmpty))
@@ -851,18 +913,18 @@ class _SendScreenState extends State<SendScreen>
                     builder: (_) => SavedFilesScreen(controller: c),
                   ),
                 ),
-                icon: const Icon(Icons.folder_open_outlined, size: 22),
+                icon: const AppIcon(Icons.folder_open_outlined, size: 22),
               ),
-            if (loggedIn && !settingsOpen)
+            if (!wide && loggedIn && !settingsOpen)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Tooltip(message: c.connection, child: connectionBadge()),
               ),
-            if (loggedIn && !settingsOpen)
+            if (!wide && loggedIn && !settingsOpen)
               IconButton(
                 tooltip: '设置',
                 onPressed: openSettings,
-                icon: const Icon(Icons.settings_outlined, size: 22),
+                icon: const AppIcon(Icons.settings_outlined, size: 22),
               ),
           ],
         ),
@@ -964,20 +1026,20 @@ class _SendScreenState extends State<SendScreen>
                 destinations: [
                   NavigationDestination(
                     key: _nativeSendNavigationKey,
-                    icon: const Icon(Icons.north_east),
+                    icon: const AppIcon(Icons.north_east),
                     label: '发送',
                   ),
                   const NavigationDestination(
-                    icon: Icon(Icons.inbox_outlined),
-                    selectedIcon: Icon(Icons.inbox),
+                    icon: AppIcon(Icons.inbox_outlined),
+                    selectedIcon: AppIcon(Icons.inbox),
                     label: '接收',
                   ),
                   const NavigationDestination(
-                    icon: Icon(Icons.history),
+                    icon: AppIcon(Icons.history),
                     label: '历史',
                   ),
                   const NavigationDestination(
-                    icon: Icon(Icons.folder_open_outlined),
+                    icon: AppIcon(Icons.folder_open_outlined),
                     label: '文件',
                   ),
                 ],
@@ -1009,7 +1071,7 @@ class _SendScreenState extends State<SendScreen>
     );
   }
 
-  Widget connectionBadge() {
+  Widget connectionBadge({bool compact = false}) {
     if (c.connected)
       return Semantics(
         label: '已连接',
@@ -1019,7 +1081,7 @@ class _SendScreenState extends State<SendScreen>
             color: Ui.softGreen,
             borderRadius: Ui.fieldRadius,
           ),
-          child: const Icon(Icons.link_rounded, size: 20, color: Ui.green),
+          child: const AppIcon(Icons.link_rounded, size: 20, color: Ui.green),
         ),
       );
     final reconnecting =
@@ -1029,6 +1091,20 @@ class _SendScreenState extends State<SendScreen>
     final color = c.connected
         ? const Color(0xff176b50)
         : const Color(0xff9a6b20);
+    if (compact)
+      return Semantics(
+        label: reconnecting ? '连接中' : '未连接',
+        child: SizedBox.square(
+          dimension: 44,
+          child: Center(
+            child: AppIcon(
+              reconnecting ? Icons.sync_rounded : Icons.cloud_off_outlined,
+              size: 20,
+              color: color,
+            ),
+          ),
+        ),
+      );
     return Container(
       key: const ValueKey('connection-badge'),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1039,7 +1115,7 @@ class _SendScreenState extends State<SendScreen>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
+          AppIcon(
             c.connected
                 ? Icons.cloud_done_outlined
                 : reconnecting
@@ -1097,7 +1173,7 @@ class _SendScreenState extends State<SendScreen>
             suffixIcon: IconButton(
               tooltip: showKey ? '隐藏密码' : '显示密码',
               onPressed: () => setState(() => showKey = !showKey),
-              icon: Icon(
+              icon: AppIcon(
                 showKey
                     ? Icons.visibility_off_outlined
                     : Icons.visibility_outlined,
@@ -1118,7 +1194,7 @@ class _SendScreenState extends State<SendScreen>
         child: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.key_off_outlined, color: Ui.green, size: 24),
+            AppIcon(Icons.key_off_outlined, color: Ui.green, size: 24),
             SizedBox(height: 12),
             Text(
               '连接暂不可用',
@@ -1240,14 +1316,14 @@ class _SendScreenState extends State<SendScreen>
                         TextButton.icon(
                           key: const ValueKey('setup-server-settings'),
                           onPressed: working ? null : showServerSettings,
-                          icon: const Icon(Icons.dns_outlined, size: 18),
+                          icon: const AppIcon(Icons.dns_outlined, size: 18),
                           label: const Text('服务器设置'),
                         ),
                         if (blocked) ...[
                           TextButton.icon(
                             key: const ValueKey('credential-diagnostics'),
                             onPressed: showCredentialDiagnostics,
-                            icon: const Icon(
+                            icon: const AppIcon(
                               Icons.info_outline_rounded,
                               size: 18,
                             ),
@@ -1323,6 +1399,7 @@ class _SendScreenState extends State<SendScreen>
                     UiField(
                       label: '已保存服务器',
                       child: DropdownButtonFormField<String>(
+                        icon: const AppIcon(Icons.arrow_drop_down),
                         isExpanded: true,
                         decoration: const InputDecoration(),
                         items: c.profiles
@@ -1472,6 +1549,7 @@ class _SendScreenState extends State<SendScreen>
   Widget targetPicker() => UiField(
     label: '发送到',
     child: DropdownButtonFormField<String>(
+      icon: const AppIcon(Icons.arrow_drop_down),
       key: ValueKey('target-$target'),
       initialValue: target,
       isExpanded: true,
@@ -1482,13 +1560,17 @@ class _SendScreenState extends State<SendScreen>
               value: d['deviceId'],
               child: Row(
                 children: [
-                  Icon(deviceIcon(d), size: 19),
+                  AppIcon(deviceIcon(d), size: 19),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(d['name'], overflow: TextOverflow.ellipsis),
                   ),
                   if (d['online'] == true)
-                    const Icon(Icons.circle, size: 6, color: Color(0xff176b58)),
+                    const AppIcon(
+                      Icons.circle,
+                      size: 6,
+                      color: Color(0xff176b58),
+                    ),
                 ],
               ),
             ),
@@ -1569,6 +1651,66 @@ class _SendScreenState extends State<SendScreen>
     },
   );
 
+  Widget desktopContentTabs() => SizedBox(
+    key: const ValueKey('content-tabs'),
+    height: 44,
+    child: Row(
+      children: [
+        for (final (index, label) in const ['接收', '已发送', '文件库'].indexed)
+          Expanded(
+            child: Semantics(
+              key: ValueKey(
+                index == 1
+                    ? 'sent-history'
+                    : index == 2
+                    ? 'open-library'
+                    : 'receive-tab',
+              ),
+              selected: contentTab == index,
+              button: true,
+              child: InkWell(
+                key: ValueKey('content-tab-$index'),
+                onTap: () => setState(() {
+                  contentTab = index;
+                  selecting = false;
+                  selected.clear();
+                }),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(12),
+                ),
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: contentTab == index
+                        ? Ui.softGreen
+                        : Colors.transparent,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(12),
+                    ),
+                    border: contentTab == index
+                        ? const Border(
+                            bottom: BorderSide(color: Ui.green, width: 2),
+                          )
+                        : null,
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: contentTab == index
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                      color: contentTab == index ? Ui.green : Ui.muted,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+
   Widget contentPane() {
     final compact = MediaQuery.sizeOf(context).width < 900;
     final content = switch (contentTab) {
@@ -1576,108 +1718,27 @@ class _SendScreenState extends State<SendScreen>
       2 => SavedFilesScreen(controller: c, embedded: true),
       _ => receivePage(),
     };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (!compact)
-          Container(
-            key: const ValueKey('content-tabs'),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Ui.border)),
-            ),
-            padding: EdgeInsets.fromLTRB(12, compact ? 0 : 8, 12, 0),
-            child: Row(
-              children: [
-                for (final (index, label) in const ['接收', '已发送', '文件库'].indexed)
-                  Expanded(
-                    child: Semantics(
-                      key: ValueKey(
-                        index == 1
-                            ? 'sent-history'
-                            : index == 2
-                            ? 'open-library'
-                            : 'receive-tab',
-                      ),
-                      selected: contentTab == index,
-                      button: true,
-                      child: InkWell(
-                        key: ValueKey('content-tab-$index'),
-                        onTap: () => setState(() {
-                          contentTab = index;
-                          selecting = false;
-                          selected.clear();
-                        }),
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(12),
-                        ),
-                        child: Container(
-                          alignment: Alignment.center,
-                          constraints: BoxConstraints(
-                            minHeight: compact ? 44 : 0,
-                          ),
-                          padding: EdgeInsets.symmetric(
-                            vertical: compact ? 8 : 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: contentTab == index
-                                ? Ui.softGreen
-                                : Colors.transparent,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(12),
-                            ),
-                            border: contentTab == index
-                                ? const Border(
-                                    bottom: BorderSide(
-                                      color: Ui.green,
-                                      width: 2,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                          child: Text(
-                            label,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: contentTab == index
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              color: contentTab == index ? Ui.green : Ui.muted,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        Expanded(
-          child: compact
-              ? content
-              : AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  transitionBuilder: (child, animation) => FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(.04, 0),
-                        end: Offset.zero,
-                      ).animate(animation),
-                      child: child,
-                    ),
-                  ),
-                  child: KeyedSubtree(
-                    key: ValueKey('content-$contentTab'),
-                    child: content,
-                  ),
-                ),
+    if (compact) return content;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(.04, 0),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
         ),
-      ],
+      ),
+      child: KeyedSubtree(key: ValueKey('content-$contentTab'), child: content),
     );
   }
 
   Widget sentPage() {
-    final items = c.historyDock.where((item) => item.outgoing).toList();
+    final items = mergeContentCards(
+      c.historyDock.where((item) => item.outgoing),
+    );
     return items.isEmpty
         ? const UiEmpty(icon: Icons.history, title: '暂无发送记录')
         : Column(
@@ -1693,6 +1754,20 @@ class _SendScreenState extends State<SendScreen>
                       style: const TextStyle(fontSize: 12, color: Ui.muted),
                     ),
                     const Spacer(),
+                    BulkFileDrag(
+                      key: const ValueKey('sent-drag-all'),
+                      paths: items
+                          .where(
+                            (item) =>
+                                item.kind == 'file' &&
+                                item.localPath.isNotEmpty &&
+                                (!selecting || selected.contains(item.id)),
+                          )
+                          .map((item) => item.localPath)
+                          .toList(),
+                      enabled: !working,
+                      onError: (error) => notice(shortError('$error')),
+                    ),
                     if (selecting)
                       TextButton(
                         key: const ValueKey('sent-select-all'),
@@ -1779,7 +1854,7 @@ class _SendScreenState extends State<SendScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 16),
+          AppIcon(icon, size: 16),
           const SizedBox(width: 4),
           Flexible(
             child: Text(
@@ -1815,7 +1890,9 @@ class _SendScreenState extends State<SendScreen>
       child: DragTarget<DockEntry>(
         onWillAcceptWithDetails: (_) => !working,
         onAcceptWithDetails: (details) => perform(
-          () => details.data.id == 'group-shared-text-drag'
+          () => details.data is BulkFileEntry
+              ? c.stageInputs((details.data as BulkFileEntry).paths, [])
+              : details.data.id == 'group-shared-text-drag'
               ? c.stageInputs([], [details.data.text])
               : c.stageHistoryEntry(details.data),
         ),
@@ -1855,7 +1932,7 @@ class _SendScreenState extends State<SendScreen>
                           onPressed: working ? null : showPhotoSuggestions,
                           icon: Badge.count(
                             count: recentPhotos.items.length,
-                            child: const Icon(
+                            child: const AppIcon(
                               Icons.add_photo_alternate_outlined,
                               size: 19,
                             ),
@@ -1868,7 +1945,10 @@ class _SendScreenState extends State<SendScreen>
                           onPressed: working
                               ? null
                               : () => perform(c.clearStaged),
-                          icon: const Icon(Icons.clear_all_rounded, size: 19),
+                          icon: const AppIcon(
+                            Icons.clear_all_rounded,
+                            size: 19,
+                          ),
                         ),
                       TextButton.icon(
                         key: const ValueKey('add-files-visible'),
@@ -1878,13 +1958,13 @@ class _SendScreenState extends State<SendScreen>
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         onPressed: working ? null : pickFiles,
-                        icon: const Icon(Icons.add, size: 17),
+                        icon: const AppIcon(Icons.add, size: 17),
                         label: const Text('添加文件'),
                       ),
                       PopupMenuButton<String>(
                         key: const ValueKey('add-files-menu'),
                         tooltip: '添加文件夹',
-                        icon: const Icon(
+                        icon: const AppIcon(
                           Icons.create_new_folder_outlined,
                           size: 19,
                         ),
@@ -2028,7 +2108,7 @@ class _SendScreenState extends State<SendScreen>
                 children: [
                   if (!isText && c.stagedDirectoryNames.containsKey(path))
                     const Center(
-                      child: Icon(
+                      child: AppIcon(
                         Icons.folder_outlined,
                         size: 36,
                         color: Ui.green,
@@ -2065,7 +2145,7 @@ class _SendScreenState extends State<SendScreen>
                                 } else
                                   perform(() => c.removeStagedFile(path!));
                               },
-                        icon: const Icon(Icons.close, size: 16),
+                        icon: const AppIcon(Icons.close, size: 16),
                       ),
                     ),
                   ),
@@ -2098,7 +2178,7 @@ class _SendScreenState extends State<SendScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.north_east, size: 22, color: Ui.green),
+            const AppIcon(Icons.north_east, size: 22, color: Ui.green),
             const Spacer(),
             Text(
               item.title,
@@ -2187,7 +2267,7 @@ class _SendScreenState extends State<SendScreen>
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 1.6),
                     )
-                  : const Icon(Icons.refresh_rounded, size: 20),
+                  : const AppIcon(Icons.refresh_rounded, size: 20),
             ),
             TextButton(
               key: const ValueKey('multi-send-toggle'),
@@ -2357,7 +2437,7 @@ class _SendScreenState extends State<SendScreen>
                                                           color: Ui.muted,
                                                         ),
                                                       )
-                                                    : Icon(
+                                                    : AppIcon(
                                                         deviceIcon(device),
                                                         size: 24,
                                                         color: checked
@@ -2399,7 +2479,7 @@ class _SendScreenState extends State<SendScreen>
                                         const Positioned(
                                           top: 8,
                                           right: 8,
-                                          child: Icon(
+                                          child: AppIcon(
                                             Icons.check_circle,
                                             size: 16,
                                             color: Ui.green,
@@ -2409,7 +2489,7 @@ class _SendScreenState extends State<SendScreen>
                                         const Positioned(
                                           top: 8,
                                           right: 8,
-                                          child: Icon(
+                                          child: AppIcon(
                                             Icons.error_outline,
                                             size: 16,
                                             color: Color(0xffb3553f),
@@ -2582,7 +2662,11 @@ class _SendScreenState extends State<SendScreen>
             padding: const EdgeInsets.fromLTRB(14, 10, 10, 0),
             child: Row(
               children: [
-                const Icon(Icons.edit_note_rounded, size: 18, color: Ui.muted),
+                const AppIcon(
+                  Icons.edit_note_rounded,
+                  size: 18,
+                  color: Ui.muted,
+                ),
                 const SizedBox(width: 6),
                 const Text(
                   '组内共享',
@@ -2597,7 +2681,7 @@ class _SendScreenState extends State<SendScreen>
                   onPressed: c.sharedTextSupported && ui.sharedHistory.canUndo
                       ? () => changeSharedHistory(redo: false)
                       : null,
-                  icon: const Icon(Icons.undo_rounded),
+                  icon: const AppIcon(Icons.undo_rounded),
                 ),
                 IconButton(
                   key: const ValueKey('shared-redo'),
@@ -2607,7 +2691,7 @@ class _SendScreenState extends State<SendScreen>
                   onPressed: c.sharedTextSupported && ui.sharedHistory.canRedo
                       ? () => changeSharedHistory(redo: true)
                       : null,
-                  icon: const Icon(Icons.redo_rounded),
+                  icon: const AppIcon(Icons.redo_rounded),
                 ),
                 if (unsynced)
                   Text(
@@ -2743,8 +2827,9 @@ class _SendScreenState extends State<SendScreen>
   });
 
   Widget receivePage() {
-    final items = c.historyDock.where((item) => !item.outgoing).toList()
-      ..sort(compareReceivedNewestFirst);
+    final items = mergeContentCards(
+      c.historyDock.where((item) => !item.outgoing),
+    )..sort(compareReceivedNewestFirst);
     final batches = <String, List<DockEntry>>{};
     final cards = <DockEntry>[];
     for (final item in items) {
@@ -2760,7 +2845,8 @@ class _SendScreenState extends State<SendScreen>
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 10, 12, 8),
+          key: const ValueKey('receive-toolbar'),
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
           child: Wrap(
             alignment: WrapAlignment.end,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -2771,8 +2857,27 @@ class _SendScreenState extends State<SendScreen>
                     : '${items.length} 项',
                 style: const TextStyle(fontSize: 12, color: Color(0xff829087)),
               ),
+              BulkFileDrag(
+                key: const ValueKey('receive-drag-all'),
+                paths: items
+                    .where(
+                      (item) =>
+                          item.kind == 'file' &&
+                          item.localPath.isNotEmpty &&
+                          (!selecting || selected.contains(item.id)),
+                    )
+                    .map((item) => item.localPath)
+                    .toList(),
+                enabled: !working,
+                onError: (error) => notice(shortError('$error')),
+              ),
               if (selecting)
                 TextButton(
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(40, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   key: const ValueKey('receive-copy-selected'),
                   onPressed:
                       items.any(
@@ -2787,6 +2892,11 @@ class _SendScreenState extends State<SendScreen>
                 ),
               if (selecting)
                 TextButton(
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(40, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   key: const ValueKey('receive-select-all'),
                   onPressed: () => setState(() {
                     if (items.every((item) => selected.contains(item.id))) {
@@ -2803,6 +2913,11 @@ class _SendScreenState extends State<SendScreen>
                 ),
               if (selecting)
                 TextButton(
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(40, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   key: const ValueKey('receive-delete-selected'),
                   onPressed: selected.isEmpty || working
                       ? null
@@ -2811,6 +2926,11 @@ class _SendScreenState extends State<SendScreen>
                 ),
               if (items.isNotEmpty)
                 TextButton(
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(40, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   key: const ValueKey('receive-multi-select'),
                   onPressed: () {
                     setState(() {
@@ -2838,7 +2958,7 @@ class _SendScreenState extends State<SendScreen>
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
+                          AppIcon(
                             Icons.inbox_outlined,
                             size: 44,
                             color: Color(0xffabb7af),
@@ -2896,7 +3016,7 @@ class _SendScreenState extends State<SendScreen>
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
             children: [
-              const Icon(
+              const AppIcon(
                 Icons.description_outlined,
                 size: 19,
                 color: Color(0xff737d88),
@@ -3016,7 +3136,7 @@ class _SendScreenState extends State<SendScreen>
         padding: EdgeInsets.zero,
         iconSize: 20,
         constraints: const BoxConstraints(minWidth: 140),
-        icon: const Icon(Icons.more_horiz),
+        icon: const AppIcon(Icons.more_horiz),
         onSelected: (action) => fileAction(action, item),
         itemBuilder: (_) => entryMenu(item),
       ),
@@ -3074,7 +3194,6 @@ class _SendScreenState extends State<SendScreen>
           'expired',
         ].contains(item.status);
     return [
-      const PopupMenuItem(value: 'details', child: Text('详情')),
       if (item.kind == 'text') ...[
         PopupMenuItem(
           value: 'view',
@@ -3083,11 +3202,14 @@ class _SendScreenState extends State<SendScreen>
         const PopupMenuItem(value: 'copy', child: Text('复制')),
       ],
       if (item.localPath.isNotEmpty)
-        const PopupMenuItem(value: 'openExternal', child: Text('系统打开')),
+        const PopupMenuItem(value: 'openExternal', child: Text('打开')),
       if (item.localPath.isNotEmpty && Platform.isWindows)
         const PopupMenuItem(value: 'locate', child: Text('定位文件')),
       if (item.kind == 'text' || item.localPath.isNotEmpty || directory)
         const PopupMenuItem(value: 'requeue', child: Text('加入待发送')),
+      if (FileShareBridge.supported &&
+          (item.kind == 'text' || item.localPath.isNotEmpty))
+        const PopupMenuItem(value: 'share', child: Text('分享')),
       if (!localHistory && item.outgoing && c.sources.containsKey(item.fileId))
         const PopupMenuItem(value: 'resend', child: Text('换路径重发')),
       if (!localHistory &&
@@ -3097,6 +3219,7 @@ class _SendScreenState extends State<SendScreen>
         const PopupMenuItem(value: 'auto', child: Text('自动重试')),
       if (cancelable) const PopupMenuItem(value: 'cancel', child: Text('取消传输')),
       const PopupMenuItem(value: 'delete', child: Text('删除')),
+      const PopupMenuItem(value: 'details', child: Text('详情')),
     ];
   }
 
@@ -3174,7 +3297,7 @@ class _SendScreenState extends State<SendScreen>
   }
 
   Future<void> copySelected() => perform(() async {
-    final values = c.historyDock.reversed
+    final values = mergeContentCards(c.historyDock).reversed
         .where((item) => item.kind == 'text' && selected.contains(item.id))
         .map((item) => item.text)
         .toList();
@@ -3285,8 +3408,19 @@ class _SendScreenState extends State<SendScreen>
       await perform(() => c.copyDockText(item), done: '已复制');
       return;
     }
+    if (action == 'share') {
+      await perform(
+        () => FileShareBridge.share(
+          paths: item.kind == 'file' && item.localPath.isNotEmpty
+              ? [item.localPath]
+              : const [],
+          text: item.kind == 'text' ? item.text : null,
+        ),
+      );
+      return;
+    }
     if (action == 'delete') {
-      await perform(() => c.deleteDockEntry(item), done: '已删除');
+      await perform(() => c.removeHistoryEntries([item]), done: '已删除');
       if (!c.historyDock.contains(item)) {
         c.dismissReceipts([item.id]);
         ui.pendingReceipts.remove(item.id);
@@ -3435,6 +3569,7 @@ class _SendScreenState extends State<SendScreen>
   Widget routePicker(bool sending) => UiField(
     label: sending ? '发送方式' : '接收方式',
     child: DropdownButtonFormField<String>(
+      icon: const AppIcon(Icons.arrow_drop_down),
       key: ValueKey(
         '${c.profile!.key}-$sending-${sending ? c.profile!.sendRoutePreference : c.profile!.receiveRoutePreference}',
       ),
@@ -3472,13 +3607,13 @@ class _SendScreenState extends State<SendScreen>
 
   Widget deviceTile(Map<String, dynamic> device) => ListTile(
     contentPadding: EdgeInsets.zero,
-    leading: Icon(deviceIcon(device), size: 22),
+    leading: AppIcon(deviceIcon(device), size: 22),
     title: Text(device['name'], maxLines: 2, overflow: TextOverflow.ellipsis),
     subtitle: device['online'] == true ? null : const Text('离线'),
     trailing: IconButton(
       tooltip: '移除设备',
       onPressed: working ? null : () => removeDevice(device),
-      icon: const Icon(Icons.link_off, size: 20),
+      icon: const AppIcon(Icons.link_off, size: 20),
     ),
   );
 
@@ -3509,6 +3644,7 @@ class _SendScreenState extends State<SendScreen>
           UiField(
             label: '同步到',
             child: DropdownButtonFormField<String>(
+              icon: const AppIcon(Icons.arrow_drop_down),
               key: ValueKey('clipboard-target-$choice'),
               initialValue: choice,
               isExpanded: true,
@@ -3556,7 +3692,7 @@ class _SendScreenState extends State<SendScreen>
         !saved.categories.containsAll(cleanupCategories) ||
         saved.sizeRule != cleanupSizeRule ||
         cleanupSizeRule != SavedFileSizeRule.any &&
-            double.tryParse(cleanupSize.text) != saved.sizeMiB;
+            double.tryParse(cleanupSize.text) != saved.sizeMiB * 1048576 / 1000;
   }
 
   Widget cleanupFilterFields() => ValueListenableBuilder<TextEditingValue>(
@@ -3604,6 +3740,7 @@ class _SendScreenState extends State<SendScreen>
               child: UiField(
                 label: '清理文件大小',
                 child: DropdownButtonFormField<SavedFileSizeRule>(
+                  icon: const AppIcon(Icons.arrow_drop_down),
                   key: ValueKey('cleanup-size-rule-$cleanupSizeRule'),
                   initialValue: cleanupSizeRule,
                   isExpanded: true,
@@ -3620,6 +3757,10 @@ class _SendScreenState extends State<SendScreen>
                     DropdownMenuItem(
                       value: SavedFileSizeRule.smaller,
                       child: Text('小于'),
+                    ),
+                    DropdownMenuItem(
+                      value: SavedFileSizeRule.atMost,
+                      child: Text('不大于'),
                     ),
                   ],
                   onChanged: working
@@ -3640,7 +3781,7 @@ class _SendScreenState extends State<SendScreen>
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    decoration: const InputDecoration(suffixText: 'MiB'),
+                    decoration: const InputDecoration(suffixText: 'KB'),
                     onSubmitted: (_) => saveCleanupFilter(),
                   ),
                 ),
@@ -3750,6 +3891,7 @@ class _SendScreenState extends State<SendScreen>
                 child: UiField(
                   label: '已保存服务器',
                   child: DropdownButtonFormField<String>(
+                    icon: const AppIcon(Icons.arrow_drop_down),
                     key: ValueKey('saved-server-${c.profile!.key}'),
                     initialValue: c.profiles.any((p) => p.key == c.profile!.key)
                         ? c.profile!.key
@@ -3783,7 +3925,7 @@ class _SendScreenState extends State<SendScreen>
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('连接检测'),
-              trailing: const Icon(Icons.chevron_right, size: 20),
+              trailing: const AppIcon(Icons.chevron_right, size: 20),
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute(
                   builder: (_) => ReachabilityScreen(monitor: c.reachability),
@@ -3810,7 +3952,7 @@ class _SendScreenState extends State<SendScreen>
                 subtitle: Text(
                   c.backgroundBatteryUnrestricted ? '不受限' : '由系统管理',
                 ),
-                trailing: const Icon(Icons.chevron_right),
+                trailing: const AppIcon(Icons.chevron_right),
                 onTap: working
                     ? null
                     : () => perform(c.openBackgroundBatterySettings),
@@ -3822,7 +3964,7 @@ class _SendScreenState extends State<SendScreen>
                 contentPadding: EdgeInsets.zero,
                 title: const Text('接收通知'),
                 subtitle: Text(c.receiveNotificationsEnabled ? '已开启' : '未开启'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
+                trailing: const AppIcon(Icons.chevron_right, size: 20),
                 onTap: working
                     ? null
                     : () => perform(
@@ -3913,6 +4055,27 @@ class _SendScreenState extends State<SendScreen>
             const SizedBox(height: 16),
             routePicker(false),
             const SizedBox(height: 16),
+            UiField(
+              label: '传输并发数',
+              child: DropdownButtonFormField<int>(
+                icon: const AppIcon(Icons.arrow_drop_down),
+                key: ValueKey('transfer-concurrency-${c.transferConcurrency}'),
+                initialValue: c.transferConcurrency,
+                decoration: const InputDecoration(),
+                items: List.generate(
+                  16,
+                  (index) => DropdownMenuItem(
+                    value: index + 1,
+                    child: Text('${index + 1}'),
+                  ),
+                ),
+                onChanged: working
+                    ? null
+                    : (value) =>
+                          perform(() => c.setTransferConcurrency(value!)),
+              ),
+            ),
+            const SizedBox(height: 16),
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: relayLimit,
               builder: (_, value, child) => UiField(
@@ -3962,7 +4125,11 @@ class _SendScreenState extends State<SendScreen>
               contentPadding: EdgeInsets.zero,
               title: const Text('接收位置'),
               subtitle: Text(
-                c.hasCustomReceiveDirectory ? c.receiveDirectoryLabel : '应用目录',
+                c.receiveDirectoryMigrationStatus.isNotEmpty
+                    ? c.receiveDirectoryMigrationStatus
+                    : c.hasCustomReceiveDirectory
+                    ? c.receiveDirectoryLabel
+                    : '应用目录',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -3983,6 +4150,13 @@ class _SendScreenState extends State<SendScreen>
                       : () => perform(c.clearReceiveDirectory, done: '已恢复默认'),
                   child: const Text('恢复默认'),
                 ),
+              ),
+            if (c.receiveDirectoryCleanupPending > 0)
+              TextButton(
+                onPressed: working
+                    ? null
+                    : () => perform(c.finishReceiveDirectoryCleanup),
+                child: Text('清理旧位置剩余文件（${c.receiveDirectoryCleanupPending}）'),
               ),
             const SizedBox(height: 12),
             Row(
@@ -4033,6 +4207,7 @@ class _SendScreenState extends State<SendScreen>
                   child: UiField(
                     label: '单位',
                     child: DropdownButtonFormField<bool>(
+                      icon: const AppIcon(Icons.arrow_drop_down),
                       key: ValueKey('retention-unit-$retentionInDays'),
                       initialValue: retentionInDays,
                       isExpanded: true,
@@ -4060,7 +4235,7 @@ class _SendScreenState extends State<SendScreen>
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('退出当前组'),
-              trailing: const Icon(Icons.logout_rounded, size: 20),
+              trailing: const AppIcon(Icons.logout_rounded, size: 20),
               onTap: working ? null : signOut,
             ),
           ]),
@@ -4071,7 +4246,7 @@ class _SendScreenState extends State<SendScreen>
               side: const BorderSide(color: Color(0xffe3e7e0)),
             ),
             clipBehavior: Clip.antiAlias,
-            child: ExpansionTile(
+            child: AppExpansionTile(
               key: const ValueKey('settings-more'),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -4190,7 +4365,7 @@ class _SendScreenState extends State<SendScreen>
         ? 0.0
         : double.tryParse(cleanupSize.text);
     if (size == null || !size.isFinite || size < 0) {
-      notice('请输入有效的 MiB 大小');
+      notice('请输入有效的 KB 大小');
       return;
     }
     await perform(
@@ -4198,7 +4373,7 @@ class _SendScreenState extends State<SendScreen>
         SavedFileCleanupFilter(
           categories: Set.of(cleanupCategories),
           sizeRule: cleanupSizeRule,
-          sizeMiB: size,
+          sizeMiB: size * 1000 / 1048576,
         ),
       ),
       done: '已保存',
@@ -4296,7 +4471,7 @@ class NativeDropFeedback extends StatelessWidget {
                       if (importing)
                         const CircularProgressIndicator(strokeWidth: 2),
                       if (!importing)
-                        const Icon(
+                        const AppIcon(
                           Icons.file_download_outlined,
                           size: 38,
                           color: Color(0xff5d6b63),
@@ -4408,7 +4583,7 @@ class _ComposeTextDialogState extends State<_ComposeTextDialog> {
                       IconButton(
                         tooltip: '关闭',
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close, size: 20),
+                        icon: const AppIcon(Icons.close, size: 20),
                       ),
                     ],
                   ),

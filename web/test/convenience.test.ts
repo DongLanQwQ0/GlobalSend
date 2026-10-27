@@ -1081,6 +1081,7 @@ test('bulk receive delete removes only selected records and local file cache, pr
   const {c}=fixture();const now=new Date().toISOString(),expiresAt=new Date(Date.now()+60000).toISOString();
   c.events=['keep','remove'].map((eventId,index)=>({eventId,type:'text.created',cursor:index+1,sourceDeviceId:'sender',targetDeviceId:'receiver',createdAt:now,expiresAt,payload:{text:eventId}}));
   const removed=transfer('remove-file','received'),kept=transfer('keep-file','received'),active=transfer('active-file','uploading');c.transfers=[removed,kept,active];
+  kept.files[0].sha256='b'.repeat(64); // distinct contents must remain after deleting another group
   c.rtcLocalFiles.set('remove-file:file-remove-file',new File(['owned'],'owned.txt'));c.rtcLocalFiles.set('keep-file:file-keep-file',new File(['keep'],'keep.txt'));
   const removedKeys:string[]=[];c.rtcStore={remove:async(key:string)=>{removedKeys.push(key);}};
   c.selected=new Set(['remove','file:remove-file:file-remove-file','file:active-file:file-active-file']);
@@ -1097,6 +1098,70 @@ test('receive toolbar offers all/delete/cancel and cancelling restores normal ca
   c.selected.add('temporary');document.querySelector<HTMLButtonElement>('[data-action="receive-multi-select"]')!.click();
   assert.equal(c.receiveSelecting,false);assert.equal(c.selected.size,0);assert.equal(document.querySelector('[data-action="receive-delete-selected"]'),null);
   assert.equal(document.querySelector('[data-action="receive-multi-select"]')!.textContent,'多选');
+});
+test('identical text and file cards merge without losing deliveries and deleting a group does not reveal old duplicates',()=>{
+  const {c}=fixture(),now=new Date().toISOString(),expiresAt=new Date(Date.now()+60000).toISOString();
+  c.events=['a','b'].map((eventId,index)=>({eventId,type:'text.created',cursor:index+1,sourceDeviceId:'sender',targetDeviceId:'receiver',createdAt:now,expiresAt,payload:{text:'same'}}));
+  assert.equal(c.displayTexts(false).length,1);assert.equal(c.events.length,2);
+  c.hideText(c.displayTexts(false)[0].eventId);assert.equal(c.displayTexts(false).length,0);
+  const first=transfer('first','received'),second=transfer('second','received');c.transfers=[first,second];
+  c.rtcLocalFiles.set('first:file-first',new File(['same'],'first.txt'));c.rtcLocalFiles.set('second:file-second',new File(['same'],'second.txt'));
+  c.rtcStore={remove:async()=>{}};
+  const cards=c.displayTransfers(false).flatMap((item:any)=>item.files.map((file:any)=>({item,file})));assert.equal(cards.length,1);
+  c.hideFile(cards[0].item.transferId,cards[0].file.fileId);assert.equal(c.displayTransfers(false).flatMap((item:any)=>item.files).length,0);
+});
+test('directory change pauses new receives and refreshes staged, sent and received file snapshots before resuming',async()=>{
+  const {c,context}=fixture(),old=new File(['old'],'saved.txt'),next=new File(['new'],'saved.txt');
+  context.setTimeout=setTimeout as any;
+  c.picked=[old];c.rtcLocalFiles.set('transfer:file',old);c.fileSources.set('transfer:file',old);c.retainedSources.set('transfer:file',old);
+  c.rtcReceives.set('active',new AbortController());let changed=false,refreshed=false,resumed=false;
+  c.ensureFileStore=async()=>({scope:'scope',setDestination:async()=>{assert.equal(c.rtcReceives.size,0);changed=true;return {name:'chosen',relocated:[{scope:'scope',key:'transfer:file'}]};},get:async()=>next});
+  c.fileLibrary.service={get:async()=>next};c.fileLibrary.refreshLocations=async()=>{refreshed=true;};
+  c.startReadyUploads=()=>{};c.selectIncomingRelays=async()=>{resumed=true;};
+  const move=c.changeReceiveDirectory({});assert.equal(c.receiveDirectoryChanging,true);assert.equal(changed,false);
+  c.rtcReceives.clear();await move;
+  assert.equal(c.picked[0],next);assert.equal(c.fileSources.get('transfer:file'),next);assert.equal(c.retainedSources.get('transfer:file'),next);
+  assert.equal(c.receiveDestination,'chosen');assert.equal(refreshed,true);assert.equal(resumed,true);assert.equal(c.receiveDirectoryChanging,false);
+});
+test('file scheduling defaults to four shared send/receive slots and persists live concurrency changes',()=>{
+  const {c}=fixture();c.selectIncomingRelays=async()=>{};
+  assert.equal(c.transferConcurrency,4);
+  c.transfers=Array.from({length:8},(_,index)=>{const item=transfer('parallel-'+index,'accepted','relay','relay');item.sourceDeviceId=c.session.device.deviceId;return item;});
+  for(const item of c.transfers)c.fileSources.set(item.transferId+':'+item.files[0].fileId,new File(['data'],'sample.txt'));
+  c.uploadFile=async(transferId:string,fileId:string)=>{c.uploads.set(transferId+':'+fileId,new AbortController());};
+  c.startReadyUploads();assert.equal(c.uploads.size,4);
+  c.setTransferConcurrency(6);assert.equal(c.uploads.size,6);
+  c.setTransferConcurrency(2);assert.equal(c.uploads.size,6,'lowering the limit leaves running files intact');
+  c.loadPreferences();assert.equal(c.transferConcurrency,2);
+  c.uploads.clear();c.rtcReceives.set('receive-a',new AbortController());c.rtcReceives.set('receive-b',new AbortController());
+  c.startReadyUploads();assert.equal(c.uploads.size,0);
+  c.setTransferConcurrency(4);assert.equal(c.uploads.size,2);assert.equal(c.activeFileTransfers,4);
+});
+test('desktop content tabs live in the right header beside compact connection/settings controls, not inside the content pane',()=>{
+  const {c,document,render}=fixture();c.render=render;c.render();
+  const navigation=document.querySelector('.topbar .right-header .content-tabs');assert.ok(navigation);
+  assert.deepEqual(Array.from(navigation!.querySelectorAll('button'),button=>button.textContent),['接收','已发送','文件库']);
+  assert.equal(document.querySelector('.dock-panel .content-tabs'),null);
+  assert.ok(document.querySelector('.right-header [data-action="connection"]'));assert.ok(document.querySelector('.right-header [data-action="settings"]'));
+  assert.equal(document.querySelectorAll('.mobile-view-tabs button').length,4);
+  document.querySelector<HTMLButtonElement>('[data-content-view="sent"]')!.click();assert.equal(c.contentView,'sent');
+});
+test('Web file menu starts with open and keeps delete and details as its last actions',()=>{
+  const {c,document,render}=fixture();c.render=render;
+  c.contextMenu={kind:'file',key:'transfer:file',x:20,y:20};c.render();
+  const labels=Array.from(document.querySelectorAll('[data-card-command]'),button=>button.textContent);
+  assert.equal(labels[0],'打开');assert.deepEqual(labels.slice(-2),['删除','详情']);
+});
+test('bulk drag exports all forty local files and stages the entire batch on an internal queue drop',()=>{
+  const {c,document,render,Event}=fixture();c.render=render;c.preparePreview=async()=>{};
+  c.transfers=Array.from({length:40},(_,index)=>{const item=transfer('bulk-'+index,'received');item.files[0].sha256=String(index).padStart(64,'0');return item;});
+  for(const item of c.transfers)c.rtcLocalFiles.set(item.transferId+':'+item.files[0].fileId,new File(['data'],item.transferId+'.bin'));
+  c.installWindowDrop();c.render();const files:File[]=[];
+  const data={types:[] as string[],values:new Map<string,string>(),effectAllowed:'',dropEffect:'',items:{add:(file:File)=>files.push(file)},setData(type:string,value:string){this.values.set(type,value);this.types.push(type);},getData(type:string){return this.values.get(type) || '';},setDragImage:()=>{}};
+  const start=new Event('dragstart',{bubbles:true,cancelable:true});Object.assign(start,{dataTransfer:data});document.querySelector('[data-drag-all="receive"]')!.dispatchEvent(start);
+  assert.equal(files.length,40);assert.equal(data.effectAllowed,'copy');assert.ok(document.querySelector('.drag-ghost'));
+  const drop=new Event('drop',{bubbles:true,cancelable:true});Object.assign(drop,{dataTransfer:data});document.querySelector('[data-queue-drop]')!.dispatchEvent(drop);
+  assert.equal(c.picked.length,40);
 });
 
 test('receive selection cards expose only the checkbox action and normal mode restores ordinary controls',()=>{

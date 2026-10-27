@@ -1,7 +1,7 @@
 #include "receive_dock.h"
 #include "touch_drag.h"
 #include "drop_target.h"
-#include "receive_dock_region.h"
+#include "shell_file.h"
 #include <flutter/standard_method_codec.h>
 #include <flutter_windows.h>
 #include <dwmapi.h>
@@ -87,29 +87,27 @@ bool GlobalSendReceiveDock::OnCreate() {
   controller_ = std::make_unique<flutter::FlutterViewController>(
       rect.right - rect.left, rect.bottom - rect.top, project);
   if (!controller_->engine() || !controller_->view()) return false;
+  system_channel_ = std::make_unique<flutter::MethodChannel<Value>>(
+      controller_->engine()->messenger(), "dev.globalsend/system",
+      &flutter::StandardMethodCodec::GetInstance());
+  system_channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    if (call.method_name() != "openWebUrl") { result->NotImplemented(); return; }
+    const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+    const auto found = args ? args->find(Value("url")) : Map::const_iterator{};
+    const auto* url = args && found != args->end() ? std::get_if<std::string>(&found->second) : nullptr;
+    const auto status = url ? OpenGlobalSendWebUrl(GetHandle(), *url) : E_INVALIDARG;
+    if (status == E_INVALIDARG) result->Error("INVALID_URL", "网址无效");
+    else if (SUCCEEDED(status)) result->Success();
+    else result->Error("OPEN_URL_FAILED", "无法打开网址");
+  });
   channel_ = std::make_unique<flutter::MethodChannel<Value>>(
       controller_->engine()->messenger(), "dev.globalsend/receive-dock",
       &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler([this](const auto& call, auto result) {
     if (call.method_name() == "ready") { result->Success(Value(payload_)); return; }
     if (call.method_name() == "hitRegions") {
-      const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
-      RECT client{}; GetClientRect(GetHandle(), &client);
-      if (args && Number(*args, "width") == client.right && Number(*args, "height") == client.bottom) {
-        const auto found = args->find(Value("rects"));
-        const auto* rects = found == args->end() ? nullptr : std::get_if<flutter::EncodableList>(&found->second);
-        std::vector<RECT> surfaces;
-        if (rects) for (const auto& value : *rects) {
-          const auto* rect = std::get_if<Map>(&value);
-          if (!rect) continue;
-          surfaces.push_back({static_cast<LONG>(Number(*rect, "left")), static_cast<LONG>(Number(*rect, "top")),
-              static_cast<LONG>(Number(*rect, "right")), static_cast<LONG>(Number(*rect, "bottom"))});
-        }
-        HRGN region = GlobalSendReceiveDockRegion(surfaces);
-        // Rectangles include clear padding around each Flutter-painted rounded
-        // surface. OS hit testing skips the gaps; AA edges are never cut.
-        if (!SetWindowRgn(GetHandle(), region, TRUE)) DeleteObject(region);
-      }
+      // One translucent pane includes the gaps between cards. Leave its native
+      // region unset so DWM antialiases the outer corners without repeated cuts.
       result->Success();
       return;
     }
@@ -281,6 +279,7 @@ void GlobalSendReceiveDock::OnDestroy() {
   drop_windows_.clear();
   if (drop_target_) { drop_target_->Release(); drop_target_ = nullptr; }
   channel_.reset();
+  system_channel_.reset();
   controller_.reset();
   shown_ = false;
 }

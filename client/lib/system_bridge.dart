@@ -1,13 +1,38 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' show Rect, Size;
 
 import 'package:flutter/services.dart';
 
 /// Windows clipboard events and copy-only OLE import/export.
+class NativeDragPreview {
+  const NativeDragPreview(this.rgba, this.width, this.height);
+  final Uint8List rgba;
+  final int width, height;
+}
+
 class SystemBridge {
   static const channel = MethodChannel('dev.globalsend/system');
+  static final _dragPreviewKey = Object();
+
+  /// Keeps existing exporters unchanged while handing their native drag the
+  /// exact card painted for this gesture. Concurrent exports have own scopes.
+  static Future<T> withDragPreview<T>(
+    NativeDragPreview? preview,
+    Future<T> Function() export,
+  ) => runZoned(export, zoneValues: {_dragPreviewKey: preview});
+  static Map<String, Object> get dragPreviewArguments {
+    final preview = Zone.current[_dragPreviewKey] as NativeDragPreview?;
+    return preview == null
+        ? const {}
+        : {
+            'previewRgba': preview.rgba,
+            'previewWidth': preview.width,
+            'previewHeight': preview.height,
+          };
+  }
 
   /// Read-only OS interface metadata; no discovery traffic or permission prompt.
   static Future<List<Map<String, dynamic>>> localIpInterfaces() async {
@@ -138,6 +163,13 @@ class SystemBridge {
       StreamController.broadcast();
   static final StreamController<Map<String, dynamic>> _windows =
       StreamController.broadcast();
+  static final StreamController<void> _pasteRequests =
+      StreamController.broadcast();
+  static Stream<void> get pasteRequests {
+    _install();
+    return _pasteRequests.stream;
+  }
+
   static String? _windowStatePath;
   static Future<void> _windowSave = Future<void>.value();
   static bool _installed = false;
@@ -189,6 +221,8 @@ class SystemBridge {
       channel.setMethodCallHandler((call) async {
         if (call.method == 'clipboardChanged') {
           _clipboard.add(Map<String, dynamic>.from(call.arguments));
+        } else if (call.method == 'pasteRequested') {
+          _pasteRequests.add(null);
         } else if (call.method == 'nativeDrag' || call.method == 'nativeDrop') {
           _drops.add({
             ...Map<String, dynamic>.from(call.arguments),
@@ -282,9 +316,15 @@ class SystemBridge {
     return await channel.invokeMethod<bool>('dragOut', {
           'pointerKind': pointerKind,
           if (paths != null) 'paths': paths else 'text': text ?? '',
+          ...dragPreviewArguments,
         }) ??
         false;
   }
+
+  static Future<bool> exportFiles(
+    List<String> paths, {
+    String pointerKind = 'auto',
+  }) => dragOut(paths: paths, pointerKind: pointerKind);
 
   static Future<void> revealFile(String path) async {
     if (!Platform.isWindows) return;

@@ -10,6 +10,7 @@ export function localEnvironment(root, inherited = process.env) {
     TEMP: temp,
     TMP: temp,
     TMPDIR: temp,
+    npm_config_logs_dir: resolve(root, 'artifacts', 'logs', 'npm-root'),
     DATA_DIR: inherited.DATA_DIR || resolve(root, 'artifacts', 'local-center', 'data'),
     RELAY_DIR: inherited.RELAY_DIR || resolve(root, 'artifacts', 'local-center', 'relay'),
     STATIC_DIR: inherited.STATIC_DIR || resolve(root, 'web', 'dist'),

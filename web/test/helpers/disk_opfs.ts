@@ -25,6 +25,7 @@ export class DiskDirectory {
   kind='directory';name:string;path:string;external:boolean;
   constructor(path:string,external=false){this.path=path;this.external=external;this.name=basename(path);mkdirSync(path,{recursive:true});}
   async queryPermission(){return 'granted';}
+  async isSameEntry(other:DiskDirectory){return this.path===other.path;}
   async getDirectoryHandle(name:string,{create=false}={}){
     const path=join(this.path,name);if(!existsSync(path)){if(!create)throw error('NotFoundError');mkdirSync(path);}
     if(!statSync(path).isDirectory())throw error('TypeMismatchError');return new DiskDirectory(path,this.external);

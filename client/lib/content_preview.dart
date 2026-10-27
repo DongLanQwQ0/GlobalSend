@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import 'received_file_access.dart';
@@ -102,7 +104,7 @@ class _ContentPreviewState extends State<ContentPreview> {
   Widget _icon(BuildContext context) {
     final category = savedFileCategory(widget.name);
     return Center(
-      child: Icon(
+      child: AppIcon(
         widget.text != null
             ? Icons.notes_rounded
             : switch (category) {

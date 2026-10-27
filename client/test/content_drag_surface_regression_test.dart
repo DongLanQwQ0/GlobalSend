@@ -1,3 +1,5 @@
+import 'native_drag_render_fixture.dart';
+
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -47,7 +49,7 @@ void main() {
       expect(find.byKey(const ValueKey('drag-feedback-phone')), findsNothing);
       expect(find.byType(Draggable<DockEntry>), findsNothing);
       await gesture.moveBy(const Offset(30, 30));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(exports, ['touch']);
       await gesture.up();
     },
@@ -86,18 +88,18 @@ void main() {
         kind: PointerDeviceKind.mouse,
       );
       await gesture.moveBy(const Offset(35, 10));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(exports, isEmpty);
       expect(
         find.byKey(const ValueKey('drag-feedback-desktop')),
         findsOneWidget,
       );
       await gesture.moveTo(const Offset(820, 250));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(exports, ['mouse']);
       expect(find.byKey(const ValueKey('drag-feedback-desktop')), findsNothing);
       await gesture.moveTo(const Offset(850, 260));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(exports, ['mouse']);
       await gesture.up();
     },
@@ -144,13 +146,13 @@ void main() {
         kind: PointerDeviceKind.mouse,
       );
       await old.moveBy(const Offset(30, 0));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(
         find.byKey(const ValueKey('drag-feedback-returning')),
         findsOneWidget,
       );
       await old.moveTo(const Offset(830, 250));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(exports, ['mouse']);
       expect(
         find.byKey(const ValueKey('drag-feedback-returning')),
@@ -159,14 +161,14 @@ void main() {
       // The pointer returns while the OS, not Flutter, owns this drag. No stale
       // Flutter avatar should reappear or duplicate an internal drop.
       await old.moveTo(center);
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(exports, ['mouse']);
       expect(
         find.byKey(const ValueKey('drag-feedback-returning')),
         findsNothing,
       );
       native.complete();
-      await tester.pump();
+      await pumpNativeDrag(tester);
       // Deliberately no old.up(): this is the actual OLE-consumed-up failure.
       final next = await tester.startGesture(
         center,
@@ -174,13 +176,13 @@ void main() {
         kind: PointerDeviceKind.mouse,
       );
       await next.moveBy(const Offset(30, 0));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(
         find.byKey(const ValueKey('drag-feedback-returning')),
         findsOneWidget,
       );
       await next.up();
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(
         find.byKey(const ValueKey('drag-feedback-returning')),
         findsNothing,
@@ -223,7 +225,7 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 650));
       await drag.moveTo(const Offset(830, 250));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       expect(exports, ['touch']);
       await drag.up();
       expect(tester.takeException(), isNull);
@@ -266,11 +268,11 @@ void main() {
           kind: PointerDeviceKind.mouse,
         );
         await drag.moveBy(const Offset(35, 0));
-        await tester.pump();
+        await pumpNativeDrag(tester);
         await drag.moveTo(const Offset(820, 200));
-        await tester.pump();
+        await pumpNativeDrag(tester);
         await drag.up();
-        await tester.pump();
+        await pumpNativeDrag(tester);
       }
       expect(exports, [
         'mouse:Drag select these words',
@@ -296,9 +298,9 @@ void main() {
         kind: PointerDeviceKind.mouse,
       );
       await select.moveBy(const Offset(110, 0));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       await select.moveTo(const Offset(820, 200));
-      await tester.pump();
+      await pumpNativeDrag(tester);
       await select.up();
       expect(exports.length, 3);
       expect(exports.last, 'mouse:Drag select these words');

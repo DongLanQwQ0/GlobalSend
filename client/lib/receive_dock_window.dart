@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -6,12 +7,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 
 import 'compact_content_card.dart';
+import 'bulk_file_drag.dart';
+import 'app_icon.dart';
+import 'system_bridge.dart';
 import 'compact_time.dart';
 import 'content_drag_surface.dart';
 import 'models.dart';
 import 'text_selection_surface.dart';
 import 'ui_tokens.dart';
 import 'received_order.dart';
+
+final _batchDragMarker = Object();
 
 /// The native dock launches this UI-only app before main creates a controller.
 /// Content and user actions go through the primary engine; no session is opened.
@@ -35,84 +41,12 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
   final scroll = ScrollController();
   List<String> order = [];
   Set<String> entering = {};
-  final countKey = GlobalKey(),
-      openKey = GlobalKey(),
-      closeKey = GlobalKey(),
-      stripKey = GlobalKey(),
-      errorKey = GlobalKey();
-  final surfaces = <String, GlobalKey>{};
-  bool regionScheduled = false, menuOpen = false, pointerHeld = false;
+  List<DockEntry> exportableFiles = [];
   int? heldPointer;
   Offset pointerOrigin = Offset.zero;
   bool pointerTouch = false;
-  String regionSnapshot = '';
-
-  void scheduleRegions() {
-    if (regionScheduled || !mounted) return;
-    regionScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      regionScheduled = false;
-      if (!mounted) return;
-      final view = View.of(context), scale = view.devicePixelRatio;
-      final screen = Offset.zero & (view.physicalSize / scale);
-      Rect? bounds(GlobalKey key) {
-        final box = key.currentContext?.findRenderObject();
-        return box is RenderBox && box.attached && box.hasSize
-            ? MatrixUtils.transformRect(
-                box.getTransformTo(null),
-                Offset.zero & box.size,
-              )
-            : null;
-      }
-
-      final strip = bounds(stripKey);
-      final rects = <Rect>[];
-      if (menuOpen || pointerHeld) {
-        rects.add(screen);
-      } else {
-        for (final key in [countKey, openKey, closeKey, errorKey]) {
-          final rect = bounds(key);
-          if (rect != null) rects.add(rect.inflate(2).intersect(screen));
-        }
-        if (strip != null)
-          for (final id in order) {
-            final rect = bounds(surfaces[id]!);
-            final visible = rect?.intersect(strip);
-            if (visible != null && !visible.isEmpty)
-              rects.add(visible.inflate(2).intersect(screen));
-          }
-      }
-      final data = {
-        'width': view.physicalSize.width.round(),
-        'height': view.physicalSize.height.round(),
-        'rects': [
-          for (final rect in rects.where((r) => !r.isEmpty))
-            {
-              'left': (rect.left * scale).floor(),
-              'top': (rect.top * scale).floor(),
-              'right': (rect.right * scale).ceil(),
-              'bottom': (rect.bottom * scale).ceil(),
-            },
-        ],
-      };
-      final snapshot = '$data';
-      if (snapshot == regionSnapshot) return;
-      regionSnapshot = snapshot;
-      unawaited(ReceiveDockApp.channel.invokeMethod<void>('hitRegions', data));
-    });
-  }
-
-  void setMenuOpen(bool value) {
-    menuOpen = value;
-    scheduleRegions();
-    WidgetsBinding.instance.scheduleFrame();
-  }
-
   void setPointerHeld(bool value) {
-    pointerHeld = value;
     if (!value) heldPointer = null;
-    scheduleRegions();
-    WidgetsBinding.instance.scheduleFrame();
   }
 
   void beginMove() {
@@ -131,9 +65,6 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
   @override
   void initState() {
     super.initState();
-    // Scrolling can only move retained composited layers in the real engine;
-    // the card paint observer does not necessarily repaint in that case.
-    scroll.addListener(scheduleRegions);
     ReceiveDockApp.channel.setMethodCallHandler((call) async {
       if (call.method == 'content') {
         revision++;
@@ -174,11 +105,16 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
         final frontChanged =
             order.isNotEmpty && ids.isNotEmpty && order.first != ids.first;
         order = ids;
-        for (final id in order) {
-          surfaces.putIfAbsent(id, GlobalKey.new);
-        }
-        surfaces.removeWhere((id, _) => !order.contains(id));
         payload = next;
+        // A content/progress update must not unmount the active batch source
+        // while its async filesystem refresh is still in flight.
+        final retainedPaths = entries
+            .where((entry) => entry.kind != 'text')
+            .map((entry) => entry.localPath)
+            .toSet();
+        exportableFiles = exportableFiles
+            .where((entry) => retainedPaths.contains(entry.localPath))
+            .toList();
         error = '';
         if (frontChanged) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -194,6 +130,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
           });
         }
       });
+      unawaited(refreshExportableFiles(next));
       if (!presented && items.isNotEmpty) {
         presented = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -209,6 +146,78 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
       (payload['items'] as List? ?? const [])
           .map((value) => Map<String, dynamic>.from(value))
           .toList();
+
+  Future<void> refreshExportableFiles(Map<String, dynamic> snapshot) async {
+    final entries =
+        items
+            .map(DockEntry.fromJson)
+            .where(
+              (entry) => entry.kind != 'text' && entry.localPath.isNotEmpty,
+            )
+            .toList()
+          ..sort(compareReceivedNewestFirst);
+    final existing = await Future.wait(
+      entries.map((entry) async {
+        final type = await FileSystemEntity.type(entry.localPath);
+        return type == FileSystemEntityType.file ||
+                type == FileSystemEntityType.directory
+            ? entry
+            : null;
+      }),
+    );
+    if (!mounted || !identical(payload, snapshot)) return;
+    final seen = <String>{};
+    setState(
+      () => exportableFiles = [
+        for (final entry in existing)
+          if (entry != null && seen.add(entry.localPath)) entry,
+      ],
+    );
+  }
+
+  Widget bulkDragHandle() {
+    final entries = exportableFiles;
+    if (entries.isEmpty) return const SizedBox.shrink();
+    final paths = entries.map((entry) => entry.localPath).toList();
+    return MetaData(
+      metaData: _batchDragMarker,
+      behavior: HitTestBehavior.opaque,
+      child: ContentDragSurface(
+        entry: BulkFileEntry(paths),
+        itemCount: paths.length,
+        onExport: (kind) async {
+          setPointerHeld(false);
+          try {
+            await ReceiveDockApp.channel.invokeMethod<bool>('dragOut', {
+              'pointerKind': kind,
+              'paths': paths,
+              ...SystemBridge.dragPreviewArguments,
+            });
+          } on PlatformException catch (failure) {
+            if (mounted) setState(() => error = failure.message ?? '无法拖出');
+          }
+        },
+        child: TooltipVisibility(
+          visible: true,
+          child: Tooltip(
+            message: '拖出全部文件',
+            triggerMode: TooltipTriggerMode.manual,
+            child: Semantics(
+              label: '拖出全部文件',
+              child: const SizedBox(
+                key: ValueKey('dock-drag-all-files'),
+                width: 44,
+                height: 30,
+                child: Center(
+                  child: AppIcon(Icons.file_copy_outlined, size: 18),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Future<void> action(String action, [String? id]) async {
     final snapshot = payload;
@@ -231,6 +240,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
     try {
       await ReceiveDockApp.channel.invokeMethod<bool>('dragOut', {
         'pointerKind': pointerKind,
+        ...SystemBridge.dragPreviewArguments,
         if (entry.kind == 'text')
           'text': entry.text
         else
@@ -255,9 +265,13 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
       'directSending',
     ].contains(entry.status);
     List<PopupMenuEntry<String>> menuItems(BuildContext _) => [
-      const PopupMenuItem(value: 'open', child: Text('打开')),
+      const PopupMenuItem(value: 'open', height: 32, child: Text('打开')),
+      if (entry.localPath.isNotEmpty)
+        const PopupMenuItem(value: 'reveal', height: 32, child: Text('定位文件')),
       if (entry.kind == 'text' || entry.localPath.isNotEmpty)
-        const PopupMenuItem(value: 'stage', child: Text('加入待发')),
+        const PopupMenuItem(value: 'stage', height: 32, child: Text('加入待发送')),
+      const PopupMenuItem(value: 'delete', height: 32, child: Text('删除')),
+      const PopupMenuItem(value: 'details', height: 32, child: Text('详情')),
     ];
     return ContentDragSurface(
       entry: entry,
@@ -272,7 +286,6 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
             final overlay =
                 Navigator.of(context).overlay!.context.findRenderObject()!
                     as RenderBox;
-            setMenuOpen(true);
             final selected = await showMenu<String>(
               context: context,
               position: RelativeRect.fromRect(
@@ -286,14 +299,13 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
               ),
               items: menuItems(context),
             );
-            setMenuOpen(false);
             if (selected != null && mounted) await action(selected, entry.id);
           },
           child: CompactContentCard(
             surfaceColor: Colors.transparent,
-            previewColor: Ui.input.withValues(alpha: .78),
-            metadataColor: const Color(0xC7ECF3EE),
-            menuColor: Colors.white.withValues(alpha: .82),
+            previewColor: Colors.transparent,
+            metadataColor: Colors.transparent,
+            menuColor: Colors.transparent,
             entry: entry,
             sender: value['sender'] as String? ?? entry.sourceLabel,
             timestamp: compactTime(DateTime.fromMillisecondsSinceEpoch(time)),
@@ -319,14 +331,11 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
               label: '更多',
               child: PopupMenuButton<String>(
                 tooltip: '更多',
-                onOpened: () => setMenuOpen(true),
-                onCanceled: () => setMenuOpen(false),
                 onSelected: (value) {
-                  setMenuOpen(false);
                   action(value, entry.id);
                 },
                 itemBuilder: menuItems,
-                icon: const Icon(Icons.more_horiz, size: 20),
+                icon: const AppIcon(Icons.more_horiz, size: 20),
               ),
             ),
           ),
@@ -345,259 +354,242 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: Ui.theme(),
-    // Compact previews and icon hover highlights are already self-explanatory.
-    // TooltipTriggerMode.manual still shows mouse hover overlays, which both
-    // obscure these small cards and lie outside their native window region.
-    builder: (_, child) => TooltipVisibility(visible: false, child: child!),
+    theme: Ui.theme().copyWith(
+      popupMenuTheme: Ui.theme().popupMenuTheme.copyWith(
+        color: const Color(0xFFEDF4EF),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        menuPadding: const EdgeInsets.symmetric(vertical: 4),
+        shape: const RoundedRectangleBorder(
+          borderRadius: Ui.fieldRadius,
+          side: BorderSide(color: Ui.border),
+        ),
+      ),
+    ),
+    // Keep labels out of the compact content strip; buttons retain semantics.
+    // One opacity layer includes routes (menus), images and controls. Painting
+    // individual translucent layers over each other made cards almost opaque.
+    builder: (_, child) => Opacity(
+      opacity: .7,
+      child: TooltipVisibility(visible: false, child: child!),
+    ),
     home: CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () => action('close'),
       },
       child: Focus(
         autofocus: true,
-        child: _DockPaintSurfaces(
-          onPaint: scheduleRegions,
-          child: Scaffold(
-            backgroundColor: Colors.transparent,
-            body: Listener(
-              onPointerDown: (event) {
-                heldPointer ??= event.pointer;
-                pointerOrigin = event.position;
-                pointerTouch = event.kind != PointerDeviceKind.mouse;
-                setPointerHeld(true);
-                if (HardwareKeyboard.instance.isAltPressed) {
-                  beginMove();
-                }
-              },
-              onPointerUp: (_) => setPointerHeld(false),
-              onPointerCancel: (_) => setPointerHeld(false),
-              child: RawGestureDetector(
-                behavior: HitTestBehavior.translucent,
-                gestures: {
-                  _DockMovePan:
-                      GestureRecognizerFactoryWithHandlers<_DockMovePan>(
-                        _DockMovePan.new,
-                        (recognizer) => recognizer.onStart = (_) => beginMove(),
-                      ),
-                },
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(
-                          height: 30,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onPanStart: (_) => beginMove(),
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: DecoratedBox(
-                                      key: countKey,
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withValues(
-                                          alpha: .78,
-                                        ),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 9,
-                                          vertical: 5,
-                                        ),
-                                        child: Text(
-                                          '收到 ${items.length} 项',
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              DecoratedBox(
-                                key: openKey,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: .78),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: ContentDragControl(
-                                  child: Semantics(
-                                    label: '打开 GlobalSend',
-                                    child: IconButton(
-                                      constraints:
-                                          const BoxConstraints.tightFor(
-                                            width: 30,
-                                            height: 28,
-                                          ),
-                                      padding: EdgeInsets.zero,
-                                      tooltip: '打开 GlobalSend',
-                                      onPressed: () => action('open'),
-                                      icon: const Icon(
-                                        Icons.open_in_full,
-                                        size: 19,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              DecoratedBox(
-                                key: closeKey,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: .78),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: ContentDragControl(
-                                  child: Semantics(
-                                    label: '关闭',
-                                    child: IconButton(
-                                      constraints:
-                                          const BoxConstraints.tightFor(
-                                            width: 30,
-                                            height: 28,
-                                          ),
-                                      padding: EdgeInsets.zero,
-                                      tooltip: '关闭',
-                                      onPressed: () => action('close'),
-                                      icon: const Icon(Icons.close, size: 20),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Expanded(
-                          child: LayoutBuilder(
-                            key: stripKey,
-                            builder: (context, bounds) {
-                              final edge = bounds.maxHeight;
-                              final values = {
-                                for (final item in items)
-                                  item['id'] as String: item,
-                              };
-                              return Listener(
-                                onPointerSignal: (event) {
-                                  if (event is PointerScrollEvent &&
-                                      scroll.hasClients) {
-                                    GestureBinding
-                                        .instance
-                                        .pointerSignalResolver
-                                        .register(event, (_) {
-                                          scroll.jumpTo(
-                                            (scroll.offset +
-                                                    event.scrollDelta.dy +
-                                                    event.scrollDelta.dx)
-                                                .clamp(
-                                                  0.0,
-                                                  scroll
-                                                      .position
-                                                      .maxScrollExtent,
-                                                ),
-                                          );
-                                        });
-                                  }
-                                },
-                                child: SingleChildScrollView(
-                                  key: const ValueKey('dock-horizontal-scroll'),
-                                  controller: scroll,
-                                  scrollDirection: Axis.horizontal,
-                                  // The viewport is a repaint boundary: the
-                                  // observer above Scaffold does not repaint
-                                  // when only horizontal scroll changes. Read
-                                  // current card transforms inside that boundary.
-                                  child: _DockPaintSurfaces(
-                                    onPaint: scheduleRegions,
-                                    child: SizedBox(
-                                      width: ((edge + 10) * order.length - 10)
-                                          .clamp(
-                                            bounds.maxWidth,
-                                            double.infinity,
-                                          ),
-                                      height: edge,
-                                      child: Stack(
-                                        children: [
-                                          for (var i = 0; i < order.length; i++)
-                                            AnimatedPositioned(
-                                              key: ValueKey(
-                                                'dock-tile-${order[i]}',
-                                              ),
-                                              duration: const Duration(
-                                                milliseconds: 240,
-                                              ),
-                                              curve: Curves.easeOutCubic,
-                                              left: i * (edge + 10),
-                                              top: 0,
-                                              width: edge,
-                                              height: edge,
-                                              child:
-                                                  TweenAnimationBuilder<double>(
-                                                    key: ValueKey(
-                                                      'dock-arrival-${order[i]}',
-                                                    ),
-                                                    tween: Tween(
-                                                      begin:
-                                                          entering.contains(
-                                                            order[i],
-                                                          )
-                                                          ? 1
-                                                          : 0,
-                                                      end: 0,
-                                                    ),
-                                                    duration: const Duration(
-                                                      milliseconds: 260,
-                                                    ),
-                                                    curve: Curves.easeOutCubic,
-                                                    builder:
-                                                        (_, value, child) =>
-                                                            Transform.translate(
-                                                              offset: Offset(
-                                                                0,
-                                                                -edge * value,
-                                                              ),
-                                                              child: Opacity(
-                                                                opacity:
-                                                                    1 - value,
-                                                                child: child,
-                                                              ),
-                                                            ),
-                                                    child: SizedBox.expand(
-                                                      key: surfaces[order[i]],
-                                                      child: card(
-                                                        values[order[i]]!,
-                                                      ),
-                                                    ),
-                                                  ),
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        if (error.isNotEmpty)
-                          Padding(
-                            key: errorKey,
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              error,
-                              style: const TextStyle(color: Colors.red),
-                            ),
-                          ),
-                      ],
+        child: Scaffold(
+          key: const ValueKey('dock-pane'),
+          backgroundColor: const Color(0xFFEDF4EF),
+          body: Listener(
+            onPointerDown: (event) {
+              heldPointer ??= event.pointer;
+              pointerOrigin = event.position;
+              pointerTouch = event.kind != PointerDeviceKind.mouse;
+              setPointerHeld(true);
+              if (HardwareKeyboard.instance.isAltPressed) {
+                beginMove();
+              }
+            },
+            onPointerUp: (_) => setPointerHeld(false),
+            onPointerCancel: (_) => setPointerHeld(false),
+            child: RawGestureDetector(
+              behavior: HitTestBehavior.translucent,
+              gestures: {
+                _DockMovePan:
+                    GestureRecognizerFactoryWithHandlers<_DockMovePan>(
+                      _DockMovePan.new,
+                      (recognizer) => recognizer.onStart = (_) => beginMove(),
                     ),
+              },
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        height: 30,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  DecoratedBox(
+                                    key: const ValueKey('dock-count'),
+                                    decoration: BoxDecoration(
+                                      color: Colors.transparent,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 9,
+                                        vertical: 5,
+                                      ),
+                                      child: Text(
+                                        '收到 ${items.length} 项',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  bulkDragHandle(),
+                                ],
+                              ),
+                            ),
+                            DecoratedBox(
+                              key: const ValueKey('dock-open'),
+                              decoration: BoxDecoration(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: ContentDragControl(
+                                child: Semantics(
+                                  label: '打开 GlobalSend',
+                                  child: IconButton(
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 30,
+                                      height: 28,
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                    tooltip: '打开 GlobalSend',
+                                    onPressed: () => action('open'),
+                                    icon: const AppIcon(
+                                      Icons.open_in_full,
+                                      size: 19,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            DecoratedBox(
+                              key: const ValueKey('dock-close'),
+                              decoration: BoxDecoration(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: ContentDragControl(
+                                child: Semantics(
+                                  label: '关闭',
+                                  child: IconButton(
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 30,
+                                      height: 28,
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                    tooltip: '关闭',
+                                    onPressed: () => action('close'),
+                                    icon: const AppIcon(Icons.close, size: 20),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Expanded(
+                        child: LayoutBuilder(
+                          key: const ValueKey('dock-content-strip'),
+                          builder: (context, bounds) {
+                            final edge = bounds.maxHeight;
+                            final values = {
+                              for (final item in items)
+                                item['id'] as String: item,
+                            };
+                            return Listener(
+                              onPointerSignal: (event) {
+                                if (event is PointerScrollEvent &&
+                                    scroll.hasClients) {
+                                  GestureBinding.instance.pointerSignalResolver
+                                      .register(event, (_) {
+                                        scroll.jumpTo(
+                                          (scroll.offset +
+                                                  event.scrollDelta.dy +
+                                                  event.scrollDelta.dx)
+                                              .clamp(
+                                                0.0,
+                                                scroll.position.maxScrollExtent,
+                                              ),
+                                        );
+                                      });
+                                }
+                              },
+                              child: SingleChildScrollView(
+                                key: const ValueKey('dock-horizontal-scroll'),
+                                controller: scroll,
+                                scrollDirection: Axis.horizontal,
+                                child: SizedBox(
+                                  width: ((edge + 10) * order.length - 10)
+                                      .clamp(bounds.maxWidth, double.infinity),
+                                  height: edge,
+                                  child: Stack(
+                                    children: [
+                                      for (var i = 0; i < order.length; i++)
+                                        AnimatedPositioned(
+                                          key: ValueKey(
+                                            'dock-tile-${order[i]}',
+                                          ),
+                                          duration: const Duration(
+                                            milliseconds: 240,
+                                          ),
+                                          curve: Curves.easeOutCubic,
+                                          left: i * (edge + 10),
+                                          top: 0,
+                                          width: edge,
+                                          height: edge,
+                                          child: TweenAnimationBuilder<double>(
+                                            key: ValueKey(
+                                              'dock-arrival-${order[i]}',
+                                            ),
+                                            tween: Tween(
+                                              begin: entering.contains(order[i])
+                                                  ? 1
+                                                  : 0,
+                                              end: 0,
+                                            ),
+                                            duration: const Duration(
+                                              milliseconds: 260,
+                                            ),
+                                            curve: Curves.easeOutCubic,
+                                            builder: (_, value, child) =>
+                                                Transform.translate(
+                                                  offset: Offset(
+                                                    0,
+                                                    -edge * value,
+                                                  ),
+                                                  child: Opacity(
+                                                    opacity: 1 - value,
+                                                    child: child,
+                                                  ),
+                                                ),
+                                            child: SizedBox.expand(
+                                              child: card(values[order[i]]!),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      if (error.isNotEmpty)
+                        Padding(
+                          key: const ValueKey('dock-error'),
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            error,
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
@@ -611,30 +603,20 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
 
 class _DockMovePan extends PanGestureRecognizer {
   @override
-  bool isPointerAllowed(PointerEvent event) =>
-      !isContentDragControlPosition(event.position, event.viewId) &&
-      super.isPointerAllowed(event);
-}
-
-class _DockPaintSurfaces extends SingleChildRenderObjectWidget {
-  const _DockPaintSurfaces({required this.onPaint, required super.child});
-  final VoidCallback onPaint;
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _DockSurfacesRender(onPaint);
-  @override
-  void updateRenderObject(
-    BuildContext context,
-    _DockSurfacesRender renderObject,
-  ) => renderObject.onPaint = onPaint;
-}
-
-class _DockSurfacesRender extends RenderProxyBox {
-  _DockSurfacesRender(this.onPaint);
-  VoidCallback onPaint;
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    super.paint(context, offset);
-    onPaint();
+  bool isPointerAllowed(PointerEvent event) {
+    final result = HitTestResult();
+    RendererBinding.instance.hitTestInView(
+      result,
+      event.position,
+      event.viewId,
+    );
+    final bulkHandle = result.path.any(
+      (entry) =>
+          entry.target is RenderMetaData &&
+          (entry.target as RenderMetaData).metaData == _batchDragMarker,
+    );
+    return !bulkHandle &&
+        !isContentDragControlPosition(event.position, event.viewId) &&
+        super.isPointerAllowed(event);
   }
 }

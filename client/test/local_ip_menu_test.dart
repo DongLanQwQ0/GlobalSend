@@ -1,3 +1,4 @@
+import 'system_font_fixture.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -44,30 +45,8 @@ class IpMenuController extends PreviewController {
 }
 
 void main() {
+  setUpAll(loadSystemTestFonts);
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUpAll(() async {
-    final fonts = FontLoader('GlobalSendSans');
-    for (final weight in ['Regular', 'Semibold']) {
-      fonts.addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File('assets/fonts/GlobalSendSans-$weight.ttf').readAsBytes(),
-          ),
-        ),
-      );
-    }
-    await fonts.load();
-    await (FontLoader('MaterialIcons')..addFont(
-          Future.value(
-            ByteData.sublistView(
-              await File(
-                'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-              ).readAsBytes(),
-            ),
-          ),
-        ))
-        .load();
-  });
 
   test('addresses sort in the requested four groups and numeric order', () {
     final addresses = sortLocalIpAddresses([

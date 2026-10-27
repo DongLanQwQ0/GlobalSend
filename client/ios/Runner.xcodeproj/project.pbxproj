@@ -16,6 +16,11 @@
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
+		AC1700000000000000000002 /* SharedInboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1700000000000000000001; };
+		AC1700000000000000000003 /* SharedInboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1700000000000000000001; };
+		AC1700000000000000000005 /* FileSharing.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1700000000000000000004; };
+		AC1700000000000000000007 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1700000000000000000006; };
+		AC1700000000000000000018 /* ShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = AC170000000000000000000B; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -26,6 +31,7 @@
 			remoteGlobalIDString = 97C146ED1CF9000F007C117D;
 			remoteInfo = Runner;
 		};
+		AC1700000000000000000015 = {isa = PBXContainerItemProxy; containerPortal = 97C146E61CF9000F007C117D; proxyType = 1; remoteGlobalIDString = AC170000000000000000000C; remoteInfo = ShareExtension; };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -39,6 +45,7 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AC1700000000000000000014 /* Embed App Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (AC1700000000000000000018, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -59,6 +66,14 @@
 		97C146FD1CF9000F007C117D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AC1700000000000000000001 /* SharedInboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedInboxStore.swift; sourceTree = "<group>"; };
+		AC1700000000000000000004 /* FileSharing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSharing.swift; sourceTree = "<group>"; };
+		AC1700000000000000000006 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		AC1700000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AC170000000000000000000A /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		AC1700000000000000000017 /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
+		AC1700000000000000000019 /* ShareConfig.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ShareConfig.xcconfig; sourceTree = "<group>"; };
+		AC170000000000000000000B /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +85,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AC1700000000000000000013 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -97,6 +113,8 @@
 			isa = PBXGroup;
 			children = (
 				9740EEB11CF90186004384FC /* Flutter */,
+				AC1700000000000000000008 /* ShareExtension */,
+				AC1700000000000000000019 /* ShareConfig.xcconfig */,
 				97C146F01CF9000F007C117D /* Runner */,
 				97C146EF1CF9000F007C117D /* Products */,
 				331C8082294A63A400263BE5 /* RunnerTests */,
@@ -108,6 +126,7 @@
 			children = (
 				97C146EE1CF9000F007C117D /* Runner.app */,
 				331C8081294A63A400263BE5 /* RunnerTests.xctest */,
+				AC170000000000000000000B /* ShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -123,11 +142,15 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
+				AC1700000000000000000001 /* SharedInboxStore.swift */,
+				AC1700000000000000000004 /* FileSharing.swift */,
+				AC1700000000000000000017 /* Runner.entitlements */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
 		};
+		AC1700000000000000000008 /* ShareExtension */ = {isa = PBXGroup; children = (AC1700000000000000000006, AC1700000000000000000009, AC170000000000000000000A, ); path = ShareExtension; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -158,10 +181,12 @@
 				97C146EC1CF9000F007C117D /* Resources */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
+				AC1700000000000000000014 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AC1700000000000000000016,
 			);
 			name = Runner;
 			packageProductDependencies = (
@@ -171,6 +196,13 @@
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AC170000000000000000000C /* ShareExtension */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = AC170000000000000000000D;
+            buildPhases = (AC1700000000000000000011, AC1700000000000000000013, AC1700000000000000000012, );
+            buildRules = (); dependencies = (); name = ShareExtension; productName = ShareExtension;
+            productReference = AC170000000000000000000B; productType = "com.apple.product-type.app-extension";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -209,6 +241,7 @@
 			targets = (
 				97C146ED1CF9000F007C117D /* Runner */,
 				331C8080294A63A400263BE5 /* RunnerTests */,
+				AC170000000000000000000C /* ShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -232,6 +265,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AC1700000000000000000012 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -284,9 +318,12 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
+				AC1700000000000000000002 /* SharedInboxStore.swift in Sources */,
+				AC1700000000000000000005 /* FileSharing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AC1700000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (AC1700000000000000000003, AC1700000000000000000007, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -295,6 +332,7 @@
 			target = 97C146ED1CF9000F007C117D /* Runner */;
 			targetProxy = 331C8085294A63A400263BE5 /* PBXContainerItemProxy */;
 		};
+		AC1700000000000000000016 = {isa = PBXTargetDependency; target = AC170000000000000000000C; targetProxy = AC1700000000000000000015; };
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
@@ -379,11 +417,12 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.globalsend.globalsend;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(GLOBALSEND_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -560,11 +599,12 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.globalsend.globalsend;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(GLOBALSEND_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -582,11 +622,12 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.globalsend.globalsend;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(GLOBALSEND_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -594,6 +635,33 @@
 			};
 			name = Release;
 		};
+		AC170000000000000000000E /* Debug */ = {isa = XCBuildConfiguration; baseConfigurationReference = 9740EEB21CF90195004384FC; buildSettings = {
+            APPLICATION_EXTENSION_API_ONLY = YES; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic;
+            CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+            CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)"; MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+            INFOPLIST_FILE = ShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+            LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
+            PRODUCT_BUNDLE_IDENTIFIER = "$(GLOBALSEND_APP_BUNDLE_ID).ShareExtension"; PRODUCT_NAME = "$(TARGET_NAME)";
+            SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
+        }; name = Debug; };
+		AC170000000000000000000F /* Release */ = {isa = XCBuildConfiguration; baseConfigurationReference = 7AFA3C8E1D35360C0083082E; buildSettings = {
+            APPLICATION_EXTENSION_API_ONLY = YES; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic;
+            CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+            CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)"; MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+            INFOPLIST_FILE = ShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+            LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
+            PRODUCT_BUNDLE_IDENTIFIER = "$(GLOBALSEND_APP_BUNDLE_ID).ShareExtension"; PRODUCT_NAME = "$(TARGET_NAME)";
+            SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
+        }; name = Release; };
+		AC1700000000000000000010 /* Profile */ = {isa = XCBuildConfiguration; baseConfigurationReference = 7AFA3C8E1D35360C0083082E; buildSettings = {
+            APPLICATION_EXTENSION_API_ONLY = YES; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic;
+            CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+            CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)"; MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+            INFOPLIST_FILE = ShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+            LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
+            PRODUCT_BUNDLE_IDENTIFIER = "$(GLOBALSEND_APP_BUNDLE_ID).ShareExtension"; PRODUCT_NAME = "$(TARGET_NAME)";
+            SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
+        }; name = Profile; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -627,6 +695,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		AC170000000000000000000D = {isa = XCConfigurationList; buildConfigurations = (AC170000000000000000000E, AC170000000000000000000F, AC1700000000000000000010, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */

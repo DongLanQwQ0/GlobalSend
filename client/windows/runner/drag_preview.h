@@ -13,6 +13,9 @@ bool InitializeGlobalSendDragPreview(IDataObject* data, HWND source,
 bool InitializeGlobalSendDragPreviewFromBitmap(IDataObject* data, HWND source,
     HBITMAP bitmap);
 HBITMAP GlobalSendTextDragBitmap(const std::wstring& text);
+// Flutter's premultiplied RGBA card; no shell thumbnail/provider or file IO.
+HBITMAP GlobalSendDragBitmapFromRgba(const std::vector<uint8_t>& rgba,
+    int width, int height);
 HBITMAP GlobalSendContentDragBitmap(const std::wstring& text,
     const std::vector<std::wstring>& paths);
 // Shell IDataObject retains drag-helper private HGLOBAL and IStream formats.

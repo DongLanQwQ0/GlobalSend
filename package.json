@@ -5,9 +5,9 @@
   "description": "Self-hosted cross-device text and file dock",
   "engines": { "node": ">=24.19.0 <25" },
   "scripts": {
-    "setup": "npm ci --prefix server && npm ci --prefix web",
-    "build": "npm run build --prefix web && npm run build --prefix server",
-    "test": "npm test --prefix server && npm test --prefix web",
+    "setup": "node scripts/run-npm.mjs server ci && node scripts/run-npm.mjs web ci",
+    "build": "node scripts/run-npm.mjs web run build && node scripts/run-npm.mjs server run build",
+    "test": "node scripts/run-npm.mjs server test && node scripts/run-npm.mjs web test",
     "dev": "node scripts/dev.mjs",
     "start": "node scripts/start.mjs",
     "client:windows": "node scripts/client.mjs",

@@ -59,7 +59,19 @@ void main() {
       'http://127.0.0.1:${center.port}',
       token: 'sender-private',
     );
-    final peer = PeerTransport(api, (id) => id == 'file' ? source.path : null);
+    var sourceAcquires = 0, sourceActive = 0;
+    final peer = PeerTransport(
+      api,
+      (id) => id == 'file' ? source.path : null,
+      acquireSource: (_) async {
+        sourceAcquires++;
+        sourceActive++;
+        return true;
+      },
+      releaseSource: () {
+        sourceActive--;
+      },
+    );
     try {
       await peer.start(createPeerIdentity('test'), loopbackOnly: true);
       expect(peer.fingerprint.length, 64);
@@ -101,6 +113,8 @@ void main() {
       expect(progress, bytes.length);
       expect(firstProgress, 12345);
       expect(validated, 1);
+      expect(sourceAcquires, 1);
+      expect(sourceActive, 0);
       await expectLater(
         PeerTransport.pull(
           route,

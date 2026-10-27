@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -215,7 +217,7 @@ class _TextViewerState extends State<_TextViewer> {
                       child: IconButton(
                         tooltip: '关闭',
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close, size: 21),
+                        icon: const AppIcon(Icons.close, size: 21),
                       ),
                     ),
                   ],
@@ -313,7 +315,7 @@ class _TextViewerState extends State<_TextViewer> {
                         ContentDragControl(
                           child: TextButton.icon(
                             onPressed: () => openWebLink(context, link.uri),
-                            icon: const Icon(Icons.open_in_new, size: 16),
+                            icon: const AppIcon(Icons.open_in_new, size: 16),
                             label: Text(link.uri.host),
                           ),
                         ),
@@ -343,7 +345,7 @@ class _TextViewerState extends State<_TextViewer> {
                     ContentDragControl(
                       child: TextButton.icon(
                         onPressed: copying ? null : copy,
-                        icon: const Icon(Icons.copy, size: 17),
+                        icon: const AppIcon(Icons.copy, size: 17),
                         label: Text(widget.copyLabel),
                       ),
                     ),

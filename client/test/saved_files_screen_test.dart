@@ -1,3 +1,4 @@
+import 'system_font_fixture.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -62,6 +63,7 @@ SavedFile entry(String id, String name, String path, int hours, int size) =>
     );
 
 void main() {
+  setUpAll(loadSystemTestFonts);
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory fixture;
   late File photo;
@@ -87,27 +89,6 @@ void main() {
   setUpAll(() async {
     fixture = await Directory('build/test-fixtures/library-ui')
         .create(recursive: true);
-    for (final name in ['Regular', 'Semibold']) {
-      await (FontLoader('GlobalSendSans')..addFont(
-            Future.value(
-              ByteData.sublistView(
-                await File('assets/fonts/GlobalSendSans-$name.ttf')
-                    .readAsBytes(),
-              ),
-            ),
-          ))
-          .load();
-    }
-    await (FontLoader('MaterialIcons')..addFont(
-          Future.value(
-            ByteData.sublistView(
-              await File(
-                'E:/Programs/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-              ).readAsBytes(),
-            ),
-          ),
-        ))
-        .load();
     final recorder = ui.PictureRecorder();
     // A task-owned image fixture; no user photo is read for visual checks.
     final scene = Canvas(recorder);

@@ -1,3 +1,5 @@
+import 'app_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import 'content_preview.dart';
@@ -77,7 +79,7 @@ class CompactContentCard extends StatelessWidget {
                   ColoredBox(
                     color: previewColor ?? Ui.input,
                     child: const Center(
-                      child: Icon(
+                      child: AppIcon(
                         Icons.folder_outlined,
                         size: 56,
                         color: Ui.green,
@@ -286,7 +288,7 @@ class CompactContentCard extends StatelessWidget {
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                               onPressed: onCopy,
-                              icon: const Icon(Icons.copy, size: 14),
+                              icon: const AppIcon(Icons.copy, size: 14),
                               label: const Text('复制'),
                             ),
                           ),

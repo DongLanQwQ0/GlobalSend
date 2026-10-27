@@ -39,7 +39,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private TextView count;
     private WindowManager.LayoutParams layout;
     private long generation;
-    private boolean hideRequested;
+    private boolean rootAdded;
+    private long visibilityRevision, lastHideRevision;
     private float downX, downY;
     private int startX, startY, startWidth, startHeight;
     private static final java.util.concurrent.ExecutorService thumbnails =
@@ -52,22 +53,32 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     @Override public void show(ReceiveNotifications.Receipt item, long arrival, java.util.function.Consumer<Boolean> shown) {
+        showWhenReady(item, arrival, shown, ++visibilityRevision);
+    }
+
+    private void showWhenReady(ReceiveNotifications.Receipt item, long arrival,
+            java.util.function.Consumer<Boolean> shown, long request) {
+        if (request <= lastHideRevision) { shown.accept(false); return; }
         final View exportingRoot = root;
         if (exportingRoot != null && DockCoordinator.afterExportFrom(exportingRoot, () -> {
-            if (root == exportingRoot && !hideRequested) show(item, arrival, shown);
-            else shown.accept(false);
+            showWhenReady(item, arrival, shown, request);
         })) return;
-        hideRequested = false;
         generation = arrival;
-        items.remove(item.id);
-        LinkedHashMap<String, ReceiveNotifications.Receipt> next = new LinkedHashMap<>();
-        next.put(item.id, item);
-        next.putAll(items);
-        items.clear(); items.putAll(next);
+        boolean newItem = !items.containsKey(item.id);
+        if (newItem) {
+            LinkedHashMap<String, ReceiveNotifications.Receipt> next = new LinkedHashMap<>();
+            next.put(item.id, item); next.putAll(items);
+            items.clear(); items.putAll(next);
+        } else { items.put(item.id, item); }
         boolean newWindow = root == null;
         try {
             if (newWindow) create();
+            int previousScroll = scroll.getScrollX();
             render();
+            if (!newItem) {
+                final HorizontalScrollView updated = scroll;
+                updated.post(() -> { if (scroll == updated) updated.scrollTo(previousScroll, 0); });
+            }
             final View presented = root;
             final boolean[] replied = {false};
             Runnable acknowledge = () -> {
@@ -80,9 +91,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 @Override public boolean onPreDraw() {
                     presented.getViewTreeObserver().removeOnPreDrawListener(this);
                     acknowledge.run();
-                    if (newWindow) {
-                        presented.setTranslationX(dp(24)); presented.setAlpha(0);
-                        presented.animate().translationX(0).alpha(1).setDuration(180).start();
+                    if (newWindow && root == presented) {
+                        presented.animate().translationX(0).alpha(1).scaleX(1).scaleY(1)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                            .setDuration(180).start();
                     }
                     return true;
                 }
@@ -101,15 +113,19 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void create() {
+        rootAdded = false;
         root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(8), dp(4), dp(8), dp(8));
+        root.setPadding(dp(6), dp(2), dp(6), dp(4));
         root.setBackground(shape(0xf5f7faf6, 18));
         root.setClipToOutline(true);
         root.setElevation(dp(8));
+        root.setAlpha(0); root.setTranslationX(dp(20));
+        root.setScaleX(.96f); root.setScaleY(.96f);
         LinearLayout header = new LinearLayout(context);
         header.setGravity(Gravity.CENTER_VERTICAL);
         count = label("", 12, 0xff4f625a);
+        count.setSingleLine(true);
         header.addView(count, new LinearLayout.LayoutParams(0, dp(30), 1));
         TextView open = control("↗", "打开 GlobalSend", () -> actions.open(items.keySet().iterator().next()));
         TextView close = control("×", "关闭", this::dismiss);
@@ -129,7 +145,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         resize.setContentDescription("拖动调整大小");
         installMove(resize, true);
         root.addView(resize, new LinearLayout.LayoutParams(-1, dp(12)));
-        layout = new WindowManager.LayoutParams(dp(272), dp(184),
+        layout = new WindowManager.LayoutParams(dp(244), dp(156),
             Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -142,16 +158,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         layout.x = bounds.right - layout.width - dp(8);
         layout.y = bounds.bottom - layout.height - dp(12);
         windows.addView(root, layout);
+        rootAdded = true;
     }
 
     private void render() {
         row.removeAllViews();
         count.setText("收到 " + items.size() + " 项");
-        int side = Math.max(dp(96), layout.height - dp(54));
+        int side = Math.max(1, layout.height - dp(48));
         for (ReceiveNotifications.Receipt receipt : items.values()) {
             LinearLayout card = new LinearLayout(context);
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setPadding(dp(10), dp(8), dp(10), dp(6));
+            card.setPadding(dp(8), dp(6), dp(8), dp(4));
             card.setBackground(shape(0xffeaf2ec, 12));
             View content;
             if (receipt.text == null && !receipt.localPath.isEmpty() &&
@@ -167,7 +184,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 });
             } else {
                 TextView text = label(receipt.text == null ? "▧\n" + receipt.fileName : receipt.text, 14, 0xff24372e);
-                text.setMaxLines(4);
+                text.setMaxLines(3);
                 text.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 content = text;
             }
@@ -176,21 +193,20 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             footer.setGravity(Gravity.CENTER_VERTICAL);
             TextView source = label(receipt.source, 10, 0xff7c8d83);
             source.setSingleLine(true); source.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            footer.addView(source, new LinearLayout.LayoutParams(0, dp(26), 1));
+            footer.addView(source, new LinearLayout.LayoutParams(0, dp(24), 1));
             if (receipt.text != null) footer.addView(control("复制", "复制", () -> actions.copy(receipt.id)),
-                new LinearLayout.LayoutParams(dp(40), dp(26)));
+                new LinearLayout.LayoutParams(dp(40), dp(24)));
             card.addView(footer);
             card.setOnClickListener(view -> actions.open(receipt.id));
             card.setOnLongClickListener(view -> {
                 if (receipt.text == null && receipt.localPath.isEmpty()) return false;
                 try {
-                    DockCoordinator.startDrag(view, receipt.text == null ? receipt.localPath : null,
+                    return DockCoordinator.startDrag(view, receipt.text == null ? receipt.localPath : null,
                         receipt.text, receipt.fileName.isEmpty() ? "GlobalSend" : receipt.fileName);
-                    return true;
                 } catch (Exception unavailable) { return false; }
             });
             LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(side, side);
-            size.rightMargin = dp(8);
+            size.rightMargin = dp(6);
             row.addView(card, size);
         }
         scroll.scrollTo(0, 0);
@@ -208,8 +224,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 int dx = Math.round(event.getRawX() - downX), dy = Math.round(event.getRawY() - downY);
                 Rect bounds = availableBounds();
                 if (resize) {
-                    layout.width = clamp(startWidth + dx, dp(224), Math.min(dp(400), bounds.width() - dp(16)));
-                    layout.height = clamp(startHeight + dy, dp(160), Math.min(dp(260), bounds.height() - dp(16)));
+                    layout.width = clamp(startWidth + dx, dp(220), Math.min(dp(400), bounds.width() - dp(16)));
+                    layout.height = clamp(startHeight + dy, dp(140), Math.min(dp(260), bounds.height() - dp(16)));
                 } else { layout.x = startX + dx; layout.y = startY + dy; }
                 layout.x = clamp(layout.x, bounds.left, bounds.right - layout.width);
                 layout.y = clamp(layout.y, bounds.top, bounds.bottom - layout.height);
@@ -229,18 +245,34 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         actions.dismiss(versions, closedGeneration);
     }
     @Override public void hide() {
+        lastHideRevision = ++visibilityRevision;
+        hideWhenReady(lastHideRevision);
+    }
+
+    private void hideWhenReady(long request) {
+        if (request != lastHideRevision) return;
         final View exportingRoot = root;
         if (exportingRoot != null && DockCoordinator.afterExportFrom(exportingRoot, () -> {
-            if (root == exportingRoot && hideRequested) hide();
-        })) {
-            hideRequested = true;
-            return;
-        }
-        hideRequested = false;
+            hideWhenReady(request);
+        })) return;
         if (root != null) {
-            root.animate().cancel();
-            if (root.isAttachedToWindow()) windows.removeViewImmediate(root);
-            root = null; row = null; scroll = null; count = null;
+            final View leaving = root;
+            final WindowManager.LayoutParams leavingLayout = layout;
+            final boolean registered = rootAdded;
+            root = null; row = null; scroll = null; count = null; layout = null;
+            rootAdded = false;
+            leaving.animate().cancel();
+            if (registered && leaving.isAttachedToWindow()) {
+                leavingLayout.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+                windows.updateViewLayout(leaving, leavingLayout);
+                leaving.animate().alpha(0).translationX(dp(20)).scaleX(.96f).scaleY(.96f)
+                    .setDuration(150).start();
+                // Cleanup must not depend on ViewPropertyAnimator's end action:
+                // cancellation or a late first-frame callback can suppress it.
+                main.postDelayed(() -> {
+                    windows.removeViewImmediate(leaving);
+                }, 160);
+            } else if (registered) { windows.removeViewImmediate(leaving); }
         }
         items.clear();
     }
