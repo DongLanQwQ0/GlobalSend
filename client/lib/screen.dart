@@ -31,6 +31,8 @@ import 'compact_content_card.dart';
 import 'compact_time.dart';
 import 'local_ip_menu.dart';
 import 'received_order.dart';
+import 'recent_photos.dart';
+import 'recent_photos_view.dart';
 
 const defaultCenterAddress = String.fromEnvironment(
   'GLOBALSEND_DEFAULT_CENTER',
@@ -128,6 +130,7 @@ class _SendScreenState extends State<SendScreen>
   bool _nativeLocalDragActive = false;
   ModalRoute<dynamic>? _homeRoute;
   SendController get c => widget.controller;
+  late final recentPhotos = RecentPhotos(directory: c.stateDirectory);
   bool get loggedIn => c.api?.token.isNotEmpty == true;
   List<Map<String, dynamic>> get peers => c.onlinePeers;
   @override
@@ -135,6 +138,7 @@ class _SendScreenState extends State<SendScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     c.addListener(refresh);
+    recentPhotos.addListener(refreshPhotoSuggestions);
     page = ui.page;
     contentTab = ui.contentTab;
     settingsOpen = ui.settingsOpen;
@@ -327,6 +331,10 @@ class _SendScreenState extends State<SendScreen>
   }
 
   void refresh() {
+    recentPhotos.setVisible(
+      loggedIn &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+    );
     if (_nativeLocalDragActive != c.nativeLocalDragActive) {
       _nativeLocalDragActive = c.nativeLocalDragActive;
       if (!_nativeLocalDragActive) scheduleReceipt();
@@ -613,6 +621,7 @@ class _SendScreenState extends State<SendScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    recentPhotos.setVisible(loggedIn && state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) refreshDevices();
     if (state == AppLifecycleState.resumed && Platform.isAndroid) {
       c.refreshNativeDock().catchError((Object _) {});
@@ -629,6 +638,8 @@ class _SendScreenState extends State<SendScreen>
       FocusManager.instance.removeEarlyKeyEventHandler(windowPasteKey);
     }
     c.removeListener(refresh);
+    recentPhotos.removeListener(refreshPhotoSuggestions);
+    recentPhotos.dispose();
     ui.routes.unsubscribe(this);
     ui.page = page;
     ui.contentTab = contentTab;
@@ -678,6 +689,40 @@ class _SendScreenState extends State<SendScreen>
       if (mounted) setState(() => working = false);
     }
   }
+
+  void refreshPhotoSuggestions() {
+    if (mounted) setState(() {});
+  }
+
+  Widget photoSuggestions() => RecentPhotosView(
+    photos: recentPhotos.items,
+    enabled: !working,
+    onAdd: (id) => perform(
+      () => recentPhotos.add(id, (path) => c.stageInputs([path], [])),
+    ),
+    onDismiss: () => perform(
+      () => recentPhotos.dismiss(
+        recentPhotos.items.map((item) => item.id).toList(),
+      ),
+    ),
+  );
+
+  Future<void> showPhotoSuggestions() => showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (_) => SafeArea(
+      top: false,
+      child: SizedBox(
+        height: 190,
+        child: AnimatedBuilder(
+          animation: recentPhotos,
+          builder: (_, _) => recentPhotos.items.isEmpty
+              ? const Center(child: Text('没有新图片'))
+              : photoSuggestions(),
+        ),
+      ),
+    ),
+  );
 
   void notice(String value) => ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(content: Text(value), duration: const Duration(seconds: 2)),
@@ -1804,6 +1849,18 @@ class _SendScreenState extends State<SendScreen>
                         ),
                       ),
                       const Spacer(),
+                      if (count > 0 && recentPhotos.items.isNotEmpty)
+                        IconButton(
+                          tooltip: '新图片',
+                          onPressed: working ? null : showPhotoSuggestions,
+                          icon: Badge.count(
+                            count: recentPhotos.items.length,
+                            child: const Icon(
+                              Icons.add_photo_alternate_outlined,
+                              size: 19,
+                            ),
+                          ),
+                        ),
                       if (count > 0)
                         IconButton(
                           key: const ValueKey('clear-staged'),
@@ -1846,19 +1903,21 @@ class _SendScreenState extends State<SendScreen>
                     children: [
                       Positioned.fill(
                         child: count == 0 && active.isEmpty
-                            ? const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.all(16),
-                                  child: Text(
-                                    '点击输入文本，或拖入文件',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Ui.muted,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
-                              )
+                            ? recentPhotos.items.isNotEmpty
+                                  ? photoSuggestions()
+                                  : const Center(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(16),
+                                        child: Text(
+                                          '点击输入文本，或拖入文件',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: Ui.muted,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                    )
                             : Listener(
                                 onPointerSignal: (event) {
                                   if (event is PointerScrollEvent &&
@@ -3825,6 +3884,30 @@ class _SendScreenState extends State<SendScreen>
                   ? null
                   : (value) => perform(() => c.setAutoReceive(value)),
             ),
+            if (recentPhotos.supported)
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('新图片建议'),
+                subtitle: recentPhotos.problem == null
+                    ? null
+                    : Text(recentPhotos.problem!),
+                value: recentPhotos.enabled,
+                onChanged: working
+                    ? null
+                    : (value) => perform(() => recentPhotos.setEnabled(value)),
+              ),
+            if (recentPhotos.supported &&
+                !recentPhotos.permissionGranted &&
+                recentPhotos.problem != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: working
+                      ? null
+                      : () => perform(recentPhotos.openSettings),
+                  child: const Text('照片权限'),
+                ),
+              ),
             const SizedBox(height: 12),
             routePicker(true),
             const SizedBox(height: 16),

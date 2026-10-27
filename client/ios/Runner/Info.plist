@@ -29,7 +29,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于与同组设备直接传输文件和文字。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于选择要发送的照片和视频。</string>
+	<string>用于选择照片和视频，以及在应用内建议新增图片；仅在你点击发送后传输。</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
