@@ -146,9 +146,10 @@ export class WebNotifications {
 
   private async deliver(notice:WebNotice):Promise<boolean> {
     const shownKey=JSON.stringify(['file',notice.itemId,'shown']);
-    const options=():NotificationOptions=>({
+    const options=():NotificationOptions & {renotify:boolean}=>({
       body:notice.body,
       tag:`globalsend:${notice.itemId}`,
+      renotify:notice.kind==='text',
       silent:notice.kind==='file' && this.seen.has(shownKey),
       icon:new URL('notification-icon.svg',this.appUrl).href,
       data:{type:clickType,itemId:notice.itemId,url:this.appUrl.href},

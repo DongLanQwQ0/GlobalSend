@@ -52,6 +52,7 @@ test('foreground messages stay in-page, background messages notify once per revi
   const f=fixture(),n=f.make();await n.requestEnable();f.setVisible(true);assert.equal(await n.notify(text()),false);
   f.setVisible(false);assert.equal(await n.notify(text()),false);assert.equal(await n.notify(text(2)),true);assert.equal(await n.notify(text(2)),false);
   n.dispose();const next=f.make();assert.equal(await next.notify(text(2)),false);assert.equal(await next.notify(text(3)),true);assert.equal(f.notifications.length,2);next.dispose();
+  assert.ok(f.notifications.every(item=>(item.options as NotificationOptions & {renotify:boolean}).renotify));
 });
 test('service worker uses same-origin subpath and routes notification click back to item',async()=>{
   const f=fixture(),n=f.make({serviceWorker:f.worker});await n.requestEnable();assert.equal(await n.notify(text()),true);
