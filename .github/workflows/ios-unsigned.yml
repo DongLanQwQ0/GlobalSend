@@ -1,13 +1,8 @@
 name: iPad unsigned IPA
 
 on:
+  # Build IPA only after Windows and Android are accepted as stable.
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'client/**'
-      - 'scripts/package-ios-unsigned.sh'
-      - '.github/workflows/ios-unsigned.yml'
 
 permissions:
   contents: read

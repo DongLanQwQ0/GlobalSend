@@ -1,8 +1,8 @@
 # iPad：下载未签名 IPA，手动签名安装
 
-在 GitHub 仓库打开 **Actions → iPad unsigned IPA → Run workflow**。构建成功后，在该次运行的 **Artifacts** 下载 `GlobalSend-iPad-unsigned-运行编号`，解压取得 `GlobalSend-iPad-unsigned.ipa`，交给你自己的签名工具签名，再安装到 iPad。
+先完成 Windows、Android 的开发和稳定性验收，最后再构建 IPA。在 GitHub 仓库打开 **Actions → iPad unsigned IPA → Run workflow**。构建成功后，在该次运行的 **Artifacts** 下载 `GlobalSend-iPad-unsigned-运行编号`，解压取得 `GlobalSend-iPad-unsigned.ipa`，交给你自己的签名工具签名，再安装到 iPad。
 
-推送 `main` 上的客户端、打包脚本或此工作流变更也会自动构建。产物保留 14 天；签名证书、Apple 账号、描述文件和 TestFlight 都不参与这条流水线。安装包只保存在 GitHub Actions 和本地，不放到 GlobalSend 中心服务器。
+工作流仅手动触发，推送源码不构建 IPA。产物保留 14 天；签名证书、Apple 账号、描述文件和 TestFlight 都不参与这条流水线。安装包只保存在 GitHub Actions 和本地，不放到 GlobalSend 中心服务器。
 
 ## 当前构建
 
@@ -17,7 +17,7 @@
 
 移动端新增“新图片建议”：回到应用时检查最近一天内、首次开启前十分钟之后创建的本机图片，最多展示六张。点击缩略图加入待发送，不自动传输；可在设置中关闭。首次需要照片权限，有限访问时只检查已授权图片，不下载 iCloud 原图。已添加或忽略的图片不重复建议。
 
-iOS 系统拖出、接收目录的外部文件夹授权和后台接收通知还需分别适配；新照片建议已完成源码和本地组件验证，仍需 iPad 真机验收。不把 Android 的后台服务和小窗直接套到 iPad。默认接收到应用文稿目录，当前 iOS 版不保证长期后台监听。
+iOS 系统分享和多文件系统拖出已接入，签名需保留分享扩展及匹配的 AppGroup，见 [系统分享](MOBILE_SHARING.md)。这些交互与新照片建议仍需 iPad 真机验收。外部接收文件夹授权和后台接收通知仍待适配；默认接收到应用文稿目录，当前 iOS 版不保证长期后台监听。
 
 ## 在 Mac 上复现
 
