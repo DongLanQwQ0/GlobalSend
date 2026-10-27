@@ -130,6 +130,7 @@ class NetworkBridge {
     required String authorization,
     required int offset,
     required int length,
+    String? operationId,
   }) async => Map<String, dynamic>.from(
     await channel.invokeMethod('putFile', {
       'url': url,
@@ -138,6 +139,7 @@ class NetworkBridge {
       'authorization': authorization,
       'offset': offset,
       'length': length,
+      'operationId': ?operationId,
     }) as Map,
   );
 }

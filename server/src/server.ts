@@ -246,6 +246,7 @@ export async function buildApp(options: Options = {}) {
   const fileColumns = (db.prepare("PRAGMA table_info(files)").all() as Row[]).map(column => column.name);
   if (!fileColumns.includes("relative_path")) db.exec("ALTER TABLE files ADD COLUMN relative_path TEXT");
   if (!fileColumns.includes("entry_kind")) db.exec("ALTER TABLE files ADD COLUMN entry_kind TEXT");
+  if (!fileColumns.includes("receive_failure")) db.exec("ALTER TABLE files ADD COLUMN receive_failure TEXT");
   db.exec("PRAGMA user_version=3");
   const get = (sql: string, ...args: any[]) =>
     db.prepare(sql).get(...args) as Row | undefined;
@@ -463,6 +464,7 @@ export async function buildApp(options: Options = {}) {
     offset: f.offset,
     attemptId: f.attempt,
     errorCode: f.error ?? null,
+    receiveFailure: Boolean(f.receive_failure),
     transport: f.transport ?? null,
     ...(() => {
       const push = directPushes.get(`${f.transfer_id}/${f.id}`);
@@ -547,7 +549,7 @@ export async function buildApp(options: Options = {}) {
     clearDirect(f.transfer_id, f.id);
     removeBytes(f);
     run(
-      "UPDATE files SET status=?,offset=0,error=? WHERE transfer_id=? AND id=?",
+      "UPDATE files SET status=?,offset=0,error=?,receive_failure=NULL WHERE transfer_id=? AND id=?",
       state,
       error,
       f.transfer_id,
@@ -562,7 +564,7 @@ export async function buildApp(options: Options = {}) {
   }
   const reserved = () =>
     get(
-      "SELECT COALESCE(SUM(size),0) AS n FROM files WHERE status IN ('offered','accepted','uploading','ready','received') AND NOT (status='received' AND COALESCE(transport,'relay')='direct')",
+      "SELECT COALESCE(SUM(size),0) AS n FROM files WHERE (status IN ('offered','accepted','uploading','ready','received') OR (status='failed' AND receive_failure IS NOT NULL)) AND NOT (status='received' AND COALESCE(transport,'relay')='direct')",
     )!.n as number;
   async function space(bytes: number) {
     if (reserved() + bytes > limits.totalQuota)
@@ -604,7 +606,7 @@ export async function buildApp(options: Options = {}) {
   }
   cleanup();
   for (const f of all(
-    "SELECT * FROM files WHERE status IN ('accepted','uploading','ready','received') AND COALESCE(transport,'relay') != 'direct'",
+    "SELECT * FROM files WHERE (status IN ('accepted','uploading','ready','received') OR (status='failed' AND receive_failure IS NOT NULL)) AND COALESCE(transport,'relay') != 'direct'",
   )) {
     const length = existsSync(f.path) ? statSync(f.path).size : 0;
     if (length < f.offset) cancelFile(f, "failed", "STORAGE_LOST");
@@ -642,7 +644,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true },
+    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -1925,19 +1927,19 @@ export async function buildApp(options: Options = {}) {
           fail("PATH_SELECTED", "Receiver selected direct transfer", 409);
         if (!["accepted", "uploading", "failed"].includes(f.status))
           fail("INVALID_STATE", "File cannot be retried", 409);
-        await space(f.status === "failed" ? f.size : 0);
+        await space(f.status === "failed" && !f.receive_failure ? f.size : 0);
         transfer(d, t.id);
         if (!["accepted", "uploading", "failed"].includes(file(t, f.id).status))
           fail("INVALID_STATE", "File changed while retrying", 409);
         if (
-          reserved() + (f.status === "failed" ? f.size : 0) >
+          reserved() + (f.status === "failed" && !f.receive_failure ? f.size : 0) >
           limits.totalQuota
         )
           fail("QUOTA_EXCEEDED", "Relay storage quota exceeded", 507);
         removeBytes(f);
         clearDirect(t.id, f.id);
         run(
-          "UPDATE files SET status='accepted',transport='relay',offset=0,attempt=?,path=?,error=NULL WHERE transfer_id=? AND id=?",
+          "UPDATE files SET status='accepted',transport='relay',offset=0,attempt=?,path=?,error=NULL,receive_failure=NULL WHERE transfer_id=? AND id=?",
           attemptId,
           join(relayDir, randomUUID()),
           t.id,
@@ -1948,6 +1950,41 @@ export async function buildApp(options: Options = {}) {
       });
     },
   );
+  // A receiver that cannot prepare its destination must stop both participants,
+  // without throwing away an already uploaded prefix. Retrying after choosing a
+  // local folder resumes this same offer rather than manufacturing a new send.
+  app.post(`${filePath}/receive-error`, {
+    schema: { body: { type: "object", additionalProperties: false, required: ["message"],
+      properties: { message: { type: "string", minLength: 1, maxLength: 500 } } } },
+  }, async (req) => {
+    const d = device(req), p = req.params as any, t = transfer(d, p.transferId);
+    role(d, t, "target");
+    const f = file(t, p.fileId);
+    if (!["offered", "accepted", "uploading", "ready"].includes(f.status))
+      return { file: fileView(f) };
+    clearDirect(t.id, f.id);
+    for (const stream of streams.get(f.path) ?? []) stream.destroy();
+    run("UPDATE files SET receive_failure=status,status='failed',error=? WHERE transfer_id=? AND id=?",
+      (req.body as { message: string }).message.trim() || "Receiver could not save this file", t.id, f.id);
+    changed(t);
+    return { file: fileView(file(t, f.id)) };
+  });
+  app.post(`${filePath}/receive-retry`, async (req) => {
+    const d = device(req), p = req.params as any, t = transfer(d, p.transferId);
+    return locked(`${t.id}/${p.fileId}`, async () => {
+      const f = file(t, p.fileId);
+      if (!f.receive_failure) return { file: fileView(f) };
+      if (f.status !== "failed") fail("INVALID_STATE", "Receiver failure is no longer active", 409);
+      clearDirect(t.id, f.id);
+      // Direct connections need fresh tickets; relay keeps its committed bytes,
+      // attempt and phase, including a complete file awaiting local storage.
+      const phase = f.transport === "direct" ? "accepted" : f.receive_failure;
+      run("UPDATE files SET status=?,transport=?,error=NULL,receive_failure=NULL WHERE transfer_id=? AND id=?",
+        phase, f.transport === "direct" ? null : f.transport, t.id, f.id);
+      changed(t);
+      return { file: fileView(file(t, f.id)) };
+    });
+  });
   app.post(`${filePath}/cancel`, async (req) => {
     const d = device(req),
       p = req.params as any,

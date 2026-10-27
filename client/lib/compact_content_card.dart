@@ -7,6 +7,7 @@ import 'models.dart';
 import 'saved_files.dart';
 import 'ui_tokens.dart';
 import 'text_selection_surface.dart';
+import 'incoming_receipt_state.dart';
 
 /// Shared visual contract for receive/history/library cards and the Windows
 /// receive dock. Actions are supplied by the owning application session.
@@ -48,16 +49,17 @@ class CompactContentCard extends StatelessWidget {
   );
 
   Widget _buildCard(BuildContext context, double width) {
+    final receive = IncomingReceiptState(entry);
+    final stateLabel = status.isNotEmpty ? status : receive.label;
     final compactAction =
         width < 180 * MediaQuery.textScalerOf(context).scale(1);
     final image =
         entry.kind == 'file' &&
-        savedFileCategory(entry.title) == SavedFileCategory.image;
-    final active = [
-      'uploading',
-      'downloading',
-      'directSending',
-    ].contains(entry.status);
+        savedFileCategory(entry.title) == SavedFileCategory.image &&
+        (!receive.incomingFile || receive.canExport);
+    final active =
+        ['uploading', 'downloading', 'directSending'].contains(entry.status) ||
+        receive.showProgress;
     final card = Material(
       color: surfaceColor ?? Colors.white,
       shape: RoundedRectangleBorder(
@@ -127,7 +129,9 @@ class CompactContentCard extends StatelessWidget {
                   Align(
                     alignment: Alignment.bottomCenter,
                     child: LinearProgressIndicator(
-                      value: entry.progress.clamp(0, 1),
+                      value: receive.showProgress
+                          ? receive.progressValue
+                          : entry.progress.clamp(0, 1),
                       minHeight: 3,
                     ),
                   ),
@@ -159,10 +163,10 @@ class CompactContentCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 11, color: Ui.muted),
                   ),
-                  if (!selecting && (status.isNotEmpty || speed.isNotEmpty))
+                  if (!selecting && (stateLabel.isNotEmpty || speed.isNotEmpty))
                     Text(
                       [
-                        status,
+                        stateLabel,
                         speed,
                       ].where((part) => part.isNotEmpty).join(' · '),
                       style: TextStyle(
@@ -201,12 +205,12 @@ class CompactContentCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 5),
                   ],
-                  if (!selecting && (status.isNotEmpty || speed.isNotEmpty))
+                  if (!selecting && (stateLabel.isNotEmpty || speed.isNotEmpty))
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
                         [
-                          status,
+                          stateLabel,
                           speed,
                         ].where((part) => part.isNotEmpty).join(' · '),
                         maxLines: 1,

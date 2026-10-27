@@ -1,4 +1,5 @@
 import 'app_icon.dart';
+import 'incoming_receipt_state.dart';
 
 import 'dart:async';
 import 'dart:io';
@@ -63,6 +64,7 @@ const statuses = {
   'awaitingReceipt': '等待确认',
   'relayConsent': '需中继',
   'failed': '失败',
+  'paused': '已暂停',
   'canceled': '已取消',
   'rejected': '已拒绝',
   'expired': '已过期',
@@ -130,6 +132,7 @@ class _SendScreenState extends State<SendScreen>
   VoidCallback? _closeNativeDismissedReceipt;
   final _receiptVersion = ValueNotifier<int>(0);
   bool _receiptWindowFloating = false;
+  String _receiptSnapshot = '';
   bool _receiptPresentedExternally = false;
   final _nativeQueueKey = GlobalKey();
   final _nativeSendNavigationKey = GlobalKey();
@@ -416,6 +419,17 @@ class _SendScreenState extends State<SendScreen>
       _receiptVersion.value++;
       scheduleReceipt();
     }
+    final receiptSnapshot = c.pendingReceipts.values
+        .map(
+          (e) =>
+              '${e.id}:${e.status}:${e.progress}:${e.receivedBytes}:${e.localPath}:${e.error}:${e.relayConfirmationPending}',
+        )
+        .join('|');
+    if (receiptSnapshot != _receiptSnapshot) {
+      _receiptSnapshot = receiptSnapshot;
+      collectReceipts();
+      _receiptVersion.value++;
+    }
     if ((c.sharedText != _sharedSnapshot ||
             ui.sharedHistory.scope != _sharedScope) &&
         !_hasComposingText(sharedText.value)) {
@@ -598,7 +612,7 @@ class _SendScreenState extends State<SendScreen>
               platformIcon: deviceIcon(device),
               onClose: close,
               onCopy: () => perform(() => c.copyDockText(item), done: '已复制'),
-              onOpen: () => perform(() => openFile(item)),
+              onOpen: () => receiptAction(item),
               dragSurface: (child) => dragSurface(
                 item,
                 child,
@@ -3073,6 +3087,65 @@ class _SendScreenState extends State<SendScreen>
     ]);
   }
 
+  Future<void> transferControl(String action, DockEntry item) async {
+    try {
+      if (action == 'pause') await c.pause(item);
+      if (action == 'resume') await c.resume(item);
+      if (action == 'cancel') await c.cancel(item);
+      if (action == 'retry') await c.retry(item);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
+
+  Future<void> receiptAction(DockEntry item) async {
+    final action = IncomingReceiptState(item).primaryAction;
+    if (['pause', 'resume', 'retry'].contains(action))
+      return transferControl(action, item);
+    if (action == 'approveRelay') return perform(() => c.approveRelay(item));
+    if (action == 'receive')
+      return perform(
+        () => item.status == 'offered' ? c.accept(item, true) : c.receive(item),
+      );
+    return perform(() => openFile(item));
+  }
+
+  Widget transferControls(DockEntry item) => TextButtonTheme(
+    data: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        minimumSize: const Size(40, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 5),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    ),
+    child: Wrap(
+      spacing: 0,
+      children: [
+        if (item.locallyPaused)
+          TextButton(
+            onPressed: () => transferControl('resume', item),
+            child: const Text('继续'),
+          )
+        else if (item.status != 'failed')
+          TextButton(
+            onPressed: () => transferControl('pause', item),
+            child: const Text('暂停'),
+          ),
+        if (item.status == 'failed')
+          TextButton(
+            onPressed: () => transferControl('retry', item),
+            child: const Text('重试'),
+          ),
+        TextButton(
+          onPressed: () => transferControl('cancel', item),
+          child: const Text('取消'),
+        ),
+      ],
+    ),
+  );
+
   Widget entryCard(
     DockEntry item, {
     bool selectionEnabled = true,
@@ -3140,11 +3213,17 @@ class _SendScreenState extends State<SendScreen>
         onSelected: (action) => fileAction(action, item),
         itemBuilder: (_) => entryMenu(item),
       ),
-      status: item.status == 'failed' ? '传输失败' : '',
+      status: item.status == 'failed'
+          ? '传输失败'
+          : item.locallyPaused
+          ? '已暂停'
+          : '',
       speed: active && item.transferBytesPerSecond > 0
           ? '${formatSize(item.transferBytesPerSecond.round())}/s'
           : '',
-      action: needsAction
+      action: c.canControlTransfer(item) && !item.relayConfirmationPending
+          ? transferControls(item)
+          : needsAction
           ? TextButton(
               style: TextButton.styleFrom(
                 minimumSize: const Size(36, 32),
@@ -3210,6 +3289,10 @@ class _SendScreenState extends State<SendScreen>
       if (FileShareBridge.supported &&
           (item.kind == 'text' || item.localPath.isNotEmpty))
         const PopupMenuItem(value: 'share', child: Text('分享')),
+      if (cancelable && item.locallyPaused)
+        const PopupMenuItem(value: 'resume', child: Text('继续传输')),
+      if (cancelable && !item.locallyPaused && item.status != 'failed')
+        const PopupMenuItem(value: 'pause', child: Text('暂停传输')),
       if (!localHistory && item.outgoing && c.sources.containsKey(item.fileId))
         const PopupMenuItem(value: 'resend', child: Text('换路径重发')),
       if (!localHistory &&
@@ -3395,6 +3478,10 @@ class _SendScreenState extends State<SendScreen>
   }
 
   Future<void> fileAction(String action, DockEntry item) async {
+    if (['pause', 'resume', 'cancel'].contains(action)) {
+      await transferControl(action, item);
+      return;
+    }
     if (action == 'requeue') {
       await perform(() => c.stageHistoryEntry(item));
       if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
@@ -3442,23 +3529,27 @@ class _SendScreenState extends State<SendScreen>
     if (action == 'details') {
       await showDialog<void>(
         context: context,
-        builder: (dialog) => AlertDialog(
-          title: Text(item.title),
-          content: SingleChildScrollView(
-            child: SelectableText(
-              '${item.sourceReference.isNotEmpty ? '文件夹 · ZIP 传输\n' : ''}${item.kind == 'text' ? '${item.text.runes.length} 字符' : formatSize(item.size)}\n${entryTime(item)}\n${sourceName(item.outgoing ? item.targetDeviceId : item.source)}\n${statusLabel(item)} · ${routeLabels[item.route] ?? item.route}\n${item.sourceReference.isNotEmpty
-                  ? '${item.sourceReference}\n'
-                  : item.localPath.isEmpty
-                  ? ''
-                  : '${item.localPath}\n'}${item.routeDetail}${item.error.isEmpty ? '' : '\n${item.error}'}',
+        builder: (dialog) => AnimatedBuilder(
+          animation: c,
+          builder: (_, __) => AlertDialog(
+            title: Text(item.title),
+            content: SingleChildScrollView(
+              child: SelectableText(
+                '${item.sourceReference.isNotEmpty ? '文件夹 · ZIP 传输\n' : ''}${item.kind == 'text' ? '${item.text.runes.length} 字符' : formatSize(item.size)}\n${entryTime(item)}\n${sourceName(item.outgoing ? item.targetDeviceId : item.source)}\n${statusLabel(item)} · ${routeLabels[item.route] ?? item.route}\n${item.sourceReference.isNotEmpty
+                    ? '${item.sourceReference}\n'
+                    : item.localPath.isEmpty
+                    ? ''
+                    : '${item.localPath}\n'}${item.routeDetail}${item.error.isEmpty ? '' : '\n${item.error}'}',
+              ),
             ),
+            actions: [
+              if (c.canControlTransfer(item)) transferControls(item),
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('关闭'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialog),
-              child: const Text('关闭'),
-            ),
-          ],
         ),
       );
       return;

@@ -140,6 +140,9 @@ class DockEntry {
     this.relayConfirmationPending = false,
     this.relayPendingBeforeAccept = false,
     this.locallyCanceled = false,
+    this.locallyPaused = false,
+    this.receiveFailure = false,
+    this.receiveFailureReported = false,
     int? createdAtMillis,
     this.receivedAtMillis = 0,
     this.sourceReference = '',
@@ -192,6 +195,9 @@ class DockEntry {
   String targetDeviceId;
   bool relayConfirmed, relayConfirmationPending, relayPendingBeforeAccept;
   bool locallyCanceled;
+  bool locallyPaused;
+  bool receiveFailure;
+  bool receiveFailureReported;
   double progress;
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -229,6 +235,9 @@ class DockEntry {
     'relayConfirmationPending': relayConfirmationPending,
     'relayPendingBeforeAccept': relayPendingBeforeAccept,
     'locallyCanceled': locallyCanceled,
+    'locallyPaused': locallyPaused,
+    'receiveFailure': receiveFailure,
+    'receiveFailureReported': receiveFailureReported,
   };
   factory DockEntry.fromJson(Map<String, dynamic> j) => DockEntry(
     id: j['id'],
@@ -268,6 +277,9 @@ class DockEntry {
     relayConfirmationPending: j['relayConfirmationPending'] ?? false,
     relayPendingBeforeAccept: j['relayPendingBeforeAccept'] ?? false,
     locallyCanceled: j['locallyCanceled'] ?? j['status'] == 'canceled',
+    locallyPaused: j['locallyPaused'] ?? j['status'] == 'paused',
+    receiveFailure: j['receiveFailure'] ?? false,
+    receiveFailureReported: j['receiveFailureReported'] ?? false,
   );
 }
 

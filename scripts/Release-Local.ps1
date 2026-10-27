@@ -50,6 +50,16 @@ try {
     $settings = @{ 'build-dir' = "build/local-release/$version"; 'enable-windows-desktop' = $true } | ConvertTo-Json
     [IO.File]::WriteAllText((Join-Path $config '.flutter_settings'), $settings, (New-Object Text.UTF8Encoding($false)))
     if (-not $PublishOnly) {
+    # Flutter's Windows assembler reuses build/flutter_assets independently of
+    # the versioned native output. Retired assets must not survive in that cache.
+    $buildAssets = [IO.Path]::GetFullPath((Join-Path $client 'build\flutter_assets'))
+    $buildRoot = [IO.Path]::GetFullPath((Join-Path $client 'build'))
+    if (-not $buildAssets.StartsWith($buildRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Build assets escaped the project build folder' }
+    if (Test-Path -LiteralPath $buildAssets) {
+        $assetEntries = @(Get-Item -LiteralPath $buildAssets -Force) + @(Get-ChildItem -LiteralPath $buildAssets -Recurse -Force)
+        if (@($assetEntries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) { throw 'Build assets contain links; refusing to replace them' }
+        Remove-Item -LiteralPath $buildAssets -Recurse -Force
+    }
     Push-Location $client
     try {
         Invoke-Checked $dart @($snapshot,'build','windows','--release','--no-pub') *> (Join-Path $logs "release-local-$version-windows.log")
@@ -60,6 +70,7 @@ try {
     $apk = Join-Path $releases "GlobalSend-$version-android-arm64-v8a.apk"
     Copy-Item -LiteralPath (Join-Path $client 'build\app\outputs\flutter-apk\app-release.apk') -Destination $apk -Force
     Invoke-Checked 'F:\Android\Sdk\build-tools\36.0.0\apksigner.bat' @('verify',$apk)
+    Invoke-Checked 'D:\Python\python.exe' @((Join-Path $PSScriptRoot 'verify-no-fonts.py'),$windows,$apk)
     Compress-Archive -Path "$windows\*" -DestinationPath (Join-Path $releases "GlobalSend-$version-windows-x64.zip") -Force
 
     # Stop only GlobalSend, never other Flutter/Node/Java applications.

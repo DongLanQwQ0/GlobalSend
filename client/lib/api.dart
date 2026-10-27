@@ -3,10 +3,14 @@ import 'dart:io';
 import 'dart:async';
 
 import 'connection_window.dart';
+import 'transfer_operation.dart';
 
 class CenterApi {
   CenterApi(this.baseUrl, {this.token = ''});
   final String baseUrl;
+  CenterApi get owner => this;
+  CenterApi forOperation(TransferOperation operation) =>
+      _OperationApi(this, operation);
   String token;
   final HttpClient client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 12);
@@ -19,14 +23,25 @@ class CenterApi {
   ]) async {
     final window = ConnectionWindow.current;
     window?.check();
+    final operation = TransferOperation.current;
+    operation?.check();
     final activeClient = window == null
-        ? client
+        ? operation?.resource<HttpClient>(
+                this,
+                () =>
+                    HttpClient()
+                      ..connectionTimeout = const Duration(seconds: 3),
+                (value) => value.close(force: true),
+              ) ??
+              client
         : window.resource<HttpClient>(
             this,
             () => HttpClient()..connectionTimeout = window.remaining,
             (value) => value.close(force: true),
           );
     final request = await activeClient.openUrl(method, uri(path));
+    operation?.onCancel(() => request.abort());
+    operation?.check();
     window?.onCancel(() => request.abort());
     window?.check();
     request.followRedirects = false;
@@ -38,6 +53,7 @@ class CenterApi {
       request.write(jsonEncode(body));
     }
     final response = await request.close().timeout(const Duration(seconds: 35));
+    operation?.check();
     window?.check();
     final String raw;
     if (window == null) {
@@ -77,7 +93,18 @@ class CenterApi {
   }
 
   Future<void> upload(String path, List<int> bytes) async {
-    final request = await client.putUrl(uri(path));
+    final operation = TransferOperation.current;
+    operation?.check();
+    final activeClient =
+        operation?.resource<HttpClient>(
+          this,
+          () => HttpClient()..connectionTimeout = const Duration(seconds: 3),
+          (value) => value.close(force: true),
+        ) ??
+        client;
+    final request = await activeClient.putUrl(uri(path));
+    operation?.onCancel(() => request.abort());
+    operation?.check();
     request.followRedirects = false;
     request.headers.set('Authorization', 'Bearer $token');
     request.headers.contentType = ContentType.binary;
@@ -100,13 +127,24 @@ class CenterApi {
     String? expectedSha256,
     int? expectedSize,
   }) async {
+    final operation = TransferOperation.current;
+    operation?.check();
     if (!path.startsWith('/api/v1/downloads/') ||
         path.contains('..') ||
         path.contains('?') ||
         path.contains('#')) {
       throw const FormatException('无效下载地址');
     }
-    final request = await client.getUrl(Uri.parse('$baseUrl$path'));
+    final activeClient =
+        operation?.resource<HttpClient>(
+          this,
+          () => HttpClient()..connectionTimeout = const Duration(seconds: 3),
+          (value) => value.close(force: true),
+        ) ??
+        client;
+    final request = await activeClient.getUrl(Uri.parse('$baseUrl$path'));
+    operation?.onCancel(() => request.abort());
+    operation?.check();
     request.followRedirects = false;
     var offset = await destination.exists() ? await destination.length() : 0;
     if (expectedSize != null && offset > expectedSize) offset = 0;
@@ -154,6 +192,7 @@ class CenterApi {
     progress(count);
     try {
       await for (final bytes in response.timeout(const Duration(seconds: 45))) {
+        operation?.check();
         sink.add(bytes);
         count += bytes.length;
         progress(count);
@@ -165,6 +204,57 @@ class CenterApi {
   }
 
   void close() => client.close(force: true);
+}
+
+class _OperationApi extends CenterApi {
+  _OperationApi(this.source, this.operation)
+    : super(source.baseUrl, token: source.token);
+  final CenterApi source;
+  final TransferOperation operation;
+  @override
+  CenterApi get owner => source.owner;
+  @override
+  Future<Map<String, dynamic>> call(
+    String method,
+    String path, [
+    Object? body,
+    bool authenticated = true,
+  ]) async {
+    operation.check();
+    final request = source.call(method, path, body, authenticated);
+    final result = await operation.wait(
+      request.timeout(const Duration(seconds: 3)),
+    );
+    operation.check();
+    return result;
+  }
+
+  @override
+  Future<void> upload(String path, List<int> bytes) {
+    operation.check();
+    return operation.wait(source.upload(path, bytes));
+  }
+
+  // Closing the per-file client aborts the body stream; wait for its sink's
+  // finally before releasing a descriptor or allowing resume on the same file.
+  @override
+  Future<void> download(
+    String path,
+    File destination,
+    void Function(int) progress, {
+    String? expectedSha256,
+    int? expectedSize,
+  }) async {
+    operation.check();
+    await source.download(
+      path,
+      destination,
+      progress,
+      expectedSha256: expectedSha256,
+      expectedSize: expectedSize,
+    );
+    operation.check();
+  }
 }
 
 class ApiException implements Exception {

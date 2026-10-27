@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'transfer_operation.dart';
+
 /// One connection-decision deadline, shared by all routes of a file. Once a
 /// route has really connected its data stream is no longer timed by this gate.
 class RouteDeadline {
@@ -45,6 +47,7 @@ class ConnectionWindow {
   Duration get remaining => limit - _watch.elapsed;
 
   void check() {
+    TransferOperation.current?.check();
     if (canceled || !established && remaining <= Duration.zero) {
       throw TimeoutException('连接探测预算已用完', limit);
     }
@@ -92,6 +95,7 @@ class ConnectionWindow {
   }();
 
   Future<T> run<T>(Future<T> Function() work) async {
+    TransferOperation.current?.onCancel(cancel);
     _watch.start();
     final future = runZoned(
       () => Future<T>.sync(work),

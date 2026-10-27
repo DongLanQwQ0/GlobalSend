@@ -76,6 +76,8 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         encoded == receiptPayload) {
       return;
     }
+    final newArrival =
+        receiptSerial != controller.receiptSerial || receiptPayload.isEmpty;
     receiptSerial = controller.receiptSerial;
     receiptPayload = encoded;
     final request = ++presentationRequest;
@@ -90,7 +92,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
       return;
     }
     // Suppress the main overlay until native focus decides the presentation.
-    controller.receiptPresentedExternally = true;
+    if (newArrival) controller.receiptPresentedExternally = true;
     unawaited(presentReceipts(items, receiptSerial, request));
   }
 
@@ -116,9 +118,11 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     } catch (error) {
       if (!mounted ||
           request != presentationRequest ||
-          serial != controller.receiptSerial)
+          serial != controller.receiptSerial) {
         return;
+      }
       controller.message = '接收窗口未能打开：$error';
+      controller.receiptPresentedExternally = false;
       controller.changed();
     }
   }
@@ -147,12 +151,31 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           if (entry != null && entry.kind == 'text') {
             await controller.copyDockText(entry);
           }
+        case 'receive':
+          if (entry != null) {
+            if (entry.status == 'offered') {
+              await controller.accept(entry, true);
+            } else {
+              await controller.receive(entry);
+            }
+          }
+        case 'retry':
+          if (entry != null) await controller.retry(entry);
+        case 'approveRelay':
+          if (entry != null) await controller.approveRelay(entry);
+        case 'pause':
+          if (entry != null) await controller.pause(entry);
+        case 'resume':
+          if (entry != null) await controller.resume(entry);
+        case 'cancel':
+          if (entry != null) await controller.cancel(entry);
         case 'stage':
           if (entry != null) await controller.stageHistoryEntry(entry);
           await SystemBridge.activateWindow();
         case 'reveal':
-          if (entry != null && entry.localPath.isNotEmpty)
+          if (entry != null && entry.localPath.isNotEmpty) {
             await SystemBridge.revealFile(entry.localPath);
+          }
         case 'delete':
           if (entry != null) {
             await controller.removeHistoryEntries([entry]);

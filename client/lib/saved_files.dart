@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 import 'models.dart';
 import 'receive_destination.dart';
 import 'received_file_access.dart';
@@ -268,6 +270,7 @@ class SavedFilesStore {
   int retentionHours = SavedFile.defaultRetentionHours;
   SavedFileCleanupFilter cleanupFilter = SavedFileCleanupFilter();
   String receiveDestinationLocation = '', receiveDestinationLabel = '';
+  int migrationSkippedFiles = 0;
   final Map<String, String> relocatedLocations = {};
   final List<SavedFile> _obsoleteLocations = [];
   int get migrationCleanupPending => _obsoleteLocations.length;
@@ -448,9 +451,12 @@ class SavedFilesStore {
     void Function(int done, int total)? onProgress,
     Future<void> Function()? onCommitted,
   }) => _write(() async {
+    migrationSkippedFiles = 0;
     if (_obsoleteLocations.isNotEmpty) {
       await _finishMigrationCleanup();
-      if (_obsoleteLocations.isNotEmpty) {
+      if (_obsoleteLocations.any(
+        (item) => !item.directory && !item.path.startsWith('content://'),
+      )) {
         throw const FileSystemException('部分旧文件尚未移除，请关闭占用文件的程序后重试');
       }
     }
@@ -466,7 +472,15 @@ class SavedFilesStore {
       await Directory(base).create(recursive: true);
     final originals = <SavedFile>[];
     for (final item in _items.values) {
-      if (await ownsExisting(item)) originals.add(item);
+      try {
+        if (await ownsExisting(item)) originals.add(item);
+      } on PlatformException {
+        // An unavailable old provider must not trap the receive destination.
+        // Keep this item's original durable reference for a later recovery.
+        migrationSkippedFiles++;
+      } on FileSystemException {
+        migrationSkippedFiles++;
+      }
     }
     originals.sort(
       (a, b) => a.relativePath.length.compareTo(b.relativePath.length),
@@ -492,6 +506,30 @@ class SavedFilesStore {
             'migration:$base:${item.profileKey}:${item.deviceId}:${item.groupId}:${item.transferId}';
         String target;
         var currentSize = item.size;
+        ReceivedFileAccess? source;
+        if (!item.directory) {
+          try {
+            source = await ReceivedFileAccess.open(item.path);
+            final probe = await source.file.open();
+            try {
+              currentSize = await probe.length();
+            } finally {
+              await probe.close();
+            }
+            await source.close();
+            source = null;
+          } on PlatformException {
+            await source?.close();
+            migrationSkippedFiles++;
+            moved.add(item);
+            continue;
+          } on FileSystemException {
+            await source?.close();
+            migrationSkippedFiles++;
+            moved.add(item);
+            continue;
+          }
+        }
         if (item.directory) {
           target = await ReceiveDestination.folderDirectory(
             destinationLocation: base,
@@ -516,10 +554,8 @@ class SavedFilesStore {
           );
           target = handle.location;
           created.add(target);
-          ReceivedFileAccess? source;
           try {
             source = await ReceivedFileAccess.open(item.path);
-            currentSize = await source.file.length();
             await source.file.openRead().pipe(File(handle.ioPath).openWrite());
           } finally {
             await source?.close();
@@ -546,8 +582,12 @@ class SavedFilesStore {
     final previousLocation = receiveDestinationLocation;
     final previousLabel = receiveDestinationLabel;
     final previousAliases = Map<String, String>.from(relocatedLocations);
+    final previousObsolete = _obsoleteLocations.toList();
+    final migratedOriginals = <SavedFile>[];
     for (var index = 0; index < originals.length; index++) {
       final old = originals[index], next = moved[index];
+      if (old.path == next.path) continue;
+      migratedOriginals.add(old);
       _items[old.id] = next;
       relocatedLocations.updateAll(
         (key, value) => value == old.path ? next.path : value,
@@ -556,7 +596,7 @@ class SavedFilesStore {
     }
     receiveDestinationLocation = location;
     receiveDestinationLabel = label;
-    _obsoleteLocations.addAll(originals);
+    _obsoleteLocations.addAll(migratedOriginals);
     try {
       // Commit every new reference before removing any old bytes. The
       // pending-old list survives interruption and is safe to retry.
@@ -568,7 +608,9 @@ class SavedFilesStore {
       relocatedLocations
         ..clear()
         ..addAll(previousAliases);
-      _obsoleteLocations.clear();
+      _obsoleteLocations
+        ..clear()
+        ..addAll(previousObsolete);
       receiveDestinationLocation = previousLocation;
       receiveDestinationLabel = previousLabel;
       for (final path in [
@@ -582,7 +624,9 @@ class SavedFilesStore {
     await ReceiveDestination.relocateFolderRoots(relocatedLocations);
     await onCommitted?.call();
     await _finishMigrationCleanup();
-    if (_obsoleteLocations.isNotEmpty) {
+    if (_obsoleteLocations.any(
+      (item) => !item.directory && !item.path.startsWith('content://'),
+    )) {
       throw const FileSystemException('文件已迁移，部分旧文件被占用，关闭占用程序后重试清理');
     }
   });
@@ -594,7 +638,8 @@ class SavedFilesStore {
       ..sort((a, b) => b.relativePath.length.compareTo(a.relativePath.length));
     for (final item in pending) {
       try {
-        if (await ownsExisting(item)) await _delete(item, recursive: false);
+        if (await ownsExisting(item) && !await _delete(item, recursive: false))
+          continue;
         _obsoleteLocations.remove(item);
       } on FileSystemException {
         // Keep the journal entry while another application owns a file handle.

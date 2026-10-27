@@ -530,10 +530,14 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(find.text('接收失败'), findsOneWidget);
-      await tester.tap(find.text('处理'));
+      await tester.tap(find.text('重试'));
       await tester.pumpAndSettle();
-      expect(actions.single['action'], 'open');
-      item.addAll({'status': 'ready', 'relayConfirmationPending': true});
+      expect(actions.single['action'], 'retry');
+      item.addAll({
+        'status': 'ready',
+        'relayConfirmationPending': true,
+        'progress': .4,
+      });
       await content(tester, data);
       expect(find.text('需要确认中继'), findsOneWidget);
       item.addAll({
@@ -543,9 +547,9 @@ void main() {
         'transferBytesPerSecond': 2048,
       });
       await content(tester, data);
-      expect(find.text('处理'), findsNothing);
+      expect(find.text('重试'), findsNothing);
       expect(find.text('接收失败'), findsNothing);
-      expect(find.text('2.0 KiB/s'), findsOneWidget);
+      expect(find.textContaining('2.0 KiB/s'), findsOneWidget);
       expect(
         tester
             .widget<LinearProgressIndicator>(
@@ -556,7 +560,7 @@ void main() {
       );
       item['status'] = 'received';
       await content(tester, data);
-      expect(find.text('2.0 KiB/s'), findsNothing);
+      expect(find.textContaining('2.0 KiB/s'), findsNothing);
       expect(find.byType(LinearProgressIndicator), findsNothing);
     },
   );

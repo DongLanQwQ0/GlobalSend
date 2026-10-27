@@ -376,7 +376,7 @@ final class DockCoordinator {
                 drop.put("paths", new ArrayList<>(local.paths));
                 drop.put("texts", new ArrayList<>(local.texts));
                 drop.put("temporaryPaths", new ArrayList<>());
-                synchronized (pending) { if (pending.size() < 32) pending.add(drop); }
+                synchronized (pending) { pending.add(drop); }
                 channel.invokeMethod("nativeDrop", drop); return true;
             default: return true;
         }
@@ -399,7 +399,7 @@ final class DockCoordinator {
             case DragEvent.ACTION_DROP:
                 dragActive = false;
                 ClipData clip = event.getClipData();
-                if (clip == null || clip.getItemCount() == 0 || clip.getItemCount() > 32) {
+                if (clip == null || clip.getItemCount() == 0) {
                     publishDrag("ended"); return false;
                 }
                 // Retain the grant until every source stream is copied. A null
@@ -417,13 +417,13 @@ final class DockCoordinator {
             if (Intent.ACTION_SEND.equals(intent.getAction())) one = Build.VERSION.SDK_INT >= 33 ? intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri.class) : intent.getParcelableExtra(Intent.EXTRA_STREAM);
             if (Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction())) {
                 ArrayList<Uri> many = Build.VERSION.SDK_INT >= 33 ? intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri.class) : intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-                if (many != null && !many.isEmpty() && many.size() <= 32) { clip = ClipData.newUri(context.getContentResolver(), "Shared files", many.get(0)); for (int i=1;i<many.size();i++) clip.addItem(new ClipData.Item(many.get(i))); }
+                if (many != null && !many.isEmpty()) { clip = ClipData.newUri(context.getContentResolver(), "Shared files", many.get(0)); for (int i=1;i<many.size();i++) clip.addItem(new ClipData.Item(many.get(i))); }
                 one = null;
             }
             if (clip == null && one != null) clip = ClipData.newUri(context.getContentResolver(), "Shared file", one);
             else if (clip == null && intent.getCharSequenceExtra(Intent.EXTRA_TEXT) != null) clip = ClipData.newPlainText("Shared text", intent.getCharSequenceExtra(Intent.EXTRA_TEXT));
         }
-        if (clip != null && clip.getItemCount() <= 32) consume(clip, null);
+        if (clip != null) consume(clip, null);
         intent.setAction(null); // Do not import again on activity resume.
     }
     private final List<DragAndDropPermissions> folderReadGrants = java.util.Collections.synchronizedList(new ArrayList<>());
@@ -477,7 +477,7 @@ final class DockCoordinator {
                 }
             }
             Map<String, Object> event = new HashMap<>(); event.put("dropId", UUID.randomUUID().toString()); event.put("paths", paths); event.put("temporaryPaths", new ArrayList<>(paths.stream().filter(path -> !path.startsWith("content://")).collect(java.util.stream.Collectors.toList()))); event.put("directoryNames", directoryNames); event.put("directorySources", directorySources); event.put("texts", texts); if (error != null) event.put("error", error);
-            synchronized (pending) { if (pending.size() < 32) pending.add(event); }
+            synchronized (pending) { pending.add(event); }
             main.post(() -> {
                 importCount--;
                 if (!disposed) { channel.invokeMethod("nativeDrop", event); publishDrag("imported"); }

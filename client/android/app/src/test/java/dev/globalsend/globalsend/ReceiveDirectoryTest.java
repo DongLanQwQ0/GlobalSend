@@ -86,6 +86,7 @@ public class ReceiveDirectoryTest {
         Result pending = new Result(); directory.pick(pending);
         Intent launched = Shadows.shadowOf(activity).getNextStartedActivityForResult().intent;
         assertEquals(Intent.ACTION_OPEN_DOCUMENT_TREE, launched.getAction());
+        assertTrue(launched.getBooleanExtra(Intent.EXTRA_LOCAL_ONLY, false));
         assertTrue((launched.getFlags() & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0);
         assertTrue((launched.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0);
         Result duplicate = new Result(); directory.pick(duplicate);
@@ -112,6 +113,24 @@ public class ReceiveDirectoryTest {
         assertTrue(activity.getContentResolver().getPersistedUriPermissions().stream().anyMatch(permission ->
             permission.getUri().equals(tree) && permission.isReadPermission() && permission.isWritePermission()));
         assertNotSame(Thread.currentThread(), provider.lastQueryThread);
+        assertTrue(provider.documents.isEmpty());
+        assertFalse(provider.lastDescriptor.getFileDescriptor().valid());
+        assertFalse(ReceiveDirectory.isOwned(activity, provider.lastCreated.toString()));
+    }
+
+    @Test public void selectionRejectsUnsupportedDescriptorBeforeSavingAndRemovesItsProbe() throws Exception {
+        Entry original = provider.add("原文件.txt", new byte[]{9});
+        directory.dispose();
+        directory = adapter((descriptor, writable) -> { throw new IOException("Unsupported proc FD reopen"); });
+        Result result = new Result(); directory.pick(result);
+        directory.onActivityResult(ReceiveDirectory.PICK_DIRECTORY, Activity.RESULT_OK, new Intent().setData(tree)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION));
+        await(result);
+        assertEquals("RECEIVE_DIRECTORY", result.error); assertNull(result.value);
+        assertEquals(1, provider.documents.size()); assertTrue(original.file.exists());
+        assertArrayEquals(new byte[]{9}, Files.readAllBytes(original.file.toPath()));
+        assertFalse(ReceiveDirectory.isOwned(activity, provider.lastCreated.toString()));
+        assertFalse(provider.lastDescriptor.getFileDescriptor().valid());
     }
 
     @Test public void activityReplacementKeepsAnOpenReceiveLeaseAlive() throws Exception {

@@ -41,6 +41,10 @@ const id = () => crypto.randomUUID();
 const fileKey = (transferId: string,fileId: string) => `${transferId}:${fileId}`;
 const time = (date: string) => new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(new Date(date));
 const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败，请重试。';
+class ReceiveStorageError extends Error {}
+async function receiveStorage<T>(action:()=>Promise<T>):Promise<T> {
+  try{return await action();}catch(error){throw new ReceiveStorageError(errorText(error));}
+}
 const localGet = (key: string) => { try { return sessionStorage.getItem(key); } catch { return null; } };
 const localSet = (key: string,value: string) => { try { sessionStorage.setItem(key,value); } catch { /* Session still works in memory if storage is unavailable. */ } };
 const rememberedGet = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -202,6 +206,10 @@ class GlobalSend {
   uploads = new Map<string,AbortController>();
   hashes = new Set<AbortController>();
   paused = new Set<string>();
+  canceled = new Set<string>();
+  cancelRequests = new Set<string>();
+  fileRequests = new Map<string,AbortController>();
+  receiveReports = new Map<string,Promise<void>>();
   uploadErrors = new Map<string,string>();
   uploadProgress = new Map<string,number>();
   handed = new Set<string>();
@@ -1233,6 +1241,7 @@ class GlobalSend {
     this.helloReceived=false;this.deviceNames.clear();
     this.libraryForward=null;this.fileLibrary.close();
     this.uploads.clear(); this.fileSources.clear(); this.api.session = null;
+    for(const controller of this.fileRequests.values())controller.abort();this.fileRequests.clear();this.receiveReports.clear();this.canceled.clear();this.cancelRequests.clear();this.paused.clear();
     rememberedSet(this.key + ':session','');
     localSet(this.key + ':session',''); localSet(this.key + ':state','');localSet(this.dockKey,'');
     this.session = null; this.connected = false; this.modal = null;
@@ -1260,7 +1269,7 @@ class GlobalSend {
       const ownDevice=this.device(this.session.device.deviceId);
       if(ownDevice && ownDevice.name!==this.session.device.name){this.session.device={...this.session.device,...ownDevice};this.saveSession();}
       const previousFiles=new Map(this.transfers.flatMap(transfer=>transfer.files.map(file=>[fileKey(transfer.transferId,file.fileId),file.status])));
-      this.transfers = transfers.transfers;
+      this.transfers = transfers.transfers.map(transfer=>({...transfer,files:transfer.files.map(file=>this.canceled.has(fileKey(transfer.transferId,file.fileId))?{...file,status:'canceled' as const}:file)}));
       if(this.receiptsInitialized)for(const transfer of this.transfers)for(const file of transfer.files)if(previousFiles.get(fileKey(transfer.transferId,file.fileId))!==file.status)this.noticeFile(transfer,file);
       this.reconcileRtc();
       this.selectOnlineTarget();
@@ -1502,7 +1511,7 @@ class GlobalSend {
         const key = fileKey(transfer.transferId,file.fileId);
         if(file.entryKind==='directory')continue;
         if (available <= 0) return;
-        if (['accepted','uploading'].includes(file.status) && this.fileSources.has(key) && !this.uploads.has(key) && !this.paused.has(key) && !this.uploadErrors.has(key)) {
+        if (['accepted','uploading'].includes(file.status) && this.fileSources.has(key) && !this.uploads.has(key) && !this.fileRequests.has(key) && !this.paused.has(key) && !this.canceled.has(key) && !this.uploadErrors.has(key)) {
           if(file.transport==='direct' || (!file.transport && this.rtcEnabled)) {
             const rtc=(file as TransferFile & {rtc?:RtcView}).rtc;
             if(rtc && rtc.state!=='failed' && this.rtcAttempts.get(key)!==rtc.attemptId){available--;void this.sendRtc(transfer,file,rtc.attemptId);}
@@ -1514,20 +1523,41 @@ class GlobalSend {
     }
   }
   setFile(transferId: string,file: TransferFile) {
+    if(this.canceled.has(fileKey(transferId,file.fileId)) && file.status!=='canceled')return;
     const transfer = this.transfers.find(item => item.transferId === transferId);
     if(file.status==='received' && transfer?.targetDeviceId===this.session?.device.deviceId)this.recordReceipt(fileKey(transferId,file.fileId));
     if (transfer) transfer.files = transfer.files.map(item => item.fileId === file.fileId ? file : item);
     if(transfer)this.noticeFile(transfer,file);
   }
+  fileActive(key:string,controller:AbortController,generation:number){return generation===this.generation && !controller.signal.aborted && !this.paused.has(key) && !this.canceled.has(key);}
+  stopFile(key:string){
+    this.uploads.get(key)?.abort();this.rtcReceives.get(key)?.abort();this.fileRequests.get(key)?.abort();
+    return this.rtcChannels.get(key)?.close().catch(()=>{}) || Promise.resolve();
+  }
+  pauseFile(key:string){if(this.canceled.has(key))return;this.paused.add(key);this.uploadErrors.delete(key);this.stopFile(key);this.render();}
+  async reportReceiveError(transfer:Transfer,file:TransferFile,error:unknown,controller:AbortController,generation:number){
+    const key=fileKey(transfer.transferId,file.fileId);
+    if(!this.fileActive(key,controller,generation))return;
+    this.uploadErrors.set(key,errorText(error));this.render();
+    if(!(this.info?.features as {receiveErrorReporting?:boolean}|undefined)?.receiveErrorReporting)return;
+    const reporting=(async()=>{
+      try{
+        const {file:failed}=await this.api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/receive-error`,{message:errorText(error).slice(0,500)||'无法保存接收文件'},'POST',controller.signal);
+        if(this.fileActive(key,controller,generation)){this.setFile(transfer.transferId,failed);this.render();}
+      }catch{/* The local failure remains visible when the center is unavailable. */}
+    })();
+    this.receiveReports.set(key,reporting);
+    try{await reporting;}finally{if(this.receiveReports.get(key)===reporting)this.receiveReports.delete(key);}
+  }
   async uploadFile(transferId: string,fileId: string) {
     const generation = this.generation;
     const key = fileKey(transferId,fileId); const source = this.fileSources.get(key);
-    if (!source || this.uploads.has(key)) return;
+    if (!source || this.uploads.has(key) || this.paused.has(key) || this.canceled.has(key)) return;
     const controller = new AbortController(); this.uploads.set(key,controller); this.uploadErrors.delete(key); this.render();
     try {
       // A failed HTTP response may have committed data: always reconcile before uploading/resuming.
-      const {transfer} = await this.api.request<{transfer:Transfer}>(`/transfers/${transferId}`);
-      if (generation !== this.generation) return;
+      const {transfer} = await this.api.request<{transfer:Transfer}>(`/transfers/${transferId}`,undefined,'GET',controller.signal);
+      if (!this.fileActive(key,controller,generation)) return;
       let file = transfer.files.find(item => item.fileId === fileId)!; this.setFile(transferId,file);
       if (!['accepted','uploading'].includes(file.status)) return;
       if(file.transport==='direct' || !file.transport && this.rtcEnabled)return;
@@ -1536,20 +1566,20 @@ class GlobalSend {
         const offset = file.offset;
         const bytes = source.slice(offset,Math.min(source.size,offset + (this.info?.limits.chunkSize || 1048576)));
         const response = await this.api.upload<{file:TransferFile}>(`/transfers/${transferId}/files/${fileId}/chunks?offset=${offset}`,bytes,loaded => {
-          if (generation !== this.generation) return;
+          if (!this.fileActive(key,controller,generation)) return;
           this.uploadProgress.set(key,offset + loaded); this.paintProgress(key,offset + loaded,source.size);
         },controller.signal);
-        if (generation !== this.generation) return;
+        if (!this.fileActive(key,controller,generation)) return;
         file = response.file; this.setFile(transferId,file); this.uploadProgress.set(key,file.offset); this.render();
       }
       if (controller.signal.aborted) throw new DOMException('已暂停','AbortError');
-      const {file:ready} = await this.api.request<{file:TransferFile}>(`/transfers/${transferId}/files/${fileId}/complete`,{});
-      if (generation !== this.generation) return;
+      const {file:ready} = await this.api.request<{file:TransferFile}>(`/transfers/${transferId}/files/${fileId}/complete`,{},'POST',controller.signal);
+      if (!this.fileActive(key,controller,generation)) return;
       this.setFile(transferId,ready);
     } catch (error) {
-      if (generation === this.generation && !(error instanceof DOMException && error.name === 'AbortError')) this.uploadErrors.set(key,errorText(error));
+      if (this.fileActive(key,controller,generation) && !(error instanceof DOMException && error.name === 'AbortError')) this.uploadErrors.set(key,errorText(error));
     } finally {
-      if (generation === this.generation) { this.uploads.delete(key); this.uploadProgress.delete(key); this.render(); this.startReadyUploads();void this.selectIncomingRelays(); }
+      if (generation === this.generation) { if(this.uploads.get(key)===controller)this.uploads.delete(key); this.uploadProgress.delete(key); this.render(); this.startReadyUploads();void this.selectIncomingRelays(); }
     }
   }
   paintProgress(key: string,loaded: number,total: number) {
@@ -1564,15 +1594,22 @@ class GlobalSend {
   async retryFile(transferId: string,fileId: string) {
     const generation=this.generation;
     const key = fileKey(transferId,fileId);
-    const file = this.transfers.find(item => item.transferId === transferId)?.files.find(item => item.fileId === fileId);
-    if (!file) return;
+    let file = this.transfers.find(item => item.transferId === transferId)?.files.find(item => item.fileId === fileId);
+    if (!file || this.canceled.has(key) || this.fileRequests.has(key)) return;
     const incoming=this.transfers.find(item=>item.transferId===transferId);
-    if(incoming?.targetDeviceId===this.session?.device.deviceId){this.uploadErrors.delete(key);void this.selectIncomingRelays();this.render();return;}
-    if (!this.fileSources.has(key)) { this.openFilePicker(key); return; }
-    if (file.status === 'failed') {
-      const response = await this.api.request<{file:TransferFile}>(`/transfers/${transferId}/files/${fileId}/retry`,{attemptId:id()});if(generation!==this.generation)return;this.setFile(transferId,response.file);
-    }
-    this.paused.delete(key); this.uploadErrors.delete(key); this.startReadyUploads(); this.render();
+    const receiving=incoming?.targetDeviceId===this.session?.device.deviceId;
+    if (!receiving && !this.fileSources.has(key)) { this.openFilePicker(key); return; }
+    const controller=new AbortController();this.fileRequests.set(key,controller);this.paused.delete(key);this.uploadErrors.delete(key);this.render();
+    try{
+      await this.receiveReports.get(key);
+      if(!this.fileActive(key,controller,generation))return;
+      file=this.transfers.find(item=>item.transferId===transferId)?.files.find(item=>item.fileId===fileId);if(!file)return;
+      if(file.receiveFailure || file.status==='failed' && !receiving){
+        const response=await this.api.request<{file:TransferFile}>(`/transfers/${transferId}/files/${fileId}/${file.receiveFailure?'receive-retry':'retry'}`,file.receiveFailure?{}:{attemptId:id()},'POST',controller.signal);
+        if(!this.fileActive(key,controller,generation))return;this.setFile(transferId,response.file);
+      }
+    }catch(error){if(this.fileActive(key,controller,generation))this.uploadErrors.set(key,errorText(error));}
+    finally{if(this.fileRequests.get(key)===controller)this.fileRequests.delete(key);if(generation===this.generation){this.render();this.startReadyUploads();void this.selectIncomingRelays();}}
   }
   async attachResumeSource(file: File,key = this.resumeKey) {
     const generation = this.generation;
@@ -1619,7 +1656,7 @@ class GlobalSend {
     try{
       const response=await this.api.request<{transfer:Transfer}>(`/transfers/${transferId}/accept`,{fileIds});
       if(generation!==this.generation)return;
-      this.transfers=this.transfers.map(item=>item.transferId===transferId?response.transfer:item);
+      this.transfers=this.transfers.map(item=>item.transferId===transferId?{...response.transfer,files:response.transfer.files.map(file=>this.canceled.has(fileKey(transferId,file.fileId))?{...file,status:'canceled' as const}:file)}:item);
       this.autoAcceptRetryAt.delete(transferId);
       if(!automatic)this.toast(fileIds.length ? '开始接收' : '已拒绝');
       await this.refresh();
@@ -1703,38 +1740,46 @@ class GlobalSend {
   }
   async receiveDirectory(transfer:Transfer,file:TransferFile){
     if(this.receiveDirectoryChanging || this.activeFileTransfers>=this.transferConcurrency)return;
-    const key=fileKey(transfer.transferId,file.fileId),generation=this.generation;if(this.rtcReceives.has(key))return;
+    const key=fileKey(transfer.transferId,file.fileId),generation=this.generation;if(this.rtcReceives.has(key) || this.paused.has(key) || this.canceled.has(key))return;
     const controller=new AbortController();this.rtcReceives.set(key,controller);
-    try{const store=await this.ensureFileStore();await store.directory(key,file);const local=await store.get(key);if(generation!==this.generation)return;if(local)this.rtcLocalFiles.set(key,local);const response=await this.api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/received`,{});if(generation===this.generation){this.recordReceipt(key,store.receivedAt(key));this.setFile(transfer.transferId,response.file);this.uploadErrors.delete(key);}}
-    catch(error){if(generation===this.generation)this.uploadErrors.set(key,errorText(error));}
-    finally{if(generation===this.generation){this.rtcReceives.delete(key);this.render();this.startReadyUploads();void this.selectIncomingRelays();}}
+    try{
+      const store=await receiveStorage(()=>this.ensureFileStore());if(!this.fileActive(key,controller,generation))return;
+      await receiveStorage(()=>store.directory(key,file));if(!this.fileActive(key,controller,generation))return;
+      const local=await receiveStorage(()=>store.get(key));if(!this.fileActive(key,controller,generation))return;
+      if(local)this.rtcLocalFiles.set(key,local);
+      const response=await this.api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/received`,{},'POST',controller.signal);
+      if(this.fileActive(key,controller,generation)){this.recordReceipt(key,store.receivedAt(key));this.setFile(transfer.transferId,response.file);this.uploadErrors.delete(key);}
+    }catch(error){if(this.fileActive(key,controller,generation)){if(error instanceof ReceiveStorageError)await this.reportReceiveError(transfer,file,error,controller,generation);else this.uploadErrors.set(key,errorText(error));}}
+    finally{if(generation===this.generation){if(this.rtcReceives.get(key)===controller)this.rtcReceives.delete(key);this.render();this.startReadyUploads();void this.selectIncomingRelays();}}
   }
   async receiveStructuredRelay(transfer:Transfer,file:TransferFile){
     if(this.receiveDirectoryChanging || this.activeFileTransfers>=this.transferConcurrency)return;
-    const key=fileKey(transfer.transferId,file.fileId),generation=this.generation;if(this.rtcReceives.has(key))return;
+    const key=fileKey(transfer.transferId,file.fileId),generation=this.generation;if(this.rtcReceives.has(key) || this.paused.has(key) || this.canceled.has(key))return;
     const controller=new AbortController();this.rtcReceives.set(key,controller);this.uploadErrors.delete(key);
     let store:RtcFileStore|undefined;
     try{
-      store=await this.ensureFileStore();let local=await store.get(key);
+      store=await receiveStorage(()=>this.ensureFileStore());if(!this.fileActive(key,controller,generation))return;
+      let local=await receiveStorage(()=>store!.get(key));if(!this.fileActive(key,controller,generation))return;
       if(!local){
-        let offset=await store.open(key,file,Date.now()+86400000);
+        let offset=await receiveStorage(()=>store!.open(key,file,Date.now()+86400000));if(!this.fileActive(key,controller,generation))return;
         if(offset<file.size){
-          const {downloadPath}=await this.api.request<{downloadPath:string}>(`/transfers/${transfer.transferId}/files/${file.fileId}/download-ticket`,{});
+          const {downloadPath}=await this.api.request<{downloadPath:string}>(`/transfers/${transfer.transferId}/files/${file.fileId}/download-ticket`,{},'POST',controller.signal);
+          if(!this.fileActive(key,controller,generation))return;
           const response=await fetch(safeDownloadUrl(this.baseUrl,downloadPath),{signal:controller.signal,credentials:'omit',cache:'no-store',headers:offset?{Range:`bytes=${offset}-`}:undefined});
           if(!response.ok || offset && response.status!==206)throw new Error('文件下载无法从已接收位置继续');
           const reader=response.body!.getReader();
-          try{for(;;){const {done,value}=await reader.read();if(done)break;const bytes=value.buffer.slice(value.byteOffset,value.byteOffset+value.byteLength) as ArrayBuffer;offset=await store.write(key,offset,bytes);if(generation!==this.generation || controller.signal.aborted)throw new DOMException('接收已停止','AbortError');this.uploadProgress.set(key,offset);this.paintProgress(key,offset,file.size);}}finally{reader.releaseLock();}
+          try{for(;;){const {done,value}=await reader.read();if(!this.fileActive(key,controller,generation))return;if(done)break;const bytes=value.buffer.slice(value.byteOffset,value.byteOffset+value.byteLength) as ArrayBuffer;offset=await receiveStorage(()=>store!.write(key,offset,bytes));if(!this.fileActive(key,controller,generation))return;this.uploadProgress.set(key,offset);this.paintProgress(key,offset,file.size);}}finally{void reader.cancel().catch(()=>{});reader.releaseLock();}
         }
-        local=await store.finish(key);
+        local=await receiveStorage(()=>store!.finish(key));if(!this.fileActive(key,controller,generation))return;
         if(await digestFile(local,{signal:controller.signal})!==file.sha256){await store.remove(key);throw new Error('文件校验不一致，请重试');}
-        await store.confirm(key);
+        await receiveStorage(()=>store!.confirm(key));
       }
-      if(generation!==this.generation)return;
+      if(!this.fileActive(key,controller,generation))return;
       this.rtcLocalFiles.set(key,local);this.rtcFileExpiry.set(key,store.expiry(key));this.recordReceipt(key,store.receivedAt(key));
-      const {file:received}=await this.api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/received`,{transport:'relay'});
-      if(generation===this.generation){this.setFile(transfer.transferId,received);void this.fileLibrary.refresh();}
-    }catch(error){if(generation===this.generation && (error as Error).name!=='AbortError')this.uploadErrors.set(key,errorText(error));}
-    finally{await store?.close(key);if(generation===this.generation){this.rtcReceives.delete(key);this.render();this.startReadyUploads();void this.selectIncomingRelays();}}
+      const {file:received}=await this.api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/received`,{transport:'relay'},'POST',controller.signal);
+      if(this.fileActive(key,controller,generation)){this.setFile(transfer.transferId,received);void this.fileLibrary.refresh();}
+    }catch(error){if(this.fileActive(key,controller,generation) && (error as Error).name!=='AbortError'){if(error instanceof ReceiveStorageError)await this.reportReceiveError(transfer,file,error,controller,generation);else this.uploadErrors.set(key,errorText(error));}}
+    finally{await store?.close(key).catch(()=>{});if(generation===this.generation){if(this.rtcReceives.get(key)===controller)this.rtcReceives.delete(key);this.uploadProgress.delete(key);this.render();this.startReadyUploads();void this.selectIncomingRelays();}}
   }
   stopRtc() {
     const probes=this.rtcProbes;this.rtcProbes=null;this.rtcProbeScope='';void probes?.dispose();
@@ -1803,16 +1848,16 @@ class GlobalSend {
   }
   async sendRtc(transfer:Transfer,file:TransferFile,attemptId:string) {
     const generation=this.generation,key=fileKey(transfer.transferId,file.fileId),source=this.fileSources.get(key);
-    if(!source || !this.session || !this.connected || !this.helloReceived || !this.isOnlinePeer(transfer.targetDeviceId) || this.uploads.has(key))return;
+    if(!source || !this.session || !this.connected || !this.helloReceived || !this.isOnlinePeer(transfer.targetDeviceId) || this.uploads.has(key) || this.paused.has(key) || this.canceled.has(key))return;
     const api=new Api(this.baseUrl,this.session),controller=new AbortController();
     this.uploads.set(key,controller);this.rtcAttempts.set(key,attemptId);this.uploadErrors.delete(key);this.render();
     let channel:RtcFileChannel|undefined;
     try {
-      const {rtc}=await api.request<{rtc:RtcView}>(`/transfers/${transfer.transferId}/files/${file.fileId}/rtc/${attemptId}`);
+      const {rtc}=await api.request<{rtc:RtcView}>(`/transfers/${transfer.transferId}/files/${file.fileId}/rtc/${attemptId}`,undefined,'GET',controller.signal);
       if(generation!==this.generation || controller.signal.aborted)return;
       channel=new RtcFileChannel(api,rtc,'source',(this.info as ServerInfo & {rtc?:{iceServers:RTCIceServer[]}})?.rtc?.iceServers || [],controller.signal);
       this.rtcChannels.set(key,channel);
-      await channel.send(source,offset=>{if(generation===this.generation){this.uploadProgress.set(key,offset);this.paintProgress(key,offset,file.size);}});
+      await channel.send(source,offset=>{if(this.fileActive(key,controller,generation)){this.uploadProgress.set(key,offset);this.paintProgress(key,offset,file.size);}});
     } catch(error) {
       if(generation===this.generation && !controller.signal.aborted) {
         // Receiver owns the next route. A failed attempt must not poison a later
@@ -1821,22 +1866,24 @@ class GlobalSend {
       }
     } finally {
       await channel?.close();
-      if(generation===this.generation){if(this.rtcChannels.get(key)===channel)this.rtcChannels.delete(key);this.uploads.delete(key);this.render();this.startReadyUploads();void this.selectIncomingRelays();void this.refresh();}
+      if(generation===this.generation){if(this.rtcChannels.get(key)===channel)this.rtcChannels.delete(key);if(this.uploads.get(key)===controller)this.uploads.delete(key);this.render();this.startReadyUploads();void this.selectIncomingRelays();void this.refresh();}
     }
   }
   async receiveRtc(transfer:Transfer,file:TransferFile) {
     if(this.receiveDirectoryChanging || this.activeFileTransfers>=this.transferConcurrency)return;
     const generation=this.generation,key=fileKey(transfer.transferId,file.fileId);
-    if(!this.session || !this.connected || !this.helloReceived || !this.isOnlinePeer(transfer.sourceDeviceId) || this.rtcReceives.has(key))return;
+    if(!this.session || !this.connected || !this.helloReceived || !this.isOnlinePeer(transfer.sourceDeviceId) || this.rtcReceives.has(key) || this.paused.has(key) || this.canceled.has(key))return;
     const controller=new AbortController(),api=new Api(this.baseUrl,this.session);
     this.rtcReceives.set(key,controller);this.uploadErrors.delete(key);this.render();
     let channel:RtcFileChannel|undefined,store:RtcFileStore|null=null,local:File|undefined,complete=false;
     try {
       await this.ensureRtc();if(generation!==this.generation || controller.signal.aborted)return;
-      store=this.rtcStore;if(!store)throw new Error('浏览器文件存储不可用');
-      const recovered=this.rtcLocalFiles.get(key) || await store.get(key).catch(()=>undefined);
+      store=await receiveStorage(()=>this.ensureFileStore());if(!this.fileActive(key,controller,generation))return;
+      const recovered=this.rtcLocalFiles.get(key) || await receiveStorage(()=>store!.get(key));
+      if(!this.fileActive(key,controller,generation))return;
       if(recovered) {local=recovered;complete=true;}
-      let offset=complete?file.size:await store.open(key,file,Date.now()+86400000);
+      let offset=complete?file.size:await receiveStorage(()=>store!.open(key,file,Date.now()+86400000));
+      if(!this.fileActive(key,controller,generation))return;
       const capability=(this.device(transfer.sourceDeviceId) as Device & {rtc?:{scopes:RtcScope[]}}|undefined)?.rtc;
       const automatic=!['lan','public'].includes(transfer.routePreference || 'auto');
       const offeredScopes:RtcScope[]=transfer.routePreference==='lan'?['lan']:transfer.routePreference==='public'?['public']:['lan','public'];
@@ -1857,15 +1904,20 @@ class GlobalSend {
           this.rtcChannels.set(key,channel);this.render();
           const activeStore=store;
           await attempt.wait(channel.receive(file.size,async bytes=>{
-            offset=await activeStore.write(key,offset,bytes);
-            if(generation===this.generation){this.uploadProgress.set(key,offset);this.paintProgress(key,offset,file.size);}
+            if(!this.fileActive(key,controller,generation))throw new DOMException('接收已停止','AbortError');
+            offset=await receiveStorage(()=>activeStore.write(key,offset,bytes));
+            if(!this.fileActive(key,controller,generation))throw new DOMException('接收已停止','AbortError');
+            this.uploadProgress.set(key,offset);this.paintProgress(key,offset,file.size);
             return offset;
           },async()=>{
-            const received=await activeStore.finish(key);
+            if(!this.fileActive(key,controller,generation))throw new DOMException('接收已停止','AbortError');
+            const received=await receiveStorage(()=>activeStore.finish(key));
             if(await digestFile(received,{signal:controller.signal})!==file.sha256){await activeStore.remove(key);throw new Error('文件校验不一致，请重新发送');}
-            await activeStore.confirm(key);local=received;complete=true;
+            if(!this.fileActive(key,controller,generation))throw new DOMException('接收已停止','AbortError');
+            await receiveStorage(()=>activeStore.confirm(key));local=received;complete=true;
           }));
         } catch(error) {
+          if(error instanceof ReceiveStorageError)throw error;
           lastError=attempt.timedOut?new Error((scope==='lan'?'局域网':'公网')+'连接预算用尽'):error;
           if(channel && !controller.signal.aborted && !attempt.timedOut)void api.request(channel.path+'/fail',{error:errorText(error)},'POST',attempt.signal).catch(()=>{});
         } finally {
@@ -1873,33 +1925,35 @@ class GlobalSend {
           if(attempt.connected && !complete)decision.resumeAfterDisconnect();
           attempt.dispose();await store.close(key);
         }
-        if(!complete && !controller.signal.aborted)offset=await store.open(key,file,Date.now()+86400000);
+        if(!complete && this.fileActive(key,controller,generation))offset=await receiveStorage(()=>store!.open(key,file,Date.now()+86400000));
       }
       if(generation!==this.generation || controller.signal.aborted)return;
       if(complete && local) {
         this.recordReceipt(key,store.receivedAt?.(key) || new Date().toISOString());
         this.rtcLocalFiles.set(key,local);this.rtcFileExpiry.set(key,store.expiry(key));this.uploadProgress.set(key,file.size);void this.fileLibrary.refresh();
-        const {file:received}=await api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/received`,{transport:'direct'});
-        if(generation!==this.generation)return;this.setFile(transfer.transferId,received);this.uploadErrors.delete(key);return;
+        const {file:received}=await api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/received`,{transport:'direct'},'POST',controller.signal);
+        if(!this.fileActive(key,controller,generation))return;this.setFile(transfer.transferId,received);this.uploadErrors.delete(key);return;
       }
       if(transfer.routePreference==='lan' || transfer.routePreference==='public')throw lastError;
       if(file.size>this.autoAcceptMaxBytes && !this.relayConfirmed.has(key))throw new Error('直连不可用；使用中继需确认');
       await store.close(key);
-      const {file:relay}=await api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/relay`,{});
-      if(generation!==this.generation)return;this.setFile(transfer.transferId,relay);if(!file.relativePath)await store.remove(key);
+      const {file:relay}=await api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/relay`,{},'POST',controller.signal);
+      if(!this.fileActive(key,controller,generation))return;this.setFile(transfer.transferId,relay);if(!file.relativePath)await store.remove(key);
     } catch(error) {
-      if(generation===this.generation && !controller.signal.aborted)this.uploadErrors.set(key,errorText(error));
+      if(this.fileActive(key,controller,generation)){if(error instanceof ReceiveStorageError)await this.reportReceiveError(transfer,file,error,controller,generation);else this.uploadErrors.set(key,errorText(error));}
     } finally {
       await channel?.close();await store?.close(key).catch(()=>{});
-      if(generation===this.generation){this.rtcReceives.delete(key);this.uploadProgress.delete(key);this.render();void this.refresh();}
+      if(generation===this.generation){if(this.rtcReceives.get(key)===controller)this.rtcReceives.delete(key);this.uploadProgress.delete(key);this.render();this.startReadyUploads();void this.selectIncomingRelays();void this.refresh();}
     }
   }
   async allowRelay(transferId:string,fileId:string) {
     const key=fileKey(transferId,fileId),transfer=this.transfers.find(t=>t.transferId===transferId),file=transfer?.files.find(f=>f.fileId===fileId);
-    if(!transfer || !file || transfer.routePreference==='lan' || transfer.routePreference==='public')return;
+    if(!transfer || !file || this.paused.has(key) || this.canceled.has(key) || this.fileRequests.has(key) || transfer.routePreference==='lan' || transfer.routePreference==='public')return;
+    const generation=this.generation,controller=new AbortController();this.fileRequests.set(key,controller);
     this.relayConfirmed.add(key);this.uploadErrors.delete(key);
-    const {file:relay}=await this.api.request<{file:TransferFile}>(`/transfers/${transferId}/files/${fileId}/relay`,{});
-    this.setFile(transferId,relay);if(!file.relativePath)await this.rtcStore?.remove(key);this.render();await this.refresh();
+    try{const {file:relay}=await this.api.request<{file:TransferFile}>(`/transfers/${transferId}/files/${fileId}/relay`,{},'POST',controller.signal);
+      if(!this.fileActive(key,controller,generation))return;this.setFile(transferId,relay);if(!file.relativePath)await this.rtcStore?.remove(key);this.render();await this.refresh();
+    }finally{if(this.fileRequests.get(key)===controller)this.fileRequests.delete(key);}
   }
   rtcPeer(transfer:Transfer) {
     if(!this.rtcEnabled || !this.session || !this.connected || !this.helloReceived || transfer.routePreference==='relay')return false;
@@ -1917,6 +1971,7 @@ class GlobalSend {
       if(transfer.targetDeviceId!==this.session.device.deviceId || Date.parse(transfer.expiresAt)<=Date.now())continue;
       for(const file of transfer.files){
         const key=fileKey(transfer.transferId,file.fileId);
+        if(this.paused.has(key) || this.canceled.has(key) || this.fileRequests.has(key))continue;
         if(file.entryKind==='directory'){if(this.activeFileTransfers<this.transferConcurrency && file.status==='accepted' && !this.rtcLocalFiles.has(key) && !this.uploadErrors.has(key))void this.receiveDirectory(transfer,file);continue;}
         if(file.relativePath && file.status==='ready'){if(this.activeFileTransfers<this.transferConcurrency && !this.uploadErrors.has(key))void this.receiveStructuredRelay(transfer,file);continue;}
         if(this.requiresNative(transfer) || !this.isOnlinePeer(transfer.sourceDeviceId))continue;
@@ -1924,14 +1979,15 @@ class GlobalSend {
         if(this.rtcPeer(transfer)) {if(this.activeFileTransfers<this.transferConcurrency)void this.receiveRtc(transfer,file);continue;}
         if(file.size>this.autoAcceptMaxBytes && !this.relayConfirmed.has(key)) {this.uploadErrors.set(key,'使用中继需确认');continue;}
         this.selectingRelays.add(key);
+        const controller=new AbortController();this.fileRequests.set(key,controller);
         try{
-          const result=await this.api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/relay`,{});
-          if(generation!==this.generation)return;
+          const result=await this.api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/relay`,{},'POST',controller.signal);
+          if(!this.fileActive(key,controller,generation))continue;
           this.setFile(transfer.transferId,result.file);this.relayRetryAt.delete(key);
         }catch(error){
-          if(generation!==this.generation)return;
+          if(!this.fileActive(key,controller,generation))continue;
           this.relayRetryAt.set(key,Date.now()+30000);this.toast('中继连接暂未完成，将重试：'+errorText(error),true);
-        }finally{if(generation===this.generation)this.selectingRelays.delete(key);}
+        }finally{if(this.fileRequests.get(key)===controller)this.fileRequests.delete(key);if(generation===this.generation)this.selectingRelays.delete(key);}
       }
     }
     if(generation===this.generation)this.render();
@@ -1939,11 +1995,24 @@ class GlobalSend {
   async cancelFile(transferId: string,fileId: string) {
     const generation=this.generation;
     const key = fileKey(transferId,fileId);
-    this.paused.add(key); this.uploads.get(key)?.abort();
-    this.rtcReceives.get(key)?.abort();await this.rtcChannels.get(key)?.close();
-    await this.api.request(`/transfers/${transferId}/files/${fileId}/cancel`,{});
-    if(generation!==this.generation)return;
-    this.fileSources.delete(key);this.rtcLocalFiles.delete(key);await this.rtcStore?.remove(key); await this.refresh();
+    if(this.cancelRequests.has(key))return;
+    this.canceled.add(key);this.paused.add(key);const closing=this.stopFile(key),store=this.rtcStore;this.uploadErrors.delete(key);
+    const file=this.transfers.find(item=>item.transferId===transferId)?.files.find(item=>item.fileId===fileId);
+    if(file)this.setFile(transferId,{...file,status:'canceled'});
+    this.fileSources.delete(key);this.uploadProgress.delete(key);this.cancelRequests.add(key);this.render();
+    const controller=new AbortController(),api=new Api(this.baseUrl,this.session);this.fileRequests.set(key,controller);
+    void (async()=>{
+      try{
+        const {file:canceled}=await api.request<{file:TransferFile}>(`/transfers/${transferId}/files/${fileId}/cancel`,{},'POST',controller.signal);
+        if(generation!==this.generation || controller.signal.aborted)return;
+        this.setFile(transferId,canceled);this.rtcLocalFiles.delete(key);
+        // Closing the native channel may drain a pending disk write; UI and the
+        // cancel RPC above never wait for it. Delete only after that lease closes.
+        await closing;
+        await store?.close(key).catch(()=>{});await store?.remove(key).catch(()=>{});
+      }catch(error){if(generation===this.generation && !controller.signal.aborted){this.uploadErrors.set(key,'本机已停止，取消通知失败');this.toast('本机已停止，取消通知失败，可重试',true);}}
+      finally{if(this.fileRequests.get(key)===controller)this.fileRequests.delete(key);if(generation===this.generation){this.cancelRequests.delete(key);this.render();this.startReadyUploads();void this.selectIncomingRelays();}}
+    })();
   }
   async download(transferId: string,fileId: string) {
     const generation = this.generation,key=fileKey(transferId,fileId);
@@ -2262,7 +2331,7 @@ class GlobalSend {
     on('[data-download]','click',(_event,node)=>{const [transferId,fileId]=node.dataset.download!.split(':');void this.run(()=>this.download(transferId,fileId));});
     on('[data-retry]','click',(_event,node)=>{const [transferId,fileId]=node.dataset.retry!.split(':');void this.run(()=>this.retryFile(transferId,fileId));});
     on('[data-use-relay]','click',(_event,node)=>{const [transferId,fileId]=node.dataset.useRelay!.split(':');void this.run(()=>this.allowRelay(transferId,fileId));});
-    on('[data-pause]','click',(_event,node)=>{this.paused.add(node.dataset.pause!);this.uploads.get(node.dataset.pause!)?.abort();this.render();});
+    on('[data-pause]','click',(_event,node)=>{this.pauseFile(node.dataset.pause!);});
     on('[data-cancel]','click',(_event,node)=>{const [transferId,fileId]=node.dataset.cancel!.split(':');void this.run(()=>this.cancelFile(transferId,fileId));});
     on('[data-text-retry]','click',(_event,node)=>{void this.sendText(node.dataset.textRetry!);});
     on('[data-text-remove]','click',(_event,node)=>{this.pendingTexts=this.pendingTexts.filter(item=>item.eventId!==node.dataset.textRemove);this.render();});

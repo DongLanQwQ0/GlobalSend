@@ -138,6 +138,13 @@ public class AndroidDragTest {
         assertEquals(paths,value.get("paths"));assertEquals(List.of("first","second"),value.get("texts"));assertTrue(((List<?>)value.get("temporaryPaths")).isEmpty());
         coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,local,0,0));
     }
+    @Test public void externalBulkDropImportsMoreThanThirtyTwoUrisWithoutTruncating() throws Exception {
+        DockShareProvider provider=new DockShareProvider();ProviderInfo info=new ProviderInfo();info.authority=activity.getPackageName()+".dock-files";provider.attachInfo(activity,info);ShadowContentResolver.registerProviderInternal(info.authority,provider);
+        List<Uri> uris=new ArrayList<>();for(int i=0;i<70;i++){File file=new File(activity.getFilesDir(),"external"+i+".bin");Files.write(file.toPath(),("bytes"+i).getBytes(java.nio.charset.StandardCharsets.UTF_8));uris.add(DockShareProvider.register(activity,file,file.getName()));}
+        ClipData clip=ClipData.newUri(activity.getContentResolver(),"70 files",uris.get(0));for(int i=1;i<uris.size();i++)clip.addItem(new ClipData.Item(uris.get(i)));
+        assertTrue(coordinator.acceptDrag(event(DragEvent.ACTION_DROP,clip)));Map<?,?> imported=awaitDrop();
+        assertNull(imported.get("error"));assertEquals(70,((List<?>)imported.get("paths")).size());assertEquals(70,((List<?>)imported.get("temporaryPaths")).size());
+    }
 
     @Test @Config(shadows = NativeDragView.class)
     public void refusedSystemStartIsReportedAndDoesNotPoisonTheNextDrag() throws Exception {

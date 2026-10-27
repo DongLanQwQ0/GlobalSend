@@ -16,6 +16,7 @@ import 'models.dart';
 import 'text_selection_surface.dart';
 import 'ui_tokens.dart';
 import 'received_order.dart';
+import 'incoming_receipt_state.dart';
 
 final _batchDragMarker = Object();
 
@@ -99,7 +100,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
                 )
                 .toList()
               ..sort(compareReceivedNewestFirst);
-        final ids = entries.map((entry) => entry.id).toList();
+        final ids = receiptDisplayOrder(order, entries);
         final added = ids.where((id) => !order.contains(id)).toList();
         entering = order.isEmpty ? {} : added.toSet();
         final frontChanged =
@@ -109,7 +110,10 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
         // A content/progress update must not unmount the active batch source
         // while its async filesystem refresh is still in flight.
         final retainedPaths = entries
-            .where((entry) => entry.kind != 'text')
+            .where(
+              (entry) =>
+                  entry.kind != 'text' && IncomingReceiptState(entry).canExport,
+            )
             .map((entry) => entry.localPath)
             .toSet();
         exportableFiles = exportableFiles
@@ -152,7 +156,8 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
         items
             .map(DockEntry.fromJson)
             .where(
-              (entry) => entry.kind != 'text' && entry.localPath.isNotEmpty,
+              (entry) =>
+                  entry.kind != 'text' && IncomingReceiptState(entry).canExport,
             )
             .toList()
           ..sort(compareReceivedNewestFirst);
@@ -257,25 +262,33 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
     final time = entry.receivedAtMillis > 0
         ? entry.receivedAtMillis
         : entry.createdAtMillis;
+    final state = IncomingReceiptState(entry);
     final needsAction =
-        entry.status == 'failed' || entry.relayConfirmationPending;
-    final active = const [
-      'uploading',
-      'downloading',
-      'directSending',
-    ].contains(entry.status);
+        state.pending ||
+        state.paused ||
+        state.failed ||
+        entry.relayConfirmationPending;
+    final active = state.pending;
     List<PopupMenuEntry<String>> menuItems(BuildContext _) => [
       const PopupMenuItem(value: 'open', height: 32, child: Text('打开')),
-      if (entry.localPath.isNotEmpty)
+      if (state.canExport && entry.localPath.isNotEmpty)
         const PopupMenuItem(value: 'reveal', height: 32, child: Text('定位文件')),
-      if (entry.kind == 'text' || entry.localPath.isNotEmpty)
+      if (state.canExport)
         const PopupMenuItem(value: 'stage', height: 32, child: Text('加入待发送')),
+      if (state.pending || state.paused)
+        PopupMenuItem(
+          value: state.paused ? 'resume' : 'pause',
+          height: 32,
+          child: Text(state.paused ? '继续' : '暂停'),
+        ),
+      if (state.pending || state.paused)
+        const PopupMenuItem(value: 'cancel', height: 32, child: Text('取消接收')),
       const PopupMenuItem(value: 'delete', height: 32, child: Text('删除')),
       const PopupMenuItem(value: 'details', height: 32, child: Text('详情')),
     ];
     return ContentDragSurface(
       entry: entry,
-      enabled: entry.kind == 'text' || entry.localPath.isNotEmpty,
+      enabled: state.canExport,
       onExport: (kind) => export(entry, kind),
       child: Builder(
         builder: (context) => GestureDetector(
@@ -309,15 +322,11 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
             entry: entry,
             sender: value['sender'] as String? ?? entry.sourceLabel,
             timestamp: compactTime(DateTime.fromMillisecondsSinceEpoch(time)),
-            status: entry.status == 'failed'
-                ? '接收失败'
-                : entry.relayConfirmationPending
-                ? '需要确认中继'
-                : '',
+            status: state.label,
             action: needsAction
                 ? TextButton(
-                    onPressed: () => action('open', entry.id),
-                    child: const Text('处理'),
+                    onPressed: () => action(state.primaryAction, entry.id),
+                    child: Text(state.primaryLabel),
                   )
                 : null,
             speed: active && (value['transferBytesPerSecond'] as num? ?? 0) > 0

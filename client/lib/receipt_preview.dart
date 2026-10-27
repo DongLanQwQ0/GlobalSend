@@ -11,8 +11,8 @@ import 'saved_image_preview.dart';
 import 'text_viewer.dart';
 import 'web_links.dart';
 import 'text_selection_surface.dart';
-import 'received_order.dart';
 import 'bulk_file_drag.dart';
+import 'incoming_receipt_state.dart';
 
 class ReceivedContentPreview extends StatelessWidget {
   const ReceivedContentPreview({
@@ -38,8 +38,11 @@ class ReceivedContentPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final desktop = Theme.of(context).platform == TargetPlatform.windows;
-    Widget desktopSurface(Widget child) => desktop ? dragSurface(child) : child;
-    Widget bodySurface(Widget child) => desktop ? child : dragSurface(child);
+    final transfer = IncomingReceiptState(entry);
+    Widget desktopSurface(Widget child) =>
+        desktop && transfer.canExport ? dragSurface(child) : child;
+    Widget bodySurface(Widget child) =>
+        !desktop && transfer.canExport ? dragSurface(child) : child;
     Widget control(Widget child) =>
         desktop ? ContentDragControl(child: child) : child;
     final lines = entry.text
@@ -99,7 +102,11 @@ class ReceivedContentPreview extends StatelessWidget {
                             ),
                             const SizedBox(height: 3),
                             Text(
-                              entry.kind == 'text' ? '收到文本' : '收到文件',
+                              entry.kind == 'text'
+                                  ? '收到文本'
+                                  : transfer.label.isNotEmpty
+                                  ? transfer.label
+                                  : '收到文件',
                               style: const TextStyle(
                                 fontSize: 13,
                                 color: Color(0xff7a887e),
@@ -148,6 +155,10 @@ class ReceivedContentPreview extends StatelessWidget {
                                 ),
                               ),
                             )
+                          : transfer.showProgress ||
+                                transfer.failed ||
+                                transfer.canceled
+                          ? _IncomingProgressBody(entry: entry)
                           : _ReceivedFileBody(
                               key: ValueKey('${entry.id}:${entry.localPath}'),
                               entry: entry,
@@ -185,9 +196,14 @@ class ReceivedContentPreview extends StatelessWidget {
                       else
                         control(
                           OutlinedButton.icon(
-                            onPressed: onOpen,
-                            icon: const AppIcon(Icons.open_in_new, size: 17),
-                            label: const Text('打开'),
+                            onPressed: transfer.canceled ? null : onOpen,
+                            icon: AppIcon(
+                              transfer.canExport
+                                  ? Icons.open_in_new
+                                  : Icons.file_download_outlined,
+                              size: 17,
+                            ),
+                            label: Text(transfer.primaryLabel),
                           ),
                         ),
                     ],
@@ -203,7 +219,7 @@ class ReceivedContentPreview extends StatelessWidget {
 }
 
 /// A live, bounded batch: new arrivals update this grid rather than replacing it.
-class ReceivedBatchPreview extends StatelessWidget {
+class ReceivedBatchPreview extends StatefulWidget {
   const ReceivedBatchPreview({
     super.key,
     required this.entries,
@@ -222,8 +238,20 @@ class ReceivedBatchPreview extends StatelessWidget {
   final VoidCallback? onExpand;
 
   @override
+  State<ReceivedBatchPreview> createState() => _ReceivedBatchPreviewState();
+}
+
+class _ReceivedBatchPreviewState extends State<ReceivedBatchPreview> {
+  List<String> order = [];
+  @override
   Widget build(BuildContext context) {
-    final sorted = [...entries]..sort(compareReceivedNewestFirst);
+    final entries = widget.entries;
+    final onClose = widget.onClose, onExpand = widget.onExpand;
+    final itemBuilder = widget.itemBuilder, onCopy = widget.onCopy;
+    final embedded = widget.embedded;
+    order = receiptDisplayOrder(order, entries);
+    final byId = {for (final entry in entries) entry.id: entry};
+    final sorted = [for (final id in order) byId[id]!];
     return _ReceiptFrame(
       embedded: embedded,
       child: ConstrainedBox(
@@ -253,7 +281,7 @@ class ReceivedBatchPreview extends StatelessWidget {
                           .where(
                             (entry) =>
                                 entry.kind == 'file' &&
-                                entry.localPath.isNotEmpty,
+                                IncomingReceiptState(entry).canExport,
                           )
                           .map((entry) => entry.localPath)
                           .toList(),
@@ -358,6 +386,67 @@ class _ReceiptFrame extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: child,
         );
+}
+
+class _IncomingProgressBody extends StatelessWidget {
+  const _IncomingProgressBody({required this.entry});
+  final DockEntry entry;
+  @override
+  Widget build(BuildContext context) {
+    final state = IncomingReceiptState(entry);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 320),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const AppIcon(
+              Icons.insert_drive_file_outlined,
+              size: 56,
+              color: Ui.green,
+            ),
+            const SizedBox(height: 20),
+            Text(
+              entry.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              bytesLabel(entry.size),
+              style: const TextStyle(color: Ui.muted),
+            ),
+            if (state.showProgress) ...[
+              const SizedBox(height: 20),
+              LinearProgressIndicator(value: state.progressValue, minHeight: 4),
+            ],
+            if (entry.transferBytesPerSecond > 0 && state.pending) ...[
+              const SizedBox(height: 10),
+              Text(
+                '${bytesLabel(entry.transferBytesPerSecond.round())}/s',
+                style: const TextStyle(fontSize: 13, color: Ui.muted),
+              ),
+            ],
+            if (state.failed && entry.error.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                entry.error,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ReceivedFileBody extends StatefulWidget {

@@ -21,6 +21,8 @@ const result = await build({
   bundle:true,platform:'browser',format:'cjs',write:false,loader:{'.css':'empty'},logLevel:'silent',
 });
 
+function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(done=>resolve=done);return {promise,resolve};}
+
 function fixture() {
   class Socket {
     static CONNECTING=0;
@@ -1409,4 +1411,108 @@ test('unavailable local storage preserves ordinary relay fallback and never adve
   const calls:any[]=[];c.api.request=async(path:string,body:any)=>{calls.push({path,body});return {};};
   await c.ensureFolderCapability();assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{path:'/devices/me/capabilities',body:{folderTransfer:false}}]);
   assert.equal(c.folderRegisteredScope,'');
+});
+
+test('receive storage failures are reported to both participants without losing the committed prefix',async()=>{
+  const {c}=fixture(),t=transfer('disk','uploading','auto','relay');t.files[0].offset=3;c.transfers=[t];c.info.features={receiveErrorReporting:true};
+  c.ensureFileStore=async()=>{throw new DOMException('目录不可写','NotAllowedError');};
+  const calls:any[]=[];c.api.request=async(path:string,body:any)=>{calls.push({path,body});return {file:{...t.files[0],status:'failed',receiveFailure:true,errorCode:body.message}};};
+  await c.receiveDirectory(t,t.files[0]);
+  assert.equal(calls.length,1);assert.match(calls[0].path,/\/receive-error$/);assert.equal(calls[0].body.message,'目录不可写');
+  assert.equal(c.transfers[0].files[0].status,'failed');assert.equal(c.transfers[0].files[0].offset,3);assert.equal(c.transfers[0].files[0].receiveFailure,true);
+});
+
+test('receive confirmation network failures and relay confirmation prompts are not reported as storage failures',async()=>{
+  const {c}=fixture(),t=transfer('ack','accepted');c.transfers=[t];c.info.features={receiveErrorReporting:true};
+  c.ensureFileStore=async()=>({directory:async()=>{},get:async()=>undefined});const calls:string[]=[];
+  c.api.request=async(path:string)=>{calls.push(path);throw new Error('连接中断');};
+  await c.receiveDirectory(t,t.files[0]);assert.equal(calls.length,1);assert.match(calls[0],/\/received$/);
+  c.ensureRtc=async()=>{};c.ensureFileStore=async()=>({get:async()=>undefined,open:async()=>3,close:async()=>{}});
+  c.rtcReceives.clear();c.uploadErrors.clear();c.autoAcceptMaxBytes=1;
+  await c.receiveRtc(t,t.files[0]);assert.match(c.uploadErrors.get('ack:file-ack'),/中继需确认/);assert.equal(calls.length,1);
+});
+
+test('structured relay disk writes report receiver failure while retaining received bytes for retry',async()=>{
+  const {c,context}=fixture(),t=transfer('write','ready','auto','relay');t.files[0].relativePath='资料/sample.txt';c.transfers=[t];c.info.features={receiveErrorReporting:true};
+  c.ensureFileStore=async()=>({get:async()=>undefined,open:async()=>2,write:async()=>{throw new DOMException('空间不足','QuotaExceededError');},close:async()=>{}});
+  const calls:any[]=[];c.api.request=async(path:string,body:any)=>{calls.push({path,body});return path.endsWith('/download-ticket')?{downloadPath:'/api/v1/downloads/test-token'}:{file:{...t.files[0],status:'failed',receiveFailure:true}};};
+  (context as any).fetch=async(_url:string,options:any)=>{assert.equal(options.headers.Range,'bytes=2-');return {ok:true,status:206,body:{getReader:()=>({read:async()=>({done:false,value:new Uint8Array([1])}),cancel:async()=>{},releaseLock:()=>{}})}};};
+  await c.receiveStructuredRelay(t,t.files[0]);assert.equal(calls.length,2);assert.match(calls[1].path,/\/receive-error$/);assert.equal(calls[1].body.message,'空间不足');
+});
+
+test('RTC storage setup failure does not try public or relay and reports the actual receiver error',async()=>{
+  const {c}=fixture(),t=transfer('rtc-disk','accepted');c.transfers=[t];c.info.features={receiveErrorReporting:true};c.ensureRtc=async()=>{};
+  c.ensureFileStore=async()=>({get:async()=>undefined,open:async()=>{throw new Error('文件夹已移除');},close:async()=>{}});
+  const calls:string[]=[];c.api.request=async(path:string)=>{calls.push(path);return {file:{...t.files[0],status:'failed',receiveFailure:true}};};
+  await c.receiveRtc(t,t.files[0]);assert.equal(calls.length,1);assert.match(calls[0],/\/receive-error$/);assert.equal(c.uploadErrors.get('rtc-disk:file-rtc-disk'),'文件夹已移除');
+});
+
+test('receiver failures retry through receive-retry for either participant and preserve offset and attempt',async()=>{
+  for(const receiving of [true,false]){
+    const {c}=fixture(),t=transfer('resume','failed','auto','relay');Object.assign(t.files[0],{offset:3,attemptId:'original',receiveFailure:true});c.transfers=[t];
+    if(!receiving){c.session.device.deviceId='sender';c.fileSources.set('resume:file-resume',new File(['data'],'sample.txt'));}
+    c.startReadyUploads=()=>{};c.selectIncomingRelays=async()=>{};const calls:any[]=[];
+    c.api.request=async(path:string,body:any)=>{calls.push({path,body});return {file:{...t.files[0],status:'uploading',receiveFailure:false}};};
+    await c.retryFile('resume','file-resume');assert.equal(calls.length,1);assert.match(calls[0].path,/\/receive-retry$/);assert.deepEqual(Object.keys(calls[0].body),[]);
+    assert.equal(c.transfers[0].files[0].offset,3);assert.equal(c.transfers[0].files[0].attemptId,'original');assert.equal(c.transfers[0].files[0].status,'uploading');
+  }
+});
+
+test('pausing a waiting receive aborts it immediately and its late storage result cannot acknowledge or restart',async()=>{
+  const {c}=fixture(),t=transfer('pause-receive','accepted'),gate=deferred<any>();c.transfers=[t];let created=0,calls=0;
+  c.ensureFileStore=()=>gate.promise;c.api.request=async()=>{calls++;return {};};
+  const receiving=c.receiveDirectory(t,t.files[0]),key='pause-receive:file-pause-receive',controller=c.rtcReceives.get(key);
+  c.pauseFile(key);assert.equal(controller.signal.aborted,true);assert.equal(c.paused.has(key),true);
+  gate.resolve({directory:async()=>created++,get:async()=>undefined});await receiving;
+  assert.equal(created,0);assert.equal(calls,0);assert.equal(c.rtcReceives.size,0);assert.equal(c.uploadErrors.has(key),false);
+});
+
+test('pausing a waiting upload aborts its metadata request and ignores the late accepted snapshot',async()=>{
+  const {c}=fixture(),t=transfer('pause-upload','accepted'),gate=deferred<any>();c.transfers=[t];c.session.device.deviceId='sender';
+  const key='pause-upload:file-pause-upload';c.fileSources.set(key,new File(['data'],'sample.txt'));let signal:AbortSignal,uploads=0;
+  c.api.request=async(_path:string,_body:any,_method:string,requestSignal:AbortSignal)=>{signal=requestSignal;return gate.promise;};c.api.upload=async()=>{uploads++;return {};};
+  const uploading=c.uploadFile(t.transferId,t.files[0].fileId);c.pauseFile(key);assert.equal(signal!.aborted,true);
+  gate.resolve({transfer:{...t,files:[{...t.files[0],offset:3}]}});await uploading;
+  assert.equal(uploads,0);assert.equal(c.uploadProgress.has(key),false);assert.equal(c.uploadErrors.has(key),false);
+});
+
+test('cancel is immediate even while channel close and center RPC are pending and stale responses cannot revive it',async()=>{
+  const {c,context}=fixture(),t=transfer('cancel-now','accepted'),closed=deferred<void>(),rpc=deferred<any>();c.transfers=[t];let requested=false;
+  const key='cancel-now:file-cancel-now',upload=new AbortController(),receive=new AbortController();c.uploads.set(key,upload);c.rtcReceives.set(key,receive);c.rtcChannels.set(key,{close:()=>closed.promise});
+  (context as any).fetch=async(url:string)=>{requested=url.endsWith('/cancel');return rpc.promise;};
+  await c.cancelFile(t.transferId,t.files[0].fileId);assert.equal(requested,true);assert.equal(upload.signal.aborted,true);assert.equal(receive.signal.aborted,true);assert.equal(c.transfers[0].files[0].status,'canceled');
+  c.setFile(t.transferId,{...t.files[0],status:'uploading',offset:3});assert.equal(c.transfers[0].files[0].status,'canceled');
+  closed.resolve();rpc.resolve({ok:true,json:async()=>({file:{...t.files[0],status:'canceled'}})});for(let i=0;i<12;i++)await Promise.resolve();
+});
+
+test('waiting receiver cards offer pause and cancel, paused cards continue, failed cards retry',()=>{
+  const {c,document}=fixture(),t=transfer('controls','accepted');c.transfers=[t];const key='controls:file-controls';
+  document.querySelector('#app')!.innerHTML=c.fileHtml(t,t.files[0],false);assert.ok(document.querySelector('[data-pause]'));assert.ok(document.querySelector('[data-cancel]'));
+  c.pauseFile(key);document.querySelector('#app')!.innerHTML=c.fileHtml(t,t.files[0],false);assert.equal(document.querySelector('[data-retry]')!.textContent,'继续');assert.equal(document.querySelector('[data-pause]'),null);
+  c.paused.delete(key);t.files[0].status='failed';t.files[0].receiveFailure=true;document.querySelector('#app')!.innerHTML=c.fileHtml(t,t.files[0],false);assert.equal(document.querySelector('[data-retry]')!.textContent,'重试');
+});
+
+test('a paused relay selection aborts its request and a late relay result cannot restart incoming work',async()=>{
+  const {c}=fixture(),t=transfer('pause-route','accepted'),gate=deferred<any>();c.transfers=[t];let signal:AbortSignal;
+  c.api.request=async(_path:string,_body:any,_method:string,value:AbortSignal)=>{signal=value;return gate.promise;};
+  const selecting=c.selectIncomingRelays(),key='pause-route:file-pause-route';c.pauseFile(key);assert.equal(signal!.aborted,true);
+  gate.resolve({file:{...t.files[0],transport:'relay'}});await selecting;
+  assert.equal(c.transfers[0].files[0].transport,null);assert.equal(c.uploadErrors.has(key),false);assert.equal(c.fileRequests.size,0);assert.equal(c.paused.has(key),true);
+});
+
+test('an older center refresh cannot revive a locally canceled file',async()=>{
+  const {c,refresh}=fixture(),t=transfer('canceled-snapshot','accepted');c.transfers=[t];c.canceled.add('canceled-snapshot:file-canceled-snapshot');
+  c.ensureRtc=async()=>{};c.ensureFolderCapability=async()=>{};c.syncProbeMonitor=()=>{};c.acceptIncoming=async()=>{};c.selectIncomingRelays=async()=>{};
+  c.api.request=async(path:string)=>path==='/devices'?{devices:c.devices}:path==='/transfers'?{transfers:[t]}:{events:[],cursor:0,hasMore:false};
+  await refresh();assert.equal(c.transfers[0].files[0].status,'canceled');
+});
+
+test('retry clicked during receiver error reporting waits for that same failure then preserves the server prefix',async()=>{
+  const {c}=fixture(),t=transfer('report-race','uploading','auto','relay'),gate=deferred<any>();t.files[0].offset=3;c.transfers=[t];c.info.features={receiveErrorReporting:true};
+  c.ensureFileStore=async()=>{throw new Error('目录不可写');};c.selectIncomingRelays=async()=>{};const paths:string[]=[];
+  c.api.request=async(path:string)=>{paths.push(path);return path.endsWith('/receive-error')?gate.promise:{file:{...t.files[0],status:'uploading',receiveFailure:false}};};
+  const receiving=c.receiveDirectory(t,t.files[0]);for(let i=0;i<8;i++)await Promise.resolve();
+  const retrying=c.retryFile(t.transferId,t.files[0].fileId);assert.equal(paths.length,1);
+  gate.resolve({file:{...t.files[0],status:'failed',receiveFailure:true}});await receiving;await retrying;
+  assert.equal(paths.length,2);assert.match(paths[1],/\/receive-retry$/);assert.equal(c.transfers[0].files[0].offset,3);assert.equal(c.transfers[0].files[0].status,'uploading');
 });

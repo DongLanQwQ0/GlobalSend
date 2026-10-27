@@ -66,6 +66,7 @@ class PeerTransport {
   bool _closed = false;
   final Map<String, PeerReceiveSlot> _receives = {};
   final Map<String, HttpClient> _pushClients = {};
+  final Map<String, Set<HttpResponse>> _sourceResponses = {};
   HttpServer? server;
   String fingerprint = '', certificate = '';
   List<String> candidates = [];
@@ -74,6 +75,14 @@ class PeerTransport {
   void cancelFile(String id) {
     canceledFiles.add(id);
     _pushClients.remove(id)?.close(force: true);
+    for (final response in _sourceResponses.remove(id) ?? <HttpResponse>{}) {
+      unawaited(
+        response
+            .detachSocket(writeHeaders: false)
+            .then((socket) => socket.destroy())
+            .catchError((Object _) {}),
+      );
+    }
     final slot = _receives.remove(id);
     if (slot != null) unawaited(slot.stop());
   }
@@ -245,6 +254,7 @@ class PeerTransport {
 
   Future<void> handle(HttpRequest request) async {
     String? sendingId;
+    String? responseFileId;
     ReceivedFileAccess? source;
     var sent = 0, total = 0;
     var sourcePermit = false;
@@ -312,6 +322,8 @@ class PeerTransport {
       }
       canceledFiles.remove(parts[2]);
       sourcePermit = await acquireSource?.call(parts[2]) ?? false;
+      (_sourceResponses[parts[2]] ??= {}).add(request.response);
+      responseFileId = parts[2];
       if (_closed || canceledFiles.contains(parts[2]))
         throw StateError('发送已结束');
       source = await ReceivedFileAccess.open(path);
@@ -407,6 +419,11 @@ class PeerTransport {
         } catch (_) {}
         if (sendingId != null) onProgress?.call(sendingId, sent, total, true);
       } finally {
+        if (responseFileId != null) {
+          _sourceResponses[responseFileId]?.remove(request.response);
+          if (_sourceResponses[responseFileId]?.isEmpty == true)
+            _sourceResponses.remove(responseFileId);
+        }
         if (sourcePermit) releaseSource?.call();
       }
     }

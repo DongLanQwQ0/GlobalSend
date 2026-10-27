@@ -28,7 +28,7 @@ import org.robolectric.shadows.ShadowContentResolver;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk=28,manifest=Config.NONE)
+@Config(sdk=28,manifest=Config.NONE,shadows=ReceiveDirectoryTest.ModernDocumentQueries.class)
 public class FileShareBridgeTest {
   private Activity activity;
   private FileShareBridge bridge;
@@ -81,5 +81,26 @@ public class FileShareBridgeTest {
     List<String> paths=new ArrayList<>();for(int i=0;i<70;i++)paths.add(file("file"+i+".unknown","data"+i).getPath());
     bridge.share(paths,null);Intent chooser=Shadows.shadowOf(activity).getNextStartedActivity();Intent target=chooser.getParcelableExtra(Intent.EXTRA_INTENT);
     assertEquals(70,target.<Uri>getParcelableArrayListExtra(Intent.EXTRA_STREAM).size());assertEquals(70,target.getClipData().getItemCount());assertEquals("application/octet-stream",target.getType());
+  }
+  @Test public void sharedDocumentDirectoryAndTreeRootKeepStructureEmptyFoldersAndOriginalBytes()throws Exception{
+    FolderDocumentsTest.Tree provider=new FolderDocumentsTest.Tree();provider.disk=new File(activity.getCacheDir(),"shared-folder-fixture");provider.disk.mkdirs();
+    ProviderInfo info=new ProviderInfo();info.authority="folder-fixtures";info.exported=true;info.grantUriPermissions=true;
+    info.readPermission=android.Manifest.permission.MANAGE_DOCUMENTS;info.writePermission=android.Manifest.permission.MANAGE_DOCUMENTS;
+    provider.attachInfo(activity,info);ShadowContentResolver.registerProviderInternal(info.authority,provider);
+    String source=provider.add("root","资料",true),nested=provider.add(source,"子目录",true),leaf=provider.add(nested,"正文.txt",false);
+    provider.add(source,"空目录",true);Files.write(provider.entries.get(leaf).file.toPath(),"原始内容".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    Intent first=new Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM,provider.uri(source));
+    bridge.handleIntent(first);imported();Map<String,Object> batch=bridge.pending().get(0);assertFalse(batch.containsKey("error"));
+    File imported=new File((String)((List<?>)batch.get("paths")).get(0));assertEquals("资料",imported.getName());
+    assertEquals("原始内容",read(new File(imported,"子目录/正文.txt")));assertTrue(new File(imported,"空目录").isDirectory());
+    assertEquals("原始内容",read(provider.entries.get(leaf).file));assertTrue(provider.entries.get(source).file.isDirectory());
+    bridge.ack((String)batch.get("batchId"));assertTrue(new File(imported,"子目录/正文.txt").isFile());
+    Intent tree=new Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM,android.provider.DocumentsContract.buildTreeDocumentUri(info.authority,source));
+    bridge.handleIntent(tree);imported();Map<String,Object> treeBatch=bridge.pending().get(0);assertFalse(treeBatch.containsKey("error"));
+    File importedTree=new File((String)((List<?>)treeBatch.get("paths")).get(0));assertEquals("原始内容",read(new File(importedTree,"子目录/正文.txt")));
+    bridge.ack((String)treeBatch.get("batchId"));
+    bridge.handleIntent(new Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM,provider.uri(leaf)));imported();
+    Map<String,Object> fileBatch=bridge.pending().get(0);assertFalse(fileBatch.containsKey("error"));
+    assertEquals("原始内容",read(new File((String)((List<?>)fileBatch.get("paths")).get(0))));
   }
 }

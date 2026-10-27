@@ -134,6 +134,41 @@ async function fixture(options = {}) {
   };
 }
 
+test("receiver storage failures notify the sender and resume committed relay bytes after restart", async () => {
+  const f = await fixture({ totalQuota: 6 });
+  try {
+    const a = await f.enroll(), b = await f.pair(a.token);
+    const offer = { transferId: "save-failure", targetDeviceId: b.id,
+      files: [{ fileId: "item", name: "note.txt", size: 6, sha256: hash("abcdef") }] };
+    const path = "/transfers/save-failure/files/item/";
+    assert.equal((await f.call("POST", "/transfers", offer, a.token)).status, 201);
+    await f.call("POST", "/transfers/save-failure/accept", { fileIds: ["item"] }, b.token);
+    await f.call("PUT", path + "chunks?offset=0", Buffer.from("abc"), a.token);
+    assert.equal((await f.call("POST", path + "receive-error", { message: "Choose a local folder" }, a.token)).status, 403);
+    const failed = await f.call("POST", path + "receive-error", { message: "请选择设备的本地文件夹" }, b.token);
+    assert.equal(failed.body.file.status, "failed");
+    assert.equal(failed.body.file.offset, 3);
+    assert.equal(failed.body.file.receiveFailure, true);
+    const source = (await f.call("GET", "/transfers/save-failure", undefined, a.token)).body.transfer.files[0];
+    assert.equal(source.errorCode, "请选择设备的本地文件夹");
+    assert.equal((await f.call("GET", "/events", undefined, a.token)).body.events.at(-1).type, "transfer.updated");
+    assert.equal((await f.call("POST", "/transfers", { ...offer, transferId: "over-quota" }, a.token)).status, 507);
+    await f.restart();
+    const retry = (await f.call("POST", path + "receive-retry", {}, b.token)).body.file;
+    assert.equal(retry.status, "uploading"); assert.equal(retry.offset, 3); assert.equal(retry.receiveFailure, false);
+    assert.equal(retry.attemptId, failed.body.file.attemptId);
+    // Replaying the prefix proves it is still present, not merely an offset.
+    assert.equal((await f.call("PUT", path + "chunks?offset=0", Buffer.from("abc"), a.token)).status, 200);
+    await f.call("PUT", path + "chunks?offset=3", Buffer.from("def"), a.token);
+    await f.call("POST", path + "complete", {}, a.token);
+    await f.call("POST", path + "receive-error", { message: "Directory unavailable" }, b.token);
+    assert.equal((await f.call("POST", path + "receive-retry", {}, a.token)).body.file.status, "ready");
+    assert.equal((await f.call("POST", path + "received", {}, b.token)).status, 200);
+    assert.equal((await f.call("POST", path + "receive-error", { message: "Late failure" }, b.token)).body.file.status, "received");
+    assert.equal((await f.call("GET", "/info")).body.features.receiveErrorReporting, true);
+  } finally { await f.close(); }
+});
+
 test("device rename updates its identity label, not its token, and notifies peers", async () => {
   const f = await fixture();
   try {

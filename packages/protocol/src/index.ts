@@ -109,6 +109,7 @@ export interface TransferFile {
   offset: number;
   attemptId: string;
   errorCode: string | null;
+  receiveFailure?: boolean;
   transport?: "relay" | "direct" | null;
   directPush?: DirectPush;
   rtc?: RtcSession;
@@ -144,7 +145,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean };
+  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";

@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import io.flutter.plugin.common.MethodChannel;
 import java.io.File;
@@ -74,15 +75,11 @@ final class FileShareBridge {
             if(!root.mkdirs()&&!root.isDirectory())throw new IllegalStateException("无法创建分享接收目录");
             int index=0;
             for(Uri uri:uris){
-                String name="shared-file";if("file".equals(uri.getScheme()))name=new File(uri.getPath()).getName();
-                else try(Cursor cursor=context.getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(cursor!=null&&cursor.moveToFirst()&&cursor.getString(0)!=null)name=cursor.getString(0);}
-                name=name.replaceAll("[\\\\/\\x00-\\x1f]","_");if(name.isEmpty()||name.equals(".")||name.equals(".."))name="shared-file";
-                File part=new File(root,String.valueOf(index++));if(!part.mkdir())throw new IllegalStateException("无法保存分享文件");File target=new File(part,name);
-                boolean copied=false;
-                try(InputStream input="file".equals(uri.getScheme())?new java.io.FileInputStream(new File(uri.getPath())):context.getContentResolver().openInputStream(uri);FileOutputStream output=new FileOutputStream(target)){
-                    if(input==null)throw new IllegalStateException("来源未授予文件读取权限");byte[] bytes=new byte[65536];int count;while((count=input.read(bytes))!=-1)output.write(bytes,0,count);output.getFD().sync();
-                    copied=true;
-                }finally{if(!copied)target.delete();}paths.add(target.getPath());
+                File part=new File(root,String.valueOf(index++));
+                try{
+                    if(!part.mkdir())throw new IllegalStateException("无法保存分享文件");
+                    paths.add(importItem(uri,part).getPath());
+                }catch(Exception error){removePartial(part);failure="部分分享内容未能导入："+error.getMessage();}
             }
         }catch(Exception error){failure="部分分享内容未能导入："+error.getMessage();}
         try{
@@ -92,6 +89,34 @@ final class FileShareBridge {
             main.post(()->channel.invokeMethod("pendingChanged",null));
         }catch(Exception error){main.post(()->channel.invokeMethod("importError","分享未能保存："+error.getMessage()));}
     }
+    private File importItem(Uri uri,File part)throws Exception{
+        boolean treeRoot="content".equals(uri.getScheme())&&DocumentsContract.isTreeUri(uri)&&uri.getPathSegments().size()==2;
+        if("content".equals(uri.getScheme())&&(treeRoot||DocumentsContract.Document.MIME_TYPE_DIR.equals(context.getContentResolver().getType(uri)))){
+            List<Map<String,Object>> entries=SendFolderEntries.read(context,uri);
+            File directory=null;String parent=part.getCanonicalPath()+File.separator;
+            for(Map<String,Object> entry:entries){
+                File target=new File(part,(String)entry.get("relativePath"));
+                if(!target.getCanonicalPath().startsWith(parent))throw new IllegalStateException("无法导入文件夹名称");
+                if(directory==null)directory=target;
+                if("directory".equals(entry.get("entryKind"))){if(!target.mkdirs()&&!target.isDirectory())throw new IllegalStateException("无法创建分享文件夹");}
+                else copyBytes(Uri.parse((String)entry.get("location")),target);
+            }
+            if(directory==null)throw new IllegalStateException("无法读取分享文件夹");
+            return directory;
+        }
+        String name="shared-file";if("file".equals(uri.getScheme()))name=new File(uri.getPath()).getName();
+        else try(Cursor cursor=context.getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(cursor!=null&&cursor.moveToFirst()&&cursor.getString(0)!=null)name=cursor.getString(0);}
+        name=name.replaceAll("[\\\\/\\x00-\\x1f]","_");if(name.isEmpty()||name.equals(".")||name.equals(".."))name="shared-file";
+        File target=new File(part,name);copyBytes(uri,target);return target;
+    }
+    private void copyBytes(Uri uri,File target)throws Exception{
+        boolean copied=false;
+        try(InputStream input="file".equals(uri.getScheme())?new java.io.FileInputStream(new File(uri.getPath())):context.getContentResolver().openInputStream(uri);FileOutputStream output=new FileOutputStream(target)){
+            if(input==null)throw new IllegalStateException("来源未授予文件读取权限");byte[] bytes=new byte[65536];int count;
+            while((count=input.read(bytes))!=-1){if(Thread.currentThread().isInterrupted())throw new InterruptedException("已停止导入");output.write(bytes,0,count);}output.getFD().sync();copied=true;
+        }finally{if(!copied)target.delete();}
+    }
+    private static void removePartial(File item){File[] children=item.listFiles();if(children!=null)for(File child:children)removePartial(child);item.delete();}
     void share(List<String> paths,String text) throws Exception {
         List<String> values=paths==null?java.util.Collections.emptyList():paths;ArrayList<Uri> uris=new ArrayList<>();String mime=null;
         for(String path:values){Uri uri;if(path.startsWith("content://"))uri=Uri.parse(path);else uri=DockShareProvider.registerForShare(context,new File(path),new File(path).getName());uris.add(uri);String next=context.getContentResolver().getType(uri);if(next==null)next="application/octet-stream";if(mime==null)mime=next;else if(!mime.equals(next))mime=mime.split("/")[0].equals(next.split("/")[0])?mime.split("/")[0]+"/*":"*/*";}

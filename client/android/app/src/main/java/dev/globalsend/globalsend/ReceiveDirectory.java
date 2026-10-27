@@ -15,6 +15,7 @@ import io.flutter.plugin.common.MethodChannel;
 import java.io.FileDescriptor;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -98,6 +99,7 @@ final class ReceiveDirectory {
         picker = result;
         try {
             host().startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                .putExtra(Intent.EXTRA_LOCAL_ONLY, true)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION), PICK_DIRECTORY);
         } catch (Exception error) { picker = null; fail(result, error); }
@@ -120,16 +122,35 @@ final class ReceiveDirectory {
             context.getContentResolver().takePersistableUriPermission(tree, granted);
             submit(result, () -> {
                 Uri folder = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
+                String label;
                 try (Cursor cursor = context.getContentResolver().query(folder,
                     new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_FLAGS}, null, null, null)) {
                     if (cursor == null || !cursor.moveToFirst()) throw new FileNotFoundException("文件夹已不存在");
                     if ((cursor.getInt(1) & DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE) == 0) throw new IOException("该文件夹不允许创建文件");
-                    Map<String, Object> selection = new HashMap<>();
-                    selection.put("location", tree.toString()); selection.put("label", cursor.getString(0)); return selection;
+                    label = cursor.getString(0);
                 }
+                validateWritable(tree.toString());
+                Map<String, Object> selection = new HashMap<>();
+                selection.put("location", tree.toString()); selection.put("label", label); return selection;
             });
         } catch (Exception error) { fail(result, error); }
         return true;
+    }
+
+    /** Validate the exact receive path before this selection becomes active. */
+    void validateWritable(String location) throws Exception {
+        Map<String, Object> probe = create(location, ".globalsend-write-test-" + UUID.randomUUID() + ".tmp");
+        try {
+            try (RandomAccessFile file = new RandomAccessFile((String) probe.get("ioPath"), "rw")) {
+                file.write(new byte[]{71, 83}); file.seek(1); file.write(82);
+                file.seek(0);
+                if (file.read() != 71 || file.read() != 82) throw new IOException("此文件夹无法直接读写，请选择本机文件夹或使用默认目录");
+                file.getFD().sync();
+            }
+        } finally {
+            try { close((String) probe.get("handle"), null); }
+            finally { delete((String) probe.get("location")); }
+        }
     }
 
     Map<String, Object> create(String destinationLocation, String name) throws Exception {
@@ -201,7 +222,12 @@ final class ReceiveDirectory {
         try {
             String path;
             try { path = descriptorAccess.checkedPath(descriptor, writable); }
-            catch (Exception unsupported) { throw new IOException("该目录不支持直接读写，请选择设备本地文件夹", unsupported); }
+            catch (Exception unsupported) {
+                android.util.Log.w("GlobalSendDestination", "Direct access failed: provider=" + document.getAuthority() +
+                    ", writable=" + writable + ", cause=" + unsupported.getClass().getSimpleName() +
+                    (unsupported instanceof android.system.ErrnoException ? ", errno=" + ((android.system.ErrnoException) unsupported).errno : ""));
+                throw new IOException("此文件夹不支持直接读写，请选择本机文件夹或使用默认目录", unsupported);
+            }
             Map<String, Object> value = stat(location);
             if (!Boolean.TRUE.equals(value.get("exists"))) throw new FileNotFoundException("文件已不存在");
             value.remove("exists"); value.put("ioPath", path); value.put("handle", token);

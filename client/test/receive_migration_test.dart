@@ -132,7 +132,11 @@ void main() {
         expect(await File(a.path).exists(), isTrue);
         expect(await File(b.path).exists(), isTrue);
         expect(
-          store.items.every((item) => File(item.path).absolute.uri.path.startsWith(next.absolute.uri.path)),
+          store.items.every(
+            (item) =>
+                File(item.path).absolute.uri.path
+                    .startsWith(next.absolute.uri.path),
+          ),
           isTrue,
         );
       },
@@ -158,7 +162,8 @@ void main() {
     await restored.setReceiveDestination('', '');
     expect(
       restored.items.every(
-        (item) => File(item.path).absolute.uri.path.startsWith(Directory('${docs.path}/GlobalSend').absolute.uri.path),
+        (item) => File(item.path).absolute.uri.path
+            .startsWith(Directory('${docs.path}/GlobalSend').absolute.uri.path),
       ),
       isTrue,
     );
@@ -225,18 +230,32 @@ void main() {
     expect(uri.files.containsKey(original.path), isFalse);
     expect(uri.handles, isEmpty);
   });
-  test('continued folder receives use the migrated root even if old user files remain',() async {
-    final root=await fixtureDirectory();
-    final old=await Directory('${root.path}/old').create();
-    final next=await Directory('${root.path}/next').create();
-    final store=SavedFilesStore(indexFile:File('${root.path}/index.json'),documentsDirectory:root);
-    await store.setReceiveDestination(old.path,'old');
-    final original=await add(store,old.path,'root',name:'资料',relative:'资料',directory:true);
+  test('continued folder receives use the migrated root even if old user files remain', () async {
+    final root = await fixtureDirectory();
+    final old = await Directory('${root.path}/old').create();
+    final next = await Directory('${root.path}/next').create();
+    final store = SavedFilesStore(
+      indexFile: File('${root.path}/index.json'),
+      documentsDirectory: root,
+    );
+    await store.setReceiveDestination(old.path, 'old');
+    final original = await add(
+      store,
+      old.path,
+      'root',
+      name: '资料',
+      relative: '资料',
+      directory: true,
+    );
     await File('${original.path}/user.txt').writeAsString('keep');
-    await store.setReceiveDestination(next.path,'next');
-    expect(await File('${original.path}/user.txt').readAsString(),'keep');
-    final location=await ReceiveDestination.folderDirectory(destinationLocation:next.path,transferKey:'tree',relativePath:'资料');
-    expect(location,store.items.single.path);
+    await store.setReceiveDestination(next.path, 'next');
+    expect(await File('${original.path}/user.txt').readAsString(), 'keep');
+    final location = await ReceiveDestination.folderDirectory(
+      destinationLocation: next.path,
+      transferKey: 'tree',
+      relativePath: '资料',
+    );
+    expect(location, store.items.single.path);
   });
 
   test('controller rewrites pending and forwarding references when the index commits', () async {
@@ -280,4 +299,74 @@ void main() {
     expect(json['dock'][0]['localPath'], path);
     expect(json['sources']['forward'], path);
   });
+
+  for (final blockedMethod in ['stat', 'open']) {
+    test(
+      'unreadable old provider $blockedMethod allows new destination and retains only inaccessible originals',
+      () async {
+        final root = await fixtureDirectory();
+        final next = await Directory('${root.path}/recovered').create();
+        final uri = UriFixture(root);
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        String blocked = '';
+        messenger.setMockMethodCallHandler(ReceiveDestination.channel, (
+          call,
+        ) async {
+          final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
+          if (call.method == blockedMethod && args['location'] == blocked) {
+            throw PlatformException(code: 'UNREADABLE', message: '旧提供程序暂不可读');
+          }
+          return uri.call(call);
+        });
+        addTearDown(
+          () => messenger.setMockMethodCallHandler(
+            ReceiveDestination.channel,
+            null,
+          ),
+        );
+        final store = SavedFilesStore(
+          indexFile: File('${root.path}/recovery-index.json'),
+          documentsDirectory: root,
+        );
+        await store.setReceiveDestination('content://fixture/tree', 'old');
+        final unreadable = await add(
+          store,
+          'content://fixture/tree',
+          'bad',
+          name: 'bad.txt',
+        );
+        final readable = await add(
+          store,
+          'content://fixture/tree',
+          'good',
+          name: 'good.txt',
+        );
+        blocked = unreadable.path;
+        await store.setReceiveDestination(next.path, 'new');
+        expect(store.receiveDestinationLocation, next.path);
+        expect(store.migrationSkippedFiles, 1);
+        expect(
+          store.items.firstWhere((item) => item.fileId == 'bad').path,
+          unreadable.path,
+        );
+        expect(uri.files.containsKey(unreadable.path), isTrue);
+        final migrated = store.items.firstWhere(
+          (item) => item.fileId == 'good',
+        );
+        expect(await File(migrated.path).readAsString(), '正文 good');
+        expect(uri.files.containsKey(readable.path), isFalse);
+        final restored = SavedFilesStore(
+          indexFile: store.indexFile,
+          documentsDirectory: root,
+        );
+        await restored.load();
+        expect(
+          restored.items.firstWhere((item) => item.fileId == 'bad').path,
+          unreadable.path,
+        );
+        expect(uri.handles, isEmpty);
+      },
+    );
+  }
 }
