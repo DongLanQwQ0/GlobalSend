@@ -146,7 +146,8 @@ void main() {
     if (await folder.exists()) await folder.delete(recursive: true);
   });
   test('pause preserves receiver partial and resume reuses it rather than deleting it', () async {
-    ReceiveDestination.registryDirectoryForTesting = () async => Directory('${folder.path}/registry');
+    ReceiveDestination.registryDirectoryForTesting = () async =>
+        Directory('${folder.path}/registry');
     addTearDown(() => ReceiveDestination.registryDirectoryForTesting = null);
     final api = PausedReceiveApi();
     final c = SendController(documentsDirectory: () async => folder)

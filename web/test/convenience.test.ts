@@ -23,6 +23,79 @@ const result = await build({
 
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(done=>resolve=done);return {promise,resolve};}
 
+test('incoming receipt keeps its window and file card through connecting, progress, ready and received',()=>{
+  const {c,document,render}=fixture();c.render=render;const t=transfer('live-receipt','offered');t.files[0].name='photo.png';t.files[0].mimeType='image/png';c.transfers=[t];
+  c.noticeFile(t,t.files[0]);const modal=document.querySelector('.receipt-modal'),card=document.querySelector('[data-receipt-id="live-receipt:file-live-receipt"]');
+  assert.match(card!.textContent!,/等待接收/);assert.ok(card!.querySelector('[data-accept]'));
+  c.setFile(t.transferId,{...t.files[0],status:'accepted'});assert.equal(document.querySelector('.receipt-modal'),modal);assert.equal(document.querySelector('[data-receipt-id="live-receipt:file-live-receipt"]'),card);
+  assert.ok(card!.querySelector('[data-pause]'));c.paintProgress('live-receipt:file-live-receipt',2,4);
+  assert.equal(card!.querySelector<HTMLElement>('[data-transfer-progress]')!.style.width,'50%');assert.match(card!.querySelector('[data-transfer-bytes]')!.textContent!,/2 B \/ 4 B/);
+  c.previews.set('live-receipt:file-live-receipt',{kind:'image',url:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='});
+  c.rtcLocalFiles.set('live-receipt:file-live-receipt',new File(['img'],'photo.png',{type:'image/png'}));
+  c.setFile(t.transferId,{...t.files[0],status:'received',offset:4});assert.equal(document.querySelector('.receipt-modal'),modal);assert.equal(document.querySelector('[data-receipt-id="live-receipt:file-live-receipt"]'),card);
+  assert.ok(card!.querySelector('img'));assert.equal(card!.querySelector('.card-meta,.card-source,.card-name,.image-card-footer'),null);assert.equal((modal as HTMLElement).style.animation,'none');
+  c.closeModal();c.noticeFile(t,{...t.files[0],status:'received'});assert.equal(c.modal,null);
+});
+
+test('preview-first text and image cards remove metadata but keep copy and menus, other files keep their name',()=>{
+  const {c,document}=fixture();const text=textEvent('clean-text',false,'只保留内容');c.events=[text];
+  document.querySelector('#app')!.innerHTML=c.dockHtml();const card=document.querySelector('.text-card')!;
+  assert.equal(card.querySelector('.card-footer,.card-meta,.card-source,time'),null);assert.ok(card.querySelector('[data-copy]'));assert.ok(card.querySelector('[data-card-menu]'));
+  const t=transfer('plain-file','received');t.files[0].name='archive.unknown';c.transfers=[t];document.querySelector('#app')!.innerHTML=c.fileHtml(t,t.files[0],false);
+  assert.equal(document.querySelector('.card-name')!.textContent,'archive.unknown');assert.ok(document.querySelector('.content-preview svg'));assert.equal(document.querySelector('.card-meta,.card-source,time'),null);
+});
+
+test('backdrop clicks close settings and connection but clicks inside content do not',()=>{
+  const {c,document,render,context,Event}=fixture();c.render=render;(context as any).window.setTimeout=(finish:()=>void)=>{finish();return 1;};
+  for(const action of ['settings','connection']){
+    render();document.querySelector<HTMLElement>('[data-action="'+action+'"]')!.click();assert.equal(c.modal,'settings');
+    document.querySelector('.settings-modal')!.dispatchEvent(new Event('click',{bubbles:true}));assert.equal(c.modal,'settings');
+    document.querySelector('.modal-backdrop')!.dispatchEvent(new Event('click',{bubbles:true}));assert.equal(c.modal,null);
+  }
+});
+
+test('failed send tools affect only actual failures and retry the same file offers with their existing prefix',async()=>{
+  const {c,document,render}=fixture();c.render=render;c.session.device.deviceId='sender';c.devices.push({deviceId:'target',name:'Target',platform:'windows',online:true});
+  const failed=transfer('bad','failed','auto','relay'),directory=transfer('dir-bad','failed','auto','relay'),normal=transfer('good','accepted','auto','relay'),running=transfer('busy','uploading','auto','relay'),waiting=transfer('waiting','accepted','auto','relay');
+  for(const t of [failed,directory,normal,running,waiting]){t.targetDeviceId='target';t.files[0].offset=2;t.files[0].attemptId='same-attempt';c.fileSources.set(t.transferId+':'+t.files[0].fileId,new File(['data'],t.files[0].name));}
+  directory.files[0].receiveFailure=true;c.transfers=[failed,directory,normal,running,waiting];c.uploads.set('busy:file-busy',new AbortController());c.uploadErrors.set('waiting:file-waiting','等待设备上线');
+  c.render();assert.equal(document.querySelectorAll('.failed-send-item').length,2);assert.equal(document.querySelectorAll('.failed-send-item .failed-card-retry').length,2);
+  assert.ok(document.querySelector('[data-action="clear-failed-sends"]'));assert.ok(document.querySelector('[data-action="retry-failed-sends"]'));
+  c.startReadyUploads=()=>{};c.selectIncomingRelays=async()=>{};const calls:any[]=[];c.api.request=async(path:string,body:any)=>{calls.push({path,body});const t=path.includes('/dir-bad/')?directory:failed;return {file:{...t.files[0],status:'uploading',receiveFailure:false}};};
+  await c.retryFailedSends();assert.equal(calls.length,2);assert.ok(calls.some(item=>item.path.endsWith('/receive-retry')));assert.ok(calls.some(item=>item.path.endsWith('/retry')));assert.ok(calls.every(item=>!item.path.endsWith('/transfers')));
+  assert.equal(c.transfers[0].files[0].offset,2);assert.equal(c.transfers[1].files[0].attemptId,'same-attempt');assert.equal(c.fileSources.has('good:file-good'),true);assert.equal(c.uploads.get('busy:file-busy').signal.aborted,false);
+  failed.files[0].status='failed';directory.files[0].status='failed';const original=c.fileSources.get('bad:file-bad');c.clearFailedSends();assert.equal(await original.text(),'data');assert.equal(c.fileSources.has('bad:file-bad'),false);assert.equal(c.fileSources.has('good:file-good'),true);assert.equal(c.fileSources.has('busy:file-busy'),true);assert.equal(document.querySelector('[data-action="clear-failed-sends"]'),null);
+});
+
+test('receipt error uses an upper close icon and separate primary retry with secondary cancel',()=>{
+  const {c,document,render}=fixture();c.render=render;const t=transfer('receipt-failed','offered');c.transfers=[t];c.noticeFile(t,t.files[0]);
+  c.setFile(t.transferId,{...t.files[0],status:'failed',receiveFailure:true,errorCode:'目录不可写'});const modal=document.querySelector('.receipt-modal')!;
+  assert.ok(modal.querySelector('.modal-header [data-action="close-modal"]'));assert.equal(modal.querySelector('.receipt-actions [data-action="close-modal"]'),null);
+  assert.ok(modal.querySelector('.transfer-retry.primary'));assert.equal(modal.querySelector('.transfer-cancel')!.textContent,'取消传输');assert.match(modal.querySelector('.receipt-error-detail')!.textContent!,/目录不可写/);
+});
+
+test('notifications bridge uses file arrival identity, ready says downloadable, shared edits remain quiet',()=>{
+  const {c}=fixture(),notices:any[]=[];c.notifications.notify=async(value:any)=>{notices.push(value);return true;};const t=transfer('notify','offered');c.transfers=[t];
+  c.noticeFile(t,t.files[0]);c.setFile(t.transferId,{...t.files[0],status:'uploading'});c.setFile(t.transferId,{...t.files[0],status:'ready'});
+  assert.ok(notices.every(value=>value.id==='notify:file-notify'&&value.revision==='file'));assert.equal(notices[0].phase,'incoming');assert.match(notices.at(-1).body,/文件可下载$/);assert.equal(notices.at(-1).phase,'ready');
+  const count=notices.length;c.noticeEvents([{...textEvent('quiet',false,'shared'),type:'group.shared.updated'}]);assert.equal(notices.length,count);
+});
+
+test('Escape first exits selection on receive, history, files and devices without leaving the current page',()=>{
+  for(const mode of ['receive','sent','library','devices']){
+    const {c,document,render,Event}=fixture();c.render=render;c.installWindowDrop();c.contentView=mode==='devices'?'receive':mode;c.mobileView=mode==='devices'?'send':'receive';
+    if(mode==='receive'){c.receiveSelecting=true;c.selected.add('one');}if(mode==='sent'){c.sentSelecting=true;c.sentSelected.add('one');}if(mode==='library'){c.fileLibrary.opened=true;c.fileLibrary.editing=true;c.fileLibrary.selected.add('one');}if(mode==='devices'){c.multiSend=true;c.selectedTargets.add('sender');}
+    render();const beforeView=c.contentView,beforeMobile=c.mobileView,event=new Event('keydown',{bubbles:true,cancelable:true});Object.assign(event,{key:'Escape',isComposing:false});document.dispatchEvent(event);
+    assert.equal(event.defaultPrevented,true);assert.equal(c.contentView,beforeView);assert.equal(c.mobileView,beforeMobile);assert.equal(c.receiveSelecting || c.sentSelecting || c.fileLibrary.editing || c.multiSend,false);
+  }
+});
+
+test('Escape closes a top modal before touching the underlying selection',()=>{
+  const {c,document,render,Event}=fixture();c.render=render;c.installWindowDrop();c.events=[textEvent('one',false,'保留的选择')];c.receiveSelecting=true;c.selected.add('one');
+  c.showReceipt({id:'topmost',version:'1',source:'sender',title:'文本',text:'正文'});const event=new Event('keydown',{bubbles:true,cancelable:true});Object.assign(event,{key:'Escape',isComposing:false});document.dispatchEvent(event);
+  assert.equal(c.modal,null);assert.equal(c.receiveSelecting,true);assert.equal(c.selected.size,1);
+});
+
 function fixture() {
   class Socket {
     static CONNECTING=0;
@@ -609,7 +682,7 @@ test('only online peers appear in discovery, editor and settings while past mess
   c.selectOnlineTarget();c.render();
   assert.deepEqual(Array.from(document.querySelectorAll('[data-target]')).map(node=>node.getAttribute('data-target')),['online']);
   assert.equal(document.querySelectorAll('.target-device').length,1);
-  assert.equal(c.target,'online');assert.match(document.querySelector('#receive-panel')!.textContent!,/离线电脑/);
+  assert.equal(c.target,'online');assert.match(document.querySelector('#receive-panel')!.textContent!,/保留历史/);assert.equal(c.deviceLabel('offline'),'离线电脑');
   c.toggleEditor(true);
   assert.equal(document.querySelector('#editor-target-device'),null);
   c.modal='settings';c.render();
@@ -751,9 +824,9 @@ function textEvent(eventId='message',outgoing=false,text='原始文字'): any {
 
 test('receive cards use persisted receipt time and restore only the current library scope metadata',()=>{
   const {c,session}=fixture(),incoming=transfer('receipt','accepted');incoming.createdAt='2026-10-24T01:00:00.000Z';c.transfers=[incoming];
-  assert.match(c.fileHtml(incoming,incoming.files[0],false),/邀请时间/);c.setFile('receipt',{...incoming.files[0],status:'received'});
+  assert.doesNotMatch(c.fileHtml(incoming,incoming.files[0],false),/邀请时间|card-meta/);c.setFile('receipt',{...incoming.files[0],status:'received'});
   const receivedAt=c.receivedAt['receipt:file-receipt'];assert.ok(Date.parse(receivedAt)>Date.parse(incoming.createdAt));assert.equal(JSON.parse(session.get(c.dockKey)!).receivedAt['receipt:file-receipt'],receivedAt);
-  assert.match(c.fileHtml(incoming,incoming.files[0],false),/接收时间/);assert.doesNotMatch(c.fileHtml(incoming,incoming.files[0],false),/邀请 /);
+  assert.doesNotMatch(c.fileHtml(incoming,incoming.files[0],false),/接收时间|card-meta/);assert.doesNotMatch(c.fileHtml(incoming,incoming.files[0],false),/邀请 /);
   c.rtcStore={scope:'current-scope'};c.reconcileRtc=()=>{};
   c.syncLibraryCache([{scope:'other-scope',key:'receipt:file-receipt',receivedAt:1},{scope:'current-scope',key:'receipt:file-receipt',receivedAt:Date.parse('2026-10-25T02:00:00.000Z')}]);
   assert.equal(c.receivedAt['receipt:file-receipt'],'2026-10-25T02:00:00.000Z');
@@ -828,7 +901,7 @@ test('new content added during a send remains queued and received modal does not
   c.showReceipt({id:'notice',version:'2',source:'sender',title:'文本已更新',text:'最新完整收件'});assert.equal(c.modal,'receipt');
   assert.equal(document.querySelector('.receipt-modal')!.getAttribute('draggable'),'true');
   assert.equal(document.querySelector('.receipt-modal')!.getAttribute('data-drag-receipt'),'notice');
-  for(const selector of ['.receipt-sender','.receipt-content','.receipt-actions'])assert.equal(document.querySelector(selector)!.closest('[data-drag-receipt]'),document.querySelector('.receipt-modal'));
+  for(const selector of ['.receipt-content','.receipt-modal .card-copy'])assert.equal(document.querySelector(selector)!.closest<HTMLElement>('[data-drag-receipt]')!.dataset.dragReceipt,'notice');
   assert.equal(c.text,'未确认正文');assert.equal(c.events.length,0);
 });
 
@@ -1047,7 +1120,7 @@ test('receipt batches retain every pending item, update one text card and end wi
   assert.equal(document.querySelectorAll('.receipt-batch-grid [data-receipt-id]').length,2);
   const before=c.events;c.closeModal();assert.equal(c.modal,null);assert.equal(c.receiptBatch.size,0);assert.deepEqual(c.events,before);
   c.showReceipt({id:'a',version:'3',source:'sender',title:'same',text:'edited first'});assert.equal(c.modal,null);
-  c.showReceipt({id:'a',version:'4',source:'sender',title:'new edit',text:'new batch'});assert.equal(c.receiptBatch.size,1);assert.equal(document.querySelector('.receipt-batch-grid'),null);
+  c.showReceipt({id:'a',version:'4',source:'sender',title:'new edit',text:'new batch'});assert.equal(c.receiptBatch.size,1);assert.ok(document.querySelector('.receipt-single-grid'));
 });
 
 test('file receipt offered through received remains one card beside ordinary messages',()=>{
@@ -1058,7 +1131,7 @@ test('file receipt offered through received remains one card beside ordinary mes
   assert.equal(c.receiptBatch.size,2);
   for(const status of ['accepted','uploading','ready','received']){c.setFile(incoming.transferId,{...incoming.files[0],status});c.render();assert.equal(c.receiptBatch.size,2);}
   assert.equal(document.querySelectorAll('[data-receipt-id="batch-file:file-batch-file"]').length,1);
-  assert.match(document.querySelector('[data-receipt-id="batch-file:file-batch-file"]')!.textContent!,/sample.txt/);
+  assert.match(document.querySelector('[data-receipt-id="batch-file:file-batch-file"]')!.getAttribute('aria-label')!,/sample.txt/);
   assert.doesNotMatch(document.querySelector('[data-receipt-id="batch-file:file-batch-file"]')!.textContent!,/已保存|查看/);
 });
 
@@ -1185,7 +1258,7 @@ test('receive selection cards expose only the checkbox action and normal mode re
 test('text metadata counts Unicode code points across staging, received cards and editors',()=>{
   const {c,document,render,Event}=fixture();c.render=render;const text='中A😀𝄞';
   c.stagedTexts=[{id:'unicode-stage',text}];c.events=[{eventId:'unicode',type:'text.created',cursor:1,sourceDeviceId:'sender',targetDeviceId:'receiver',createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),payload:{text}}];c.render();
-  assert.match(document.querySelector('.staged-description')!.textContent!,/4 字符/);assert.equal(document.querySelector('.text-card .card-meta span')!.textContent,'4 字符');
+  assert.match(document.querySelector('.staged-description')!.textContent!,/4 字符/);assert.equal(document.querySelector('.text-card .card-meta'),null);assert.match(document.querySelector('.text-card')!.textContent!,/中A😀𝄞/);
   c.toggleEditor(true);const field=document.querySelector<HTMLTextAreaElement>('#send-text')!;field.value=text;field.dispatchEvent(new Event('input'));assert.equal(document.querySelector('#text-count')!.textContent,'4 字符');
 });
 
@@ -1228,7 +1301,7 @@ test('normal shared synchronization is silent and only failure or conflict is su
 
 test('image cards keep the image dominant and filename accessible without a visible filename row',()=>{
   const {c,document,render}=fixture();c.render=render;const t=transfer('photo','received');t.files[0].name='1000060721.png';t.files[0].mimeType='image/png';c.transfers=[t];c.render();
-  const card=document.querySelector('.image-card')!;assert.ok(card);assert.equal(card.querySelector('.card-name'),null);assert.match(card.getAttribute('aria-label')!,/1000060721.png/);assert.ok(card.querySelector('.image-card-footer .card-source'));assert.equal(card.querySelector('[data-action="view"]'),null);assert.ok(card.querySelector('[data-card-menu]'));
+  const card=document.querySelector('.image-card')!;assert.ok(card);assert.equal(card.querySelector('.card-name'),null);assert.match(card.getAttribute('aria-label')!,/1000060721.png/);assert.equal(card.querySelector('.image-card-footer'),null);assert.equal(card.querySelector('[data-action="view"]'),null);assert.ok(card.querySelector('[data-card-menu]'));
 });
 
 test('a successful target briefly shows a check and restores the ordinary device without another send action',async()=>{

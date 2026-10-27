@@ -1,0 +1,11 @@
+{
+  "id": "./",
+  "name": "GlobalSend",
+  "short_name": "GlobalSend",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#f7f8f4",
+  "background_color": "#f7f8f4",
+  "icons": [{"src":"./notification-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]
+}

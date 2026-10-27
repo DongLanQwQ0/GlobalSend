@@ -6,13 +6,17 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
+import android.os.Build;
+import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.system.Os;
 import android.system.OsConstants;
 import io.flutter.embedding.engine.FlutterEngine;
 import io.flutter.plugin.common.MethodChannel;
 import java.io.FileDescriptor;
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -64,6 +68,12 @@ final class ReceiveDirectory {
             if (disposed) { result.error("DESTINATION_CLOSED", "目录连接已关闭，请重试", null); return; }
             switch (call.method) {
                 case "pick": pick(result); break;
+                case "allFilesAccess": result.success(allFilesAccess()); break;
+                case "allFilesSettings":
+                    try { openAllFilesSettings(); result.success(null); }
+                    catch (Exception error) { fail(result, error); }
+                    break;
+                case "downloads": submit(result, this::downloads); break;
                 case "create": submit(result, () -> create(call.argument("destinationLocation"), call.argument("name"))); break;
                 case "directory": submit(result, () -> directory(call.argument("parentLocation"), call.argument("name"), Boolean.TRUE.equals(call.argument("unique")))); break;
                 case "open": submit(result, () -> open(call.argument("location"), Boolean.TRUE.equals(call.argument("writable")))); break;
@@ -129,12 +139,73 @@ final class ReceiveDirectory {
                     if ((cursor.getInt(1) & DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE) == 0) throw new IOException("该文件夹不允许创建文件");
                     label = cursor.getString(0);
                 }
+                File direct = physicalDocument(tree);
+                if (direct != null) {
+                    validateLocalDirectory(direct);
+                    return localSelection(direct);
+                }
                 validateWritable(tree.toString());
                 Map<String, Object> selection = new HashMap<>();
                 selection.put("location", tree.toString()); selection.put("label", label); return selection;
             });
         } catch (Exception error) { fail(result, error); }
         return true;
+    }
+
+    boolean allFilesAccess() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager();
+    }
+
+    void openAllFilesSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
+            throw new IllegalStateException("此系统请使用文件夹选择器");
+        try {
+            host().startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:" + context.getPackageName())));
+        } catch (android.content.ActivityNotFoundException unavailable) {
+            host().startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+        }
+    }
+
+    Map<String, Object> downloads() throws Exception {
+        if (!allFilesAccess()) throw new IOException("请先在系统设置中允许管理所有文件，再选择 Download/GlobalSend");
+        File folder = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "GlobalSend");
+        if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("无法创建 Download/GlobalSend");
+        validateLocalDirectory(folder);
+        return localSelection(folder.getCanonicalFile());
+    }
+
+    private static Map<String, Object> localSelection(File folder) throws IOException {
+        Map<String, Object> value = new HashMap<>();
+        value.put("location", folder.getCanonicalPath()); value.put("label", folder.getCanonicalPath());
+        return value;
+    }
+
+    /** A real local path is used only after the user grants Android's all-files access. */
+    File physicalDocument(Uri document) throws IOException {
+        if (!allFilesAccess() || !"com.android.externalstorage.documents".equals(document.getAuthority())) return null;
+        String id;
+        try { id = DocumentsContract.getDocumentId(document); }
+        catch (IllegalArgumentException treeOnly) { id = DocumentsContract.getTreeDocumentId(document); }
+        int split = id.indexOf(':');
+        if (split < 0 || !"primary".equalsIgnoreCase(id.substring(0, split))) return null;
+        File root = Environment.getExternalStorageDirectory().getCanonicalFile();
+        File selected = new File(root, id.substring(split + 1)).getCanonicalFile();
+        if (!selected.equals(root) && !selected.getPath().startsWith(root.getPath() + File.separator))
+            throw new IOException("文件夹不在所选存储设备内");
+        return selected;
+    }
+
+    static void validateLocalDirectory(File folder) throws Exception {
+        if (!folder.isDirectory()) throw new IOException("接收文件夹已不存在，请重新选择");
+        File probe = File.createTempFile(".globalsend-write-test-", ".tmp", folder);
+        try (RandomAccessFile file = new RandomAccessFile(probe, "rw")) {
+            file.write(new byte[]{71, 83}); file.seek(1); file.write(82); file.seek(0);
+            if (file.read() != 71 || file.read() != 82) throw new IOException("接收文件夹无法读写");
+            file.getFD().sync();
+        } finally {
+            if (!probe.delete() && probe.exists()) throw new IOException("接收文件夹无法清理临时文件");
+        }
     }
 
     /** Validate the exact receive path before this selection becomes active. */
@@ -226,7 +297,13 @@ final class ReceiveDirectory {
                 android.util.Log.w("GlobalSendDestination", "Direct access failed: provider=" + document.getAuthority() +
                     ", writable=" + writable + ", cause=" + unsupported.getClass().getSimpleName() +
                     (unsupported instanceof android.system.ErrnoException ? ", errno=" + ((android.system.ErrnoException) unsupported).errno : ""));
-                throw new IOException("此文件夹不支持直接读写，请选择本机文件夹或使用默认目录", unsupported);
+                File direct = physicalDocument(document);
+                if (direct == null) throw new IOException("此文件夹无法直接读写；可使用默认目录，或开启所有文件访问后重试", unsupported);
+                if (!direct.isFile()) throw new FileNotFoundException("接收文件已不存在，请重新选择目录");
+                try (RandomAccessFile probe = new RandomAccessFile(direct, writable ? "rw" : "r")) {
+                    probe.seek(probe.getFilePointer());
+                }
+                path = direct.getPath();
             }
             Map<String, Object> value = stat(location);
             if (!Boolean.TRUE.equals(value.get("exists"))) throw new FileNotFoundException("文件已不存在");

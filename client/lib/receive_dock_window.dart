@@ -315,6 +315,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
             if (selected != null && mounted) await action(selected, entry.id);
           },
           child: CompactContentCard(
+            previewOnly: true,
             surfaceColor: Colors.transparent,
             previewColor: Colors.transparent,
             metadataColor: Colors.transparent,

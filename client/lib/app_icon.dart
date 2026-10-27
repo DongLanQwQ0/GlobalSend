@@ -77,7 +77,7 @@ class _VectorIconPainter extends CustomPainter {
       'Missing vector icon 0x${codePoint!.toRadixString(16)}',
     );
     if (commands == null) return null;
-    final value = Path();
+    final value = Path()..fillType = PathFillType.nonZero;
     var index = 0;
     while (index < commands.length) {
       switch (commands[index++].toInt()) {
@@ -106,7 +106,14 @@ class _VectorIconPainter extends CustomPainter {
     final outline = path();
     if (outline == null) return;
     canvas.save();
-    canvas.scale(size.width / 24, size.height / 24);
+    // Tight, non-square parents must not stretch a gear or a chain. Center the
+    // canonical 24-unit viewport and use a uniform scale in either direction.
+    final scale = size.shortestSide / 24;
+    canvas.translate(
+      (size.width - 24 * scale) / 2,
+      (size.height - 24 * scale) / 2,
+    );
+    canvas.scale(scale, scale);
     if (mirror) {
       canvas.translate(24, 0);
       canvas.scale(-1, 1);

@@ -23,6 +23,7 @@ import 'saved_image_preview.dart';
 import 'text_viewer.dart';
 import 'network_bridge.dart';
 import 'received_file_access.dart';
+import 'receive_destination.dart';
 import 'reachability_screen.dart';
 import 'system_bridge.dart';
 import 'content_preview.dart';
@@ -135,6 +136,8 @@ class _SendScreenState extends State<SendScreen>
   String _receiptSnapshot = '';
   bool _receiptPresentedExternally = false;
   final _nativeQueueKey = GlobalKey();
+  final _savedFilesKey = GlobalKey<SavedFilesScreenState>();
+  bool? _allFilesAccess;
   final _nativeSendNavigationKey = GlobalKey();
   int _nativeSendNavigationSerial = 0;
   bool _queueRouteVisible = true;
@@ -294,14 +297,14 @@ class _SendScreenState extends State<SendScreen>
         unawaited(navigator.maybePop());
         return KeyEventResult.handled;
       }
-      if (settingsOpen || selecting || contentTab != 0 || page != 1) {
+      if (!settingsOpen && exitContentSelection()) {
+        return KeyEventResult.handled;
+      }
+      if (settingsOpen || contentTab != 0 || page != 1) {
         setState(() {
           if (settingsOpen)
             settingsOpen = false;
-          else if (selecting) {
-            selecting = false;
-            selected.clear();
-          } else if (contentTab != 0)
+          else if (contentTab != 0)
             contentTab = 0;
           else
             page = 1;
@@ -572,6 +575,7 @@ class _SendScreenState extends State<SendScreen>
 
     final route = DialogRoute<void>(
       context: context,
+      barrierDismissible: true,
       builder: (dialog) => ValueListenableBuilder<int>(
         valueListenable: _receiptVersion,
         builder: (_, _, _) {
@@ -670,6 +674,7 @@ class _SendScreenState extends State<SendScreen>
     recentPhotos.setVisible(loggedIn && state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) refreshDevices();
     if (state == AppLifecycleState.resumed && Platform.isAndroid) {
+      if (settingsOpen) unawaited(refreshAllFilesAccess());
       c.refreshNativeDock().catchError((Object _) {});
       c
           .refreshReceiveNotifications(request: loggedIn)
@@ -813,6 +818,43 @@ class _SendScreenState extends State<SendScreen>
     cleanupSizeRule = cleanup.sizeRule;
     cleanupSize.text = (cleanup.sizeMiB * 1048576 / 1000).toString();
     setState(() => settingsOpen = true);
+    if (Platform.isAndroid) unawaited(refreshAllFilesAccess());
+  }
+
+  Future<void> refreshAllFilesAccess() async {
+    final allowed = await ReceiveDestination.allFilesAccess();
+    if (mounted) setState(() => _allFilesAccess = allowed);
+  }
+
+  Future<void> useDownloadsDirectory() async {
+    final destination = await ReceiveDestination.downloads();
+    await c.changeReceiveDirectory(
+      destination['location']!,
+      destination['label']!,
+    );
+  }
+
+  bool get fileSelectionActive =>
+      contentTab == 2 &&
+      (page == 0 || MediaQuery.sizeOf(context).width >= 900) &&
+      (_savedFilesKey.currentState?.selectionActive ?? false);
+
+  bool exitContentSelection() {
+    if (fileSelectionActive &&
+        _savedFilesKey.currentState!.exitSelectionIfActive()) {
+      return true;
+    }
+    if (!selecting && !ui.multiSend) return false;
+    setState(() {
+      if (selecting) {
+        selecting = false;
+        selected.clear();
+      } else {
+        ui.multiSend = false;
+        ui.sendTargets.clear();
+      }
+    });
+    return true;
   }
 
   Future<void> chooseLocalIp() async {
@@ -828,9 +870,15 @@ class _SendScreenState extends State<SendScreen>
     }
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final window = PopScope(
-      canPop: !settingsOpen && page == 1,
+      canPop:
+          !settingsOpen &&
+          !selecting &&
+          !ui.multiSend &&
+          !fileSelectionActive &&
+          page == 1,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
+          if (!settingsOpen && exitContentSelection()) return;
           setState(() {
             settingsOpen = false;
             page = 1;
@@ -1368,22 +1416,25 @@ class _SendScreenState extends State<SendScreen>
 
   Future<void> showCredentialDiagnostics() => showDialog<void>(
     context: context,
+    barrierDismissible: true,
     builder: (dialog) => AlertDialog(
       title: const Text('诊断信息'),
       content: SizedBox(
         width: 480,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SelectableText(
-                c.credentialProblem!.diagnostic,
-                style: const TextStyle(fontSize: 14, height: 1.55),
-              ),
-              const SizedBox(height: 24),
-              const Text('登录信息暂不可用。可以重试连接，或重新输入组密码。'),
-            ],
+        child: dialogScroll(
+          SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SelectableText(
+                  c.credentialProblem!.diagnostic,
+                  style: const TextStyle(fontSize: 14, height: 1.55),
+                ),
+                const SizedBox(height: 24),
+                const Text('登录信息暂不可用。可以重试连接，或重新输入组密码。'),
+              ],
+            ),
           ),
         ),
       ),
@@ -1399,56 +1450,59 @@ class _SendScreenState extends State<SendScreen>
   Future<void> showServerSettings() async {
     await showDialog<void>(
       context: context,
+      barrierDismissible: true,
       builder: (dialog) => StatefulBuilder(
         builder: (dialog, update) => AlertDialog(
           title: const Text('服务器设置'),
           content: SizedBox(
             width: 480,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (c.profiles.isNotEmpty) ...[
-                    UiField(
-                      label: '已保存服务器',
-                      child: DropdownButtonFormField<String>(
-                        icon: const AppIcon(Icons.arrow_drop_down),
-                        isExpanded: true,
-                        decoration: const InputDecoration(),
-                        items: c.profiles
-                            .map(
-                              (p) => DropdownMenuItem(
-                                value: p.key,
-                                child: Text(
-                                  p.baseUrl,
-                                  overflow: TextOverflow.ellipsis,
+            child: dialogScroll(
+              SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (c.profiles.isNotEmpty) ...[
+                      UiField(
+                        label: '已保存服务器',
+                        child: DropdownButtonFormField<String>(
+                          icon: const AppIcon(Icons.arrow_drop_down),
+                          isExpanded: true,
+                          decoration: const InputDecoration(),
+                          items: c.profiles
+                              .map(
+                                (p) => DropdownMenuItem(
+                                  value: p.key,
+                                  child: Text(
+                                    p.baseUrl,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: working
-                            ? null
-                            : (key) {
-                                final p = c.profiles.firstWhere(
-                                  (p) => p.key == key,
-                                );
-                                update(() {
-                                  address.text = p.baseUrl;
-                                  development = p.baseUrl.startsWith('http:');
-                                });
-                              },
+                              )
+                              .toList(),
+                          onChanged: working
+                              ? null
+                              : (key) {
+                                  final p = c.profiles.firstWhere(
+                                    (p) => p.key == key,
+                                  );
+                                  update(() {
+                                    address.text = p.baseUrl;
+                                    development = p.baseUrl.startsWith('http:');
+                                  });
+                                },
+                        ),
                       ),
+                      const SizedBox(height: 24),
+                    ],
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('允许 HTTP'),
+                      value: development,
+                      onChanged: (value) => update(() => development = value),
                     ),
-                    const SizedBox(height: 24),
                   ],
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('允许 HTTP'),
-                    value: development,
-                    onChanged: (value) => update(() => development = value),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -1494,6 +1548,7 @@ class _SendScreenState extends State<SendScreen>
     String? error;
     final route = DialogRoute<String>(
       context: context,
+      barrierDismissible: true,
       builder: (dialog) => StatefulBuilder(
         builder: (dialog, update) => AlertDialog(
           title: const Text('输入组密码'),
@@ -1636,7 +1691,10 @@ class _SendScreenState extends State<SendScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(height: 180, child: queuePanel()),
+              SizedBox(
+                height: c.failedOutgoingFiles.isEmpty ? 180 : 212,
+                child: queuePanel(),
+              ),
               const SizedBox(height: 10),
               targetDevices(),
               const SizedBox(height: 10),
@@ -1654,7 +1712,10 @@ class _SendScreenState extends State<SendScreen>
           children: [
             tools,
             const SizedBox(height: 12),
-            SizedBox(height: 180, child: queuePanel()),
+            SizedBox(
+              height: c.failedOutgoingFiles.isEmpty ? 180 : 212,
+              child: queuePanel(),
+            ),
             const SizedBox(height: 12),
             targetDevices(),
             const SizedBox(height: 12),
@@ -1729,7 +1790,14 @@ class _SendScreenState extends State<SendScreen>
     final compact = MediaQuery.sizeOf(context).width < 900;
     final content = switch (contentTab) {
       1 => sentPage(),
-      2 => SavedFilesScreen(controller: c, embedded: true),
+      2 => SavedFilesScreen(
+        key: _savedFilesKey,
+        controller: c,
+        embedded: true,
+        onSelectionChanged: () {
+          if (mounted) setState(() {});
+        },
+      ),
       _ => receivePage(),
     };
     if (compact) return content;
@@ -1885,6 +1953,7 @@ class _SendScreenState extends State<SendScreen>
 
   Widget queuePanel() {
     final count = c.stagedFiles.length + c.stagedTexts.length;
+    final failed = c.failedOutgoingFiles;
     final active = c.dock
         .where(
           (item) =>
@@ -1992,6 +2061,35 @@ class _SendScreenState extends State<SendScreen>
                     ],
                   ),
                 ),
+                if (failed.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          key: const ValueKey('clear-failed-outgoing'),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(40, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: () => failedQueueAction(retry: false),
+                          child: const Text('清除所有失败文件'),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          key: const ValueKey('retry-failed-outgoing'),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(40, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: () => failedQueueAction(retry: true),
+                          child: const Text('重试所有'),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
                   child: Stack(
                     children: [
@@ -2182,39 +2280,71 @@ class _SendScreenState extends State<SendScreen>
     );
   }
 
+  Future<void> failedQueueAction({required bool retry}) async {
+    try {
+      if (retry) {
+        await c.retryFailedOutgoingFiles();
+      } else {
+        await c.clearFailedOutgoingFiles();
+      }
+    } catch (error) {
+      if (mounted) notice(shortError('$error'));
+    }
+  }
+
   Widget activeTransferTile(DockEntry item) => Material(
     color: Colors.white,
     borderRadius: Ui.cardRadius,
     child: InkWell(
       onTap: () => fileAction('details', item),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const AppIcon(Icons.north_east, size: 22, color: Ui.green),
-            const Spacer(),
-            Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppIcon(Icons.north_east, size: 22, color: Ui.green),
+                const Spacer(),
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.transferBytesPerSecond > 0
+                      ? '${formatSize(item.transferBytesPerSecond.round())}/s'
+                      : statusLabel(item),
+                  maxLines: 1,
+                  style: const TextStyle(fontSize: 11, color: Ui.muted),
+                ),
+                const SizedBox(height: 6),
+                LinearProgressIndicator(
+                  value: item.progress.clamp(0, 1),
+                  minHeight: 3,
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              item.transferBytesPerSecond > 0
-                  ? '${formatSize(item.transferBytesPerSecond.round())}/s'
-                  : statusLabel(item),
-              maxLines: 1,
-              style: const TextStyle(fontSize: 11, color: Ui.muted),
+          ),
+          if (c.failedOutgoingFiles.any((entry) => entry.id == item.id))
+            Positioned(
+              right: 3,
+              top: 3,
+              child: IconButton(
+                key: ValueKey('retry-outgoing-${item.id}'),
+                tooltip: '重试',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 30,
+                  height: 30,
+                ),
+                onPressed: () => transferControl('retry', item),
+                icon: const AppIcon(Icons.refresh, size: 19),
+              ),
             ),
-            const SizedBox(height: 6),
-            LinearProgressIndicator(
-              value: item.progress.clamp(0, 1),
-              minHeight: 3,
-            ),
-          ],
-        ),
+        ],
       ),
     ),
   );
@@ -2771,6 +2901,7 @@ class _SendScreenState extends State<SendScreen>
     ui.composeIndex = index;
     final route = DialogRoute<String>(
       context: context,
+      barrierDismissible: true,
       builder: (_) => _ComposeTextDialog(controller: text),
     );
     final value = await Navigator.of(context).push(route);
@@ -3529,25 +3660,103 @@ class _SendScreenState extends State<SendScreen>
     if (action == 'details') {
       await showDialog<void>(
         context: context,
+        barrierDismissible: true,
         builder: (dialog) => AnimatedBuilder(
           animation: c,
           builder: (_, __) => AlertDialog(
-            title: Text(item.title),
-            content: SingleChildScrollView(
-              child: SelectableText(
-                '${item.sourceReference.isNotEmpty ? '文件夹 · ZIP 传输\n' : ''}${item.kind == 'text' ? '${item.text.runes.length} 字符' : formatSize(item.size)}\n${entryTime(item)}\n${sourceName(item.outgoing ? item.targetDeviceId : item.source)}\n${statusLabel(item)} · ${routeLabels[item.route] ?? item.route}\n${item.sourceReference.isNotEmpty
-                    ? '${item.sourceReference}\n'
-                    : item.localPath.isEmpty
-                    ? ''
-                    : '${item.localPath}\n'}${item.routeDetail}${item.error.isEmpty ? '' : '\n${item.error}'}',
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('transfer-details-close'),
+                  tooltip: '关闭',
+                  onPressed: () => Navigator.pop(dialog),
+                  icon: const AppIcon(Icons.close, size: 20),
+                ),
+              ],
+            ),
+            content: dialogScroll(
+              SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SelectableText(
+                      '${item.sourceReference.isNotEmpty ? '源文件夹\n' : ''}${item.kind == 'text' ? '${item.text.runes.length} 字符' : formatSize(item.size)}\n${entryTime(item)}\n${sourceName(item.outgoing ? item.targetDeviceId : item.source)}\n${statusLabel(item)} · ${routeLabels[item.route] ?? item.route}\n${item.sourceReference.isNotEmpty
+                          ? '${item.sourceReference}\n'
+                          : item.localPath.isEmpty
+                          ? ''
+                          : '${item.localPath}\n'}${item.routeDetail}${item.error.isEmpty ? '' : '\n${item.error}'}',
+                    ),
+                    if (item.receiveFailure && !item.outgoing) ...[
+                      const SizedBox(height: 16),
+                      const Text(
+                        '接收目录',
+                        style: TextStyle(fontSize: 13, color: Ui.muted),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        c.receiveDirectoryLabel.isEmpty
+                            ? '默认目录'
+                            : c.receiveDirectoryLabel,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          TextButton(
+                            onPressed: () => perform(c.chooseReceiveDirectory),
+                            child: const Text('更改目录'),
+                          ),
+                          if (c.hasCustomReceiveDirectory)
+                            TextButton(
+                              onPressed: () => perform(c.clearReceiveDirectory),
+                              child: const Text('使用默认目录'),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
+            actionsAlignment: MainAxisAlignment.spaceBetween,
             actions: [
-              if (c.canControlTransfer(item)) transferControls(item),
-              TextButton(
-                onPressed: () => Navigator.pop(dialog),
-                child: const Text('关闭'),
-              ),
+              if (c.canControlTransfer(item)) ...[
+                TextButton(
+                  key: const ValueKey('transfer-details-cancel'),
+                  onPressed: () => transferControl('cancel', item),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                  child: const Text('取消传输'),
+                ),
+                FilledButton(
+                  key: const ValueKey('transfer-details-primary'),
+                  onPressed: () => transferControl(
+                    item.locallyPaused
+                        ? 'resume'
+                        : item.status == 'failed'
+                        ? 'retry'
+                        : 'pause',
+                    item,
+                  ),
+                  child: Text(
+                    item.locallyPaused
+                        ? '继续'
+                        : item.status == 'failed'
+                        ? '重试'
+                        : '暂停',
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -3566,6 +3775,13 @@ class _SendScreenState extends State<SendScreen>
       }
     });
   }
+
+  /// Modal content scrolls normally without an automatic desktop thumb. The
+  /// queue and device strips keep their explicitly requested scrollbars.
+  Widget dialogScroll(Widget child) => ScrollConfiguration(
+    behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+    child: child,
+  );
 
   Future<void> resendSheet(DockEntry item) async {
     final mode = await showModalBottomSheet<String>(
@@ -4242,6 +4458,30 @@ class _SendScreenState extends State<SendScreen>
                   child: const Text('恢复默认'),
                 ),
               ),
+            if (Platform.isAndroid)
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  TextButton(
+                    key: const ValueKey('receive-downloads-directory'),
+                    onPressed: working
+                        ? null
+                        : () => perform(useDownloadsDirectory),
+                    child: const Text('Download/GlobalSend'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('manage-all-files-access'),
+                    onPressed: working
+                        ? null
+                        : () =>
+                              perform(ReceiveDestination.openAllFilesSettings),
+                    child: Text(
+                      _allFilesAccess == true ? '所有文件权限已开启' : '管理所有文件权限',
+                    ),
+                  ),
+                ],
+              ),
             if (c.receiveDirectoryCleanupPending > 0)
               TextButton(
                 onPressed: working
@@ -4364,11 +4604,14 @@ class _SendScreenState extends State<SendScreen>
                   subtitle: Text(c.connection),
                   onTap: () => showDialog<void>(
                     context: context,
+                    barrierDismissible: true,
                     builder: (dialog) => AlertDialog(
                       title: const Text('连接信息'),
-                      content: SingleChildScrollView(
-                        child: SelectableText(
-                          '${c.profile!.baseUrl}\n${c.peerStatus}${c.message.isEmpty ? '' : '\n${c.message}'}',
+                      content: dialogScroll(
+                        SingleChildScrollView(
+                          child: SelectableText(
+                            '${c.profile!.baseUrl}\n${c.peerStatus}${c.message.isEmpty ? '' : '\n${c.message}'}',
+                          ),
                         ),
                       ),
                       actions: [
@@ -4391,6 +4634,7 @@ class _SendScreenState extends State<SendScreen>
                       if (mounted) {
                         await showDialog<void>(
                           context: context,
+                          barrierDismissible: true,
                           builder: (dialog) => AlertDialog(
                             title: const Text('蜂窝连接'),
                             content: SelectableText('$result'),
@@ -4494,6 +4738,7 @@ class _SendScreenState extends State<SendScreen>
   Future<bool> confirm(String title, String body, String action) async =>
       await showDialog<bool>(
         context: context,
+        barrierDismissible: true,
         builder: (dialog) => AlertDialog(
           title: Text(title),
           content: Text(body),

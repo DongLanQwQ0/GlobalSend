@@ -7,7 +7,7 @@
   font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   font-synthesis:none;font-size:16px;color:var(--text);background:var(--canvas);line-height:1.5;
 }
-*{box-sizing:border-box}body{margin:0}h1,h2,h3,p,pre{margin:0}
+*{box-sizing:border-box;scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0}body{margin:0}h1,h2,h3,p,pre{margin:0}
 button,input,textarea,select{font:inherit;color:inherit}button,a,input,textarea,select{-webkit-tap-highlight-color:transparent}
 button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 12px;border:0;border-radius:var(--radius-control);background:transparent;line-height:1.4;cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}button svg{width:18px;height:18px;flex-shrink:0}
@@ -303,6 +303,27 @@ details[open]>summary::after{transform:rotate(225deg);top:23px}
  .dock-toolbar button{padding-left:4px;padding-right:4px}.receive-selection-toolbar{gap:0}.receive-selection-toolbar button{font-size:.8rem}
  .server-change,.settings-input-row{flex-wrap:wrap}.server-change>input,.settings-input-row>input{flex-basis:100%}
 }
+/* Preview-first cards: actions float over content; metadata lives in details. */
+.preview-card{aspect-ratio:1;background:var(--soft)}
+.preview-card>.card-text,.preview-card>.card-preview-button,.library-card.preview-card>.library-card-preview{flex:1;min-height:0;height:100%;aspect-ratio:auto}
+.preview-card>.card-text{padding:40px 16px 48px;overflow:auto}.preview-card .card-text-lines{max-height:none}
+.preview-card>.card-preview-button{position:absolute;inset:0}.preview-card .content-preview{height:100%;aspect-ratio:auto}
+.preview-card .file-text-preview{padding:40px 16px 48px;mask-image:none;overflow:auto;color:var(--text)}
+.preview-copy{position:absolute;right:8px;bottom:8px;z-index:2;background:#ffffffe0;backdrop-filter:blur(12px);border-radius:10px;padding:7px 10px;min-height:34px}
+.file-card:not(.preview-card){aspect-ratio:1}.file-card:not(.preview-card) .card-preview-button{flex:1;min-height:0}.file-card:not(.preview-card) .content-preview{height:100%;aspect-ratio:auto;background:transparent}.file-card:not(.preview-card) .card-body{flex:0;padding:8px 14px 16px}.file-card:not(.preview-card) .card-name{white-space:normal;overflow-wrap:anywhere;text-align:center}
+.preview-card .card-transfer{position:absolute;bottom:0;left:0;right:0;padding:8px 10px;background:#f8fbf4e8;backdrop-filter:blur(14px);z-index:2}.card-transfer .card-status{display:block;margin:0}.transfer-bytes{font-size:.72rem;color:var(--muted)}.transfer-speed{float:right}.card-transfer .progress{margin-top:6px}
+.card-actions{justify-content:space-between;gap:10px}.card-actions .transfer-cancel{order:0;margin-right:auto}.card-actions .transfer-retry{order:2;margin-left:auto;color:white;background:var(--green);padding:7px 16px;min-width:70px}
+.failed-card-retry{position:absolute;top:6px;right:44px;width:32px;height:32px;min-height:32px;z-index:3;padding:5px;background:#ffffffe8;border-radius:10px}.failed-card-retry svg{width:19px;height:19px}
+.failed-send-tools{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 2px 8px}.failed-send-tools button{min-height:32px;font-size:.78rem;padding:6px 9px}.failed-send-item{width:100%;min-width:0}.failed-send-item .content-card{height:100%;min-height:0}.failed-send-item .card-transfer .transfer-cancel{font-size:.7rem}.failed-send-item .card-transfer .transfer-retry{display:none}
+.receipt-modal{padding:16px;gap:12px}.receipt-modal>.modal-header{margin:0}.receipt-modal>.modal-header h2{font-size:1rem}.receipt-single-modal{width:min(430px,100%);max-width:430px}.receipt-batch-modal{width:min(760px,100%);max-width:760px}.receipt-batch-grid{padding:0;max-height:calc(var(--app-viewport-height,100dvh) - 144px);scrollbar-gutter:auto}.receipt-single-grid{grid-template-columns:minmax(0,1fr)}
+.receipt-modal .receipt-content{min-height:0;max-height:none;flex:1;border:0;border-radius:0;background:transparent;overflow:auto}.receipt-modal .card-preview-button.receipt-content{position:relative;aspect-ratio:auto;overflow:hidden}.receipt-modal .preview-card>.card-preview-button.receipt-content{position:absolute;inset:0}.receipt-modal .receipt-content .content-preview{height:100%;max-height:none;min-height:0}.receipt-modal .receipt-content img{object-fit:cover}.receipt-single-grid .receipt-content img{object-fit:contain}.receipt-single-grid .card-text{padding:40px 18px 54px}.receipt-batch-grid .card-text{display:block}.receipt-back{margin:0;padding:0;min-height:32px}
+.receipt-prepare{position:absolute;bottom:8px;right:8px;z-index:2;background:#ffffffdc;backdrop-filter:blur(12px);min-height:32px;font-size:.8rem}.receipt-error-detail{position:absolute;inset:46px 12px 85px;z-index:2;overflow:auto;padding:12px;border-radius:12px;background:#fffffff2}.receipt-error-detail p{color:var(--red);font-size:.85rem;line-height:1.5}.receipt-error-detail button{margin-top:8px;min-height:32px;padding:4px 8px;font-size:.8rem}
+.library-card.preview-card .library-card-preview{aspect-ratio:auto}.library-card.preview-card .library-card-preview img{height:100%;object-fit:cover}.library-card:not(.preview-card){aspect-ratio:1}.library-card:not(.preview-card) .library-card-name{text-align:center;padding-bottom:16px}
+.target-devices{scrollbar-width:none}.dock-items,.history-items,.receipt-batch-grid,.embedded-library{scrollbar-gutter:auto}
+.notification-reason{display:block;font-size:.75rem;line-height:1.4;color:var(--muted);margin-top:4px}
+.failed-send-item .card-actions{display:none}.failed-send-item .card-transfer{padding:4px 8px}.failed-send-item .file-text-preview{padding:40px 8px 25px;font-size:.72rem;line-height:1.5}.failed-send-item .failed-card-retry{right:6px}.failed-send-item .card-menu-button{right:42px}
+.file-card:not(.preview-card):has(.receipt-prepare) .card-body{padding-bottom:48px}.file-card:not(.preview-card) .receipt-prepare{font-size:.72rem;min-height:30px;bottom:7px;right:7px}
+@media(max-width:760px){.receipt-modal{padding:12px}.receipt-batch-grid{gap:10px}.receipt-single-modal{max-width:400px}.failed-send-tools{padding-bottom:4px}.failed-send-tools button{font-size:.74rem}.card-actions button{font-size:.75rem}}
 @media(prefers-reduced-motion:reduce){
  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
  .settings-modal,.receipt-modal,.modal-backdrop.leaving .settings-modal{animation:none}

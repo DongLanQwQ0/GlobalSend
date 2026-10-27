@@ -3,6 +3,7 @@ import 'app_icon.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'controller.dart';
 import 'ui_tokens.dart';
@@ -17,6 +18,7 @@ import 'content_drag_surface.dart';
 import 'system_bridge.dart';
 import 'bulk_file_drag.dart';
 import 'file_share.dart';
+import 'dock_platform.dart';
 
 const _sortLabels = {
   SavedFilesSort.newest: '最新接收',
@@ -31,21 +33,34 @@ class SavedFilesScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.embedded = false,
+    this.onSelectionChanged,
   });
   final SendController controller;
   final bool embedded;
+  final VoidCallback? onSelectionChanged;
 
   @override
-  State<SavedFilesScreen> createState() => _SavedFilesScreenState();
+  State<SavedFilesScreen> createState() => SavedFilesScreenState();
 }
 
-class _SavedFilesScreenState extends State<SavedFilesScreen>
+class SavedFilesScreenState extends State<SavedFilesScreen>
     with WidgetsBindingObserver {
   SendController get c => widget.controller;
   SavedFilesSort sort = SavedFilesSort.newest;
   bool selecting = false, working = false;
   final selected = <String>{};
   String error = '';
+  bool get selectionActive => selecting;
+  bool exitSelectionIfActive() {
+    if (!selecting) return false;
+    finishSelection();
+    return true;
+  }
+
+  void back() {
+    if (ModalRoute.of(context)?.isCurrent == false) return;
+    if (!exitSelectionIfActive()) Navigator.of(context).maybePop();
+  }
 
   @override
   void initState() {
@@ -70,7 +85,9 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
   void refresh() {
     if (!mounted) return;
     final available = c.savedFiles.map((file) => file.id).toSet();
+    final previousCount = selected.length;
     setState(() => selected.removeWhere((id) => !available.contains(id)));
+    if (selected.length != previousCount) widget.onSelectionChanged?.call();
   }
 
   Future<void> loadFiles() async {
@@ -102,12 +119,19 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
     }
   }
 
-  void toggle(SavedFile file) => setState(() {
+  void updateSelection(VoidCallback update) {
+    setState(update);
+    widget.onSelectionChanged?.call();
+  }
+
+  void startSelection() => updateSelection(() => selecting = true);
+
+  void toggle(SavedFile file) => updateSelection(() {
     selecting = true;
     if (!selected.add(file.id)) selected.remove(file.id);
   });
 
-  void finishSelection() => setState(() {
+  void finishSelection() => updateSelection(() {
     selected.clear();
     selecting = false;
   });
@@ -298,11 +322,14 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
   Widget build(BuildContext context) {
     final files = sortSavedFiles(c.savedFiles, sort);
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: Colors.white,
       appBar: widget.embedded
           ? null
           : AppBar(
+              leading: Navigator.of(context).canPop() || selecting
+                  ? BackButton(onPressed: back)
+                  : null,
               automaticallyImplyLeading: !widget.embedded,
               toolbarHeight: widget.embedded ? 42 : 56,
               title: Text(
@@ -317,7 +344,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                   TextButton(
                     onPressed: working
                         ? null
-                        : () => setState(() {
+                        : () => updateSelection(() {
                             if (selected.length == files.length) {
                               selected.clear();
                             } else {
@@ -333,9 +360,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                 TextButton(
                   onPressed: working || files.isEmpty
                       ? null
-                      : () => selecting
-                            ? finishSelection()
-                            : setState(() => selecting = true),
+                      : () => selecting ? finishSelection() : startSelection(),
                   child: Text(selecting ? '完成' : '编辑'),
                 ),
                 const SizedBox(width: 8),
@@ -410,7 +435,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                       ),
                     if (widget.embedded && selecting)
                       TextButton(
-                        onPressed: () => setState(() {
+                        onPressed: () => updateSelection(() {
                           if (selected.length == files.length)
                             selected.clear();
                           else
@@ -426,7 +451,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
                             ? null
                             : () => selecting
                                   ? finishSelection()
-                                  : setState(() => selecting = true),
+                                  : startSelection(),
                         child: Text(selecting ? '取消' : '多选'),
                       ),
                   ],
@@ -535,6 +560,17 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
             )
           : null,
     );
+    if (widget.embedded) return scaffold;
+    return PopScope(
+      canPop: !selecting,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) exitSelectionIfActive();
+      },
+      child: CallbackShortcuts(
+        bindings: {const SingleActivator(LogicalKeyboardKey.escape): back},
+        child: Focus(autofocus: true, child: scaffold),
+      ),
+    );
   }
 
   Widget tile(SavedFile file) {
@@ -557,6 +593,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
           entryKind: file.directory ? 'directory' : 'file',
         );
     final windows = Theme.of(context).platform == TargetPlatform.windows;
+    final android = Theme.of(context).platform == TargetPlatform.android;
     final card = CompactContentCard(
       entry: item,
       sender: previous?.sourceLabel ?? '',
@@ -565,9 +602,10 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
       selecting: selecting,
       selected: selected.contains(file.id),
       onToggle: () => toggle(file),
-      onLongPress: windows ? null : () => toggle(file),
+      onLongPress: windows || android ? null : () => toggle(file),
       menu: PopupMenuButton<String>(
         tooltip: '更多',
+        icon: const AppIcon(Icons.more_horiz, size: 20),
         padding: EdgeInsets.zero,
         onSelected: (action) async {
           if (action == 'open')
@@ -584,7 +622,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
             await perform(() => FileShareBridge.share(paths: [file.path]), '');
           if (action == 'select') toggle(file);
           if (action == 'rename') {
-            setState(() {
+            updateSelection(() {
               selected
                 ..clear()
                 ..add(file.id);
@@ -592,7 +630,7 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
             await rename();
           }
           if (action == 'delete') {
-            setState(() {
+            updateSelection(() {
               selected
                 ..clear()
                 ..add(file.id);
@@ -618,9 +656,32 @@ class _SavedFilesScreenState extends State<SavedFilesScreen>
     return ContentDragSurface(
       key: ValueKey('saved-file-${file.id}'),
       entry: item,
-      enabled: !selecting && !working,
-      touchDrags: windows,
-      onExport: (kind) => perform(() => c.dragOut(item, pointerKind: kind), ''),
+      enabled: !working && (android || !selecting),
+      touchDrags: windows || android,
+      onExport: (kind) => perform(() async {
+        if (!android) {
+          await c.dragOut(item, pointerKind: kind);
+          return;
+        }
+        if (!selecting)
+          updateSelection(() {
+            selecting = true;
+            selected
+              ..clear()
+              ..add(file.id);
+          });
+        // Long press exports the existing selection, never toggles or silently
+        // adds the card being held. A zero-selection drag uses only that source.
+        final paths = c.savedFiles
+            .where((entry) => selected.contains(entry.id))
+            .map((entry) => entry.path)
+            .toSet()
+            .toList();
+        await DockPlatform.startDrag(
+          paths: paths.isEmpty ? [file.path] : paths,
+          label: '${paths.isEmpty ? 1 : paths.length} 项',
+        );
+      }, ''),
       child: card,
     );
   }

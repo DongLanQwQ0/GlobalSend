@@ -34,6 +34,7 @@ import { groupIpSources, browserHostCandidates, literalIp, IP_GROUPS } from './i
 import type { IpSource } from './ip_addresses';
 import { applyTextDocuments } from './model';
 import type { TextDocument } from './model';
+import { WebNotifications } from './notifications';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const brand = `<button class="brand brand-button" type="button" data-action="ip-addresses" aria-label="GlobalSend，本机地址"><span class="brand-icon">${icon('logo')}</span>GlobalSend</button>`;
@@ -165,6 +166,7 @@ class GlobalSend {
   stagedTexts:{id:string;text:string;target?:string}[]=[];
   editingStagedId='';
   queueSending=false;
+  retryingFailedSends=false;
   multiSend=false;
   selectedTargets=new Set<string>();
   sendBatch:SendBatch|null=null;
@@ -181,6 +183,9 @@ class GlobalSend {
   contextMenu:{kind:'text'|'file'|'receipt';key:string;x:number;y:number}|null=null;
   private modalClosing=false;
   private renderedModalKey='';
+  private receiptBindings=new WeakMap<HTMLElement,Set<string>>();
+  pendingNotificationId='';
+  notifications=new WebNotifications({onOpen:itemId=>{this.pendingNotificationId=itemId;this.openNotificationReceipt();},onChange:()=>{if(!this.loading)this.render();}});
   folderNames=new WeakMap<File,string>();
   folderParts=new WeakMap<File,FolderPart[]>();
   folderRegisteredScope='';
@@ -677,8 +682,9 @@ class GlobalSend {
     document.addEventListener('keydown',event=>{
       if(event.defaultPrevented || event.isComposing || event.keyCode===229 || this.editorComposing || this.shared.composingActive || this.viewedText()?.composing || event.key!=='Escape')return;
       if(this.contextMenu){event.preventDefault();this.contextMenu=null;document.querySelector('.content-menu')?.remove();}
-      else if(this.contentView==='library' && this.fileLibrary.back())event.preventDefault();
       else if(this.modal){event.preventDefault();this.modal==='editor'?this.toggleEditor(false):this.closeModal();}
+      else if(this.contentView==='library' && this.fileLibrary.back())event.preventDefault();
+      else if(this.exitSelection())event.preventDefault();
       else if(this.contentView!=='receive'){event.preventDefault();this.contentView='receive';this.render();}
     });
     const external=(event:DragEvent)=>!!event.dataTransfer && Array.from(event.dataTransfer.types).some(type=>['Files','text/plain','text/uri-list'].includes(type));
@@ -718,6 +724,10 @@ class GlobalSend {
       if(file.entryKind==='directory' || selecting && !selection.has(fileItemKey(transfer.transferId,file.fileId)))return [];
       const local=this.localFile(fileKey(transfer.transferId,file.fileId));return local?[local]:[];
     })))];
+  }
+  exitSelection(){
+    if(!this.receiveSelecting && !this.sentSelecting && !this.multiSend)return false;
+    this.receiveSelecting=false;this.sentSelecting=false;this.multiSend=false;this.selected.clear();this.sentSelected.clear();this.selectedTargets.clear();this.render();return true;
   }
   bulkDragButton(outgoing:boolean){
     const files=this.bulkDragFiles(outgoing);return files.length?'<button class="icon-button quiet bulk-drag" draggable="true" data-drag-all="'+(outgoing?'sent':'receive')+'" aria-label="全部拖拽" title="拖出 '+files.length+' 个本地文件">'+icon('drag')+'</button>':'';
@@ -784,7 +794,7 @@ class GlobalSend {
     catch {if(generation===this.generation)this.previewFailed.add(key);}
     finally {this.previewLoading.delete(key);if(this.modal==='receipt' && [...this.receiptBatch.values()].some(item=>item.fileKey===key))this.paintReceiptReady();}
   }
-  paintReceiptReady(){for(const button of document.querySelectorAll<HTMLButtonElement>('[data-prepare-receipt]')){const key=button.dataset.prepareReceipt!;const ready=this.fileSources.has(key) || this.rtcLocalFiles.has(key) || this.previewSources.has(key);button.textContent=ready?'可拖出':this.previewLoading.has(key)?'准备中…':'准备拖出';button.disabled=ready || this.previewLoading.has(key);}}
+  paintReceiptReady(){for(const button of document.querySelectorAll<HTMLButtonElement>('[data-prepare-receipt]')){const key=button.dataset.prepareReceipt!;const ready=this.fileSources.has(key) || this.rtcLocalFiles.has(key) || this.previewSources.has(key);if(ready){button.remove();continue;}button.textContent=this.previewLoading.has(key)?'准备中…':'准备拖出';button.disabled=this.previewLoading.has(key);}}
   async prepareReceiptDrag(key=this.receipt?.fileKey){if(!key || this.previewLoading.has(key))return;const [transferId,fileId]=key.split(':'),transfer=this.transfers.find(item=>item.transferId===transferId),file=transfer?.files.find(item=>item.fileId===fileId);if(!transfer || !file)return;await this.loadRelayPreview(transfer,file);if(!this.previewSources.has(key))this.toast('准备失败，请重试或下载文件',true);}
   async openFilePreview(transferId:string,fileId:string){
     const transfer=this.localTransfer(transferId),file=transfer?.files.find(item=>item.fileId===fileId);if(!transfer || !file)return;
@@ -971,12 +981,22 @@ class GlobalSend {
       const originalId=event.type==='text.updated'?event.payload.sourceEventId:event.eventId;
       if(!originalId || this.events.some(item=>item.eventId===event.eventId))continue;
       const receipt={id:originalId,version:String(event.cursor),source:event.sourceDeviceId,title:event.type==='text.updated'?'文本已更新':'发来一条文本',text:event.payload.text || ''};
-      if(notify)this.showReceipt(receipt);else this.receiptVersions.set(originalId,receipt.version);
+      if(notify){this.showReceipt(receipt);void this.notifications.notify({id:originalId,revision:receipt.version,kind:'text',phase:event.type==='text.updated'?'updated':'received',title:this.deviceLabel(event.sourceDeviceId),body:receipt.text,itemId:originalId});}else this.receiptVersions.set(originalId,receipt.version);
     }
   }
   noticeFile(transfer:Transfer,file:TransferFile){
-    if(transfer.targetDeviceId!==this.session?.device.deviceId || !['offered','accepted','uploading','ready','received'].includes(file.status))return;
-    this.showReceipt({id:fileKey(transfer.transferId,file.fileId),version:'file',source:transfer.sourceDeviceId,title:file.name,fileKey:fileKey(transfer.transferId,file.fileId)});
+    if(transfer.targetDeviceId!==this.session?.device.deviceId)return;
+    const key=fileKey(transfer.transferId,file.fileId),current=this.receiptBatch.get(key);
+    if(['offered','accepted','uploading','ready','received'].includes(file.status))void this.notifications.notify({id:key,revision:'file',kind:'file',phase:file.status==='ready'?'ready':file.status==='received'?'received':'incoming',title:this.deviceLabel(transfer.sourceDeviceId),body:file.name+' · '+(file.status==='received'?'已接收文件':file.status==='ready'?'文件可下载':file.status==='offered'?'收到文件请求，待接收':'正在连接文件传输'),itemId:key});
+    if(current){this.receiptBatch.set(key,{...current,title:file.name});if(this.receipt?.id===key)this.receipt=this.receiptBatch.get(key)!;this.render();return;}
+    if(!['offered','accepted','uploading','ready','received'].includes(file.status))return;
+    this.showReceipt({id:key,version:'file',source:transfer.sourceDeviceId,title:file.name,fileKey:key});
+  }
+  openNotificationReceipt(){
+    if(this.loading || !this.session || !this.pendingNotificationId)return;
+    const key=this.pendingNotificationId,event=this.localEvent(key),[transferId,fileId]=key.split(':'),transfer=this.localTransfer(transferId),file=transfer?.files.find(item=>item.fileId===fileId);
+    const receipt:GlobalSend['receipt']=event?{id:key,version:String(event.cursor),source:event.sourceDeviceId,title:'文本',text:event.payload.text || ''}:file && transfer?{id:key,version:'file',source:transfer.sourceDeviceId,title:file.name,fileKey:key}:null;
+    if(!receipt)return;this.pendingNotificationId='';this.receiptBatch.set(key,receipt);this.receipt=receipt;this.receiptFocusId=key;this.modal='receipt';this.render();
   }
   closeModal(){
     const addressMenu=this.modal==='ip-addresses';if(addressMenu)this.ipAbort?.abort();
@@ -986,22 +1006,39 @@ class GlobalSend {
   }
   receiptCardHtml(receipt:NonNullable<GlobalSend['receipt']>){
     const transfer=receipt.fileKey?this.localTransfer(receipt.fileKey.split(':')[0]):undefined,file=transfer?.files.find(item=>item.fileId===receipt.fileKey?.split(':')[1]);
-    const image=receipt.text===undefined && filePreviewKind({name:receipt.title,mimeType:file?.mimeType || ''})==='image';
-    const attributes='data-receipt-id="'+e(receipt.id)+'" data-view-receipt="'+e(receipt.id)+'" tabindex="0" draggable="'+(receipt.text!==undefined?'false':'true')+'" '+(receipt.text!==undefined?'data-drag-receipt="'+e(receipt.id)+'"':'data-drag-file="'+e(receipt.fileKey)+'"');
+    if(file && transfer)return fileCard(this,transfer,file,false,receipt.id);
+    const attributes='data-receipt-id="'+e(receipt.id)+'" data-view-receipt="'+e(receipt.id)+'" tabindex="0" draggable="false" data-drag-receipt="'+e(receipt.id)+'"';
     const menu='<button class="icon-button quiet card-menu-button" data-receipt-menu="'+e(receipt.id)+'" aria-label="更多">···</button>';
-    const source='<span class="card-source">'+e(this.deviceLabel(receipt.source))+'</span>';
-    if(receipt.text!==undefined)return '<article class="content-card text-card" '+attributes+'>'+menu+'<div class="card-text selectable-text"><span class="card-text-lines">'+linkifyHtml(receipt.text.slice(0,500))+'</span></div><div class="card-footer"><div class="card-footer-info"><div class="card-meta"><span>'+characterCount(receipt.text)+' 字符</span></div>'+source+'</div><button class="quiet card-copy" data-copy-receipt="'+e(receipt.id)+'">'+icon('copy')+'复制</button></div></article>';
-    const body=image?'<div class="image-card-footer">'+source+'<span>'+(file?formatBytes(file.size):'')+'</span></div>':'<div class="card-body"><strong class="card-name" title="'+e(receipt.title)+'">'+e(receipt.title)+'</strong><div class="card-meta">'+(file?formatBytes(file.size):'')+'</div><div class="card-bottom">'+source+'</div></div>';
-    return '<article class="content-card file-card '+(image?'image-card':'')+'" '+attributes+' aria-label="预览 '+e(receipt.title)+'" title="'+e(receipt.title)+'">'+menu+'<div class="card-preview-button">'+this.previewHtml(receipt.fileKey!,receipt.title,file?.mimeType)+'</div>'+body+'</article>';
+    return '<article class="content-card text-card preview-card" '+attributes+'>'+menu+'<div class="card-text receipt-content selectable-text"><span class="card-text-lines">'+linkifyHtml((receipt.text || '').slice(0,this.receiptFocusId===receipt.id || this.receiptBatch.size===1?100000:500))+'</span></div><button class="quiet card-copy preview-copy" data-copy-receipt="'+e(receipt.id)+'">'+icon('copy')+'复制</button></article>';
   }
   receiptHtml(){
     const stamp=(item:NonNullable<GlobalSend['receipt']>)=>this.receiptTime(item.fileKey || 'text:'+item.id,item.receivedAt || '1970-01-01T00:00:00.000Z');
     const items=[...this.receiptBatch.values()].sort((a,b)=>stamp(b).localeCompare(stamp(a)) || a.id.localeCompare(b.id));
-    if(items.length>1 && !this.receiptFocusId)return `<div class="modal-backdrop receipt-backdrop"><section class="modal receipt-modal receipt-batch-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title" tabindex="-1"><div class="modal-header"><h2 id="receipt-title">${items.length} 项新收件</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭收件">${icon('close')}</button></div><div class="receipt-batch-grid receive-grid">${items.map(item=>this.receiptCardHtml(item)).join('')}</div><div class="receipt-actions"><button class="secondary" data-action="close-modal">${icon('close')}关闭</button></div></section></div>`;
-    const receipt=this.receiptBatch.get(this.receiptFocusId) || items[0] || this.receipt;if(!receipt)return '';
-    const transfer=receipt.fileKey?this.transfers.find(item=>item.transferId===receipt.fileKey!.split(':')[0]):null,file=transfer?.files.find(item=>item.fileId===receipt.fileKey!.split(':')[1]);
-    const dragReady=!!receipt.fileKey && (this.fileSources.has(receipt.fileKey) || this.rtcLocalFiles.has(receipt.fileKey) || this.previewSources.has(receipt.fileKey));
-    return `<div class="modal-backdrop receipt-backdrop"><section class="modal receipt-modal" ${receipt.text!==undefined?`draggable="true" data-drag-receipt="${e(receipt.id)}"`:''} role="dialog" aria-modal="true" aria-labelledby="receipt-title" tabindex="-1">${items.length>1?`<button class="quiet receipt-back" data-action="receipt-grid">← 全部 ${items.length} 项</button>`:''}<div class="receipt-sender"><span class="receipt-device-icon">${platformIcon(this.device(receipt.source)?.platform || 'web')}</span><h2 id="receipt-title">${e(this.deviceLabel(receipt.source))}</h2><p>${e(receipt.text!==undefined?`${receipt.title} · ${characterCount(receipt.text)} 字符`:'发来一个文件')}</p></div><article class="receipt-content" ${receipt.text!==undefined?'':`draggable="true" data-drag-file="${e(receipt.fileKey)}"`}>${receipt.text!==undefined?`<pre class="selectable-text" draggable="false">${linkifyHtml(receipt.text)}</pre>`:`${this.previewHtml(receipt.fileKey!,file?.name || receipt.title,file?.mimeType)}<strong>${e(receipt.title)}</strong>${file?`<span>${formatBytes(file.size)}</span>`:''}`}</article><div class="receipt-actions">${receipt.text!==undefined?`<button class="primary" data-copy-receipt="${e(receipt.id)}">${icon('copy')}复制</button>`:file && transfer?file.status==='offered'?`<button class="primary" data-accept="${e(transfer.transferId)}">接收</button>`:!['ready','received'].includes(file.status)?`<span class="send-note">${e(statusLabel[file.status])}</span>`:`<button class="primary" data-prepare-receipt="${e(receipt.fileKey)}" ${dragReady?'disabled':''}>${dragReady?'可拖出':'准备拖出'}</button><button class="secondary" data-download="${e(receipt.fileKey)}">${icon('down')}下载</button>`:''}<button class="secondary" data-action="close-modal">${icon('close')}关闭</button></div></section></div>`;
+    if(!items.length && this.receipt)items.push(this.receipt);if(!items.length)return '';
+    const focused=this.receiptBatch.get(this.receiptFocusId),visible=focused?[focused]:items,single=visible.length===1;
+    const drag=single?`draggable="true" ${visible[0].text!==undefined?'data-drag-receipt':'data-drag-file'}="${e(visible[0].fileKey || visible[0].id)}"`:'';
+    return `<div class="modal-backdrop receipt-backdrop"><section class="modal receipt-modal ${single?'receipt-single-modal':'receipt-batch-modal'}" ${drag} role="dialog" aria-modal="true" aria-labelledby="receipt-title" tabindex="-1"><div class="modal-header"><h2 id="receipt-title">${focused && items.length>1?`<button class="quiet receipt-back" data-action="receipt-grid">← 全部 ${items.length} 项</button>`:items.length>1?`${items.length} 项新收件`:'新收件'}</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭收件">${icon('close')}</button></div><div class="receipt-batch-grid receive-grid ${single?'receipt-single-grid':''}">${visible.map(item=>this.receiptCardHtml(item)).join('')}</div></section></div>`;
+  }
+  updateReceiptDom(backdrop:HTMLElement){
+    const template=document.createElement('div');template.innerHTML=this.receiptHtml();
+    const fresh=template.querySelector<HTMLElement>('.receipt-modal'),modal=backdrop.querySelector<HTMLElement>('.receipt-modal');if(!fresh || !modal)return;
+    modal.className=fresh.className;modal.style.animation='none';
+    for(const name of ['draggable','data-drag-receipt','data-drag-file']){if(fresh.hasAttribute(name))modal.setAttribute(name,fresh.getAttribute(name)!);else modal.removeAttribute(name);}
+    const header=modal.querySelector('.modal-header')!,nextHeader=fresh.querySelector('.modal-header')!;
+    if(header.innerHTML!==nextHeader.innerHTML)header.innerHTML=nextHeader.innerHTML;
+    const grid=modal.querySelector('.receipt-batch-grid')!,nextGrid=fresh.querySelector('.receipt-batch-grid')!;grid.className=nextGrid.className;
+    const existing=new Map(Array.from(grid.children).map(node=>[(node as HTMLElement).dataset.receiptId,node as HTMLElement]));
+    const keys=new Set<string>();let index=0;
+    for(const next of Array.from(nextGrid.children) as HTMLElement[]){
+      const key=next.dataset.receiptId!,previous=existing.get(key),node=previous || next;keys.add(key);
+      if(previous && previous.dataset.internalDrag!=='true'){
+        if(previous.innerHTML!==next.innerHTML)previous.innerHTML=next.innerHTML;
+        for(const name of previous.getAttributeNames())if(!next.hasAttribute(name))previous.removeAttribute(name);
+        for(const name of next.getAttributeNames())previous.setAttribute(name,next.getAttribute(name)!);
+      }
+      if(grid.children[index]!==node)grid.insertBefore(node,grid.children[index] || null);index++;
+    }
+    for(const node of Array.from(grid.children) as HTMLElement[])if(!keys.has(node.dataset.receiptId!))node.remove();
   }
   openCardMenu(kind:'text'|'file'|'receipt',key:string,x:number,y:number){this.contextMenu={kind,key,x:Math.min(x,window.innerWidth-188),y:Math.min(y,window.innerHeight-214)};this.render();document.querySelector<HTMLElement>('.content-menu button')?.focus();}
   cardMenuHtml(){
@@ -1294,7 +1331,7 @@ class GlobalSend {
           void this.api.request(`/events/${event.eventId}/ack`,{}).catch(() => this.acked.delete(event.eventId));
         }
       }
-      this.receiptsInitialized=true;
+      this.receiptsInitialized=true;this.openNotificationReceipt();
       this.initializeConsent(); this.render(); this.startReadyUploads();
       if((this.info?.features as {groupSharedText?:boolean}|undefined)?.groupSharedText)void this.shared.refresh();
       void this.ensureRtc();void this.ensureFolderCapability();
@@ -1522,6 +1559,29 @@ class GlobalSend {
       }
     }
   }
+  isFailedSend(transfer:Transfer,file:TransferFile){
+    const key=fileKey(transfer.transferId,file.fileId),error=this.uploadErrors.get(key);
+    if(transfer.sourceDeviceId!==this.session?.device.deviceId || this.paused.has(key) || this.canceled.has(key) || this.uploads.has(key) || this.fileRequests.has(key) || (this.hiddenItems[fileItemKey(transfer.transferId,file.fileId)] || 0)>Date.now())return false;
+    return file.status==='failed' || !!error && !['received','ready','canceled','expired','rejected'].includes(file.status) && !/等待设备上线|中继需确认/.test(error);
+  }
+  failedSendFiles(){return this.transfers.flatMap(transfer=>transfer.files.filter(file=>this.isFailedSend(transfer,file)).map(file=>({transfer,file,key:fileKey(transfer.transferId,file.fileId)})));}
+  clearFailedSends(){
+    for(const {transfer,file,key} of this.failedSendFiles()){
+      this.hiddenItems[fileItemKey(transfer.transferId,file.fileId)]=Math.max(Date.parse(transfer.expiresAt),Date.now()+86400000);
+      this.fileSources.delete(key);this.retainedSources.delete(key);this.uploadErrors.delete(key);this.localHistory.removeFile(transfer.transferId,file.fileId);
+    }
+    this.persist();this.render();
+  }
+  async retryFailedSends(){
+    if(this.retryingFailedSends)return;this.retryingFailedSends=true;this.render();
+    const queue=this.failedSendFiles();let cursor=0,missing=0;
+    try{await Promise.all(Array.from({length:Math.min(queue.length,this.transferConcurrency)},async()=>{
+      while(cursor<queue.length){const {transfer,file,key}=queue[cursor++];if(!this.isFailedSend(transfer,file))continue;
+        if(!this.fileSources.has(key)){missing++;continue;}await this.retryFile(transfer.transferId,file.fileId);
+      }
+    }));if(missing)this.toast('部分文件需要重新选择原文件',true);}
+    finally{this.retryingFailedSends=false;this.render();}
+  }
   setFile(transferId: string,file: TransferFile) {
     if(this.canceled.has(fileKey(transferId,file.fileId)) && file.status!=='canceled')return;
     const transfer = this.transfers.find(item => item.transferId === transferId);
@@ -1590,6 +1650,9 @@ class GlobalSend {
     const progress = document.getElementById(`progress-${key}`);
     if (progress) { progress.style.width = `${total ? Math.min(100,loaded/total*100) : 0}%`; progress.parentElement?.setAttribute('aria-valuenow',String(loaded)); }
     const label = document.getElementById(`bytes-${key}`); if (label) label.textContent = `${formatBytes(loaded)} / ${formatBytes(total)}`;
+    for(const node of document.querySelectorAll<HTMLElement>('[data-transfer-progress]'))if(node.dataset.transferProgress===key){node.style.width=`${total?Math.min(100,loaded/total*100):0}%`;node.parentElement?.setAttribute('aria-valuenow',String(loaded));}
+    for(const node of document.querySelectorAll<HTMLElement>('[data-transfer-bytes]'))if(node.dataset.transferBytes===key)node.textContent=`${formatBytes(loaded)} / ${formatBytes(total)}`;
+    for(const node of document.querySelectorAll<HTMLElement>('[data-transfer-speed]'))if(node.dataset.transferSpeed===key)node.textContent=this.transferSpeed(key);
   }
   async retryFile(transferId: string,fileId: string) {
     const generation=this.generation;
@@ -2086,12 +2149,17 @@ class GlobalSend {
     const editorScroll=this.editorElement?.scrollTop || 0;
     const readerScroll=this.viewedText()?.displayElement?.scrollTop || this.viewedText()?.element?.scrollTop || 0;
     const receiptScroll=document.querySelector('.receipt-batch-grid')?.scrollTop || 0;
+    const existingReceipt=document.querySelector<HTMLElement>('.receipt-backdrop'),heldReceipt=this.modal==='receipt'?existingReceipt:null;
+    if(existingReceipt && !heldReceipt)existingReceipt.remove();
+    if(heldReceipt && heldReceipt.parentElement!==document.body)document.body.append(heldReceipt);
     if (this.loading) app.innerHTML = `<div class="loading-view"><span class="spinner"></span>连接中…</div>`;
     else if (!this.session) app.innerHTML = this.onboarding();
-    else app.innerHTML = this.workspace() + this.modalHtml() + this.cardMenuHtml();
+    else app.innerHTML = this.workspace() + (heldReceipt?'':this.modalHtml()) + this.cardMenuHtml();
+    if(heldReceipt)this.updateReceiptDom(heldReceipt);
+    else if(this.modal==='receipt'){const receipt=document.querySelector('.receipt-backdrop');if(receipt)document.body.append(receipt);}
     this.mountEditor();this.mountTextViewer();this.mountAutoAcceptLimit();this.shared.mount();this.bind();this.fileLibrary.bind();this.mountPreviews();
     this.animateWorkspaceView();
-    const modalKey=this.modal==='receipt'?`receipt:${this.receiptBatch.keys().next().value || this.receipt?.id}`:this.modal || '';
+    const modalKey=this.modal || '';
     if(modalKey===this.renderedModalKey)document.querySelector<HTMLElement>('.settings-modal,.receipt-modal')?.style.setProperty('animation','none');this.renderedModalKey=modalKey;
     if(this.modal==='receipt')this.paintReceiptReady();
     document.querySelectorAll<HTMLDetailsElement>('details.advanced-join').forEach((node,index)=>{if(openDetails[index])node.open=true;});
@@ -2117,7 +2185,8 @@ class GlobalSend {
       </section></main>${this.modalHtml()}`;
   }
   convenienceHtml() {
-    return `<section class="settings-card"><h3>收发</h3><label class="setting-row"><span>记住设备</span><input id="remember-device" type="checkbox" ${this.rememberDevice?'checked':''}></label><label class="setting-row"><span>自动接收</span><input data-auto-accept type="checkbox" ${this.autoAccept?'checked':''}></label><label class="limit-field" for="auto-accept-limit">中继确认阈值 <span><input id="auto-accept-limit" type="number" min="0" step="1" value="${e(this.autoAcceptLimitDraft ?? String(this.autoAcceptMaxBytes/1048576))}" inputmode="numeric" aria-label="中继确认阈值 MiB"> MiB / 文件</span></label><label class="setting-row" for="file-route"><span>传输方式</span><select id="file-route" ${this.pendingOffer?'disabled':''}>${(['auto','lan','public','relay'] as const).map((route,index)=>`<option value="${route}" ${this.routePreference===route?'selected':''}>${['自动','仅局域网','仅公网直连','中继'][index]}</option>`).join('')}</select></label><label class="setting-row" for="transfer-concurrency"><span>传输并发</span><select id="transfer-concurrency">${Array.from({length:16},(_,index)=>index+1).map(value=>`<option value="${value}" ${this.transferConcurrency===value?'selected':''}>${value}</option>`).join('')}</select></label><button class="quiet" data-action="library">文件与自动清理</button></section>`;
+    const notifications=this.notifications.state(),noticeReason=notifications.reason==='home-screen'?'添加到主屏幕后可开启':notifications.reason==='denied'?'请在浏览器设置中允许通知':notifications.reason==='insecure'?'需要 HTTPS':notifications.reason?'当前浏览器不支持':'';
+    return `<section class="settings-card"><h3>收发</h3><label class="setting-row"><span>接收通知${noticeReason?`<small class="notification-reason">${noticeReason}</small>`:''}</span><input data-web-notifications type="checkbox" ${notifications.enabled?'checked':''} ${!notifications.available || notifications.permission==='denied'?'disabled':''}></label><label class="setting-row"><span>记住设备</span><input id="remember-device" type="checkbox" ${this.rememberDevice?'checked':''}></label><label class="setting-row"><span>自动接收</span><input data-auto-accept type="checkbox" ${this.autoAccept?'checked':''}></label><label class="limit-field" for="auto-accept-limit">中继确认阈值 <span><input id="auto-accept-limit" type="number" min="0" step="1" value="${e(this.autoAcceptLimitDraft ?? String(this.autoAcceptMaxBytes/1048576))}" inputmode="numeric" aria-label="中继确认阈值 MiB"> MiB / 文件</span></label><label class="setting-row" for="file-route"><span>传输方式</span><select id="file-route" ${this.pendingOffer?'disabled':''}>${(['auto','lan','public','relay'] as const).map((route,index)=>`<option value="${route}" ${this.routePreference===route?'selected':''}>${['自动','仅局域网','仅公网直连','中继'][index]}</option>`).join('')}</select></label><label class="setting-row" for="transfer-concurrency"><span>传输并发</span><select id="transfer-concurrency">${Array.from({length:16},(_,index)=>index+1).map(value=>`<option value="${value}" ${this.transferConcurrency===value?'selected':''}>${value}</option>`).join('')}</select></label><button class="quiet" data-action="library">文件与自动清理</button></section>`;
   }
   deviceSettingsHtml() {
     const me=this.session!.device;
@@ -2190,11 +2259,11 @@ class GlobalSend {
       ${this.session?this.deviceSettingsHtml():''}<section class="settings-card server-settings" data-server-settings><label class="settings-field-label" for="server-url">服务器地址</label><form id="server-form" class="server-change"><input id="server-url" type="url" aria-label="服务器地址" placeholder="https://send.example.com" value="${e(this.serverDraft)}"><button class="secondary" type="submit">前往</button></form></section>${this.session?`<div class="settings-footer"><button class="quiet" data-action="signout">切换分组</button></div>`:''}</section></div>`;
   }
   bind() {
-    const on = (selector: string,event: string,handler: (event: Event,node: HTMLElement)=>void) => document.querySelectorAll<HTMLElement>(selector).forEach(node=>node.addEventListener(event,event=>handler(event,node)));
+    const on = (selector: string,event: string,handler: (event: Event,node: HTMLElement)=>void) => document.querySelectorAll<HTMLElement>(selector).forEach(node=>{if(node.closest('.receipt-backdrop')){const key=selector+':'+event,bound=this.receiptBindings.get(node) || new Set<string>();if(bound.has(key))return;bound.add(key);this.receiptBindings.set(node,bound);}node.addEventListener(event,event=>handler(event,node));});
     // Keep the title button alive until its click; a shared-editor blur can
     // otherwise replace the workspace between pointer-down and pointer-up.
     on('[data-action="ip-addresses"]','pointerdown',event=>{if(this.shared.focusedActive && !this.shared.composingActive)event.preventDefault();});
-    on('.modal-backdrop','click',(event,node)=>{if(this.modal==='ip-addresses' && event.target===node)this.closeModal();});
+    on('.modal-backdrop','click',(event,node)=>{if(event.target===node){if(this.modal==='editor')this.toggleEditor(false);else this.closeModal();}});
     on('[data-action]','click',(_event,node)=> {
       const action = node.dataset.action;
       if(action==='ip-addresses')void this.openIpAddresses();
@@ -2203,6 +2272,8 @@ class GlobalSend {
       if (action==='server-modal') this.openSettings();
       if (action==='open-editor') {this.editingStagedId='';this.toggleEditor(true);}
       if (action==='stage-text') this.stageDraft();
+      if(action==='clear-failed-sends')this.clearFailedSends();
+      if(action==='retry-failed-sends')void this.retryFailedSends();
       if (action==='clipboard') void this.readClipboard();
       if (action==='send-queue') void this.sendQueue();
       if (action==='multi-send') {if(this.queueSending)return;this.multiSend=!this.multiSend;this.selectedTargets.clear();this.render();}
@@ -2246,6 +2317,7 @@ class GlobalSend {
     on('#enroll-form','submit',event=>{event.preventDefault(); void this.enroll();});
     on('#remember-device','change',(_event,node)=>{this.rememberDevice=(node as HTMLInputElement).checked;this.saveSession();});
     on('[data-auto-accept]','change',(_event,node)=>this.setAutoAccept((node as HTMLInputElement).checked));
+    on('[data-web-notifications]','change',(_event,node)=>{if((node as HTMLInputElement).checked)void this.notifications.requestEnable();else this.notifications.setEnabled(false);});
     on('#transfer-concurrency','change',(_event,node)=>{try{this.setTransferConcurrency(Number((node as HTMLSelectElement).value));}catch(error){this.toast(errorText(error),true);}});
     on('#file-route','change',(_event,node)=>{this.routePreference=(node as HTMLSelectElement).value as RoutePreference;rememberedSet(this.dockKey+':route',this.routePreference);this.render();});
     on('#server-form','submit',event=>{event.preventDefault(); try { this.changeServer(); } catch(error) { this.toast(errorText(error),true); }});
@@ -2301,13 +2373,14 @@ class GlobalSend {
     on('[data-open-text],[data-open-file]','keydown',(event,node)=>{const key=event as KeyboardEvent;if(event.target!==node || !['Enter',' '].includes(key.key))return;key.preventDefault();node.click();});
     on('.large-file-preview','dblclick',()=>{const key=this.openedFile?.key;if(!key)return;const preview=this.previews.get(key);if(preview?.url)window.open(preview.url,'_blank','noopener');else{const [transferId,fileId]=key.split(':');void this.run(()=>this.download(transferId,fileId));}});
     on('[data-copy-receipt]','click',(_event,node)=>{const receipt=this.receiptBatch.get(node.dataset.copyReceipt!) || this.receipt;if(receipt?.text!==undefined)void this.copy(receipt.text);});
+    on('[data-copy-file]','click',(_event,node)=>{const key=node.dataset.copyFile!,source=this.localFile(key);void this.run(async()=>{const text=source?(await readLocalText(source)).text:this.previews.get(key)?.text;if(text!==undefined)this.copy(text);});});
     on('[data-prepare-receipt]','click',(_event,node)=>{void this.prepareReceiptDrag(node.dataset.prepareReceipt);});
     on('[data-view-receipt]','click',(event,node)=>{if((event.target as Element).closest('button,a') || window.getSelection?.()?.isCollapsed===false)return;this.receiptFocusId=node.dataset.viewReceipt!;this.render();});
     on('[data-receipt-menu]','click',(event,node)=>{event.stopPropagation();const rect=node.getBoundingClientRect();this.openCardMenu('receipt',node.dataset.receiptMenu!,rect.right-180,rect.bottom+4);});
     on('[data-drag-all]','dragstart',(event,node)=>this.beginBulkDrag(event,node));
     on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragstart',(event,node)=>this.beginContentDrag(event,node));
     on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragend',()=>this.endContentDrag());
-    on('.content-card[data-drag-text],.content-card[data-drag-file]','contextmenu',(event,node)=>{if(isTextSelectionTarget(event.target))return;event.preventDefault();const mouse=event as MouseEvent;this.openCardMenu(node.dataset.dragText?'text':'file',node.dataset.dragText || node.dataset.dragFile!,mouse.clientX,mouse.clientY);});
+    on('.content-card[data-drag-text],.content-card[data-drag-file]','contextmenu',(event,node)=>{if(isTextSelectionTarget(event.target))return;event.preventDefault();const mouse=event as MouseEvent;this.openCardMenu(node.dataset.receiptId?'receipt':node.dataset.dragText?'text':'file',node.dataset.receiptId || node.dataset.dragText || node.dataset.dragFile!,mouse.clientX,mouse.clientY);});
     on('[data-card-menu]','click',(event,node)=>{event.stopPropagation();const card=node.closest<HTMLElement>('[data-drag-text],[data-drag-file]');if(!card)return;const rect=node.getBoundingClientRect();this.openCardMenu(card.dataset.dragText?'text':'file',card.dataset.dragText || card.dataset.dragFile!,rect.right-180,rect.bottom+4);});
     on('[data-card-command]','click',(_event,node)=>{void this.run(()=>this.cardCommand(node.dataset.cardCommand!));});
     on('[data-hide-text]','click',(_event,node)=>this.hideText(node.dataset.hideText!));

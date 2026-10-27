@@ -380,6 +380,30 @@ class SendController extends ChangeNotifier {
     }
   }
 
+  List<DockEntry> get failedOutgoingFiles => dock
+      .where(
+        (item) =>
+            item.outgoing &&
+            item.kind == 'file' &&
+            item.status == 'failed' &&
+            !item.locallyPaused &&
+            !item.locallyCanceled,
+      )
+      .toList(growable: false);
+
+  Future<void> retryFailedOutgoingFiles() async {
+    await Future.wait(failedOutgoingFiles.map(retry));
+  }
+
+  Future<void> clearFailedOutgoingFiles() async {
+    // This is a queue operation, not content-group history deletion. A failed
+    // send of the same original must not remove its successful sibling record.
+    for (final item in failedOutgoingFiles) {
+      if (dock.contains(item) && item.status == 'failed')
+        await deleteDockEntry(item);
+    }
+  }
+
   Map<String, String> sources = {};
   Map<String, String> pendingTexts = {};
   Future<void> _saveTail = Future<void>.value();
@@ -3610,12 +3634,31 @@ class SendController extends ChangeNotifier {
         return;
       }
       if (item.outgoing) {
-        await a.call('POST', '${fileRoute(item)}/retry', {
-          'attemptId': newId(),
-        });
+        final response = await a.call('GET', '/transfers/${item.transferId}');
         _requireSession(epoch, a, p);
+        final transfer = Map<String, dynamic>.from(response['transfer']);
+        final remote = (transfer['files'] as List).firstWhere(
+          (f) => f['fileId'] == item.fileId,
+        );
+        if (remote['status'] == 'failed') {
+          // Storage loss/hash failure already discarded invalid relay bytes.
+          // Destination failures instead retain them and use receive-retry.
+          await a.call(
+            'POST',
+            '${fileRoute(item)}/${remote['receiveFailure'] == true ? 'receive-retry' : 'retry'}',
+            remote['receiveFailure'] == true
+                ? <String, dynamic>{}
+                : {'attemptId': newId()},
+          );
+          _requireSession(epoch, a, p);
+          item.receiveFailure = false;
+          item.receiveFailureReported = false;
+          item.error = '';
+          await _restartFileWork(item);
+          return;
+        }
         item.error = '';
-        await _uploadFile(item);
+        await _restartFileWork(item, transfer: transfer);
       } else {
         await _receiveFile(item);
       }
@@ -3637,16 +3680,21 @@ class SendController extends ChangeNotifier {
   Future<void> _restartFile(DockEntry item) =>
       _runFileOperation(item, () => _restartFileWork(item));
 
-  Future<void> _restartFileWork(DockEntry item) async {
+  Future<void> _restartFileWork(
+    DockEntry item, {
+    Map<String, dynamic>? transfer,
+  }) async {
     final a = api!.forOperation(TransferOperation.current!),
         p = profile!,
         epoch = generation;
     try {
-      final response = await a.call('GET', '/transfers/${item.transferId}');
+      final response = transfer == null
+          ? await a.call('GET', '/transfers/${item.transferId}')
+          : {'transfer': transfer};
       _requireSession(epoch, a, p);
-      final transfer = Map<String, dynamic>.from(response['transfer']);
-      updateTransfer(transfer);
-      final remote = (transfer['files'] as List).firstWhere(
+      final currentTransfer = Map<String, dynamic>.from(response['transfer']);
+      updateTransfer(currentTransfer);
+      final remote = (currentTransfer['files'] as List).firstWhere(
         (f) => f['fileId'] == item.fileId,
       );
       if ([

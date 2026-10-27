@@ -32,6 +32,7 @@ class CompactContentCard extends StatelessWidget {
     this.metadataColor,
     this.previewColor,
     this.menuColor,
+    this.previewOnly = false,
   });
   final DockEntry entry;
   final String sender, timestamp, status, speed;
@@ -42,6 +43,10 @@ class CompactContentCard extends StatelessWidget {
   final Key? copyKey;
   final Color? surfaceColor, metadataColor;
   final Color? previewColor, menuColor;
+
+  /// The independent dock overlays controls on its preview, without a metadata
+  /// footer. Main receive/history/library cards keep their default layout.
+  final bool previewOnly;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -60,6 +65,15 @@ class CompactContentCard extends StatelessWidget {
     final active =
         ['uploading', 'downloading', 'directSending'].contains(entry.status) ||
         receive.showProgress;
+    final category = savedFileCategory(entry.title);
+    final canPreview =
+        entry.kind == 'text' ||
+        receive.canExport &&
+            entry.localPath.isNotEmpty &&
+            const {
+              SavedFileCategory.image,
+              SavedFileCategory.text,
+            }.contains(category);
     final card = Material(
       color: surfaceColor ?? Colors.white,
       shape: RoundedRectangleBorder(
@@ -77,7 +91,18 @@ class CompactContentCard extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (entry.isDirectory)
+                if (previewOnly && (entry.isDirectory || !canPreview))
+                  _DockFileSummary(
+                    entry: entry,
+                    bottomSpace:
+                        stateLabel.isNotEmpty ||
+                            speed.isNotEmpty ||
+                            action != null
+                        ? 42
+                        : 8,
+                    color: previewColor,
+                  )
+                else if (entry.isDirectory)
                   ColoredBox(
                     color: previewColor ?? Ui.input,
                     child: const Center(
@@ -94,7 +119,10 @@ class CompactContentCard extends StatelessWidget {
                     location: entry.localPath,
                     name: entry.title,
                     text: entry.kind == 'text' ? entry.text : null,
-                    topInset: menu != null || selecting ? 28 : 0,
+                    topInset: menu != null || selecting
+                        ? (previewOnly ? 24 : 28)
+                        : 0,
+                    maxTextLines: previewOnly && onCopy != null ? 3 : null,
                     backgroundColor: previewColor,
                     borderRadius: BorderRadius.zero,
                   ),
@@ -125,6 +153,105 @@ class CompactContentCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                if (previewOnly && !selecting && onCopy != null)
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: ContentDragControl(
+                      child: Material(
+                        color: Colors.white.withValues(alpha: .82),
+                        borderRadius: BorderRadius.circular(10),
+                        child: TextButton(
+                          key: copyKey,
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(40, 28),
+                            padding: const EdgeInsets.symmetric(horizontal: 7),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            textStyle: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(fontSize: 12),
+                          ),
+                          onPressed: onCopy,
+                          child: const Text('复制'),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (previewOnly &&
+                    !selecting &&
+                    (stateLabel.isNotEmpty ||
+                        speed.isNotEmpty ||
+                        action != null))
+                  Positioned(
+                    left: 5,
+                    right: 5,
+                    bottom: 6,
+                    child: Material(
+                      color: Colors.white.withValues(alpha: .82),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (stateLabel.isNotEmpty)
+                                    Text(
+                                      stateLabel,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: entry.status == 'failed'
+                                            ? Theme.of(context)
+                                                  .colorScheme
+                                                  .error
+                                            : Ui.ink,
+                                      ),
+                                    ),
+                                  if (speed.isNotEmpty)
+                                    Text(
+                                      speed,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Ui.muted,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (action != null)
+                              ContentDragControl(
+                                child: TextButtonTheme(
+                                  data: TextButtonThemeData(
+                                    style: TextButton.styleFrom(
+                                      minimumSize: const Size(28, 26),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                      ),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      textStyle: Theme.of(context)
+                                          .textTheme
+                                          .labelLarge
+                                          ?.copyWith(fontSize: 12),
+                                    ),
+                                  ),
+                                  child: action!,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 if (active)
                   Align(
                     alignment: Alignment.bottomCenter,
@@ -138,7 +265,7 @@ class CompactContentCard extends StatelessWidget {
               ],
             ),
           ),
-          if (image)
+          if (!previewOnly && image)
             Container(
               color: metadataColor ?? Ui.input,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -181,7 +308,7 @@ class CompactContentCard extends StatelessWidget {
                 ],
               ),
             )
-          else
+          else if (!previewOnly)
             Container(
               color: metadataColor ?? Ui.input,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -324,4 +451,50 @@ class CompactContentCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DockFileSummary extends StatelessWidget {
+  const _DockFileSummary({
+    required this.entry,
+    required this.bottomSpace,
+    this.color,
+  });
+  final DockEntry entry;
+  final double bottomSpace;
+  final Color? color;
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: color ?? Ui.input,
+    child: Padding(
+      padding: EdgeInsets.fromLTRB(10, 24, 10, bottomSpace),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AppIcon(
+            entry.isDirectory
+                ? Icons.folder_outlined
+                : switch (savedFileCategory(entry.title)) {
+                    SavedFileCategory.image => Icons.image_outlined,
+                    SavedFileCategory.video => Icons.movie_outlined,
+                    SavedFileCategory.audio => Icons.music_note_outlined,
+                    SavedFileCategory.archive => Icons.folder_zip_outlined,
+                    _ => Icons.insert_drive_file_outlined,
+                  },
+            size: bottomSpace > 8 ? 28 : 40,
+            color: Ui.green,
+          ),
+          const SizedBox(height: 6),
+          Flexible(
+            child: Text(
+              entry.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, height: 1.3, color: Ui.ink),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

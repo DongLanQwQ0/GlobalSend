@@ -1,4 +1,5 @@
 import 'system_font_fixture.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -14,6 +15,8 @@ import 'package:globalsend/saved_files_screen.dart';
 import 'package:globalsend/ui_tokens.dart';
 import 'package:globalsend/saved_image_preview.dart';
 import 'package:globalsend/receive_destination.dart';
+import 'package:globalsend/dock_platform.dart';
+import 'package:globalsend/app_icon.dart';
 
 class GalleryController extends SendController {
   final library = <SavedFile>[];
@@ -65,6 +68,14 @@ SavedFile entry(String id, String name, String path, int hours, int size) =>
 void main() {
   setUpAll(loadSystemTestFonts);
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(DockPlatform.channel, (call) async => null);
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(DockPlatform.channel, null);
+  });
   late Directory fixture;
   late File photo;
   Future<void> decode(ImageProvider provider) async {
@@ -180,7 +191,7 @@ void main() {
   }
 
   testWidgets(
-    'library uses a two-column grid with real thumbnails and sorting; long press selects the whole tile',
+    'library uses a two-column grid with real thumbnails and sorting; long press drags and selects the whole tile',
     (tester) async {
       final c = controller(), boundary = GlobalKey();
       addTearDown(c.dispose);
@@ -222,7 +233,7 @@ void main() {
       await tester.tap(find.byTooltip('排序'));
       await tester.pumpAndSettle();
       await tester.tap(
-        find.widgetWithText(CheckedPopupMenuItem<SavedFilesSort>, '最大优先'),
+        find.widgetWithText(AppCheckedPopupMenuItem<SavedFilesSort>, '最大优先'),
       );
       await tester.pumpAndSettle();
       expect(

@@ -70,6 +70,21 @@ class ReceiveDestination {
     throw UnsupportedError('此平台尚不支持接收保存目录');
   }
 
+  static Future<bool> allFilesAccess() async =>
+      Platform.isAndroid &&
+      (await channel.invokeMethod<bool>('allFilesAccess') ?? false);
+
+  static Future<void> openAllFilesSettings() async {
+    if (!Platform.isAndroid) throw UnsupportedError('仅 Android 支持所有文件访问设置');
+    await channel.invokeMethod<void>('allFilesSettings');
+  }
+
+  static Future<Map<String, String>> downloads() async {
+    if (!Platform.isAndroid) throw UnsupportedError('此快捷目录仅适用于 Android');
+    final result = await channel.invokeMapMethod<String, dynamic>('downloads');
+    return Map<String, String>.from(result!);
+  }
+
   static Future<ReceiveFileHandle> create({
     required String destinationLocation,
     required String name,

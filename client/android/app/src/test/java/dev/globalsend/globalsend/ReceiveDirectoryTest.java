@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.CancellationSignal;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.DocumentsProvider;
 import io.flutter.plugin.common.BinaryMessenger;
@@ -45,10 +46,11 @@ import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.shadows.ShadowContentResolver;
+import org.robolectric.shadows.ShadowEnvironment;
 
 /** Uses synthetic DocumentsProvider data, never a user's document directory. */
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = 28, manifest = Config.NONE, shadows = ReceiveDirectoryTest.ModernDocumentQueries.class)
+@Config(sdk = 28, manifest = Config.NONE, shadows = {ReceiveDirectoryTest.ModernDocumentQueries.class, ReceiveDirectoryTest.GrantedEnvironment.class})
 public class ReceiveDirectoryTest {
     private Activity activity;
     private ReceiveDirectory directory;
@@ -61,6 +63,7 @@ public class ReceiveDirectoryTest {
     };
 
     @Before public void setup() throws Exception {
+        GrantedEnvironment.allowed = false;
         activity = Robolectric.buildActivity(Activity.class).setup().get();
         provider = new FixtureDocuments();
         provider.folder = new File(activity.getCacheDir(), "selected-saf-fixture"); provider.folder.mkdirs();
@@ -81,6 +84,91 @@ public class ReceiveDirectoryTest {
         return new ReceiveDirectory(activity, new MethodChannel(messenger, "test-receive-directory"), access);
     }
     @After public void cleanup() { directory.dispose(); activity.finish(); }
+
+    private void allFilesGrant(boolean allowed) {
+        GrantedEnvironment.allowed = allowed;
+    }
+
+    @Test @Config(sdk = 34)
+    public void allFilesSettingsRequiresExplicitUserGrantBeforeDownloadsSelection() throws Exception {
+        allFilesGrant(false);
+        assertFalse(directory.allFilesAccess());
+        try { directory.downloads(); fail("No implicit permission grant"); }
+        catch (IOException expected) { assertTrue(expected.getMessage().contains("系统设置")); }
+        directory.openAllFilesSettings();
+        Intent intent = Shadows.shadowOf(activity).getNextStartedActivity();
+        assertEquals(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, intent.getAction());
+        assertEquals("package:" + activity.getPackageName(), intent.getDataString());
+        assertFalse(directory.allFilesAccess());
+    }
+
+    @Test @Config(sdk = 34)
+    public void grantedDownloadsSelectionIsDirectAndTheProbeDoesNotTouchExistingFiles() throws Exception {
+        allFilesGrant(true);
+        File folder = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "GlobalSend");
+        folder.mkdirs();
+        File original = new File(folder, "existing.txt"); Files.write(original.toPath(), new byte[]{9,8,7});
+        Map<String,Object> selected = directory.downloads();
+        assertEquals(folder.getCanonicalPath(), selected.get("location"));
+        assertFalse(((String) selected.get("location")).startsWith("content://"));
+        assertArrayEquals(new byte[]{9,8,7}, Files.readAllBytes(original.toPath()));
+        assertFalse(java.util.Arrays.stream(folder.listFiles()).anyMatch(file -> file.getName().startsWith(".globalsend-write-test-")));
+        try (RandomAccessFile output = new RandomAccessFile(new File(folder, "received.part"), "rw")) {
+            output.write(new byte[]{1,2}); output.seek(2); output.write(3);
+        }
+        assertArrayEquals(new byte[]{1,2,3}, Files.readAllBytes(new File(folder, "received.part").toPath()));
+    }
+
+    @Test @Config(sdk = 34)
+    public void physicalTreeAndLeafPathsRequireGrantAndNeverMapOtherProvidersOrEscapeTheVolume() throws Exception {
+        Uri tree = DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", "primary:Download/GlobalSend");
+        allFilesGrant(false);
+        assertNull(directory.physicalDocument(tree));
+        allFilesGrant(true);
+        File expected = new File(Environment.getExternalStorageDirectory(), "Download/GlobalSend").getCanonicalFile();
+        assertEquals(expected, directory.physicalDocument(tree));
+        Uri leaf = DocumentsContract.buildDocumentUriUsingTree(tree, "primary:Download/GlobalSend/file.part");
+        assertEquals(new File(expected, "file.part"), directory.physicalDocument(leaf));
+        assertNull(directory.physicalDocument(DocumentsContract.buildTreeDocumentUri("receive-fixtures", "primary:Download/GlobalSend")));
+        try {
+            directory.physicalDocument(DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", "primary:../outside"));
+            fail("The selected volume must remain the actual destination");
+        } catch (IOException expectedError) { assertTrue(expectedError.getMessage().contains("存储设备")); }
+    }
+
+    @Test @Config(sdk = 34)
+    public void procDescriptorPermissionFailureCanResumeTheSameAuthorizedLocalFileWithoutCopying() throws Exception {
+        allFilesGrant(true);
+        File folder = new File(Environment.getExternalStorageDirectory(), "Download/GlobalSend"); folder.mkdirs();
+        String name = "resume-" + UUID.randomUUID() + ".part";
+        File target = new File(folder, name); Files.write(target.toPath(), new byte[]{1,2});
+        String id = "primary:Download/GlobalSend/" + name;
+        provider = new FixtureDocuments(); provider.folder = folder;
+        provider.rootId = "primary:Download/GlobalSend";
+        ProviderInfo info = new ProviderInfo(); info.authority = "com.android.externalstorage.documents";
+        info.exported = true; info.grantUriPermissions = true;
+        info.readPermission = Manifest.permission.MANAGE_DOCUMENTS; info.writePermission = Manifest.permission.MANAGE_DOCUMENTS;
+        provider.attachInfo(activity, info);
+        provider.documents.put(id, new Entry(id, target, name));
+        ShadowContentResolver.registerProviderInternal("com.android.externalstorage.documents", provider);
+        Uri tree = DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", "primary:Download/GlobalSend");
+        String location = DocumentsContract.buildDocumentUriUsingTree(tree, id).toString();
+        activity.getSharedPreferences("globalsend-receive-destination", Activity.MODE_PRIVATE).edit()
+            .putStringSet("created-document-uris", new java.util.HashSet<>(java.util.Collections.singleton(location))).commit();
+        directory.dispose();
+        directory = adapter((descriptor, writable) -> { throw new android.system.ErrnoException("open", android.system.OsConstants.EACCES); });
+        Map<String,Object> handle = directory.open(location, true);
+        assertEquals(location, handle.get("location"));
+        assertEquals(target.getCanonicalPath(), handle.get("ioPath"));
+        assertEquals(2L, handle.get("size"));
+        try (RandomAccessFile output = new RandomAccessFile((String) handle.get("ioPath"), "rw")) {
+            output.seek(2); output.write(3);
+        }
+        directory.close((String) handle.get("handle"), null);
+        assertArrayEquals(new byte[]{1,2,3}, Files.readAllBytes(target.toPath()));
+        assertFalse(provider.lastDescriptor.getFileDescriptor().valid());
+        assertFalse(new File(activity.getFilesDir(), "received").exists());
+    }
 
     @Test public void pickerUsesSystemTreeAndCancellationNeverSelectsAFolder() {
         Result pending = new Result(); directory.pick(pending);
@@ -185,7 +273,7 @@ public class ReceiveDirectoryTest {
         directory.dispose();
         directory = adapter((descriptor, writable) -> { throw new IOException("Unsupported proc FD reopen"); });
         try { directory.create(tree.toString(), "new.bin"); fail("Unsupported provider must not silently copy elsewhere"); }
-        catch (IOException expected) { assertTrue(expected.getMessage().contains("不支持直接读写")); }
+        catch (IOException expected) { assertTrue(expected.getMessage().contains("无法直接读写")); }
         assertEquals(1, provider.documents.size());
         assertFalse(ReceiveDirectory.isOwned(activity, provider.lastCreated.toString()));
         assertFalse(provider.lastDescriptor.getFileDescriptor().valid());
@@ -228,6 +316,15 @@ public class ReceiveDirectoryTest {
         @Override public void error(String code, String message, Object details) { error = code; calls++; }
         @Override public void notImplemented() { error = "notImplemented"; calls++; }
     }
+    @Implements(Environment.class)
+    public static final class GrantedEnvironment extends ShadowEnvironment {
+        static boolean allowed;
+        // Robolectric has no mounted FUSE volume for Environment's framework
+        // implementation. Only its special-permission result is controlled;
+        // production document mapping and file I/O below are exercised as-is.
+        @Implementation(minSdk = 30) protected static boolean isExternalStorageManager() { return allowed; }
+    }
+
     static final class Entry {
         final String id; final File file; String name;
         Entry(String id, File file, String name) { this.id = id; this.file = file; this.name = name; }
@@ -242,6 +339,7 @@ public class ReceiveDirectoryTest {
         }
     }
     public static final class FixtureDocuments extends DocumentsProvider {
+        String rootId = "selected";
         File folder; Entry lastOpened; Uri lastCreated; ParcelFileDescriptor lastDescriptor;
         Thread lastQueryThread;
         final Map<String, Entry> documents = new LinkedHashMap<>();
@@ -260,7 +358,7 @@ public class ReceiveDirectoryTest {
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_SIZE,
                 DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_FLAGS} : projection;
             MatrixCursor cursor = new MatrixCursor(columns);
-            if (!id.equals("selected") && !documents.containsKey(id)) return cursor;
+            if (!id.equals(rootId) && !documents.containsKey(id)) return cursor;
             Map<String, Object> data = row(id);
             Object[] values = new Object[columns.length];
             for (int i = 0; i < columns.length; i++) values[i] = data.get(columns[i]);
@@ -286,7 +384,7 @@ public class ReceiveDirectoryTest {
                 DocumentsContract.Document.FLAG_SUPPORTS_DELETE | DocumentsContract.Document.FLAG_SUPPORTS_RENAME | DocumentsContract.Document.FLAG_SUPPORTS_WRITE);
             return data;
         }
-        @Override public boolean isChildDocument(String parent, String id) { return parent.equals("selected") && documents.containsKey(id); }
+        @Override public boolean isChildDocument(String parent, String id) { return parent.equals(rootId) && documents.containsKey(id); }
         @Override public String createDocument(String parent, String mimeType, String name) throws FileNotFoundException {
             if (!parent.equals("selected") || documents.values().stream().anyMatch(entry -> entry.name.equalsIgnoreCase(name))) throw new FileNotFoundException("Name already exists");
             try {
