@@ -153,6 +153,17 @@ The receiver must close the previous channel and await local writer closure befo
 
 SDP/ICE/session/result changes send only `{type:"rtc.probes.changed"}` to the two participants. Foreground presence changes notify same-group online peers with that same type. Clients then fetch the snapshot. No addresses, SDP or nonce payloads enter SQL events. The data channel is `globalsend-probe-v1`: clients exchange bounded nonce/echo control messages, not file bytes; they close it promptly and start a fresh, receiver-consented RTC session for an actual file.
 
+## Reverse HTTPS preflight (source implementation; not deployed)
+
+`features.httpsPeerProbes=true` enables a read-only reverse-direction handshake. A native peer advertises `peer.httpsProbe=true` only after negotiating this feature. Existing peer publications without this optional flag remain valid. The current public deployment does not advertise this feature yet.
+
+- Requester `POST /devices/:deviceId/https-probes`: `{scope:"lan"|"public",timeoutMs?:1..1000}` → `{result:{reachable,tested,elapsedMs,address?,cellular?,sourceName?,sourceEndpoint?,targetEndpoint?,error?}}`. Both devices must be online and in the same group. The requester must already publish its HTTPS listener; the responder must advertise `httpsProbe`. The response stays open only for the bounded handshake.
+- The center sends only the responder `{type:"https.probe",probeId,requesterDeviceId,scope,timeoutMs,peer:{candidates,certificateSha256}}`. The responder races its matching source-interface / target-address pairs, including permitted Android cellular for public scope, using the existing pinned nonce handshake. This does not acquire a transfer ticket, open a destination writer, allocate relay storage or emit history.
+- Responder `POST /https-probes/:probeId/result`: the result above. A successful result must name one of the requester's published endpoints. Only this responder can complete it. Results arriving after cancellation, timeout, disconnect or changed receiving endpoints return `PROBE_ENDED` (410).
+- Requester HTTP cancellation, the deadline or either device disconnecting deletes the transient request and sends `{type:"https.probe.cancel",probeId}` to stop remote sockets. Timeout/cancellation reports `tested:false`, not a measured unreachable address. No IP/result is persisted in the database.
+
+Native refresh starts LAN/public reverse checks alongside ordinary address checks. Native results live for 30 seconds, are invalidated on local-interface/peer changes and can be refreshed explicitly. The pending work is connecting these results to the file-transport readiness scheduler; this section does not describe an already-released selector.
+
 ## Deployment and defaults
 
 The same process and port provide API, WebSocket, file relay and the Web client. `WEB_ENABLED=true` (default) serves `<base>/app/` from `STATIC_DIR`; `WEB_ENABLED=false` disables only Web static routes and their landing redirect, even when static assets are absent. API, WebSocket, health and relay remain available. A deployment prefix is preserved on all routes: with `PUBLIC_BASE_URL=https://example.com/send`, use `/send/app/`, `/send/api/v1` and `/send/api/v1/ws`. The Web client uses its page's center by default; no separate relay address or production Web process is required.

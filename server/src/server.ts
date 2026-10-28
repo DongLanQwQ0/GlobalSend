@@ -45,6 +45,8 @@ import {
   type FolderReuseRequest,
   type RoutePreference,
   type Peer,
+  type HttpsPeerProbeRequest,
+  type HttpsPeerProbeResult,
   type GroupSharedText,
 } from "../../packages/protocol/src/index.ts";
 
@@ -300,6 +302,12 @@ export async function buildApp(options: Options = {}) {
   };
   const directPushes = new Map<string, PushAttempt>();
   const peerAnnouncements = new Map<string, { data: Omit<Peer, "expiresAt">; expires: number }>();
+  const httpsProbes = new Map<string, {
+    requester: string; responder: string; peerSignature: string;
+    finish: (result: HttpsPeerProbeResult, cancelPeer?: boolean) => void;
+  }>();
+  const httpsPeerSignature = (peer: Peer | null) => peer
+    ? JSON.stringify([peer.candidates, peer.certificateSha256]) : "";
   const rtc = new RtcRegistry(discoveryNow);
   const rtcProbes = new RtcProbeRegistry(discoveryNow);
   function rtcChanged(attempt: RtcAttempt) {
@@ -385,6 +393,8 @@ export async function buildApp(options: Options = {}) {
         clearDirect(t.id, f.id, true);
   }
   function clearDeviceDiscovery(deviceId: string) {
+    for (const probe of [...httpsProbes.values()]) if (probe.requester === deviceId || probe.responder === deviceId)
+      probe.finish({reachable:false,tested:false,elapsedMs:0,error:"设备已离线"},true);
     clearPeerAddresses(deviceId);
     for (const attempt of rtc.forgetDevice(deviceId)) rtcChanged(attempt);
     probesChanged(rtcProbes.forgetDevice(deviceId), true);
@@ -647,7 +657,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true },
+    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -947,6 +957,7 @@ export async function buildApp(options: Options = {}) {
             certificateSha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
             push: { type: "boolean" },
             cellularPush: { type: "boolean" },
+            httpsProbe: { type: "boolean" },
           },
         },
       },
@@ -996,6 +1007,55 @@ export async function buildApp(options: Options = {}) {
       return { peer: peerView(d.id) };
     },
   );
+  app.post(`${api}/devices/:deviceId/https-probes`, {schema:{body:{
+    type:"object",additionalProperties:false,required:["scope"],properties:{
+      scope:{enum:["lan","public"]},timeoutMs:{type:"integer",minimum:1,maximum:1000},
+    },
+  }}}, async (req,reply) => {
+    const d=device(req),remote=target(d,(req.params as any).deviceId),b=req.body as HttpsPeerProbeRequest;
+    requireOnline(d.id);requireOnline(remote.id);
+    if(d.id===remote.id)fail("INVALID_TARGET","Select another device",409);
+    const own=peerView(d.id),responder=peerView(remote.id);
+    if(!own?.candidates.length)fail("PEER_UNAVAILABLE","Publish the receiving endpoint before checking reverse reachability",409);
+    if(!responder?.httpsProbe)fail("HTTPS_PROBE_UNSUPPORTED","Peer does not support reverse HTTPS checks",409);
+    const probeId=randomUUID(),timeoutMs=b.timeoutMs??1000,started=Date.now();
+    let timer:ReturnType<typeof setTimeout>;
+    let onClose:()=>void;
+    const result=new Promise<HttpsPeerProbeResult>(resolve=>{
+      const finish=(value:HttpsPeerProbeResult,cancelPeer=false)=>{
+        if(!httpsProbes.delete(probeId))return;
+        clearTimeout(timer);reply.raw.off("close",onClose);
+        if(cancelPeer)send(remote.id,{type:"https.probe.cancel",probeId});
+        resolve(value);
+      };
+      onClose=()=>finish({reachable:false,tested:false,elapsedMs:Date.now()-started,error:"检测已取消"},true);
+      httpsProbes.set(probeId,{requester:d.id,responder:remote.id,peerSignature:httpsPeerSignature(own),finish});
+      timer=setTimeout(()=>finish({reachable:false,tested:false,elapsedMs:Date.now()-started,error:"反向检测超时"},true),timeoutMs);
+      reply.raw.once("close",onClose);
+    });
+    send(remote.id,{type:"https.probe",probeId,requesterDeviceId:d.id,scope:b.scope,timeoutMs,
+      peer:{candidates:own!.candidates,certificateSha256:own!.certificateSha256}});
+    return {result:await result};
+  });
+  app.post(`${api}/https-probes/:probeId/result`,{schema:{body:{
+    type:"object",additionalProperties:false,required:["reachable","tested","elapsedMs"],properties:{
+      reachable:{type:"boolean"},tested:{type:"boolean"},elapsedMs:{type:"integer",minimum:0},
+      address:{type:"string",maxLength:512},cellular:{type:"boolean"},sourceName:{type:"string",maxLength:512},
+      sourceEndpoint:{type:"string",maxLength:512},targetEndpoint:{type:"string",maxLength:512},error:{type:"string",maxLength:500},
+    },
+  }}},async req=>{
+    const d=device(req),probe=httpsProbes.get((req.params as any).probeId),result=req.body as HttpsPeerProbeResult;
+    if(!probe)fail("PROBE_ENDED","Reverse HTTPS check has ended",410);
+    if(probe!.responder!==d.id)fail("FORBIDDEN","Only the checked peer can report",403);
+    const peer=peerView(probe!.requester);
+    if(httpsPeerSignature(peer)!==probe!.peerSignature){
+      probe!.finish({reachable:false,tested:false,elapsedMs:0,error:"接收地址已更新"},true);
+      fail("PROBE_ENDED","Receiving endpoint changed",410);
+    }
+    if(result.reachable && (!result.tested || !result.address || !peer!.candidates.includes(result.address)))
+      fail("INVALID_PROBE_RESULT","Report the checked receiving endpoint",409);
+    probe!.finish(result);return {ok:true};
+  });
   app.delete(`${api}/devices/:deviceId`, async (req) => {
     const d = device(req),
       p = req.params as any;
@@ -2224,6 +2284,7 @@ export async function buildApp(options: Options = {}) {
   }
   app.addHook("onClose", async () => {
     closing = true;
+    for(const probe of [...httpsProbes.values()])probe.finish({reachable:false,tested:false,elapsedMs:0,error:"中心正在关闭"},true);
     clearInterval(timer);
     clearInterval(probeTimer);
     for (const group of streams.values())

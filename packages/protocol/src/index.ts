@@ -22,6 +22,31 @@ export interface Peer {
   expiresAt: string;
   push?: boolean;
   cellularPush?: boolean;
+  httpsProbe?: boolean;
+}
+/** A reverse-direction handshake only; it never selects a file transport. */
+export interface HttpsPeerProbeResult {
+  reachable: boolean;
+  tested: boolean;
+  elapsedMs: number;
+  address?: string;
+  cellular?: boolean;
+  sourceName?: string;
+  sourceEndpoint?: string;
+  targetEndpoint?: string;
+  error?: string;
+}
+export interface HttpsPeerProbeRequest {
+  scope: "lan" | "public";
+  timeoutMs?: number;
+}
+export interface HttpsPeerProbeMessage {
+  type: "https.probe";
+  probeId: string;
+  requesterDeviceId: string;
+  scope: "lan" | "public";
+  timeoutMs: number;
+  peer: Pick<Peer, "candidates" | "certificateSha256">;
 }
 export interface DirectPush {
   attemptId: string;
@@ -157,7 +182,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean };
+  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";

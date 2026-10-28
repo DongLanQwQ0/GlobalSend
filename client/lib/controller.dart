@@ -32,6 +32,7 @@ import 'recent_devices.dart';
 import 'local_history.dart';
 import 'connection_window.dart';
 import 'route_probes.dart';
+import 'reverse_https_probe.dart';
 import 'local_ip_addresses.dart';
 import 'candidate_routes.dart';
 import 'transfer_operation.dart';
@@ -146,6 +147,7 @@ class SendController extends ChangeNotifier {
   PeerTransport? peer;
   RtcFileTransport? rtc;
   RtcProbeMonitor? rtcProbes;
+  ReverseHttpsProbes? reverseHttpsProbes;
   bool _probeForeground = true;
   bool _appForeground = true;
   Timer? rtcHeartbeat;
@@ -982,6 +984,11 @@ class SendController extends ChangeNotifier {
       foreground: _probeForeground,
       devices: onlinePeers,
     );
+    reverseHttpsProbes?.update(
+      onlinePeers,
+      online: connected && peer != null,
+      localSignature: jsonEncode([peer?.fingerprint, peer?.candidates]),
+    );
   }
 
   void setProbeForeground(bool value) {
@@ -1029,6 +1036,7 @@ class SendController extends ChangeNotifier {
   Future<void> _republishNetworkAddresses() async {
     final epoch = generation;
     if (disposed || !connected) return;
+    reverseHttpsProbes?.invalidate();
     await rtcProbes?.invalidate();
     await peer?.publish();
     await rtc?.publish();
@@ -1047,6 +1055,7 @@ class SendController extends ChangeNotifier {
         _backgroundConnectionPaused)
       return;
     final epoch = generation;
+    reverseHttpsProbes?.invalidate();
     // Replace an OPEN socket too: its old interface can have disappeared while
     // the OS has not yet delivered its close event. Do not reset transfer state.
     await openSocket(epoch);
@@ -1594,6 +1603,7 @@ class SendController extends ChangeNotifier {
         (id) => paths[id],
         addressReader: localIpAddresses,
         pushEnabled: info['features']?['directPush'] == true,
+        httpsProbeEnabled: info['features']?['httpsPeerProbes'] == true,
         cellularPushAllowed: () => Platform.isAndroid && cellularUploads,
         acquireSource: (fileId) async {
           // A self-transfer already owns its receiver slot in this process.
@@ -1670,6 +1680,14 @@ class SendController extends ChangeNotifier {
           }
         },
       );
+      if (info['features']?['httpsPeerProbes'] == true) {
+        reverseHttpsProbes ??= ReverseHttpsProbes(
+          a,
+          localAddresses: localIpAddresses,
+          cellularAllowed: () => cellularUploads,
+          androidCellular: Platform.isAndroid,
+        );
+      }
       await service.start(identity);
       if (epoch != generation) {
         await service.close();
@@ -1849,6 +1867,11 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> handleServerMessage(Map<String, dynamic> message) async {
+    if (message['type'] == 'https.probe' ||
+        message['type'] == 'https.probe.cancel') {
+      await reverseHttpsProbes?.handle(message);
+      return;
+    }
     if (message['type'] == 'sharedText.updated' && sharedTextSupported) {
       sharedDocument.applyRemote(message);
       return;
@@ -1891,6 +1914,8 @@ class SendController extends ChangeNotifier {
           ? reachability.refresh()
           : reachability.refreshDevice(deviceId),
       if (rtcProbes != null) rtcProbes!.refreshNow(peerId: deviceId),
+      if (reverseHttpsProbes != null)
+        reverseHttpsProbes!.refresh(deviceId: deviceId, force: true),
     ]);
   }
 
@@ -5476,6 +5501,8 @@ class SendController extends ChangeNotifier {
     rtcHeartbeat?.cancel();
     unawaited(rtcProbes?.close());
     rtcProbes = null;
+    unawaited(reverseHttpsProbes?.close());
+    reverseHttpsProbes = null;
     unawaited(rtc?.close());
     rtc = null;
     peer?.close();

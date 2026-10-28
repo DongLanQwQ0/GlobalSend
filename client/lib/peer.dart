@@ -48,6 +48,7 @@ class PeerTransport {
     this.onProgress,
     this.onRoute,
     this.pushEnabled = false,
+    this.httpsProbeEnabled = false,
     this.cellularPushAllowed,
     this.addressReader,
     this.acquireSource,
@@ -59,6 +60,7 @@ class PeerTransport {
   onProgress;
   final void Function(String fileId, String route)? onRoute;
   final bool pushEnabled;
+  final bool httpsProbeEnabled;
   final bool Function()? cellularPushAllowed;
   final Future<List<LocalIpAddress>> Function()? addressReader;
   final Future<bool> Function(String fileId)? acquireSource;
@@ -176,6 +178,7 @@ class PeerTransport {
         'certificateSha256': fingerprint,
         if (pushEnabled) 'push': true,
         if (pushEnabled) 'cellularPush': cellularPushAllowed?.call() ?? false,
+        if (httpsProbeEnabled) 'httpsProbe': true,
       });
     }
   }
