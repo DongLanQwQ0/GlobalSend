@@ -128,6 +128,13 @@ export interface Transfer {
   routePreference?: RoutePreference;
   files: TransferFile[];
 }
+/** Receiver verified a complete retained root before accepting its payload. */
+export interface FolderReuseRequest {
+  files: { fileId: string; sha256: string; size: number }[];
+}
+export interface FolderReuseReceipt {
+  files: TransferFile[];
+}
 export interface Event {
   cursor: number;
   protocolVersion: 1;
@@ -150,7 +157,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean };
+  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";

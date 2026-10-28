@@ -183,6 +183,65 @@ void main() {
           final savedRoot = target.savedFiles.singleWhere(
             (file) => file.directory && file.relativePath == '资料',
           );
+          // A repeated complete tree must reuse that exact allocated root,
+          // including its empty directories, rather than receiving 资料 (2).
+          await target.refreshSavedFiles();
+          final savedIds = target.savedFiles.map((file) => file.id).toSet();
+          final modified = await File('${folder.localPath}/sub/a.txt')
+              .lastModified();
+          await source.stageDirectory(original.path);
+          await source.sendStaged(target.profile!.deviceId);
+          final againList = await source.api!.call('GET', '/transfers');
+          final again = (againList['transfers'] as List).singleWhere(
+            (value) => value['transferId'] != transfer['transferId'],
+          ) as Map;
+          await until(
+            () =>
+                target.dock
+                        .where(
+                          (entry) => entry.transferId == again['transferId'],
+                        )
+                        .length ==
+                    5 &&
+                target.dock
+                    .where((entry) => entry.transferId == again['transferId'])
+                    .every((entry) => entry.status == 'received'),
+            () async {
+              await source.reconcile();
+              await target.reconcile();
+            },
+          );
+          final reused = await source.api!.call(
+            'GET',
+            '/transfers/${again['transferId']}',
+          );
+          final receipts = reused['transfer']['files'] as List;
+          expect(
+            receipts.every(
+              (value) => value['reused'] == true && value['offset'] == 0,
+            ),
+            isTrue,
+          );
+          expect(
+            receipts.map((value) => value['receivedAt']).toSet().length,
+            1,
+          );
+          expect(target.savedFiles.map((file) => file.id).toSet(), savedIds);
+          expect(
+            target.dock
+                .singleWhere(
+                  (entry) =>
+                      entry.transferId == again['transferId'] &&
+                      entry.relativePath == '资料',
+                )
+                .localPath,
+            folder.localPath,
+          );
+          expect(await Directory('${inbox.path}/资料 (2)').exists(), isFalse);
+          expect(
+            await File('${folder.localPath}/sub/a.txt').lastModified(),
+            modified,
+          );
           if (!direct) {
             // Later user-created files are not part of the received manifest.
             await File('${folder.localPath}/keep-user.txt')

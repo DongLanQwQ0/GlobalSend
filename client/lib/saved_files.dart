@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'models.dart';
 import 'receive_destination.dart';
 import 'received_file_access.dart';
+import 'folder_transfer.dart';
+import 'dock_platform.dart';
 
 enum SavedFilesSort { newest, oldest, name, largest, smallest }
 
@@ -475,8 +477,8 @@ class SavedFilesStore {
   });
 
   /// Verify the actual retained bytes before acknowledging a repeated offer.
-  /// Folder members remain on the normal folder path so their directory tree
-  /// is never split between an old root and a newly allocated root.
+  /// Folder members are matched only as a complete tree by reusableFolder,
+  /// never individually across unrelated roots.
   Future<SavedFile?> reusableFile(DockEntry entry) => _write(() async {
     if (entry.isDirectory ||
         entry.relativePath.isNotEmpty ||
@@ -506,6 +508,132 @@ class SavedFilesStore {
       }
     }
     return null;
+  });
+
+  /// Match one retained root, never a collection of unrelated saved leaves.
+  /// The actual tree must match too: an added/deleted empty directory matters.
+  Future<Map<String, SavedFile>?> reusableFolder(
+    List<DockEntry> entries,
+  ) => _write(() async {
+    if (entries.isEmpty) return null;
+    final rootName = entries.first.relativePath.split('/').first;
+    final offered = {
+      for (final entry in entries)
+        entry.relativePath.split('/').skip(1).join('/'): entry,
+    };
+    if (offered.length != entries.length ||
+        offered['']?.isDirectory != true ||
+        entries.any((entry) => entry.relativePath.split('/').first != rootName))
+      return null;
+    final roots = _items.values
+        .where(
+          (item) =>
+              item.directory &&
+              item.relativePath.isNotEmpty &&
+              !item.relativePath.contains('/'),
+        )
+        .toList();
+    for (final root in roots) {
+      try {
+        if (!await ownsExisting(root)) continue;
+        final saved = {
+          for (final item in _items.values.where(
+            (item) =>
+                item.profileKey == root.profileKey &&
+                item.deviceId == root.deviceId &&
+                item.groupId == root.groupId &&
+                item.transferId == root.transferId &&
+                (item.relativePath == root.relativePath ||
+                    item.relativePath.startsWith('${root.relativePath}/')),
+          ))
+            item.relativePath.split('/').skip(1).join('/'): item,
+        };
+        if (saved.length != offered.length ||
+            offered.keys.any(
+              (key) =>
+                  saved[key] == null ||
+                  saved[key]!.directory != offered[key]!.isDirectory ||
+                  !saved[key]!.directory &&
+                      (saved[key]!.size != offered[key]!.size ||
+                          saved[key]!.contentDigest.isNotEmpty &&
+                              saved[key]!.contentDigest !=
+                                  offered[key]!.contentDigest),
+            ))
+          continue;
+        final actual = ReceivedFileAccess.isContentUri(root.path)
+            ? (await DockPlatform.directoryEntries(root.path))
+                  .map(FolderEntry.fromMap)
+                  .toList()
+            : await readFolderEntries(root.path);
+        final tree = {
+          for (final entry in actual)
+            entry.relativePath.split('/').skip(1).join('/'): entry,
+        };
+        if (tree.length != offered.length ||
+            offered.keys.any(
+              (key) =>
+                  tree[key] == null ||
+                  tree[key]!.directory != offered[key]!.isDirectory ||
+                  _comparable(
+                        ReceivedFileAccess.canonical(tree[key]!.location),
+                      ) !=
+                      _comparable(saved[key]!.path),
+            ))
+          continue;
+        var identical = true;
+        for (final entry in offered.entries) {
+          // The indexed owners and actual root tree already match. Opening
+          // each file proves current read access; do not reread the entire
+          // ownership registry once for every member of a large folder.
+          if (entry.value.isDirectory) continue;
+          final access = await ReceivedFileAccess.open(saved[entry.key]!.path);
+          try {
+            if (await access.file.length() != entry.value.size ||
+                (await sha256.bind(access.file.openRead()).first).toString() !=
+                    entry.value.contentDigest) {
+              identical = false;
+              break;
+            }
+          } finally {
+            await access.close();
+          }
+        }
+        if (identical)
+          return {
+            for (final entry in offered.entries)
+              entry.value.fileId: saved[entry.key]!,
+          };
+      } on FileSystemException {
+        // A changed or unavailable root needs a normal new folder receive.
+      } on PlatformException {
+        // A revoked document grant is not a retained, readable directory.
+      }
+    }
+    return null;
+  });
+
+  /// Refresh the existing cleanup owners in one index write, not N full saves.
+  Future<Map<String, SavedFile>> refreshReusedFolder(
+    Map<String, SavedFile> matched,
+    List<DockEntry> entries,
+    DateTime receivedAt,
+  ) => _write(() async {
+    final updated = <String, SavedFile>{};
+    for (final entry in entries) {
+      final item = _items[matched[entry.fileId]!.id];
+      if (item == null) continue; // Respect a user's intervening removal.
+      final next = item.refreshed(
+        receivedAtMillis:
+            receivedAt.millisecondsSinceEpoch > item.receivedAtMillis
+            ? receivedAt.millisecondsSinceEpoch
+            : item.receivedAtMillis,
+        digest: entry.contentDigest,
+      );
+      _items[item.id] = next;
+      updated[entry.fileId] = next;
+    }
+    if (updated.isNotEmpty) await _persist();
+    return updated;
   });
 
   Future<void> rename(String id, String name) => _write(() async {

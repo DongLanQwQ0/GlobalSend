@@ -3507,6 +3507,41 @@ class SendController extends ChangeNotifier {
     if (!_acceptingTransfers.add(lock)) return;
     try {
       await _receiveDirectoryMigration?.future;
+      if (info['features']?['folderReuse'] == true) {
+        final selected = ids.toSet();
+        final roots = dock
+            .where(
+              (entry) =>
+                  !entry.outgoing &&
+                  entry.transferId == item.transferId &&
+                  entry.isDirectory &&
+                  entry.relativePath.isNotEmpty &&
+                  !entry.relativePath.contains('/') &&
+                  selected.contains(entry.fileId),
+            )
+            .toList();
+        for (final root in roots) {
+          final members = dock
+              .where(
+                (entry) =>
+                    !entry.outgoing &&
+                    entry.transferId == item.transferId &&
+                    (entry.relativePath == root.relativePath ||
+                        entry.relativePath.startsWith('${root.relativePath}/')),
+              )
+              .toList();
+          if (members.every(
+            (entry) =>
+                selected.contains(entry.fileId) &&
+                !entry.locallyPaused &&
+                !entry.locallyCanceled &&
+                (entry.status == 'offered' || entry.relayPendingBeforeAccept),
+          )) {
+            await _reuseSavedFolder(root, members);
+            _requireSession(epoch, a, p);
+          }
+        }
+      }
       if (info['features']?['fileReuse'] == true) {
         for (final entry
             in dock
@@ -3534,6 +3569,91 @@ class SendController extends ChangeNotifier {
     } finally {
       _acceptingTransfers.remove(lock);
     }
+  }
+
+  Future<bool> _reuseSavedFolder(
+    DockEntry root,
+    List<DockEntry> members,
+  ) async {
+    final epoch = generation, a = api!, owner = profile!;
+    final store = await _savedStore();
+    final matched = await store?.reusableFolder(members);
+    _requireSession(epoch, a, owner);
+    bool stopped() =>
+        members.any((entry) => entry.locallyPaused || entry.locallyCanceled);
+    if (matched == null || stopped()) return false;
+    final previous = {
+      for (final entry in members) entry.fileId: entry.localPath,
+    };
+    for (final entry in members) entry.localPath = matched[entry.fileId]!.path;
+    await save(); // Recover a committed receipt even if the HTTP response is lost.
+    _requireSession(epoch, a, owner);
+    if (stopped()) return false;
+    Map<String, dynamic> response;
+    try {
+      response = await a.call(
+        'POST',
+        '/transfers/${root.transferId}/folders/${root.fileId}/reuse',
+        {
+          'files': [
+            for (final entry in members)
+              {
+                'fileId': entry.fileId,
+                'sha256': entry.contentDigest,
+                'size': entry.size,
+              },
+          ],
+        },
+      );
+    } on ApiException catch (error) {
+      if (error.response?['error']?['code'] != 'TRANSFER_STARTED') rethrow;
+      for (final entry in members) entry.localPath = previous[entry.fileId]!;
+      await save();
+      return false;
+    }
+    _requireSession(epoch, a, owner);
+    if (stopped()) return false;
+    final receipt = {
+      for (final value in response['files'] as List)
+        value['fileId'] as String: value as Map,
+    };
+    final receivedAt = DateTime.parse(
+      receipt[root.fileId]!['receivedAt'] as String,
+    );
+    final updated = await store!.refreshReusedFolder(
+      matched,
+      members,
+      receivedAt,
+    );
+    final paths = <String>{};
+    for (final entry in members) {
+      final remote = receipt[entry.fileId]!;
+      if (remote['status'] != 'received' || remote['reused'] != true)
+        throw StateError('中心未确认完整目录复用');
+      entry.localPath = updated[entry.fileId]?.path ?? entry.localPath;
+      paths.add(ReceivedFileAccess.canonical(entry.localPath));
+      entry.receivedAtMillis = receivedAt.millisecondsSinceEpoch;
+      entry.status = 'received';
+      entry.progress = 1;
+      entry.receivedBytes = entry.size;
+      entry.error = '';
+      entry.route = 'direct';
+      entry.routeDetail = '已保存';
+      entry.relayConfirmationPending = false;
+      entry.relayPendingBeforeAccept = false;
+      _postReceivedNotice(entry, 'received', fileName: entry.title);
+    }
+    for (final entry in dock.where(
+      (entry) =>
+          !entry.outgoing &&
+          entry.localPath.isNotEmpty &&
+          paths.contains(ReceivedFileAccess.canonical(entry.localPath)),
+    )) {
+      entry.receivedAtMillis = receivedAt.millisecondsSinceEpoch;
+    }
+    await save();
+    changed();
+    return true;
   }
 
   Future<bool> _reuseSavedFile(DockEntry item) async {

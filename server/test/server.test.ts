@@ -1563,3 +1563,64 @@ test("cancel during the chunk disk check cannot recreate an orphan relay file", 
     await f.close();
   }
 });
+
+test("whole-folder reuse commits the exact tree at once, preserves other roots and survives replay",async()=>{
+ const f=await fixture({totalQuota:12});
+ try{
+  const a=await f.enroll(),b=await f.pair(a.token);
+  await f.call('POST','/devices/me/capabilities',{folderTransfer:true},b.token);
+  const files=[
+   {fileId:'root',name:'资料',relativePath:'资料',entryKind:'directory',size:0,sha256:hash('')},
+   {fileId:'empty',name:'空目录',relativePath:'资料/空目录',entryKind:'directory',size:0,sha256:hash('')},
+   {fileId:'sub',name:'sub',relativePath:'资料/sub',entryKind:'directory',size:0,sha256:hash('')},
+   {fileId:'body',name:'a.txt',relativePath:'资料/sub/a.txt',entryKind:'file',size:6,sha256:hash('abcdef')},
+   {fileId:'other',name:'别的目录',relativePath:'别的目录',entryKind:'directory',size:0,sha256:hash('')},
+  ];
+  assert.equal((await f.call('POST','/transfers',{transferId:'folder-reuse',targetDeviceId:b.id,routePreference:'relay',files},a.token)).status,201);
+  const body={files:files.slice(0,4).map(({fileId,size,sha256})=>({fileId,size,sha256}))};
+  const receipt=await f.call('POST','/transfers/folder-reuse/folders/root/reuse',body,b.token);
+  assert.equal(receipt.status,200,JSON.stringify(receipt.body));assert.equal(receipt.body.files.length,4);
+  assert.ok(receipt.body.files.every((file:any)=>file.status==='received' && file.reused && file.receivedAt===receipt.body.files[0].receivedAt && file.offset===0));
+  assert.equal(receipt.body.files[0].transport,null);assert.equal(receipt.body.files[3].transport,'direct');
+  const transfer=(await f.call('GET','/transfers/folder-reuse',undefined,b.token)).body.transfer;
+  assert.equal(transfer.files.find((file:any)=>file.fileId==='other').status,'offered');
+  assert.deepEqual(await readdir(join(f.dir,'relay')),[]);
+  assert.equal((await f.call('PUT','/transfers/folder-reuse/files/body/chunks?offset=0',Buffer.from('abcdef'),a.token)).status,409);
+  await f.call('POST','/transfers/folder-reuse/accept',{fileIds:files.map(file=>file.fileId)},b.token);
+  await f.restart();
+  assert.deepEqual((await f.call('POST','/transfers/folder-reuse/folders/root/reuse',body,b.token)).body,receipt.body);
+  assert.equal((await f.call('GET','/info')).body.features.folderReuse,true);
+ }finally{await f.close();}
+});
+
+test("folder reuse never partially acknowledges an incomplete, mismatched or already streaming tree",async()=>{
+ const f=await fixture();
+ try{
+  const a=await f.enroll(),b=await f.pair(a.token);await f.call('POST','/devices/me/capabilities',{folderTransfer:true},b.token);
+  const files=[{fileId:'root',name:'root',relativePath:'root',entryKind:'directory',size:0,sha256:hash('')},{fileId:'body',name:'a.txt',relativePath:'root/a.txt',entryKind:'file',size:6,sha256:hash('abcdef')}];
+  await f.call('POST','/transfers',{transferId:'folder-no-partial',targetDeviceId:b.id,files},a.token);
+  const path='/transfers/folder-no-partial/folders/root/reuse',body={files:files.map(({fileId,size,sha256})=>({fileId,size,sha256}))};
+  assert.equal((await f.call('POST',path,body,a.token)).status,403);
+  assert.equal((await f.call('POST',path,{files:[body.files[0]]},b.token)).body.error.code,'INCOMPLETE_FOLDER');
+  assert.equal((await f.call('POST',path,{files:[body.files[0],body.files[0]]},b.token)).body.error.code,'INCOMPLETE_FOLDER');
+  assert.equal((await f.call('POST',path,{files:[body.files[0],{...body.files[1],sha256:hash('ABCDEF')}]},b.token)).body.error.code,'CONTENT_MISMATCH');
+  let entries=(await f.call('GET','/transfers/folder-no-partial',undefined,b.token)).body.transfer.files;assert.ok(entries.every((file:any)=>file.status==='offered' && !file.reused));
+  await f.call('POST','/transfers/folder-no-partial/accept',{fileIds:['root','body']},b.token);
+  await f.call('PUT','/transfers/folder-no-partial/files/body/chunks?offset=0',Buffer.from('abc'),a.token);
+  assert.equal((await f.call('POST',path,body,b.token)).body.error.code,'TRANSFER_STARTED');
+  entries=(await f.call('GET','/transfers/folder-no-partial',undefined,b.token)).body.transfer.files;assert.equal(entries[0].status,'accepted');assert.ok(entries.every((file:any)=>!file.reused));
+  await f.call('POST','/transfers',{transferId:'empty-folder-reuse',targetDeviceId:b.id,files:[files[0]]},a.token);
+  const empty=await f.call('POST','/transfers/empty-folder-reuse/folders/root/reuse',{files:[body.files[0]]},b.token);assert.equal(empty.status,200);assert.equal(empty.body.files[0].status,'received');
+ }finally{await f.close();}
+});
+
+test('folder reuse metadata has its own batch budget rather than the file chunk limit',async()=>{
+ const f=await fixture({chunkSize:1024});
+ try{
+  const a=await f.enroll(),b=await f.pair(a.token);await f.call('POST','/devices/me/capabilities',{folderTransfer:true},b.token);
+  const files=Array.from({length:40},(_,i)=>({fileId:'dir-'+i,name:i?'empty-'+i:'root',relativePath:i?'root/empty-'+i:'root',entryKind:'directory',size:0,sha256:hash('')}));
+  const offered=await f.call('POST','/transfers',{transferId:'folder-batch-budget',targetDeviceId:b.id,files},a.token);assert.equal(offered.status,201);
+  const body={files:files.map(({fileId,size,sha256})=>({fileId,size,sha256}))};assert.ok(JSON.stringify(body).length>1024);
+  const reused=await f.call('POST','/transfers/folder-batch-budget/folders/dir-0/reuse',body,b.token);assert.equal(reused.status,200,JSON.stringify(reused.body));assert.equal(reused.body.files.length,40);
+ }finally{await f.close();}
+});

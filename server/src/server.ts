@@ -42,6 +42,7 @@ import {
   type Event,
   type Transfer,
   type TransferFile,
+  type FolderReuseRequest,
   type RoutePreference,
   type Peer,
   type GroupSharedText,
@@ -646,7 +647,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true },
+    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -2003,6 +2004,44 @@ export async function buildApp(options: Options = {}) {
   // Check the receiver's local inventory before accepting an offer, so the
   // sender never starts uploading a duplicate. The client verifies the bytes;
   // the center only records the receipt, even after old offers have expired.
+  app.post(`${api}/transfers/:transferId/folders/:rootId/reuse`, {
+    bodyLimit: 8 * 1024 * 1024,
+    schema: { body: {
+      type: "object", additionalProperties: false, required: ["files"],
+      properties: { files: { type: "array", minItems: 1, maxItems: 10000, items: {
+        type: "object", additionalProperties: false, required: ["fileId", "sha256", "size"],
+        properties: { fileId: id, sha256: fileOfferSchema.properties.sha256, size: fileOfferSchema.properties.size },
+      } } },
+    } },
+  }, async req => {
+    const d=device(req), p=req.params as any, t=transfer(d,p.transferId);
+    role(d,t,"target");
+    const root=file(t,p.rootId);
+    if(root.entry_kind!=="directory" || !root.relative_path || root.relative_path.includes("/"))
+      fail("NOT_A_FOLDER_ROOT","Select a complete offered folder",409);
+    const members=all("SELECT * FROM files WHERE transfer_id=? ORDER BY rowid",t.id)
+      .filter(f=>f.relative_path===root.relative_path || f.relative_path?.startsWith(root.relative_path+"/"));
+    const request=(req.body as FolderReuseRequest).files;
+    const supplied=new Map(request.map(f=>[f.fileId,f]));
+    if(supplied.size!==request.length || supplied.size!==members.length || members.some(f=>!supplied.has(f.id)))
+      fail("INCOMPLETE_FOLDER","Verify every folder entry together",409);
+    if(members.some(f=>supplied.get(f.id)!.sha256!==f.sha || supplied.get(f.id)!.size!==f.size))
+      fail("CONTENT_MISMATCH","Local folder does not match the offered content",409);
+    if(members.every(f=>f.status==="received" && f.reused_at))
+      return {files:members.map(fileView)};
+    if(members.some(f=>!["offered","accepted"].includes(f.status) || f.offset!==0 || locks.has(`${t.id}/${f.id}`)))
+      fail("TRANSFER_STARTED","Folder reuse must precede payload transfer",409);
+    const receivedAt=iso();
+    tx(()=>{
+      for(const f of members){
+        clearDirect(t.id,f.id);removeBytes(f);
+        run("UPDATE files SET status='received',transport=?,offset=0,error=NULL,receive_failure=NULL,reused_at=? WHERE transfer_id=? AND id=?",
+          f.entry_kind==="directory"?null:"direct",receivedAt,t.id,f.id);
+      }
+    });
+    changed(t);
+    return {files:members.map(f=>fileView(file(t,f.id)))};
+  });
   app.post(`${filePath}/reuse`, {
     schema: { body: {
       type: "object", additionalProperties: false, required: ["sha256", "size"],
