@@ -123,6 +123,7 @@ export interface Device {
   peer?: Peer | null;
   rtc?: RtcCapability | null;
   folderTransfer?: boolean;
+  openUrlIntentV1?: boolean;
 }
 export interface TransferFile {
   fileId: string;
@@ -182,7 +183,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean };
+  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean; openUrlIntents?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";
@@ -218,11 +219,38 @@ export type ServerMessage =
   | { type: "hello"; deviceId: string; protocolVersion: 1 }
   | { type: "presence"; deviceId: string; online: boolean }
   | { type: "devices.changed" }
+  | { type: "url_intents.changed" }
   | { type: "rtc.changed"; transferId: string; fileId: string; attemptId: string }
   | { type: "rtc.probes.changed" }
   | ({ type: "sharedText.updated" } & GroupSharedText)
   | { type: "event"; event: Event }
   | { type: "pong" };
+export type OpenUrlIntentState = "queued" | "delivered" | "launch_accepted" | "needs_tap" | "failed" | "expired";
+export interface OpenUrlIntentRequest {
+  requestId: string;
+  targetDeviceId: string;
+  callerAppId: string;
+  url: string;
+  expiresInMs?: number;
+}
+export interface OpenUrlIntent {
+  requestId: string;
+  sourceDeviceId: string;
+  targetDeviceId: string;
+  callerAppId: string;
+  state: OpenUrlIntentState;
+  createdAt: string;
+  expiresAt: string;
+  updatedAt: string;
+  /** Returned only to the intended target while queued / delivered. */
+  url?: string;
+  error?: { code: string; message: string };
+}
+export interface OpenUrlIntentResult {
+  sourceDeviceId: string;
+  state: Exclude<OpenUrlIntentState, "queued">;
+  error?: { code: string; message: string };
+}
 export const idPattern = "^[a-zA-Z0-9_-]{1,100}$";
 export const fileOfferSchema = {
   type: "object",

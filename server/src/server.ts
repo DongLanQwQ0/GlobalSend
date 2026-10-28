@@ -31,6 +31,7 @@ import { type WebSocket } from "ws";
 import { RtcRegistry, type RtcAttempt, type RtcScope } from "./rtc.ts";
 import { RtcProbeRegistry } from "./rtc_probes.ts";
 import { TextContents } from "./text_content.ts";
+import { UrlIntents } from "./url_intents.ts";
 import {
   PROTOCOL_VERSION,
   DEFAULT_CHUNK_SIZE,
@@ -48,6 +49,8 @@ import {
   type HttpsPeerProbeRequest,
   type HttpsPeerProbeResult,
   type GroupSharedText,
+  type OpenUrlIntentRequest,
+  type OpenUrlIntentResult,
 } from "../../packages/protocol/src/index.ts";
 
 type Row = Record<string, any>;
@@ -71,6 +74,7 @@ export interface Options {
   maxDevicesPerGroup?: number;
   stunUrls?: string[];
   discoveryNow?: () => number;
+  urlIntentNow?: () => number;
 }
 const digest = (x: string | Buffer) =>
   createHash("sha256").update(x).digest("hex");
@@ -269,6 +273,12 @@ export async function buildApp(options: Options = {}) {
     }
   };
   const textContents = new TextContents(db);
+  const capabilityColumns = (db.prepare("PRAGMA table_info(device_capabilities)").all() as Row[]).map(column => column.name);
+  if (!capabilityColumns.includes("open_url_intent")) db.exec("ALTER TABLE device_capabilities ADD COLUMN open_url_intent INTEGER NOT NULL DEFAULT 0");
+  const urlIntents = new UrlIntents(db, options.urlIntentNow ?? Date.now, (source, target) => {
+    send(source, { type: "url_intents.changed" });
+    if (target !== source) send(target, { type: "url_intents.changed" });
+  });
   run(
     "INSERT OR IGNORE INTO groups(id,created) SELECT group_id,MIN(created) FROM devices GROUP BY group_id",
   );
@@ -348,6 +358,7 @@ export async function buildApp(options: Options = {}) {
     peer: d.revoked ? null : peerView(d.id),
     rtc: d.revoked || !online(d.id) ? null : rtc.capability(d.id),
     folderTransfer: Boolean(get("SELECT folder_transfer FROM device_capabilities WHERE device_id=?", d.id)?.folder_transfer),
+    openUrlIntentV1: Boolean(get("SELECT open_url_intent FROM device_capabilities WHERE device_id=?", d.id)?.open_url_intent),
   });
   function device(req: FastifyRequest) {
     const value = req.headers.authorization;
@@ -588,6 +599,7 @@ export async function buildApp(options: Options = {}) {
   }
   function cleanup() {
     const now = Date.now();
+    urlIntents.cleanup();
     cleanupDiscovery();
     for (const f of all(
       "SELECT files.* FROM files JOIN transfers ON transfers.id=files.transfer_id WHERE transfers.expires<=? AND files.status NOT IN ('expired','canceled','rejected')",
@@ -657,7 +669,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true },
+    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true, openUrlIntents: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -833,14 +845,32 @@ export async function buildApp(options: Options = {}) {
     };
   });
   app.post(`${api}/devices/me/capabilities`, {
-    schema: { body: { type: "object", additionalProperties: false, required: ["folderTransfer"], properties: { folderTransfer: { type: "boolean" } } } },
+    schema: { body: { type: "object", additionalProperties: false, required: ["folderTransfer"], properties: { folderTransfer: { type: "boolean" }, openUrlIntentV1: {type:"boolean"} } } },
   }, async req => {
-    const d = device(req), enabled = (req.body as {folderTransfer:boolean}).folderTransfer;
-    const previous = get("SELECT folder_transfer FROM device_capabilities WHERE device_id=?", d.id)?.folder_transfer ?? 0;
-    run("INSERT INTO device_capabilities(device_id,folder_transfer) VALUES(?,?) ON CONFLICT(device_id) DO UPDATE SET folder_transfer=excluded.folder_transfer", d.id, enabled ? 1 : 0);
-    if (Boolean(previous) !== enabled) for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", d.group_id)) send(peer.id, {type:"devices.changed"});
+    const d = device(req), body = req.body as {folderTransfer:boolean;openUrlIntentV1?:boolean}, enabled = body.folderTransfer;
+    const previous = get("SELECT folder_transfer,open_url_intent FROM device_capabilities WHERE device_id=?", d.id);
+    const openUrl = body.openUrlIntentV1 ?? Boolean(previous?.open_url_intent);
+    if (openUrl && !["windows", "android"].includes(d.platform)) fail("unsupported_target", "当前平台不支持自动打开网页");
+    run("INSERT INTO device_capabilities(device_id,folder_transfer,open_url_intent) VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET folder_transfer=excluded.folder_transfer,open_url_intent=excluded.open_url_intent", d.id, enabled ? 1 : 0, openUrl ? 1 : 0);
+    if (Boolean(previous?.folder_transfer) !== enabled || Boolean(previous?.open_url_intent) !== openUrl) for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", d.group_id)) send(peer.id, {type:"devices.changed"});
     return {device:deviceView(d)};
   });
+  const urlRequestId = { type: "string", pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" };
+  const urlIntentParams = { type: "object", required: ["requestId"], properties: { requestId: urlRequestId } };
+  app.post(`${api}/url-intents`, { schema: { body: {
+    type: "object", additionalProperties: false, required: ["requestId", "targetDeviceId", "url", "callerAppId"],
+    properties: { requestId: urlRequestId, targetDeviceId: id, url: {type:"string",minLength:1,maxLength:4096},
+      callerAppId: {type:"string",minLength:3,maxLength:255,pattern:"^[a-zA-Z][a-zA-Z0-9_]*(?:\\.[a-zA-Z][a-zA-Z0-9_]*)+$"},
+      expiresInMs: {type:"integer",minimum:1,maximum:120000} },
+  } } }, async req => urlIntents.create(device(req), req.body as OpenUrlIntentRequest));
+  app.get(`${api}/url-intents/pending`, async req => urlIntents.pending(device(req)));
+  app.get(`${api}/url-intents/:requestId`, {schema:{params:urlIntentParams}}, async req =>
+    urlIntents.status(device(req), (req.params as {requestId:string}).requestId));
+  app.post(`${api}/url-intents/:requestId/result`, {schema:{params:urlIntentParams,body:{
+    type:"object",additionalProperties:false,required:["sourceDeviceId","state"],
+    properties:{sourceDeviceId:id,state:{enum:["delivered","launch_accepted","needs_tap","failed","expired"]},
+      error:{type:"object",additionalProperties:false,required:["code","message"],properties:{code:{type:"string",minLength:1,maxLength:80},message:{type:"string",minLength:1,maxLength:500}}}},
+  }}}, async req => urlIntents.result(device(req), (req.params as {requestId:string}).requestId, req.body as OpenUrlIntentResult));
   app.patch(`${api}/devices/me`, {
     schema: {
       body: {
