@@ -2,14 +2,14 @@
 
 ## 先确认版本
 
-截至 2026-10-27，发布记录确认：
+截至 2026-10-28，发布记录确认：
 
-- Windows 已更新、启动 **1.0.19+24**，位于 `E:\Programs\GlobalSend`。
-- [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.19-android-arm64-v8a.apk)：约 18.85 MB。手机已通过 `10.195.39.39:37561` 更新并启动 **1.0.19+24**，数据保留。
-- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.19-windows-x64.zip)。不要只替换 EXE。
-- 中心与 [网页版](https://123.207.180.163/globalsend/app/) 已部署 **1.0.19**，真实目录传输已启用。
+- Windows 已更新、启动 **1.0.28+37**，位于 `E:\Programs\GlobalSend`。
+- [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.28-android-arm64-v8a.apk)：约 16.22 MB。已获更新授权，但构建期间 `10.196.4.142:36241` 断开，推送/安装未完成；手机最后确认 **1.0.23+32**。
+- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.28-windows-x64.zip)。不要只替换 EXE。
+- 中心与 [网页版](https://123.207.180.163/globalsend/app/) 已上线 `globalsend:interaction-fixes-20261028-193816`；本轮仅原生代码变化，不重复部署相同 Web 资源。
 
-版本以 [本机发布记录](../artifacts/releases/latest-local.json) 和 [中心部署记录](../artifacts/deploy/current-workspace-deployment.json) 为准。两端已包含图片缩放焦点/裁剪修正，Windows 另包含触屏长按拖放及创建窗口前恢复位置修正。验收项见 [UI 验收](UI_ACCEPTANCE.md)。
+版本以 [本机发布记录](../artifacts/releases/latest-local.json) 和 [中心部署记录](../artifacts/deploy/current-workspace-deployment.json) 为准。安装新版后，优先验证目录异常不阻断登录、长按不切换多选、接收坞删除/出现延迟，以及已测通路径复用；步骤见 [UI 验收](UI_ACCEPTANCE.md)。未安装的手机不能用于判定这些新修复无效。
 
 ## 快速走一遍
 
@@ -23,6 +23,6 @@
 
 ## 更新约定
 
-统一使用 `npm run release:local`。成功构建后完整更新 `E:\Programs\GlobalSend` 并重启；向已授权手机推送 APK、覆盖安装并启动，保留数据。安装包只留本地，不上传服务器。
+统一使用 `npm run release:local`。成功构建后完整更新 `E:\Programs\GlobalSend` 并重启；向已授权手机推送 APK、覆盖安装并启动，保留数据。安装包留本地及 GitHub Release，不上传中心服务器。
 
 无人值守时只尝试已有授权 USB 或用户提供的 ADB 地址；断开则保留 APK 与待推送状态，不索要新地址，不阻塞 Windows 和 Web 发布。

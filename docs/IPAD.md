@@ -2,7 +2,9 @@
 
 先完成 Windows、Android 的开发和稳定性验收，最后再构建 IPA。在 GitHub 仓库打开 **Actions → iPad unsigned IPA → Run workflow**。构建成功后，在该次运行的 **Artifacts** 下载 `GlobalSend-iPad-unsigned-运行编号`，解压取得 `GlobalSend-iPad-unsigned.ipa`，交给你自己的签名工具签名，再安装到 iPad。
 
-工作流仅手动触发，推送源码不构建 IPA。产物保留 14 天；签名证书、Apple 账号、描述文件和 TestFlight 都不参与这条流水线。安装包只保存在 GitHub Actions 和本地，不放到 GlobalSend 中心服务器。
+工作流仅手动触发，推送源码不构建 IPA。Actions 产物保留 14 天；成功后另发布 IPA 与 iOS 更新清单到 GitHub Release。签名证书、Apple 账号、描述文件和 TestFlight 都不参与这条流水线。安装包不放到 GlobalSend 中心服务器。
+
+若当前版本/构建号已有 Windows 或 Android Release，应选择它的源码 Tag 运行（例如 `v1.0.28-build37`），让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；若要构建更新后的源码，先增加构建号再手动触发。当前 Android 新包尚未安装验收，因此暂不触发新 IPA。
 
 ## 当前构建
 
