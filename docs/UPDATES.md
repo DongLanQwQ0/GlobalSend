@@ -28,7 +28,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows 1.0.28+37 已安装运行；设置中的实际更新检查此前在 1.0.27 验证。当前[公开 Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.28-build37)含 Windows ZIP、Android arm64 APK 及各自清单。Android APK 已构建，但构建期间 ADB 断开，手机安装未完成。
+Windows、Android 1.0.28+37 均已安装运行；设置中的实际更新检查此前在 Windows 1.0.27 验证。当前[公开 Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.28-build37)含 Windows ZIP、Android arm64 APK 及各自清单。手机随后通过新 ADB 地址完成覆盖安装，数据保留。
 
 GitHub API 已确认四个资产均上传完成。本次用客户端公开接口复核时，直连读取清单超时，改用现有代理后读取 Release 也超时，因此尚未完成 1.0.28 的整条公开更新检查；未将网络超时视为“已是最新”。证据：`artifacts/reports/github-release-1.0.28.json`、`artifacts/logs/public-platform-updates-1.0.28*.log`。
 

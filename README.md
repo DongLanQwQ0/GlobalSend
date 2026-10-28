@@ -12,7 +12,7 @@ Windows 最新为 **1.0.28+37**，完整客户端已更新并运行于 `E:\Progr
 
 Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.28-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android 最新构建为 **1.0.28+37**：[arm64 APK，16.22 MB](artifacts/releases/GlobalSend-1.0.28-android-arm64-v8a.apk)。用户已恢复更新授权，但手机在构建期间断开 ADB，**推送和安装未完成**；最后确认安装仍为 **1.0.23+32**。新版目录、长按、主题及选路修复需安装新包才会生效，不能把构建成功当作手机已更新。
+Android 已覆盖安装并启动 **1.0.28+37**：[arm64 APK，16.22 MB](artifacts/releases/GlobalSend-1.0.28-android-arm64-v8a.apk)。手机通过新授权地址恢复连接，安装返回 Success，实际包版本和进程已确认；启动画面进入原有收发工作区并显示电脑设备，没有被接收目录错误挡在登录页。数据保留；后台、拖放及真实跨网选路仍需实机验收。
 
 iPad / iPhone 最后交付的未签名 IPA 为 **1.0.24 (33)**，需要自行签名安装，不含本轮主题功能。构建入口仍仅支持手动触发，见 [iPad 构建说明](docs/IPAD.md)。**中心服务器不托管安装包；Windows、Android 新版发布到 [GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.28-build37)。**
 
