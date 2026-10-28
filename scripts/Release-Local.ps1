@@ -1,6 +1,7 @@
 <# Builds and publishes the native clients to the user's local test devices. #>
 [CmdletBinding()]
-param([string]$Serial = $env:GLOBALSEND_ADB_SERIAL, [switch]$PublishOnly, [switch]$KeepRunning, [switch]$PushOnlyPhone, [switch]$WindowsOnly)
+param([string]$Serial = $env:GLOBALSEND_ADB_SERIAL, [switch]$PublishOnly, [switch]$KeepRunning, [switch]$PushOnlyPhone, [switch]$WindowsOnly,
+    [switch]$DeferPhone, [string]$PhoneDeferReason = 'Device use coordinated by another active task')
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $client = Join-Path $root 'client'
@@ -151,8 +152,9 @@ try {
     $report = @{ version=$version; buildNumber=$buildNumber; windowsVersion=$version; windows=$target; windowsPid=$process.Id; stateBackup=$stateBackup; apk=$apk; apkBytes=$apkBytes; apkBuilt=(!$WindowsOnly); serial=$Serial; androidInstalled=$false; phonePending=$true; lastConfirmedPhoneVersion=$previousRelease.lastConfirmedPhoneVersion; lastConfirmedPhoneBuildNumber=$previousRelease.lastConfirmedPhoneBuildNumber; publishedAt=(Get-Date).ToString('o') }
     $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releases 'latest-local.json') -Encoding UTF8
 
-    if ($WindowsOnly) {
+    if ($WindowsOnly -or $DeferPhone) {
         $report.phoneDeferred = $true
+        $report.phoneDeferReason = if ($WindowsOnly) { 'Android build and update paused' } else { $PhoneDeferReason }
         $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releases 'latest-local.json') -Encoding UTF8
         $report | ConvertTo-Json
         if ($KeepRunning) { Wait-Process -Id $process.Id }

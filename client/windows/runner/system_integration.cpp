@@ -196,6 +196,24 @@ winrt::fire_and_forget RevealFile(std::wstring path,
   }
 }
 
+// Browser startup (COM/DDE) can wait on another process. Keep that wait off the
+// platform/UI thread, including when an explicit remote intent arrives in tray.
+winrt::fire_and_forget OpenWebUrl(std::string url, HWND parent,
+    std::shared_ptr<flutter::MethodResult<Value>> result) {
+  const winrt::apartment_context platform_thread;
+  const auto generation = system_generation;
+  co_await winrt::resume_background();
+  const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const HRESULT status = SUCCEEDED(initialized) || initialized == RPC_E_CHANGED_MODE
+      ? OpenGlobalSendWebUrl(parent, url) : initialized;
+  if (SUCCEEDED(initialized)) CoUninitialize();
+  co_await platform_thread;
+  if (!channel || generation != system_generation) co_return;
+  if (status == E_INVALIDARG) result->Error("INVALID_URL", "网址无效");
+  else if (SUCCEEDED(status)) result->Success();
+  else result->Error("OPEN_URL_FAILED", "无法打开网址");
+}
+
 class DragSource final : public IDropSource {
  public:
   explicit DragSource(bool touch = false) : touch_(touch) {}
@@ -515,10 +533,8 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       if (!ole_initialized) { result->Error("OLE_UNAVAILABLE", "Windows drag is unavailable"); return; }
       Drag(*arguments, std::move(result), owner);
     } else if (call.method_name() == "openWebUrl") {
-      const auto status = OpenGlobalSendWebUrl(owner, String(*arguments, "url"));
-      if (status == E_INVALIDARG) result->Error("INVALID_URL", "网址无效");
-      else if (SUCCEEDED(status)) result->Success();
-      else result->Error("OPEN_URL_FAILED", "无法打开网址");
+      OpenWebUrl(String(*arguments, "url"), owner,
+          std::shared_ptr<flutter::MethodResult<Value>>(std::move(result)));
     } else if (call.method_name() == "revealFile") {
       RevealFile(Wide(String(*arguments, "path")),
           std::shared_ptr<flutter::MethodResult<Value>>(std::move(result)));
