@@ -2,8 +2,10 @@ package dev.globalsend.globalsend;
 
 import android.app.Activity;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -17,10 +19,32 @@ final class IntegrationUi {
     IntegrationUi(Activity activity,String title) {
         this.activity=activity;colors=ReceiveAppearance.load(activity);
         activity.setTitle(title);activity.getWindow().setStatusBarColor(colors.surface);activity.getWindow().setNavigationBarColor(colors.surface);
-        activity.getWindow().getDecorView().setSystemUiVisibility("dark".equals(mode())?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        int systemUi="dark".equals(mode())?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        if(Build.VERSION.SDK_INT<30) systemUi|=View.SYSTEM_UI_FLAG_LAYOUT_STABLE|View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+        activity.getWindow().getDecorView().setSystemUiVisibility(systemUi);
+        if(Build.VERSION.SDK_INT>=30) activity.getWindow().setDecorFitsSystemWindows(false);
         ScrollView scroll=new ScrollView(activity);scroll.setFillViewport(true);scroll.setBackgroundColor(colors.surface);
+        scroll.setOnApplyWindowInsetsListener((view,insets)->{
+            int left,top,right,bottom;
+            if(Build.VERSION.SDK_INT>=30) {
+                android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());
+                left=safe.left;top=safe.top;right=safe.right;bottom=safe.bottom;
+            } else {
+                left=insets.getSystemWindowInsetLeft();top=insets.getSystemWindowInsetTop();right=insets.getSystemWindowInsetRight();bottom=insets.getSystemWindowInsetBottom();
+                if(Build.VERSION.SDK_INT>=28 && insets.getDisplayCutout()!=null) {
+                    android.view.DisplayCutout cutout=insets.getDisplayCutout();
+                    left=Math.max(left,cutout.getSafeInsetLeft());top=Math.max(top,cutout.getSafeInsetTop());
+                    right=Math.max(right,cutout.getSafeInsetRight());bottom=Math.max(bottom,cutout.getSafeInsetBottom());
+                }
+            }
+            // The viewport owns system space; the body keeps its original 24dp.
+            // Always assign absolute insets so repeated dispatch never adds them.
+            view.setPadding(left,top,right,bottom);
+            return insets;
+        });
         body=new LinearLayout(activity);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(24),dp(24),dp(24),dp(24));
         scroll.addView(body,new ScrollView.LayoutParams(-1,-2));activity.setContentView(scroll);
+        scroll.requestApplyInsets();
         LinearLayout heading=new LinearLayout(activity);heading.setGravity(Gravity.CENTER_VERTICAL);
         TextView label=text(title,24,colors.ink);label.setTypeface(null,android.graphics.Typeface.BOLD);
         heading.addView(label,new LinearLayout.LayoutParams(0,dp(48),1));
