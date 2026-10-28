@@ -16,7 +16,10 @@ export class RtcProbeRegistry {
   private readonly probes = new Map<string, RtcProbeView>();
   private readonly results = new Map<string, RtcProbeResult>();
   private readonly now: () => number;
-  constructor(now: () => number = Date.now) { this.now = now; }
+  private readonly parallelCapable: (id:string)=>boolean;
+  constructor(now: () => number = Date.now, parallelCapable: (id:string)=>boolean = ()=>false) {
+    this.now = now; this.parallelCapable = parallelCapable;
+  }
   presence(deviceId: string): RtcProbePresence {
     const expires = this.foreground.get(deviceId) ?? 0;
     return expires > this.now() ? { foreground: true, expiresAt: new Date(expires).toISOString() } : { foreground: false, expiresAt: null };
@@ -42,8 +45,11 @@ export class RtcProbeRegistry {
     if (this.results.has(attemptId)) fail("PROBE_ENDED", "Probe attempt has ended", 410);
     for (const deviceId of [initiatorDeviceId, responderDeviceId]) {
       if (!this.presence(deviceId).foreground) fail("PROBE_BACKGROUND", "Both devices must be in the foreground");
-      if ([...this.probes.values()].some(value => participants(value).includes(deviceId))) fail("PROBE_BUSY", "A device already has an active probe");
+      if (!this.parallelCapable(deviceId) && [...this.probes.values()].some(value => participants(value).includes(deviceId))) fail("PROBE_BUSY", "A device already has an active probe");
     }
+    if ([...this.probes.values()].some(value => value.scope === scope &&
+      participants(value).includes(initiatorDeviceId) && participants(value).includes(responderDeviceId)))
+      fail("PROBE_BUSY", "This device pair and scope are already being checked");
     const probe: RtcProbeView = { attemptId, initiatorDeviceId, responderDeviceId, scope,
       expiresAt: new Date(this.now() + PROBE_SESSION_MS).toISOString(), offer: null, answer: null, candidates: { initiator: [], responder: [] } };
     this.probes.set(attemptId, probe); return probe;

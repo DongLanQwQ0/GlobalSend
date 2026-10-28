@@ -309,7 +309,7 @@ export async function buildApp(options: Options = {}) {
   const httpsPeerSignature = (peer: Peer | null) => peer
     ? JSON.stringify([peer.candidates, peer.certificateSha256]) : "";
   const rtc = new RtcRegistry(discoveryNow);
-  const rtcProbes = new RtcProbeRegistry(discoveryNow);
+  const rtcProbes = new RtcProbeRegistry(discoveryNow, id => rtc.capability(id)?.parallelProbes === true);
   function rtcChanged(attempt: RtcAttempt) {
     const value = { type: "rtc.changed", transferId: attempt.transferId, fileId: attempt.fileId, attemptId: attempt.attemptId };
     send(attempt.sourceDeviceId, value);
@@ -657,7 +657,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true },
+    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -859,11 +859,11 @@ export async function buildApp(options: Options = {}) {
   });
   app.post(`${api}/devices/me/rtc`, { schema: { body: {
     type: "object", additionalProperties: false, required: ["scopes"],
-    properties: { scopes: { type: "array", maxItems: 2, uniqueItems: true, items: { enum: ["lan", "public"] } }, refresh: { type: "boolean" } },
+    properties: { scopes: { type: "array", maxItems: 2, uniqueItems: true, items: { enum: ["lan", "public"] } }, refresh: { type: "boolean" }, parallelProbes: { type: "boolean" } },
   } } }, async (req) => {
-    const d = device(req), body = req.body as { scopes: RtcScope[]; refresh?: boolean }, scopes = body.scopes;
+    const d = device(req), body = req.body as { scopes: RtcScope[]; refresh?: boolean; parallelProbes?: boolean }, scopes = body.scopes;
     requireOnline(d.id);
-    if (rtc.register(d.id, scopes) || body.refresh === true) {
+    if (rtc.register(d.id, scopes, body.parallelProbes === true) || body.refresh === true) {
       for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", d.group_id))
         send(peer.id, { type: "devices.changed" });
     }
@@ -882,7 +882,7 @@ export async function buildApp(options: Options = {}) {
     const ownScopes = rtc.capability(d.id)?.scopes ?? [];
     const peers = !online(d.id) || !rtcProbes.presence(d.id).foreground ? [] : all("SELECT id,platform FROM devices WHERE group_id=? AND revoked=0 AND id<>?", d.group_id, d.id)
       .filter(peer => online(peer.id) && rtcProbes.presence(peer.id).foreground)
-      .map(peer => ({ deviceId: peer.id, scopes: (rtc.capability(peer.id)?.scopes ?? []).filter(scope => ownScopes.includes(scope)), foregroundExpiresAt: rtcProbes.presence(peer.id).expiresAt! }))
+      .map(peer => ({ deviceId: peer.id, scopes: (rtc.capability(peer.id)?.scopes ?? []).filter(scope => ownScopes.includes(scope)), foregroundExpiresAt: rtcProbes.presence(peer.id).expiresAt!, ...(rtc.capability(peer.id)?.parallelProbes ? {parallelProbes:true} : {}) }))
       .filter(peer => peer.scopes.length > 0);
     return { ...rtcProbes.snapshot(d.id), peers };
   });

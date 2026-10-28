@@ -13,10 +13,10 @@ window.RTCPeerConnection=class extends Original {
   override close(){if(!this.counted){this.counted=true;closed++;}super.close();}
 };
 Object.assign(window,{fixture:{
-  async configure(session:{deviceToken:string;device:{deviceId:string}},peers:string[]) {
+  async configure(session:{deviceToken:string;device:{deviceId:string}},peers:string[],parallel=false) {
     await monitor?.dispose();
     const api=new Api(location.origin,session as never);
-    monitor=new RtcProbeMonitor({api,deviceId:session.device.deviceId,changed:()=>{}});
+    monitor=new RtcProbeMonitor({api,deviceId:session.device.deviceId,parallel,reportAddresses:parallel,changed:()=>{}});
     monitor.setOnlinePeers(peers);
     await monitor.setForeground(true);
   },

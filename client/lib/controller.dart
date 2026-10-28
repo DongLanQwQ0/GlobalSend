@@ -1029,6 +1029,7 @@ class SendController extends ChangeNotifier {
       self,
       onResults: (results) => reachability.setRtcResults(self, results),
       supportsAddressReporting: info['features']?['rtcProbeAddresses'] == true,
+      parallel: info['features']?['rtcParallelProbes'] == true,
     );
     _updateReachability();
   }
@@ -1712,6 +1713,7 @@ class SendController extends ChangeNotifier {
     final epoch = generation, a = api!, p = profile!;
     final service = RtcFileTransport(
       a,
+      parallelProbes: info['features']?['rtcParallelProbes'] == true,
       cellularAllowed: () => cellularUploads,
       onNetwork: (fileId, network, family) {
         if (epoch != generation) return;

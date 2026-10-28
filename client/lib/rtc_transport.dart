@@ -21,10 +21,12 @@ class RtcFileTransport {
     this.api, {
     this.iceServers = const [],
     this.cellularAllowed,
+    this.parallelProbes = false,
     this.onNetwork,
     RtcConnectionFactory? connectionFactory,
   }) : connectionFactory = connectionFactory ?? createRtcDataConnection;
   final CenterApi api;
+  final bool parallelProbes;
   final List<Map<String, dynamic>> iceServers;
   final bool Function()? cellularAllowed;
   final void Function(String fileId, String network, String family)? onNetwork;
@@ -46,6 +48,7 @@ class RtcFileTransport {
 
   Future<void> publish() => api.call('POST', '/devices/me/rtc', {
     'scopes': ['lan', 'public'],
+    if (parallelProbes) 'parallelProbes': true,
   });
 
   Future<void> receive({

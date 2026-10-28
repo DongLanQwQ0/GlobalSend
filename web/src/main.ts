@@ -1936,7 +1936,7 @@ class GlobalSend {
       let store:RtcFileStore;
       try{store=await this.ensureFileStore();}catch(error){if(generation===this.generation)this.rtcUnavailable=true;throw error;}
       if(generation!==this.generation || epoch!==this.discoveryEpoch || !this.connected || !this.helloReceived)return;
-      await api.request('/devices/me/rtc',{scopes:['lan','public'],...(explicitRefresh && (this.info?.features as {discoveryRefresh?:boolean}|undefined)?.discoveryRefresh?{refresh:true}:{})});
+      await api.request('/devices/me/rtc',{scopes:['lan','public'],...(this.info?.features?.rtcParallelProbes?{parallelProbes:true}:{}),...(explicitRefresh && (this.info?.features as {discoveryRefresh?:boolean}|undefined)?.discoveryRefresh?{refresh:true}:{})});
       if(generation!==this.generation || epoch!==this.discoveryEpoch || !this.connected || !this.helloReceived)return;
       this.rtcRegisteredAt=Date.now();await store.cleanup();if(!explicitRefresh){this.syncProbeMonitor();void this.refresh();}
     })();
@@ -1950,7 +1950,7 @@ class GlobalSend {
     if(!this.session || !this.info?.features?.rtcProbes || !this.rtcEnabled || !this.rtcRegisteredAt) {void this.rtcProbes?.setForeground(false);return;}
     if(!this.rtcProbes || this.rtcProbeScope!==this.dockKey) {
       const previous=this.rtcProbes;void previous?.dispose();
-      const monitor=new RtcProbeMonitor({api:new Api(this.baseUrl,this.session),deviceId:this.session.device.deviceId,reportAddresses:this.info.features.rtcProbeAddresses===true,changed:()=>{if(this.rtcProbes===monitor)this.render();}});
+      const monitor=new RtcProbeMonitor({api:new Api(this.baseUrl,this.session),deviceId:this.session.device.deviceId,reportAddresses:this.info.features.rtcProbeAddresses===true,parallel:this.info.features.rtcParallelProbes===true,changed:()=>{if(this.rtcProbes===monitor)this.render();}});
       this.rtcProbes=monitor;this.rtcProbeScope=this.dockKey;
     }
     this.rtcProbes.setOnlinePeers(this.onlinePeers().map(device=>device.deviceId));void this.rtcProbes.setForeground(this.probeForeground());

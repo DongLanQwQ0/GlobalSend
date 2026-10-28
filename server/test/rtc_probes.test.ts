@@ -49,6 +49,40 @@ async function fixture() {
   return { dir, call, enroll, connect, foreground, pair, counts, advance(ms: number) { now += ms; }, async close() { await app.close(); await rm(dir, { recursive: true, force: true }); } };
 }
 
+test("negotiated peers check both scopes and other devices concurrently without taking legacy peers' single slot", async () => {
+  const f = await fixture();
+  try {
+    const a = await f.enroll("parallel-a"), b = await f.enroll("parallel-b"), c = await f.enroll("parallel-c"), old = await f.enroll("legacy");
+    for (const d of [a, b, c]) {
+      assert.equal((await f.call("POST", "/devices/me/rtc", {scopes:["lan","public"],parallelProbes:true}, d.token)).status, 200);
+      await f.foreground(d);
+    }
+    await f.foreground(old);
+    const before = f.counts();
+    const create = (actor:typeof a, peer:typeof a, attemptId:string, scope:string) =>
+      f.call("POST", `/devices/${peer.id}/rtc-probes`, {attemptId,scope}, actor.token);
+    assert.deepEqual((await Promise.all([
+      create(a,b,"ab-lan","lan"), create(a,b,"ab-public","public"), create(a,c,"ac-public","public"),
+    ])).map(response=>response.status), [200,200,200]);
+    assert.equal((await f.call("GET", "/devices/me/rtc-probes", undefined, a.token)).body.probes.length, 3);
+    assert.equal((await create(b,a,"duplicate-direction","lan")).body.error.code, "PROBE_BUSY");
+    const snapshot = (await f.call("GET", "/devices/me/rtc-probes", undefined, a.token)).body;
+    assert.equal(snapshot.peers.find((p:any)=>p.deviceId===b.id).parallelProbes, true);
+    assert.equal(snapshot.peers.find((p:any)=>p.deviceId===old.id).parallelProbes, undefined);
+    assert.equal((await create(a,old,"old-lan","lan")).status, 200);
+    assert.equal((await create(c,old,"old-public","public")).body.error.code, "PROBE_BUSY");
+    await f.call("POST", "/rtc-probes/ab-lan/description", {type:"offer",sdp}, a.token);
+    await f.call("POST", "/rtc-probes/ab-lan/description", {type:"answer",sdp}, b.token);
+    assert.equal((await f.call("POST", "/rtc-probes/ab-lan/complete", {elapsedMs:4}, a.token)).status, 200);
+    assert.equal((await f.call("GET", "/rtc-probes/ab-public", undefined, b.token)).status, 200);
+    assert.equal((await f.call("GET", "/rtc-probes/ac-public", undefined, c.token)).status, 200);
+    assert.deepEqual(f.counts(),before);
+    await a.ws.close();
+    assert.equal((await f.call("GET", "/devices/me/rtc-probes", undefined, b.token)).body.probes.length, 0);
+    assert.equal((await f.call("GET", "/devices/me/rtc-probes", undefined, c.token)).body.probes.length, 0);
+  } finally { await f.close(); }
+});
+
 test("dedicated RTC probe negotiates between foreground peers without transfer, history or relay side effects", async () => {
   const f = await fixture();
   try {

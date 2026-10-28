@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'api.dart';
+import 'connection_window.dart';
 import 'rtc_candidates.dart';
 import 'rtc_connection.dart';
 import 'rtc_transport.dart';
@@ -55,6 +56,7 @@ class RtcProbeSession {
   Future<void>? _closing;
   late RtcCandidatePolicy _policy;
   final _wake = Completer<void>();
+  var _signal = Completer<void>();
   final _opened = Completer<void>();
   final _echo = Completer<void>();
   final _candidates = <Map<String, dynamic>>[];
@@ -73,10 +75,18 @@ class RtcProbeSession {
     if (!_wake.isCompleted) _wake.complete();
   }
 
-  Future<void> _pause() => Future.any([
-    Future<void>.delayed(const Duration(milliseconds: 180)),
-    _wake.future,
-  ]);
+  void nudge() {
+    if (!_signal.isCompleted) _signal.complete();
+  }
+
+  Future<void> _pause() async {
+    await Future.any([
+      Future<void>.delayed(const Duration(milliseconds: 180)),
+      _wake.future,
+      _signal.future,
+    ]);
+    _signal = Completer<void>();
+  }
 
   void _attach(RtcDataChannel channel) {
     if (stopped || _channel != null || channel.label != rtcProbeChannel) {
@@ -87,6 +97,7 @@ class RtcProbeSession {
     void state(RTCDataChannelState state) {
       if (state == RTCDataChannelState.RTCDataChannelOpen) {
         if (!_opened.isCompleted) _opened.complete();
+        nudge();
       } else if (state == RTCDataChannelState.RTCDataChannelClosed &&
           !stopped &&
           !_echoed) {
@@ -103,6 +114,7 @@ class RtcProbeSession {
           if (value['type'] == 'echo' && value['nonce'] == nonce) {
             _echoed = true;
             if (!_echo.isCompleted) _echo.complete();
+            nudge();
           }
         } else if (value['type'] == 'ping' &&
             value['nonce'] is String &&
@@ -215,6 +227,7 @@ class RtcProbeSession {
       _pc!.onIceCandidate = (candidate) {
         if (!stopped && _policy.allows(candidate.candidate ?? '')) {
           _candidates.add(candidate.toMap());
+          nudge();
         }
       };
       _pc!.onConnectionState = (state) {
@@ -304,7 +317,7 @@ class RtcProbeSession {
   }();
 }
 
-/// Foreground-only, one connection at a time; WS wakes it for incoming offers.
+/// Foreground coordinator. Negotiated peers may check multiple scopes at once.
 class RtcProbeMonitor {
   RtcProbeMonitor(
     this.api,
@@ -313,6 +326,7 @@ class RtcProbeMonitor {
     this.connectionFactory,
     this.initialize,
     this.supportsAddressReporting = false,
+    this.parallel = false,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
   final CenterApi api;
@@ -321,6 +335,7 @@ class RtcProbeMonitor {
   final RtcConnectionFactory? connectionFactory;
   final Future<void> Function()? initialize;
   final bool supportsAddressReporting;
+  final bool parallel;
   final DateTime Function() clock;
   final _attempted = <String, DateTime>{};
   final _requestedScopes = <String>{};
@@ -335,15 +350,27 @@ class RtcProbeMonitor {
   DateTime? _published;
   Future<void> _presence = Future.value();
   RtcProbeSession? _session;
+  final _parallelSessions = <String, RtcProbeSession>{};
+  final _creatingScopes = <String>{};
   bool _checkingSignal = false;
   String _peers = '';
   Set<String> _eligiblePeers = {};
   Set<String> _onlineIds = {};
   bool get active => !_closed && _online && _foreground;
-  bool get hasActiveSession => _session != null;
+  bool get hasActiveSession =>
+      _session != null ||
+      _parallelSessions.isNotEmpty ||
+      _creatingScopes.isNotEmpty;
 
   Future<void> signalChanged() async {
     if (!active) return;
+    if (parallel) {
+      for (final session in _parallelSessions.values) {
+        session.nudge();
+      }
+      await refresh();
+      return;
+    }
     final session = _session;
     if (session != null && !_checkingSignal) {
       _checkingSignal = true;
@@ -387,6 +414,13 @@ class RtcProbeMonitor {
     _peers = peers;
     if (changed) {
       _epoch++;
+      for (final session in _parallelSessions.values.toList()) {
+        final other =
+            session.view[session.initiator
+                ? 'responderDeviceId'
+                : 'initiatorDeviceId'];
+        if (!active || !ids.contains(other)) unawaited(_stopProbe(session));
+      }
       final session = _session;
       if (!active ||
           session != null &&
@@ -429,6 +463,7 @@ class RtcProbeMonitor {
   }
 
   Future<void> _cancelSession() async {
+    await Future.wait(_parallelSessions.values.toList().map(_stopProbe));
     final session = _session;
     if (session == null) return;
     await session.close();
@@ -462,6 +497,7 @@ class RtcProbeMonitor {
   }
 
   Future<void> refresh() async {
+    if (parallel) return _refreshParallel();
     if (!active) return;
     if (_busy) {
       _again = true;
@@ -561,6 +597,163 @@ class RtcProbeMonitor {
       if (_again) {
         _again = false;
         if (active) unawaited(refresh());
+      }
+    }
+  }
+
+  Future<void> _stopProbe(RtcProbeSession session) async {
+    final id = session.view['attemptId'];
+    if (identical(_parallelSessions[id], session)) _parallelSessions.remove(id);
+    await session.close();
+    cleanupConnection(() async {
+      await api.call('DELETE', session.route);
+    });
+  }
+
+  void _startParallel(Map<String, dynamic> view, int epoch) {
+    final id = view['attemptId'] as String;
+    if (!active || epoch != _epoch || _parallelSessions.containsKey(id)) return;
+    final session = RtcProbeSession(
+      api,
+      deviceId,
+      view,
+      connectionFactory: connectionFactory,
+      initialize: initialize,
+      supportsAddressReporting: supportsAddressReporting,
+    );
+    _parallelSessions[id] = session;
+    unawaited(() async {
+      try {
+        await session.run();
+      } catch (_) {
+        // Each session reports its own failure; another scope keeps running.
+      } finally {
+        await session.close();
+        if (identical(_parallelSessions[id], session))
+          _parallelSessions.remove(id);
+        if (active && epoch == _epoch) unawaited(refresh());
+      }
+    }());
+  }
+
+  bool _peerWorking(String id) =>
+      _creatingScopes.any((key) => key.startsWith('$id/')) ||
+      _parallelSessions.values.any(
+        (session) =>
+            session.view[session.initiator
+                ? 'responderDeviceId'
+                : 'initiatorDeviceId'] ==
+            id,
+      );
+
+  Future<void> _createParallel(String peer, String scope, int epoch) async {
+    final key = '$peer/$scope';
+    _creatingScopes.add(key);
+    _attempted[key] = clock();
+    _requestedScopes.remove(key);
+    try {
+      final response = await ConnectionWindow(const Duration(seconds: 1)).run(
+        () => api.call('POST', '/devices/$peer/rtc-probes', {
+          'attemptId': _nonce(),
+          'scope': scope,
+        }),
+      );
+      final view = Map<String, dynamic>.from(response['probe']);
+      if (!active || epoch != _epoch || !_onlineIds.contains(peer)) {
+        cleanupConnection(() async {
+          await api.call('DELETE', '/rtc-probes/${view['attemptId']}');
+        });
+        return;
+      }
+      _startParallel(view, epoch);
+    } on ApiException catch (error) {
+      if (error.response?['error']?['code'] == 'PROBE_BUSY')
+        _attempted.remove(key);
+    } catch (_) {
+      // Signaling loss does not stop the other independently running checks.
+    } finally {
+      _creatingScopes.remove(key);
+    }
+  }
+
+  Future<void> _refreshParallel() async {
+    if (!active) return;
+    if (_busy) {
+      _again = true;
+      return;
+    }
+    _busy = true;
+    final epoch = _epoch;
+    final known = _parallelSessions.keys.toSet();
+    try {
+      if (_published == null ||
+          clock().difference(_published!) >= const Duration(seconds: 20)) {
+        await _publish(true);
+        if (!active || epoch != _epoch) return;
+        _published = clock();
+      }
+      final snapshot = await api.call('GET', '/devices/me/rtc-probes');
+      if (!active || epoch != _epoch) return;
+      results = List<Map<String, dynamic>>.from(snapshot['results']);
+      onResults?.call(results);
+      final probes = List<Map<String, dynamic>>.from(snapshot['probes']);
+      final activeIds = probes.map((view) => view['attemptId']).toSet();
+      for (final id in known.difference(activeIds)) {
+        final session = _parallelSessions[id];
+        if (session != null) unawaited(_stopProbe(session));
+      }
+      for (final view in probes) {
+        final other =
+            view[view['initiatorDeviceId'] == deviceId
+                ? 'responderDeviceId'
+                : 'initiatorDeviceId'];
+        if (_onlineIds.contains(other)) _startParallel(view, epoch);
+      }
+      for (final peer in List<Map<String, dynamic>>.from(snapshot['peers'])) {
+        final id = peer['deviceId'] as String;
+        if (!_onlineIds.contains(id)) continue;
+        for (final scope in ['lan', 'public']) {
+          if (!(peer['scopes'] as List).contains(scope)) continue;
+          final key = '$id/$scope', previous = _attempted[key];
+          final requested = _requestedScopes.contains(key);
+          if (!requested && deviceId.compareTo(id) >= 0) continue;
+          if (_creatingScopes.contains(key) ||
+              probes.any(
+                (view) =>
+                    view['scope'] == scope &&
+                    [
+                      view['initiatorDeviceId'],
+                      view['responderDeviceId'],
+                    ].contains(id),
+              ))
+            continue;
+          if (!requested &&
+              (previous != null &&
+                      clock().difference(previous) <
+                          const Duration(minutes: 2) ||
+                  results.any(
+                    (r) =>
+                        r['scope'] == scope &&
+                        [
+                          r['initiatorDeviceId'],
+                          r['responderDeviceId'],
+                        ].contains(id) &&
+                        DateTime.parse(r['expiresAt']).isAfter(clock()),
+                  )))
+            continue;
+          // Legacy peers still own a single session. Only negotiate parallel
+          // scopes when the peer explicitly advertises that capability.
+          if (peer['parallelProbes'] != true && _peerWorking(id)) break;
+          unawaited(_createParallel(id, scope, epoch));
+        }
+      }
+    } catch (_) {
+      // A later group/presence notification retries the bounded discovery pass.
+    } finally {
+      _busy = false;
+      if (_again) {
+        _again = false;
+        unawaited(refresh());
       }
     }
   }

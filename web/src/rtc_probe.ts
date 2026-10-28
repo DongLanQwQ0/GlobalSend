@@ -188,7 +188,7 @@ export class RtcProbeSession {
 }
 
 interface MonitorOptions {
-  api:ProbeApi;deviceId:string;changed:()=>void;reportAddresses?:boolean;
+  api:ProbeApi;deviceId:string;changed:()=>void;reportAddresses?:boolean;parallel?:boolean;
   session?:(view:RtcProbeView,signal:AbortSignal)=>Pick<RtcProbeSession,'run'|'close'|'refresh'|'active'>;
 }
 /** Foreground-only coordinator; shared server results never change file policy. */
@@ -210,29 +210,40 @@ export class RtcProbeMonitor {
   private leaseAbort:AbortController|null=null;
   private leaseClosing=false;
   private running=false;
+  private parallelSessions=new Map<string,NonNullable<RtcProbeMonitor['activeSession']>>();
+  private creatingScopes=new Set<string>();
+  private requestedScopes=new Set<string>();
+  private sessions(){return [...this.parallelSessions.values(),...(this.activeSession?[this.activeSession]:[])];}
+  private stopSession(active:NonNullable<RtcProbeMonitor['activeSession']>){active.abort.abort();active.value.close();this.parallelSessions.delete(active.view.attemptId);}
+
   private activeSession:{view:RtcProbeView;value:Pick<RtcProbeSession,'run'|'close'|'refresh'|'active'>;abort:AbortController}|null=null;
   constructor(options:MonitorOptions){this.options=options;}
   get ownCandidates(){
-    const view=this.activeSession?.view;
-    return view?.candidates[view.initiatorDeviceId===this.options.deviceId?'initiator':'responder'].map(candidate=>candidate.candidate) || [];
+    return this.sessions().flatMap(({view})=>view.candidates[view.initiatorDeviceId===this.options.deviceId?'initiator':'responder'].map(candidate=>candidate.candidate));
   }
   setOnlinePeers(ids:string[]) {
     const changed=ids.length!==this.online.size || ids.some(id=>!this.online.has(id));
     this.online=new Set(ids);this.results=this.results.filter(result=>this.online.has(probeOther(result,this.options.deviceId)));
-    if(this.activeSession && !this.online.has(probeOther(this.activeSession.view,this.options.deviceId))){this.activeSession.abort.abort();this.activeSession.value.close();}
+    for(const active of this.sessions())if(!this.online.has(probeOther(active.view,this.options.deviceId)))this.stopSession(active);
     if(changed && this.foreground)void this.refresh();
   }
-  removePeer(id:string){this.online.delete(id);this.lastAttempt.delete(id);this.results=this.results.filter(result=>probeOther(result,this.options.deviceId)!==id);if(this.activeSession && probeOther(this.activeSession.view,this.options.deviceId)===id){this.activeSession.abort.abort();this.activeSession.value.close();}this.options.changed();}
+  removePeer(id:string){
+    this.online.delete(id);this.lastAttempt.delete(id);
+    for(const key of this.lastAttempt.keys())if(key.startsWith(id+'/'))this.lastAttempt.delete(key);
+    this.results=this.results.filter(result=>probeOther(result,this.options.deviceId)!==id);
+    for(const active of this.sessions())if(probeOther(active.view,this.options.deviceId)===id)this.stopSession(active);
+    this.options.changed();
+  }
   status(peerId:string) {
     if(!this.foreground || !this.online.has(peerId))return '';
-    if(this.activeSession?.value.active && probeOther(this.activeSession.view,this.options.deviceId)===peerId)return 'RTC 检测中';
+    if(this.sessions().some(active=>active.value.active && probeOther(active.view,this.options.deviceId)===peerId))return 'RTC 检测中';
     return probeResultLabel(this.results,this.options.deviceId,peerId);
   }
   async setForeground(value:boolean) {
     if(this.disposed && value || value===this.foreground)return;
     this.foreground=value;const epoch=++this.epoch;
     this.life.abort();this.life=new AbortController();if(!this.leaseClosing)this.leaseAbort?.abort();
-    this.activeSession?.abort.abort();this.activeSession?.value.close();this.activeSession=null;this.snapshot=null;this.results=[];this.lastAttempt.clear();
+    for(const active of this.sessions())this.stopSession(active);this.activeSession=null;this.requestedScopes.clear();this.snapshot=null;this.results=[];this.lastAttempt.clear();
     if(this.heartbeat!==null){clearInterval(this.heartbeat);this.heartbeat=null;}
     if(value)this.heartbeat=setInterval(()=>{void this.tick();},20000);
     this.options.changed();
@@ -256,19 +267,20 @@ export class RtcProbeMonitor {
       if(epoch===this.epoch)await this.refresh();
     }catch{/* Probe availability must not block actual transfers. */}
   }
-  async changed(){if(!this.foreground)return;void this.activeSession?.value.refresh();await this.refresh();}
-  async refreshPeer(peerId:string){if(!this.online.has(peerId))return;this.requestedPeers.add(peerId);await this.refresh();}
-  async refreshAllPeers(){for(const id of this.online)this.requestedPeers.add(id);await this.refresh();}
+  async changed(){if(!this.foreground)return;for(const active of this.sessions())void active.value.refresh();await this.refresh();}
+  async refreshPeer(peerId:string){if(!this.online.has(peerId))return;if(this.options.parallel){for(const scope of ['lan','public'])this.requestedScopes.add(peerId+'/'+scope);}else this.requestedPeers.add(peerId);await this.refresh();}
+  async refreshAllPeers(){for(const id of this.online){if(this.options.parallel){for(const scope of ['lan','public'])this.requestedScopes.add(id+'/'+scope);}else this.requestedPeers.add(id);}await this.refresh();}
   async networkChanged(canResume?:()=>boolean){const restore=this.foreground;await this.setForeground(false);if(restore && !this.disposed && (!canResume || canResume()))await this.setForeground(true);}
   async refresh() {
     if(!this.foreground || this.disposed)return;
     if(this.syncing){this.syncAgain=true;return this.syncing;}
-    const epoch=this.epoch;
+    const epoch=this.epoch,known=new Set(this.parallelSessions.keys());
     const syncing=(async()=>{
       try {
         const snapshot=await this.options.api.request<RtcProbeSnapshot>('/devices/me/rtc-probes',undefined,'GET',this.life.signal);
         if(epoch!==this.epoch || !this.foreground)return;
         this.snapshot=snapshot;this.results=snapshot.results.filter(result=>Date.parse(result.expiresAt)>Date.now() && this.online.has(probeOther(result,this.options.deviceId)));this.options.changed();
+        if(this.options.parallel){this.scheduleParallel(snapshot,epoch,known);return;}
         if(this.activeSession){const view=snapshot.probes.find(probe=>probe.attemptId===this.activeSession!.view.attemptId);if(view)void this.activeSession.value.refresh(view);return;}
         if(this.running)return;
         const incoming=snapshot.probes.find(probe=>probe.responderDeviceId===this.options.deviceId && this.online.has(probe.initiatorDeviceId));
@@ -287,14 +299,56 @@ export class RtcProbeMonitor {
     if(epoch!==this.epoch || !this.foreground || !this.online.has(probeOther(view,this.options.deviceId)))return null;
     const life=this.life.signal,abort=new AbortController(),cancel=()=>abort.abort();life.addEventListener('abort',cancel,{once:true});
     const value=this.options.session?.(view,abort.signal) || new RtcProbeSession(this.options.api,view,this.options.deviceId,abort.signal,this.options.reportAddresses);
-    const active={view,value,abort};this.activeSession=active;this.options.changed();
+    const active={view,value,abort};if(this.options.parallel)this.parallelSessions.set(view.attemptId,active);else this.activeSession=active;this.options.changed();
     try {
       const result=await value.run();
       if(result && epoch===this.epoch && this.foreground && this.online.has(probeOther(view,this.options.deviceId))){this.results=this.results.filter(old=>old.scope!==result.scope || probeOther(old,this.options.deviceId)!==probeOther(result,this.options.deviceId));this.results.push(result);}
       return result;
     } finally {
-      life.removeEventListener('abort',cancel);value.close();if(this.activeSession===active)this.activeSession=null;this.options.changed();
+      life.removeEventListener('abort',cancel);value.close();if(this.parallelSessions.get(view.attemptId)===active)this.parallelSessions.delete(view.attemptId);if(this.activeSession===active)this.activeSession=null;this.options.changed();
     }
+  }
+  private scheduleParallel(snapshot:RtcProbeSnapshot,epoch:number,known:Set<string>){
+    for(const id of known){const active=this.parallelSessions.get(id);if(active && !snapshot.probes.some(view=>view.attemptId===id))this.stopSession(active);}
+    for(const view of snapshot.probes){
+      if(!this.online.has(probeOther(view,this.options.deviceId)))continue;
+      const active=this.parallelSessions.get(view.attemptId);
+      if(active)void active.value.refresh(view);
+      else void this.runParallel(view,epoch);
+    }
+    for(const peer of snapshot.peers){
+      if(!this.online.has(peer.deviceId) || Date.parse(peer.foregroundExpiresAt)<=Date.now())continue;
+      for(const scope of probeScopes(peer.scopes)){
+        const key=peer.deviceId+'/'+scope,requested=this.requestedScopes.has(key);
+        if(!requested && !probeInitiator(this.options.deviceId,peer.deviceId))continue;
+        if(this.creatingScopes.has(key) || snapshot.probes.some(view=>view.scope===scope && probeOther(view,this.options.deviceId)===peer.deviceId))continue;
+        const recent=snapshot.results.some(result=>result.scope===scope && probeOther(result,this.options.deviceId)===peer.deviceId && Date.parse(result.expiresAt)>Date.now());
+        if(!requested && (recent || Date.now()-(this.lastAttempt.get(key)??-Infinity)<RTC_PROBE_INTERVAL))continue;
+        if(!peer.parallelProbes && (this.sessions().some(active=>probeOther(active.view,this.options.deviceId)===peer.deviceId) || [...this.creatingScopes].some(value=>value.startsWith(peer.deviceId+'/'))))break;
+        void this.initiateScope(peer,scope,epoch);
+      }
+    }
+  }
+  private async runParallel(view:RtcProbeView,epoch:number){
+    if(this.parallelSessions.has(view.attemptId))return;
+    try{await this.session(view,epoch);}catch{/* This scope's failure does not stop other checks. */}
+    finally{if(epoch===this.epoch && this.foreground)void this.refresh();}
+  }
+  private async initiateScope(peer:RtcProbePeer,scope:RtcScope,epoch:number){
+    const key=peer.deviceId+'/'+scope;
+    this.creatingScopes.add(key);this.requestedScopes.delete(key);this.lastAttempt.set(key,Date.now());
+    let created=false;
+    try{
+      const attemptId=probeNonce(),controller=new AbortController(),cancel=()=>controller.abort(),life=this.life.signal;
+      life.addEventListener('abort',cancel,{once:true});if(life.aborted)controller.abort();
+      const timer=setTimeout(cancel,1000);
+      let probe:RtcProbeView;
+      try{({probe}=await this.options.api.request<{probe:RtcProbeView}>(`/devices/${peer.deviceId}/rtc-probes`,{attemptId,scope},'POST',controller.signal));}
+      finally{clearTimeout(timer);life.removeEventListener('abort',cancel);}
+      if(epoch!==this.epoch || !this.foreground || !this.online.has(peer.deviceId)){void this.options.api.request(`/rtc-probes/${attemptId}`,undefined,'DELETE').catch(()=>{});return;}
+      created=true;await this.runParallel(probe,epoch);
+    }catch{this.lastAttempt.delete(key);}
+    finally{this.creatingScopes.delete(key);if(created && epoch===this.epoch && this.foreground)void this.refresh();}
   }
   private async respond(view:RtcProbeView,epoch:number) {
     this.running=true;

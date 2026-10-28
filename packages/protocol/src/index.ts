@@ -82,7 +82,7 @@ export interface RtcView extends RtcSession {
   candidates: { source: RtcCandidate[]; target: RtcCandidate[] };
 }
 export interface RtcProbePresence { foreground: boolean; expiresAt: string | null }
-export interface RtcProbePeer { deviceId: string; scopes: RtcScope[]; foregroundExpiresAt: string }
+export interface RtcProbePeer { parallelProbes?: boolean; deviceId: string; scopes: RtcScope[]; foregroundExpiresAt: string }
 export interface RtcProbeView {
   attemptId: string;
   initiatorDeviceId: string;
@@ -182,7 +182,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean };
+  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";

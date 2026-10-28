@@ -97,6 +97,59 @@ test('hiding aborts a pending signaling request immediately rather than waiting 
   finally{session.close();peer.restore();}
 });
 
+test('negotiated parallel monitor checks both scopes and multiple peers while LAN remains stalled',async()=>{
+  const probes=new Map<string,RtcProbeView>(),results:RtcProbeResult[]=[],started:string[]=[],closed:string[]=[];
+  const blocked=new Map<string,()=>void>();
+  const api={request:async(path:string,body:any)=>{
+    if(path.endsWith('/presence')){if(!body.foreground){probes.clear();results.length=0;}return {};}
+    if(path==='/devices/me/rtc-probes')return {presence:{foreground:true,expiresAt:new Date(Date.now()+40000).toISOString()},
+      peers:['b','c'].map(deviceId=>({deviceId,scopes:['lan','public'],parallelProbes:true,foregroundExpiresAt:new Date(Date.now()+40000).toISOString()})),probes:[...probes.values()],results:[...results]};
+    if(path.startsWith('/devices/')){const probe={...view(body.scope),attemptId:body.attemptId,initiatorDeviceId:'a',responderDeviceId:path.split('/')[2]};probes.set(probe.attemptId,probe);return {probe};}
+    if(path.startsWith('/rtc-probes/'))probes.delete(path.split('/')[2]);return {};
+  }};
+  const monitor=new RtcProbeMonitor({api:api as any,deviceId:'a',parallel:true,changed:()=>{},session:(probe,signal)=>({
+    active:true,refresh:async()=>{},close:()=>{closed.push(probe.attemptId);},run:async()=>{
+      started.push(probe.responderDeviceId+'/'+probe.scope);
+      if(probe.scope==='lan')await new Promise<void>(resolve=>{blocked.set(probe.attemptId,resolve);signal.addEventListener('abort',()=>resolve(),{once:true});});
+      if(signal.aborted)return null;
+      const value=result(probe);probes.delete(probe.attemptId);results.push(value);return value;
+    },
+  })});
+  monitor.setOnlinePeers(['b','c']);
+  try{
+    await monitor.setForeground(true);
+    await until(()=>results.length===2);
+    assert.deepEqual(new Set(started),new Set(['b/lan','b/public','c/lan','c/public']));
+    assert.equal([...probes.values()].filter(probe=>probe.scope==='lan').length,2);
+    assert.ok(results.every(value=>value.scope==='public'),'public succeeds while both LAN sessions are pending');
+    assert.equal(monitor.status('b'),'RTC 检测中');
+    for(const resume of blocked.values())resume();
+    await until(()=>monitor.results.length===4);
+    assert.equal(started.length,4,'completed scopes do not immediately repeat');
+    await monitor.refreshAllPeers();await until(()=>started.length===8);
+    await monitor.setForeground(false);await delay(10);
+    assert.equal(monitor.results.length,0);assert.ok(closed.length>=8);
+  }finally{for(const resume of blocked.values())resume();await monitor.dispose();}
+});
+
+test('parallel coordinator keeps a legacy peer serial and stops all concurrent peers on background',async()=>{
+  const probes=new Map<string,RtcProbeView>(),results:RtcProbeResult[]=[],started:string[]=[],resume=new Map<string,()=>void>();
+  const api={request:async(path:string,body:any)=>{
+    if(path.endsWith('/presence'))return {};
+    if(path==='/devices/me/rtc-probes')return {peers:[{deviceId:'b',scopes:['lan','public'],foregroundExpiresAt:new Date(Date.now()+40000).toISOString()}],probes:[...probes.values()],results:[...results]};
+    const probe={...view(body.scope),attemptId:body.attemptId,initiatorDeviceId:'a',responderDeviceId:'b'};probes.set(probe.attemptId,probe);return {probe};
+  }};
+  const monitor=new RtcProbeMonitor({api:api as any,deviceId:'a',parallel:true,changed:()=>{},session:(probe,signal)=>({active:true,refresh:async()=>{},close:()=>{},run:async()=>{
+    started.push(probe.scope);await new Promise<void>(resolve=>{resume.set(probe.scope,resolve);signal.addEventListener('abort',()=>resolve(),{once:true});});
+    if(signal.aborted)return null;const value=result(probe);probes.delete(probe.attemptId);results.push(value);return value;
+  }})});
+  monitor.setOnlinePeers(['b']);
+  try{await monitor.setForeground(true);await until(()=>started.length===1);assert.deepEqual(started,['lan']);
+    resume.get('lan')!();await until(()=>started.length===2);assert.deepEqual(started,['lan','public']);
+    await monitor.setForeground(false);await delay(10);assert.equal(monitor.results.length,0);
+  }finally{for(const done of resume.values())done();await monitor.dispose();}
+});
+
 function monitorApi(self='a',other='b') {
   const calls:{path:string;body:any}[]=[],scopes:string[]=[];
   let results:RtcProbeResult[]=[];

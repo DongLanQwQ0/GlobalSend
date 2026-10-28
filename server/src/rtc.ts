@@ -31,7 +31,7 @@ export function validateIceCandidate(candidate: RtcCandidate) {
 
 /** Transient signaling only; no file bytes, credentials or persistent events. */
 export class RtcRegistry {
-  private readonly capabilities = new Map<string, { scopes: RtcScope[]; expires: number }>();
+  private readonly capabilities = new Map<string, { scopes: RtcScope[]; expires: number; parallelProbes?: boolean }>();
   private readonly attempts = new Map<string, RtcAttempt>();
   private readonly candidateExpires = new WeakMap<RtcCandidate, number>();
   private readonly descriptionExpires = new WeakMap<RtcAttempt, { offer: number; answer: number }>();
@@ -40,14 +40,14 @@ export class RtcRegistry {
   capability(deviceId: string) {
     const value = this.capabilities.get(deviceId);
     return value && value.expires > this.now()
-      ? { scopes: [...value.scopes], expiresAt: new Date(value.expires).toISOString() }
+      ? { scopes: [...value.scopes], expiresAt: new Date(value.expires).toISOString(), ...(value.parallelProbes ? {parallelProbes:true} : {}) }
       : null;
   }
-  register(deviceId: string, scopes: RtcScope[]) {
+  register(deviceId: string, scopes: RtcScope[], parallelProbes = false) {
     const previous = this.capability(deviceId);
-    if (scopes.length) this.capabilities.set(deviceId, { scopes: [...scopes].sort(), expires: this.now() + PEER_TTL_SECONDS * 1000 });
+    if (scopes.length) this.capabilities.set(deviceId, { scopes: [...scopes].sort(), expires: this.now() + PEER_TTL_SECONDS * 1000, parallelProbes });
     else this.capabilities.delete(deviceId);
-    return JSON.stringify(previous?.scopes ?? []) !== JSON.stringify([...scopes].sort());
+    return JSON.stringify(previous?.scopes ?? []) !== JSON.stringify([...scopes].sort()) || Boolean(previous?.parallelProbes) !== parallelProbes;
   }
   forgetDevice(deviceId: string) {
     this.capabilities.delete(deviceId);

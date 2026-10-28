@@ -18,6 +18,8 @@ class ProbeApi extends CenterApi {
   final probes = <Map<String, dynamic>>[];
   String peer = 'b';
   String self = 'a';
+  bool parallelPeer = false;
+  List<String>? peerIds;
   Map<String, dynamic> view(String id, String scope) => {
     'attemptId': id,
     'initiatorDeviceId': self,
@@ -41,17 +43,20 @@ class ProbeApi extends CenterApi {
     if (path == '/devices/me/rtc-probes') {
       return {
         'peers': [
-          {
-            'deviceId': peer,
-            'scopes': ['lan', 'public'],
-          },
+          for (final id in peerIds ?? [peer])
+            {
+              if (parallelPeer) 'parallelProbes': true,
+              'deviceId': id,
+              'scopes': ['lan', 'public'],
+            },
         ],
         'probes': List.of(probes),
         'results': List.of(results),
       };
     }
     if (path.startsWith('/devices/') && path.endsWith('/rtc-probes')) {
-      final probe = view(value['attemptId'], value['scope']);
+      final probe = view(value['attemptId'], value['scope'])
+        ..['responderDeviceId'] = path.split('/')[2];
       probes.add(probe);
       return {'probe': probe};
     }
@@ -176,6 +181,12 @@ class ProbeConnection implements RtcDataConnection {
   }
 }
 
+class QuietProbeChannel extends EchoChannel {
+  QuietProbeChannel(super.owner);
+  @override
+  Future<void> send(RTCDataChannelMessage value) async {}
+}
+
 Future<void> eventually(bool Function() ready) async {
   final end = DateTime.now().add(const Duration(seconds: 3));
   while (!ready()) {
@@ -235,6 +246,120 @@ void main() {
     expect(api.results.single.containsKey('initiatorAddress'), false);
     expect(api.results.single.containsKey('responderAddress'), false);
     expect(api.results.single['success'], true);
+  });
+
+  test('parallel RTC checks do not let stalled LAN negotiations block public or another device', () async {
+    final api = ProbeApi()
+      ..parallelPeer = true
+      ..peerIds = ['b', 'c'];
+    final lan = Completer<void>();
+    final started = <String>[];
+    final monitor = RtcProbeMonitor(
+      api,
+      'a',
+      parallel: true,
+      initialize: () async {},
+      connectionFactory:
+          ({
+            required scope,
+            required allowCellular,
+            required iceServers,
+          }) async {
+            started.add(scope);
+            if (scope == 'lan') await lan.future;
+            return ProbeConnection();
+          },
+    );
+    addTearDown(() async {
+      if (!lan.isCompleted) lan.complete();
+      await monitor.close();
+      api.close();
+    });
+    monitor.update(
+      online: true,
+      foreground: true,
+      devices: [
+        for (final id in ['b', 'c'])
+          {
+            'deviceId': id,
+            'online': true,
+            'rtc': {
+              'scopes': ['lan', 'public'],
+              'parallelProbes': true,
+            },
+          },
+      ],
+    );
+    await eventually(
+      () => api.results.where((r) => r['scope'] == 'public').length == 2,
+    );
+    expect(started.where((s) => s == 'lan').length, 2);
+    expect(started.where((s) => s == 'public').length, 2);
+    expect(lan.isCompleted, false);
+    expect(api.probes.where((p) => p['scope'] == 'lan').length, 2);
+    expect(monitor.hasActiveSession, true);
+    lan.complete();
+    await eventually(
+      () => api.results.length == 4 && !monitor.hasActiveSession,
+    );
+    expect(api.results.map((r) => r['responderDeviceId']).toSet(), {'b', 'c'});
+    expect(
+      api.calls
+          .where(
+            (path) =>
+                path.startsWith('POST /devices/') &&
+                path.endsWith('/rtc-probes'),
+          )
+          .length,
+      4,
+    );
+  });
+
+  test('backgrounding closes every parallel RTC owner without recording unreachable results', () async {
+    final api = ProbeApi()
+      ..parallelPeer = true
+      ..peerIds = ['b', 'c'];
+    final connections = <ProbeConnection>[];
+    final monitor = RtcProbeMonitor(
+      api,
+      'a',
+      parallel: true,
+      initialize: () async {},
+      connectionFactory:
+          ({
+            required scope,
+            required allowCellular,
+            required iceServers,
+          }) async {
+            final pc = ProbeConnection();
+            pc.channel = QuietProbeChannel(pc);
+            connections.add(pc);
+            return pc;
+          },
+    );
+    addTearDown(() async {
+      await monitor.close();
+      api.close();
+    });
+    final peers = [
+      for (final id in ['b', 'c'])
+        {
+          'deviceId': id,
+          'online': true,
+          'rtc': {
+            'scopes': ['lan', 'public'],
+          },
+        },
+    ];
+    monitor.update(online: true, foreground: true, devices: peers);
+    await eventually(() => connections.length == 4 && api.probes.length == 4);
+    monitor.update(online: true, foreground: false, devices: peers);
+    await eventually(
+      () => connections.every((pc) => pc.closes == 1 && pc.channel.closes == 1),
+    );
+    expect(monitor.results, isEmpty);
+    expect(api.results, isEmpty);
+    expect(monitor.hasActiveSession, false);
   });
 
   test(
