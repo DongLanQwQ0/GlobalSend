@@ -240,7 +240,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         handle.setOnClickListener(view -> setCollapsed(false));
         installEdgeMove(handle);
         handle.setVisibility(View.GONE);
-        root.addView(handle, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(handle, new FrameLayout.LayoutParams(dp(12), dp(48), Gravity.TOP | Gravity.RIGHT));
         root.setOnDragListener((view, event) -> receiveDrop(event));
         layout = new WindowManager.LayoutParams(dp(244), dp(156),
             Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
@@ -278,6 +278,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         resize.setTextColor(appearance.muted);
         handle.setBackground(new InsetDrawable(shape(appearance.accent, 2), dp(4), dp(12), dp(4), dp(12)));
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
+            Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
+        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(12), dp(48),
             Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
         row.removeAllViews();
         updateLabels();
@@ -566,6 +568,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             finishGeometry(value); return;
         }
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
+            Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
+        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(12), dp(48),
             Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
         float initialPanelAlpha = expanded.getVisibility() == View.VISIBLE ? expanded.getAlpha() : 0;
         float initialHandleAlpha = handle.getVisibility() == View.VISIBLE ? handle.getAlpha() : 0;
