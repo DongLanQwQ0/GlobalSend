@@ -1,10 +1,10 @@
 # Chrona → GlobalSend：定向打开局域网页面（协商草案）
 
-状态：2026-10-28 源码只读调查后的建议，**尚未实现此集成接口**。GlobalSend 当前原生构建 1.0.29+38；现有客户端不能被当作已支持以下提案。Chrona 拥有 LAN 服务和入口 UI，GlobalSend 拥有本机集成桥、组内发现、定向投递及接收端行为。本轮不操作 Chrona 文件或手机。
+状态：双方已按此方案分工实现。中心已部署独立 URL 意图队列，Windows 1.0.30+39已更新运行，Android同版正式包已交付并等待独占设备联调。准确消息格式以 [ABI v1](INTEGRATION_ABI_V1.md) 为准。Chrona 拥有 LAN 服务、入口 UI 和独占的设备联调，GlobalSend 拥有本机集成桥、组内发现、定向投递及接收端行为。
 
 已收敛范围：Chrona 发送端仅 Android（`com.donglan.chrona`，minSdk 26 / targetSdk 36）；GlobalSend 接收端先覆盖 Windows / Android。不开发 Chrona Windows 客户端，不新增 Windows 本机 IPC，不宣布 Web / iOS 支持自动打开。Chrona 代理已读取并采用本草案，以下纳入其确认的身份和平台边界。
 
-## 当前实际能力
+## 1.0.29 集成前能力（历史基线）
 
 | 能力 | 现状与出处 |
 | --- | --- |
@@ -66,7 +66,7 @@ Chrona 关闭 LAN 服务或网络改变后，不自动重发旧链接；状态�
 2. GlobalSend 新增本机桥、能力发布、open_url 定向消息和去重/结果回执；不改 Chrona LAN 配对。
 3. 两端用同一 requestId 验收：正确目标、未选目标不唤起、普通链接不唤起、重复请求只开一次、过期/离线/Android 后台拦截状态真实；最后独立验收 Chrona URL 的浏览器可达和原有配对。
 
-此文件是方案交接，不是新增接口已上线的声明。
+此文件保留设计依据和集成前基线；实际交付、部署与设备验收分别记录，不将中心上线等同于客户端已安装。
 
 ## Android 首次关联的推荐交互
 

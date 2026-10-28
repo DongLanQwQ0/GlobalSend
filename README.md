@@ -8,13 +8,13 @@
 
 新版入组只需同一中心和**至少 10 位的相同组密码**，设备名称自动获取，也可修改。不需要邀请码、互相配对或首次建组确认。发现只通过中心完成；仅在线组员互换 IPv4/IPv6 地址，地址上传后 30 分钟到期，最后一个连接断开立即撤下。文件仍按局域网 → 公网 → 中继传输，保留手动选择。
 
-Windows 最新为 **1.0.29+38**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。本版增加跟随系统、居中拖影、Android 应用安装包选择及独立文件暂存坞；保留此前快速选路、目录恢复和接收坞修复。
+Windows 最新本地版为 **1.0.30+39**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。本版新增 Chrona 本机应用联动和独立网页打开意图，Windows 浏览器启动移出UI线程；保留跟随系统、居中拖影、Android 应用安装包选择及独立文件暂存坞。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.29-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.30-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.29+38 arm64 APK，约15.48 MiB](artifacts/releases/GlobalSend-1.0.29-android-arm64-v8a.apk)已构建。当前 ADB 无在线设备，尚未安装；手机最后确认仍是 **1.0.28+37**，数据保留。新版后台暂存坞、系统拖放及真实跨网选路仍需真机验收。
+Android [1.0.30+39 arm64 APK，约15.51 MiB](artifacts/releases/GlobalSend-1.0.30-android-arm64-v8a.apk)已构建并验签。真实手机尚未更新，最后确认仍是 **1.0.28+37**，数据保留。共享模拟器由 Chrona 联调独占，另构建 x86_64 验证包，不替换正式 arm64 包、不复制模拟器。后台暂存坞、系统拖放及真实跨网选路仍需真机验收。
 
-iPad / iPhone 最后交付的未签名 IPA 为 **1.0.24 (33)**，需要自行签名安装，不含本轮主题功能。构建入口仍仅支持手动触发，见 [iPad 构建说明](docs/IPAD.md)。**中心服务器不托管安装包；Windows、Android 新版发布到 [GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.29-build38)。**
+iPad / iPhone 最后交付的未签名 IPA 为 **1.0.24 (33)**，需要自行签名安装，不含本轮主题功能。构建入口仍仅支持手动触发，见 [iPad 构建说明](docs/IPAD.md)。**中心服务器不托管安装包；当前已公开的 [GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.29-build38) 为1.0.29，本地1.0.30待集成验收后发布。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 

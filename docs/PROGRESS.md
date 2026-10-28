@@ -1,5 +1,14 @@
 # 实施记录
 
+## 2026-10-28 当前本地交付：1.0.30+39 / Chrona 本机集成
+
+- 独立 URL 意图队列与 `openUrlIntentV1` 能力已实现，格式见 [ABI v1](INTEGRATION_ABI_V1.md)。普通文本、共享编辑和文件记录不触发自动打开。
+- 中心镜像 `globalsend:url-integration-20261028-224537` 已部署，公开 info 返回 `openUrlIntents=true`；Web 资源与冻结候选一致。切换前无活动传输，42设备、15组、96传输、149文件及原能力记录一致，Caddy 与数据卷未变，安装包路由仍410。冷备、回滚和验收记录位于 `artifacts/deploy/20261028-224537-url-integration`。
+- Windows完整1.0.30+39已更新到 `E:\Programs\GlobalSend` 并重启，PID46760、Responding=true，15个包文件长度与构建候选一致。Windows实际运行端已向中心发布新能力，浏览器启动移出UI线程。正式arm64 APK为16,261,512字节、ZIP22,354,413字节，验签与零打包字体检查通过，状态备份在 `backups/native-state/20261028-225610-pre-1.0.30`。
+- Android Messenger/本机关联与持久结果回放13项检查、Flutter真实中心HTTP/WS/去重及旧启动回归12项通过；新原生关联页和Flutter恢复提示压缩渲染已查看。真实手机尚未安装1.0.30；Chrona消费arm64包时发现共享AVD为x86_64，另从相同源码269bd73构建x64验证包，不复制AVD或替换正式arm64包。GitHub公开版仍1.0.29，尚未触发IPA。
+- Chrona 独占已有 AVD / ADB；GlobalSend 提供隔离本地中心1507，不读取或移交用户既有凭据、不修改Windows用户当前组。跨应用 Binder、首次关联、实际系统浏览器和8765网页可达分别验收，不用注入启动器测试替代。
+- 1.0.29 Web 已在原持久浏览器身份实测亮暗/主题色、跟随系统、Esc/点击遮罩关闭及切换页签保留草稿；已移除仅用于验收的自有草稿，未发送内容或修改组内共享。记录 `artifacts/reports/browser-1.0.29-acceptance.json`。
+
 ## 2026-10-28 当前交付：1.0.29+38
 
 - Android 原生拖影去掉硬编码浅绿，读取与主界面相同的主题；原生系统拖放机制保留。亮、暗、中性、主题色及系统明暗检查通过，已查看真实 Android Canvas 渲染。

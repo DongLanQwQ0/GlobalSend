@@ -1,6 +1,6 @@
 # Android 本机集成 ABI v1
 
-双方已固定的实现接口。Chrona 负责调用端，GlobalSend 负责服务、关联、组内定向意图和接收处理。组件正在实现，不代表当前已安装 1.0.29 已具备此能力。
+双方已固定的实现接口。Chrona 负责调用端，GlobalSend 负责服务、关联、组内定向意图和接收处理。中心及Windows1.0.30+39已更新，Android同版包已构建；跨进程及实际系统浏览器验收仍单独记录，不将旧1.0.29当作支持本接口。
 
 ## 绑定与消息
 
@@ -59,6 +59,7 @@
 
 Android Java 与 Flutter 使用 MethodChannel `dev.globalsend/integration`：
 
+- Dart 安装处理器后调用 `ready`。原生在此之前排队本机请求，保持首次接收时间与回复通道；不把 Flutter 冷启动时暂未安装处理器当成请求已完成。
 - Java → Dart `request`，参数 `{callerAppId:"com.donglan.chrona",receivedAtMillis:UTC毫秒,request:{...v1请求...}}`，结果为上述完整响应外壳。Java 校验 UID/关联；Dart 校验请求、当前组和权限范围，不接收组密码/token。首次POST前扣掉原生冷启动排队耗时；期限已耗尽时返回expired，不向中心创建或宣称入队。
 - Dart → Java `openUrlIntent`，参数 `{requestId,sourceDeviceId,url,expiresAt,callerAppId}`；返回 `{state:"launch_accepted"|"needs_tap"|"failed"|"expired",error?:{code,message}}`。
 - Java → Dart `urlIntentResult`，同一 requestId/sourceDeviceId 加 `state`、原生生成的 `resultId:UUID` 和可选 error，用于通知被点击后的回执。冷启动不得丢回执，需原生保存/重放。`openUrlIntent`直接结果也可附resultId。
