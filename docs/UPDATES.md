@@ -15,9 +15,9 @@
 ```powershell
 # 在项目根目录执行；版本、构建号和源码提交应来自这次构建。
 .\scripts\Publish-GitHubRelease.ps1 -Platform windows `
-  -Package .\artifacts\releases\GlobalSend-1.0.27-windows-x64.zip `
-  -Version 1.0.27 -BuildNumber 36 `
-  -SourceCommit 8651fcb4565e0f931e52bd753acb80a5962a7011
+  -Package .\artifacts\releases\GlobalSend-1.0.28-windows-x64.zip `
+  -Version 1.0.28 -BuildNumber 37 `
+  -SourceCommit 40acbd9511853f1e34a97d21a92947a196fa04c9
 ```
 
 核对输出后，用相同参数加 `-Publish` 发布。Android 用 `-Platform android` 和 APK；iOS 用 `-Platform ios` 和 IPA。脚本读取 Windows EXE 产品版本、Android APK 元数据或 IPA 主应用 plist，版本不匹配就停止。Android 入口适用于本项目显式 ABI 构建、不追加 split-APK 版本码偏移的包。
@@ -28,6 +28,8 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows 1.0.27+36 已安装运行，并实际在“设置 → 更新”完成公开 GitHub 检查。已发布的 Windows 包会提示旧 Windows 客户端，不会让当前 Windows、Android 或 iOS 误报更新。该版本的[公开 Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.27-build36)仅含 Windows 安装包与对应清单。
+Windows 1.0.28+37 已安装运行；设置中的实际更新检查此前在 1.0.27 验证。当前[公开 Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.28-build37)含 Windows ZIP、Android arm64 APK 及各自清单。Android APK 已构建，但构建期间 ADB 断开，手机安装未完成。
 
-客户端选包、重复通知、检查时机及通知按钮分别有自动检查；Android 通知在主机框架中验证。iOS 原生通知代码需在下一次获准的 IPA 构建和真机安装时验收。仓库发布入口不改变当前手机的暂停推包要求。
+GitHub API 已确认四个资产均上传完成。本次用客户端公开接口复核时，直连读取清单超时，改用现有代理后读取 Release 也超时，因此尚未完成 1.0.28 的整条公开更新检查；未将网络超时视为“已是最新”。证据：`artifacts/reports/github-release-1.0.28.json`、`artifacts/logs/public-platform-updates-1.0.28*.log`。
+
+客户端选包、重复通知、检查时机及通知按钮分别有自动检查；Android 通知在主机框架中验证。iOS 原生通知代码需在原生端稳定后下一次 IPA 构建和真机安装时验收，不因为发布其他平台包就触发 IPA 构建。
