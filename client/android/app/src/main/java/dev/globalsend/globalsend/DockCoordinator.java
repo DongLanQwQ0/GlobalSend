@@ -527,7 +527,12 @@ final class DockCoordinator {
                 // Read permission, not cleanup ownership, governs exporting a
                 // document selected or shared by the user.
                 uri = Uri.parse(readable);
-            } else uri = DockShareProvider.register(view.getContext(), new File(readable), label);
+            } else {
+                File file = new File(readable);
+                // The clip label describes the selection (for example "2 项").
+                // Each exported URI must still expose its own filename.
+                uri = DockShareProvider.register(view.getContext(), file, file.getName());
+            }
             items.add(new ClipData.Item(uri));String type=view.getContext().getContentResolver().getType(uri);types.add(type==null?"application/octet-stream":type);flags |= View.DRAG_FLAG_GLOBAL_URI_READ;
         }
         for(String text:texts){if(text==null||text.length()>100000)throw new IllegalArgumentException("Invalid drag text");items.add(new ClipData.Item(text));types.add("text/plain");}

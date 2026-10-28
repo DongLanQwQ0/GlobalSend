@@ -18,6 +18,8 @@
 
 拖出与系统分享共用同一个只读文件 URI 注册入口。对用户已能读取的 `Download/GlobalSend` 原件，不再额外要求其位于应用私有目录；不复制原件，也不因此取得删除权限。此修正在 1.0.23+32 真机复现后完成源码和 Java 检查，按用户要求暂不安装新包。
 
+多文件拖出时，整组标签仍可显示“2 项”，但每个导出 URI 保留各自的原文件名。此前普通路径分支误将整组标签写成所有文件的名称，其他应用收到的名称会相同；已用公共 Download 原件、实际 ContentProvider 查询和读取回归验证修正。系统拖放样式未改，此修正同样尚未安装。
+
 ## 本次失败的实际原因
 
 实体 vivo 的 `GlobalSendDestination` 日志记录：`provider=com.android.externalstorage.documents, writable=true, cause=ErrnoException, errno=13`。系统已给出 SAF 文件描述符，但原接收链需要经 `/proc/self/fd` 再次打开，重开时被系统拒绝（EACCES）。此前“请选择本机目录”不能准确解释这个本机目录失败。

@@ -582,6 +582,42 @@ public class AndroidDragTest {
         catch (java.io.FileNotFoundException expected) { }
     }
 
+    @Test @Config(shadows = NativeDragView.class)
+    public void bulkPublicFileDragKeepsEachOriginalNameForOtherApps() throws Exception {
+        NativeDragView.resetFixture();
+        DockShareProvider provider = new DockShareProvider();
+        ProviderInfo info = new ProviderInfo(); info.authority = activity.getPackageName() + ".dock-files";
+        provider.attachInfo(activity, info); ShadowContentResolver.registerProviderInternal(info.authority, provider);
+        File directory = new File(android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS), "GlobalSend");
+        assertTrue(directory.isDirectory() || directory.mkdirs());
+        List<String> names = List.of("课程笔记.txt", "照片.jpg");
+        List<String> paths = new ArrayList<>();
+        for (String name : names) {
+            File file = new File(directory, name);
+            Files.write(file.toPath(), name.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            paths.add(file.getPath());
+        }
+        View source = new View(activity); activity.setContentView(source);
+        assertTrue(DockCoordinator.startDrag(source, paths, List.of(), "2 项"));
+        ClipData clip = NativeDragView.clips.get(0);
+        assertEquals("2 项", clip.getDescription().getLabel());
+        for (int i = 0; i < names.size(); i++) {
+            Uri uri = clip.getItemAt(i).getUri();
+            try (Cursor cursor = activity.getContentResolver().query(uri,
+                    new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
+                assertNotNull(cursor); assertTrue(cursor.moveToFirst());
+                assertEquals(names.get(i), cursor.getString(0));
+                assertEquals(new File(paths.get(i)).length(), cursor.getLong(1));
+            }
+            try (java.io.InputStream stream = activity.getContentResolver().openInputStream(uri)) {
+                assertArrayEquals(Files.readAllBytes(new File(paths.get(i)).toPath()), stream.readAllBytes());
+            }
+        }
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,
+            (DockCoordinator.LocalDrag) NativeDragView.states.get(0), 0, 0));
+    }
+
     public static class FixtureProvider extends ContentProvider {
         File directory;
         @Override public boolean onCreate() { return true; }
