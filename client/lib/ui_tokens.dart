@@ -1,9 +1,143 @@
 import 'app_icon.dart';
+import 'appearance.dart';
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+
+@immutable
+class UiPalette extends ThemeExtension<UiPalette> {
+  const UiPalette({
+    required this.background,
+    required this.surface,
+    required this.input,
+    required this.ink,
+    required this.muted,
+    required this.border,
+    required this.green,
+    required this.softGreen,
+    required this.onAccent,
+  });
+  final Color background,
+      surface,
+      input,
+      ink,
+      muted,
+      border,
+      green,
+      softGreen,
+      onAccent;
+  factory UiPalette.from(Appearance appearance) {
+    final dark = appearance.mode == AppearanceMode.dark;
+    final accent = (dark
+        ? const [
+            0xff81d6b4,
+            0xff9ecaff,
+            0xffc9b6ff,
+            0xfff3aec0,
+            0xffeac17c,
+            0xffb7c9d8,
+          ]
+        : const [
+            0xff176b50,
+            0xff245ea8,
+            0xff7051a8,
+            0xffa34363,
+            0xff815c17,
+            0xff4c6375,
+          ])[appearance.accent.index];
+    final neutral = appearance.mode == AppearanceMode.neutral;
+    final surface = Color(
+      dark
+          ? 0xff1c2324
+          : neutral
+          ? 0xfff7f7f8
+          : 0xffffffff,
+    );
+    return UiPalette(
+      background: Color(
+        dark
+            ? 0xff121819
+            : neutral
+            ? 0xffe9eaec
+            : 0xfff4f6f2,
+      ),
+      surface: surface,
+      input: Color(
+        dark
+            ? 0xff242c2d
+            : neutral
+            ? 0xffefeff1
+            : 0xfffafcf9,
+      ),
+      ink: Color(
+        dark
+            ? 0xffe6eeee
+            : neutral
+            ? 0xff25272b
+            : 0xff202923,
+      ),
+      muted: Color(
+        dark
+            ? 0xffa8b5b1
+            : neutral
+            ? 0xff62666d
+            : 0xff667068,
+      ),
+      border: Color(
+        dark
+            ? 0xff3b4748
+            : neutral
+            ? 0xffd5d7dc
+            : 0xffdfe6df,
+      ),
+      green: Color(accent),
+      softGreen: Color.alphaBlend(
+        Color(accent).withValues(alpha: dark ? .13 : .08),
+        surface,
+      ),
+      onAccent: dark ? const Color(0xff102321) : Colors.white,
+    );
+  }
+  @override
+  UiPalette copyWith({
+    Color? background,
+    Color? surface,
+    Color? input,
+    Color? ink,
+    Color? muted,
+    Color? border,
+    Color? green,
+    Color? softGreen,
+    Color? onAccent,
+  }) => UiPalette(
+    background: background ?? this.background,
+    surface: surface ?? this.surface,
+    input: input ?? this.input,
+    ink: ink ?? this.ink,
+    muted: muted ?? this.muted,
+    border: border ?? this.border,
+    green: green ?? this.green,
+    softGreen: softGreen ?? this.softGreen,
+    onAccent: onAccent ?? this.onAccent,
+  );
+  @override
+  UiPalette lerp(covariant UiPalette? other, double t) {
+    if (other == null) return this;
+    return UiPalette(
+      background: Color.lerp(background, other.background, t)!,
+      surface: Color.lerp(surface, other.surface, t)!,
+      input: Color.lerp(input, other.input, t)!,
+      ink: Color.lerp(ink, other.ink, t)!,
+      muted: Color.lerp(muted, other.muted, t)!,
+      border: Color.lerp(border, other.border, t)!,
+      green: Color.lerp(green, other.green, t)!,
+      softGreen: Color.lerp(softGreen, other.softGreen, t)!,
+      onAccent: Color.lerp(onAccent, other.onAccent, t)!,
+    );
+  }
+}
 
 /// Shared visual language; transfer, focus and persistence stay with callers.
 abstract final class Ui {
@@ -18,14 +152,29 @@ abstract final class Ui {
   static const fieldRadius = BorderRadius.all(Radius.circular(14));
   static const cardRadius = BorderRadius.all(Radius.circular(16));
 
-  static ThemeData theme() {
-    const outline = OutlineInputBorder(
+  static UiPalette colors(BuildContext context) =>
+      Theme.of(context).extension<UiPalette>() ??
+      UiPalette.from(const Appearance());
+
+  static ThemeData theme([Appearance appearance = const Appearance()]) {
+    final palette = UiPalette.from(appearance);
+    final background = palette.background,
+        input = palette.input,
+        ink = palette.ink,
+        muted = palette.muted,
+        border = palette.border,
+        green = palette.green;
+    final outline = OutlineInputBorder(
       borderRadius: fieldRadius,
       borderSide: BorderSide(color: border),
     );
     const buttonShape = RoundedRectangleBorder(borderRadius: fieldRadius);
     return ThemeData(
       useMaterial3: true,
+      brightness: appearance.mode == AppearanceMode.dark
+          ? Brightness.dark
+          : Brightness.light,
+      extensions: [palette],
       fontFamily: switch (defaultTargetPlatform) {
         TargetPlatform.windows => 'Segoe UI',
         TargetPlatform.iOS || TargetPlatform.macOS => '.AppleSystemUIFont',
@@ -47,15 +196,32 @@ abstract final class Ui {
         drawerButtonIconBuilder: (_) => const AppIcon(Icons.menu),
         endDrawerButtonIconBuilder: (_) => const AppIcon(Icons.menu),
       ),
-      colorScheme: ColorScheme.fromSeed(seedColor: green, surface: Colors.white)
-          .copyWith(
+      colorScheme:
+          ColorScheme.fromSeed(
+            seedColor: green,
+            surface: palette.surface,
+            brightness: appearance.mode == AppearanceMode.dark
+                ? Brightness.dark
+                : Brightness.light,
+          ).copyWith(
             primary: green,
+            onPrimary: palette.onAccent,
+            primaryContainer: palette.softGreen,
+            onPrimaryContainer: ink,
+            surface: palette.surface,
+            surfaceContainerLowest: palette.surface,
+            surfaceContainerLow: palette.input,
+            surfaceContainer: palette.input,
+            surfaceContainerHigh: palette.softGreen,
+            surfaceContainerHighest: palette.softGreen,
+            outline: border,
             onSurface: ink,
             onSurfaceVariant: muted,
             outlineVariant: border,
           ),
       scaffoldBackgroundColor: background,
-      textTheme: const TextTheme(
+      iconTheme: IconThemeData(color: muted),
+      textTheme: TextTheme(
         bodyMedium: TextStyle(fontSize: 16, height: 1.55),
         bodyLarge: TextStyle(fontSize: 16, height: 1.55),
         bodySmall: TextStyle(fontSize: 13, height: 1.45, color: muted),
@@ -75,7 +241,7 @@ abstract final class Ui {
           fontWeight: FontWeight.w600,
         ),
       ),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         backgroundColor: background,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
@@ -85,13 +251,18 @@ abstract final class Ui {
           fontSize: 22,
           fontWeight: FontWeight.w600,
           color: ink,
+          fontFamilyFallback: const [
+            'Microsoft YaHei',
+            'PingFang SC',
+            'sans-serif',
+          ],
         ),
       ),
-      navigationBarTheme: const NavigationBarThemeData(
-        backgroundColor: Colors.white,
-        indicatorColor: Color(0xffe0eee7),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: palette.surface,
+        indicatorColor: palette.softGreen,
       ),
-      inputDecorationTheme: const InputDecorationTheme(
+      inputDecorationTheme: InputDecorationTheme(
         border: outline,
         enabledBorder: outline,
         focusedBorder: OutlineInputBorder(
@@ -104,9 +275,9 @@ abstract final class Ui {
         contentPadding: EdgeInsets.all(16),
         hintStyle: TextStyle(fontSize: 15, color: muted),
       ),
-      cardTheme: const CardThemeData(
+      cardTheme: CardThemeData(
         elevation: 0,
-        color: Colors.white,
+        color: palette.surface,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
@@ -125,7 +296,7 @@ abstract final class Ui {
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(88, 48),
           shape: buttonShape,
-          side: const BorderSide(color: border),
+          side: BorderSide(color: border),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         ),
       ),
@@ -142,25 +313,47 @@ abstract final class Ui {
           padding: const EdgeInsets.all(8),
         ),
       ),
-      dialogTheme: const DialogThemeData(
-        backgroundColor: Colors.white,
+      dialogTheme: DialogThemeData(
+        backgroundColor: palette.surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: radius),
         titleTextStyle: TextStyle(
           fontSize: 22,
           fontWeight: FontWeight.w600,
           color: ink,
+          fontFamilyFallback: const [
+            'Microsoft YaHei',
+            'PingFang SC',
+            'sans-serif',
+          ],
         ),
-        contentTextStyle: TextStyle(fontSize: 16, height: 1.55, color: ink),
+        contentTextStyle: TextStyle(
+          fontSize: 16,
+          height: 1.55,
+          color: ink,
+          fontFamilyFallback: const [
+            'Microsoft YaHei',
+            'PingFang SC',
+            'sans-serif',
+          ],
+        ),
       ),
-      popupMenuTheme: const PopupMenuThemeData(
-        color: Colors.white,
+      popupMenuTheme: PopupMenuThemeData(
+        color: palette.surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: fieldRadius),
-        textStyle: TextStyle(fontSize: 15, color: ink),
+        textStyle: TextStyle(
+          fontSize: 15,
+          color: ink,
+          fontFamilyFallback: const [
+            'Microsoft YaHei',
+            'PingFang SC',
+            'sans-serif',
+          ],
+        ),
       ),
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: Colors.white,
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: palette.surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -174,11 +367,7 @@ abstract final class Ui {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: fieldRadius),
       ),
-      dividerTheme: const DividerThemeData(
-        color: border,
-        thickness: 1,
-        space: 24,
-      ),
+      dividerTheme: DividerThemeData(color: border, thickness: 1, space: 24),
     );
   }
 
@@ -245,11 +434,11 @@ class UiField extends StatelessWidget {
     children: [
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 14,
           height: 1.4,
           fontWeight: FontWeight.w600,
-          color: Ui.muted,
+          color: Ui.colors(context).muted,
         ),
       ),
       const SizedBox(height: 8),
@@ -288,26 +477,114 @@ Widget uiDisclosure({
   Key? key,
   required String title,
   required List<Widget> children,
-}) => Material(
-  color: Ui.input,
-  shape: const RoundedRectangleBorder(
-    borderRadius: Ui.cardRadius,
-    side: BorderSide(color: Ui.border),
-  ),
-  clipBehavior: Clip.antiAlias,
-  child: AppExpansionTile(
-    key: key,
-    title: Text(
-      title,
-      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+}) => Builder(
+  builder: (context) => Material(
+    color: Ui.colors(context).input,
+    shape: RoundedRectangleBorder(
+      borderRadius: Ui.cardRadius,
+      side: BorderSide(color: Ui.colors(context).border),
     ),
-    tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-    shape: const Border(),
-    collapsedShape: const Border(),
-    children: children,
+    clipBehavior: Clip.antiAlias,
+    child: AppExpansionTile(
+      key: key,
+      title: Text(
+        title,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      ),
+      tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      shape: const Border(),
+      collapsedShape: const Border(),
+      children: children,
+    ),
   ),
 );
+
+class AppearancePicker extends StatelessWidget {
+  const AppearancePicker({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final settings = AppearanceScope.maybeOf(context);
+    if (settings == null) return const SizedBox.shrink();
+    final value = settings.value;
+    Future<void> save({AppearanceMode? mode, AccentColor? accent}) async {
+      try {
+        await settings.set(mode: mode, accent: accent);
+      } catch (_) {
+        if (context.mounted)
+          ScaffoldMessenger.maybeOf(context)
+              ?.showSnackBar(const SnackBar(content: Text('外观未保存，请重试')));
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SegmentedButton<AppearanceMode>(
+          key: const ValueKey('appearance-mode'),
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: AppearanceMode.light, label: Text('亮色')),
+            ButtonSegment(value: AppearanceMode.dark, label: Text('暗色')),
+            ButtonSegment(value: AppearanceMode.neutral, label: Text('中性')),
+          ],
+          selected: {value.mode},
+          onSelectionChanged: (selected) => save(mode: selected.single),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final accent in AccentColor.values)
+              Semantics(
+                button: true,
+                selected: value.accent == accent,
+                label: const ['绿', '蓝', '紫', '玫瑰', '琥珀', '石板'][accent.index],
+                child: Tooltip(
+                  message: const [
+                    '绿',
+                    '蓝',
+                    '紫',
+                    '玫瑰',
+                    '琥珀',
+                    '石板',
+                  ][accent.index],
+                  child: InkResponse(
+                    key: ValueKey('accent-${accent.name}'),
+                    onTap: () => save(accent: accent),
+                    radius: 24,
+                    child: SizedBox.square(
+                      dimension: 44,
+                      child: Center(
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: UiPalette.from(
+                              value.copyWith(accent: accent),
+                            ).green,
+                          ),
+                          child: value.accent == accent
+                              ? AppIcon(
+                                  Icons.done,
+                                  size: 20,
+                                  color: UiPalette.from(value).onAccent,
+                                )
+                              : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
 
 class UiEmpty extends StatelessWidget {
   const UiEmpty({
@@ -326,12 +603,12 @@ class UiEmpty extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          AppIcon(icon, size: 40, color: Ui.muted),
+          AppIcon(icon, size: 40, color: Ui.colors(context).muted),
           const SizedBox(height: 16),
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 16, color: Ui.muted),
+            style: TextStyle(fontSize: 16, color: Ui.colors(context).muted),
           ),
           if (action != null) ...[const SizedBox(height: 16), action!],
         ],

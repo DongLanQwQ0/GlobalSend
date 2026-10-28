@@ -38,6 +38,8 @@ import type { TextDocument } from './model';
 import { WebNotifications } from './notifications';
 import { MobileViewport } from './mobile_viewport';
 import { PageDisplay } from './page_display';
+import { AppearancePreferences, appearanceKey } from './appearance';
+import type { AppearanceMode, AccentColor } from './appearance';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const brand = `<button class="brand brand-button" type="button" data-action="ip-addresses" aria-label="GlobalSend，本机地址">GlobalSend</button>`;
@@ -99,7 +101,9 @@ class GlobalSend {
     document.addEventListener('compositionend',finishFormComposition);
     document.addEventListener('focusout',finishFormComposition);
     new MobileViewport(window,document);
+    window.addEventListener('storage',event=>{if(event.key===appearanceKey)this.appearance.reload();});
   }
+  appearance=new AppearancePreferences(document,()=>rememberedGet(appearanceKey),value=>rememberedSet(appearanceKey,value));
   pageDisplay=new PageDisplay(document,window,()=>{if(!this.loading)this.render();});
   baseUrl = baseFromLocation(location);
   api = new Api(this.baseUrl);
@@ -2260,7 +2264,7 @@ class GlobalSend {
     if(this.modal==='ip-addresses' && !document.querySelector('.ip-address-modal')?.contains(document.activeElement))document.querySelector<HTMLElement>('.ip-address-modal')?.focus({preventScroll:true});
   }
   onboarding() {
-    return `<main class="onboarding"><header class="onboarding-header">${brand}<button class="icon-button secondary" data-action="library" aria-label="本机文件库">${icon('folder')}</button></header><section class="pair-form panel"><h1>加入分组</h1><div class="connection-server"><span>服务器</span><div><code title="${e(this.baseUrl)}">${e(this.baseUrl)}</code><button class="quiet" type="button" data-action="server-modal">更换</button></div></div>
+    return `<main class="onboarding"><header class="onboarding-header">${brand}<div class="row"><button class="icon-button quiet" data-action="settings" aria-label="设置">${icon('settings')}</button><button class="icon-button secondary" data-action="library" aria-label="本机文件库">${icon('folder')}</button></div></header><section class="pair-form panel"><h1>加入分组</h1><div class="connection-server"><span>服务器</span><div><code title="${e(this.baseUrl)}">${e(this.baseUrl)}</code><button class="quiet" type="button" data-action="server-modal">更换</button></div></div>
       ${this.startupError?`<div class="error-message" role="alert">${e(this.startupError)} <button data-action="reload" class="quiet">重试</button></div>`:''}
       <form id="enroll-form"><label class="field" for="group-key">组密码<span class="password-input"><input id="group-key" type="${this.showGroupKey?'text':'password'}" minlength="10" maxlength="256" autocomplete="off" spellcheck="false" autocapitalize="off" value="${e(this.groupKey)}" placeholder="至少 10 位" required><button type="button" class="password-eye" data-action="show-group-key" aria-label="${this.showGroupKey?'隐藏组密码':'显示组密码'}" aria-pressed="${this.showGroupKey}" title="${this.showGroupKey?'隐藏组密码':'显示组密码'}">${icon(this.showGroupKey?'eye-off':'eye')}</button></span></label><label class="field" for="device-name">设备名称<input id="device-name" maxlength="80" autocomplete="off" value="${e(this.deviceName)}" placeholder="${e(suggestedDeviceName(navigator))}"></label>
       <label class="preference-check"><input id="remember-device" type="checkbox" ${this.rememberDevice?'checked':''}>记住设备</label>
@@ -2340,10 +2344,12 @@ class GlobalSend {
       return `<div class="modal-backdrop"><section class="modal reader-modal" draggable="true" data-drag-text="${e(event.eventId)}" role="dialog" aria-modal="true" aria-labelledby="reader-title"><div class="modal-header"><div><h2 id="reader-title">${editable?'编辑已发送文字':'收到的文字'}</h2><p class="reader-meta">${editable?'发给 ':''}${e(this.deviceLabel(editable?event.targetDeviceId:event.sourceDeviceId))} · ${time(event.createdAt)}${event.payload.editedAt?' · 已修改':''}</p></div><button class="icon-button quiet" data-action="close-modal" aria-label="关闭文字">${icon('close')}</button></div><div class="editor-sheet"><div class="editor-host" data-reader-host></div><div class="web-link-list" data-reader-links></div><div class="editor-tools"><span id="reader-count">${characterCount(view.draft)} 字符</span><span>${editable?'Ctrl / ⌘ + Enter 保存':'只读'}</span></div></div><div class="reader-footer"><div class="item-actions"><button class="copy-button" data-action="copy-reader">${icon('copy')} 复制</button></div>${editable?'<button class="primary" data-action="save-reader" aria-keyshortcuts="Control+Enter Meta+Enter">保存</button>':''}</div>${editable?'<p id="reader-status" class="reader-status" role="status" aria-live="polite"></p>':''}</section></div>`;
     }
     return `<div class="modal-backdrop"><section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-header"><h2 id="modal-title">设置</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭设置">${icon('close')}</button></div>
-      ${this.session?this.deviceSettingsHtml():''}<section class="settings-card server-settings" data-server-settings><label class="settings-field-label" for="server-url">服务器地址</label><form id="server-form" class="server-change"><input id="server-url" type="url" aria-label="服务器地址" placeholder="https://send.example.com" value="${e(this.serverDraft)}"><button class="secondary" type="submit">前往</button></form></section>${this.session?`<div class="settings-footer"><button class="quiet" data-action="signout">切换分组</button></div>`:''}</section></div>`;
+      ${this.appearance.html()}${this.session?this.deviceSettingsHtml():''}<section class="settings-card server-settings" data-server-settings><label class="settings-field-label" for="server-url">服务器地址</label><form id="server-form" class="server-change"><input id="server-url" type="url" aria-label="服务器地址" placeholder="https://send.example.com" value="${e(this.serverDraft)}"><button class="secondary" type="submit">前往</button></form></section>${this.session?`<div class="settings-footer"><button class="quiet" data-action="signout">切换分组</button></div>`:''}</section></div>`;
   }
   bind() {
     const on = (selector: string,event: string,handler: (event: Event,node: HTMLElement)=>void) => document.querySelectorAll<HTMLElement>(selector).forEach(node=>{if(node.closest('.receipt-backdrop')){const key=selector+':'+event,bound=this.receiptBindings.get(node) || new Set<string>();if(bound.has(key))return;bound.add(key);this.receiptBindings.set(node,bound);}node.addEventListener(event,event=>handler(event,node));});
+    on('[data-appearance-mode]','click',(_event,node)=>this.appearance.set({mode:node.dataset.appearanceMode as AppearanceMode}));
+    on('[data-appearance-accent]','click',(_event,node)=>this.appearance.set({accent:node.dataset.appearanceAccent as AccentColor}));
     // Keep the title button alive until its click; a shared-editor blur can
     // otherwise replace the workspace between pointer-down and pointer-up.
     on('[data-action="ip-addresses"]','pointerdown',event=>{if(this.shared.focusedActive && !this.shared.composingActive)event.preventDefault();});

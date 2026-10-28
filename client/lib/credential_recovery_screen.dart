@@ -21,8 +21,8 @@ class CredentialRecoveryScreen extends StatelessWidget {
     body: ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        const Card(
-          color: Ui.softGreen,
+        Card(
+          color: Ui.colors(context).softGreen,
           child: Padding(
             padding: EdgeInsets.all(24),
             child: Text('旧记录只读。转发本机文件请使用文件库。'),
@@ -32,7 +32,7 @@ class CredentialRecoveryScreen extends StatelessWidget {
         for (final record in records)
           ListTile(
             shape: const RoundedRectangleBorder(borderRadius: Ui.cardRadius),
-            tileColor: Colors.white,
+            tileColor: Ui.colors(context).surface,
             leading: const AppIcon(Icons.history_outlined),
             title: Text('${record.profile['name'] ?? '原设备'} · 只读'),
             subtitle: Text(
@@ -104,7 +104,7 @@ class _CredentialHistoryState extends State<_CredentialHistory> {
                 shape: const RoundedRectangleBorder(
                   borderRadius: Ui.cardRadius,
                 ),
-                tileColor: Colors.white,
+                tileColor: Ui.colors(context).surface,
                 leading: AppIcon(
                   entry.kind == 'text'
                       ? Icons.notes_outlined
@@ -146,7 +146,7 @@ class _CredentialHistoryState extends State<_CredentialHistory> {
                 shape: const RoundedRectangleBorder(
                   borderRadius: Ui.cardRadius,
                 ),
-                tileColor: Colors.white,
+                tileColor: Ui.colors(context).surface,
                 title: Text(text, maxLines: 3, overflow: TextOverflow.ellipsis),
                 onTap: () =>
                     showTextViewer(context, title: '原待发送 · 只读', text: text),

@@ -95,7 +95,7 @@ class _ContentPreviewState extends State<ContentPreview> {
           value,
           maxLines: lines,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: font, height: 1.55, color: Ui.ink),
+          style: TextStyle(fontSize: font, height: 1.55, color: Ui.colors(context).ink),
         ),
       );
     },

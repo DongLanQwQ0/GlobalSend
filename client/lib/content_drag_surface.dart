@@ -133,7 +133,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
         opacity: .9,
         child: Material(
           key: ValueKey('drag-feedback-${widget.entry.id}'),
-          color: Colors.white,
+          color: Ui.colors(context).surface,
           elevation: 8,
           shadowColor: Colors.black26,
           borderRadius: Ui.cardRadius,
@@ -158,13 +158,13 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(
                     children: [
-                      const AppIcon(Icons.add, size: 16, color: Ui.green),
+                      AppIcon(Icons.add, size: 16, color: Ui.colors(context).green),
                       const SizedBox(width: 6),
                       Text(
                         widget.itemCount == null
                             ? '复制'
                             : '复制 ${widget.itemCount} 项',
-                        style: const TextStyle(fontSize: 12, color: Ui.green),
+                        style: TextStyle(fontSize: 12, color: Ui.colors(context).green),
                       ),
                     ],
                   ),

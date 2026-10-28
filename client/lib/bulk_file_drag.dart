@@ -42,13 +42,13 @@ class BulkFileDrag extends StatelessWidget {
       child: Semantics(
         label: '全部拖拽',
         child: Theme.of(context).platform == TargetPlatform.windows
-            ? const SizedBox.square(
+            ? SizedBox.square(
                 dimension: 44,
                 child: Center(
                   child: AppIcon(
                     Icons.drag_indicator,
                     size: 20,
-                    color: Ui.green,
+                    color: Ui.colors(context).green,
                   ),
                 ),
               )

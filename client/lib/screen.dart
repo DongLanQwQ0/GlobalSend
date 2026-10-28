@@ -911,7 +911,7 @@ class _SendScreenState extends State<SendScreen>
                       vertical: wide ? 8 : 4,
                     ),
                     minimumSize: const Size(0, 40),
-                    foregroundColor: Ui.ink,
+                    foregroundColor: Ui.colors(context).ink,
                   ),
                   child: const Text(
                     'GlobalSend',
@@ -937,6 +937,27 @@ class _SendScreenState extends State<SendScreen>
             ],
           ),
           actions: [
+            if (!loggedIn)
+              IconButton(
+                tooltip: '外观',
+                icon: const AppIcon(Icons.settings_outlined, size: 20),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (dialog) => AlertDialog(
+                    title: const Text('外观'),
+                    content: const SizedBox(
+                      width: 360,
+                      child: AppearancePicker(),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialog),
+                        child: const Text('关闭'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             if (wide && loggedIn && !settingsOpen)
               Padding(
                 padding: const EdgeInsets.only(right: 20),
@@ -1142,11 +1163,15 @@ class _SendScreenState extends State<SendScreen>
         label: '已连接',
         child: Container(
           padding: const EdgeInsets.all(8),
-          decoration: const BoxDecoration(
-            color: Ui.softGreen,
+          decoration: BoxDecoration(
+            color: Ui.colors(context).softGreen,
             borderRadius: Ui.fieldRadius,
           ),
-          child: const AppIcon(Icons.link_rounded, size: 20, color: Ui.green),
+          child: AppIcon(
+            Icons.link_rounded,
+            size: 20,
+            color: Ui.colors(context).green,
+          ),
         ),
       );
     final reconnecting =
@@ -1154,7 +1179,7 @@ class _SendScreenState extends State<SendScreen>
         c.connection.contains('连接中') ||
         c.connection.startsWith('正在');
     final color = c.connected
-        ? const Color(0xff176b50)
+        ? Ui.colors(context).green
         : const Color(0xff9a6b20);
     if (compact)
       return Semantics(
@@ -1252,14 +1277,18 @@ class _SendScreenState extends State<SendScreen>
       Widget recoveryNotice() => Container(
         key: const ValueKey('credential-recovery-notice'),
         padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(
-          color: Ui.softGreen,
+        decoration: BoxDecoration(
+          color: Ui.colors(context).softGreen,
           borderRadius: Ui.cardRadius,
         ),
-        child: const Column(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppIcon(Icons.key_off_outlined, color: Ui.green, size: 24),
+            AppIcon(
+              Icons.key_off_outlined,
+              color: Ui.colors(context).green,
+              size: 24,
+            ),
             SizedBox(height: 12),
             Text(
               '连接暂不可用',
@@ -1268,7 +1297,11 @@ class _SendScreenState extends State<SendScreen>
             SizedBox(height: 8),
             Text(
               '本机文件和记录已保留。',
-              style: TextStyle(fontSize: 14, color: Ui.muted, height: 1.5),
+              style: TextStyle(
+                fontSize: 14,
+                color: Ui.colors(context).muted,
+                height: 1.5,
+              ),
             ),
           ],
         ),
@@ -1638,10 +1671,10 @@ class _SendScreenState extends State<SendScreen>
                     child: Text(d['name'], overflow: TextOverflow.ellipsis),
                   ),
                   if (d['online'] == true)
-                    const AppIcon(
+                    AppIcon(
                       Icons.circle,
                       size: 6,
-                      color: Color(0xff176b58),
+                      color: Ui.colors(context).green,
                     ),
                 ],
               ),
@@ -1764,14 +1797,17 @@ class _SendScreenState extends State<SendScreen>
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: contentTab == index
-                            ? Ui.softGreen
+                            ? Ui.colors(context).softGreen
                             : Colors.transparent,
                         borderRadius: const BorderRadius.vertical(
                           top: Radius.circular(12),
                         ),
                         border: contentTab == index
-                            ? const Border(
-                                bottom: BorderSide(color: Ui.green, width: 2),
+                            ? Border(
+                                bottom: BorderSide(
+                                  color: Ui.colors(context).green,
+                                  width: 2,
+                                ),
                               )
                             : null,
                       ),
@@ -1782,7 +1818,9 @@ class _SendScreenState extends State<SendScreen>
                           fontWeight: contentTab == index
                               ? FontWeight.w600
                               : FontWeight.w400,
-                          color: contentTab == index ? Ui.green : Ui.muted,
+                          color: contentTab == index
+                              ? Ui.colors(context).green
+                              : Ui.colors(context).muted,
                         ),
                       ),
                     ),
@@ -1841,7 +1879,10 @@ class _SendScreenState extends State<SendScreen>
                     selecting
                         ? '${selected.length}/${items.length} 项'
                         : '${items.length} 项',
-                    style: const TextStyle(fontSize: 12, color: Ui.muted),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Ui.colors(context).muted,
+                    ),
                   ),
                   BulkFileDrag(
                     key: const ValueKey('sent-drag-all'),
@@ -1915,8 +1956,8 @@ class _SendScreenState extends State<SendScreen>
   Widget workspacePane(Widget child, {bool joined = false}) => DecoratedBox(
     key: joined ? const ValueKey('desktop-content-pane') : null,
     decoration: BoxDecoration(
-      color: Colors.white,
-      border: Border.all(color: const Color(0xffe3e7e3)),
+      color: Ui.colors(context).surface,
+      border: Border.all(color: Ui.colors(context).border),
       borderRadius: joined
           ? const BorderRadius.vertical(bottom: Radius.circular(20))
           : BorderRadius.circular(20),
@@ -1941,7 +1982,9 @@ class _SendScreenState extends State<SendScreen>
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 44),
         padding: const EdgeInsets.symmetric(horizontal: 4),
-        backgroundColor: quiet ? Ui.background : Ui.softGreen,
+        backgroundColor: quiet
+            ? Ui.colors(context).background
+            : Ui.colors(context).softGreen,
         shape: const RoundedRectangleBorder(borderRadius: Ui.fieldRadius),
       ),
       onPressed: working ? null : onTap,
@@ -1997,12 +2040,12 @@ class _SendScreenState extends State<SendScreen>
           child: Container(
             key: const ValueKey('send-queue'),
             decoration: BoxDecoration(
-              color: Ui.input,
+              color: Ui.colors(context).input,
               borderRadius: Ui.fieldRadius,
               border: Border.all(
                 color: candidates.isNotEmpty || c.nativeQueueDragActive
-                    ? Ui.green
-                    : Ui.border,
+                    ? Ui.colors(context).green
+                    : Ui.colors(context).border,
                 width: candidates.isNotEmpty || c.nativeQueueDragActive ? 2 : 1,
               ),
             ),
@@ -2109,14 +2152,14 @@ class _SendScreenState extends State<SendScreen>
                         child: count == 0 && active.isEmpty
                             ? recentPhotos.items.isNotEmpty
                                   ? photoSuggestions()
-                                  : const Center(
+                                  : Center(
                                       child: Padding(
                                         padding: EdgeInsets.all(16),
                                         child: Text(
                                           '点击输入文本，或拖入文件',
                                           textAlign: TextAlign.center,
                                           style: TextStyle(
-                                            color: Ui.muted,
+                                            color: Ui.colors(context).muted,
                                             fontSize: 14,
                                           ),
                                         ),
@@ -2190,12 +2233,16 @@ class _SendScreenState extends State<SendScreen>
                             child: Container(
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: Ui.softGreen.withValues(alpha: .92),
+                                color: Ui.colors(context).softGreen
+                                    .withValues(alpha: .92),
                                 borderRadius: Ui.fieldRadius,
                               ),
-                              child: const Text(
+                              child: Text(
                                 '松手，加入待发',
-                                style: TextStyle(color: Ui.green, fontSize: 16),
+                                style: TextStyle(
+                                  color: Ui.colors(context).green,
+                                  fontSize: 16,
+                                ),
                               ),
                             ),
                           ),
@@ -2216,7 +2263,7 @@ class _SendScreenState extends State<SendScreen>
     final value = isText ? c.stagedTexts[textIndex] : '';
     final title = isText ? value.replaceAll('\n', ' ') : safeName(path!);
     return Material(
-      color: Colors.white,
+      color: Ui.colors(context).surface,
       borderRadius: Ui.cardRadius,
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -2231,11 +2278,11 @@ class _SendScreenState extends State<SendScreen>
                 fit: StackFit.expand,
                 children: [
                   if (!isText && c.stagedDirectoryNames.containsKey(path))
-                    const Center(
+                    Center(
                       child: AppIcon(
                         Icons.folder_outlined,
                         size: 36,
-                        color: Ui.green,
+                        color: Ui.colors(context).green,
                       ),
                     )
                   else
@@ -2257,7 +2304,8 @@ class _SendScreenState extends State<SendScreen>
                         tooltip: '移除',
                         padding: EdgeInsets.zero,
                         style: IconButton.styleFrom(
-                          backgroundColor: Colors.white.withValues(alpha: .9),
+                          backgroundColor: Ui.colors(context).surface
+                              .withValues(alpha: .9),
                           minimumSize: const Size(28, 28),
                         ),
                         onPressed: working
@@ -2305,7 +2353,7 @@ class _SendScreenState extends State<SendScreen>
   }
 
   Widget activeTransferTile(DockEntry item) => Material(
-    color: Colors.white,
+    color: Ui.colors(context).surface,
     borderRadius: Ui.cardRadius,
     child: InkWell(
       onTap: () => fileAction('details', item),
@@ -2316,7 +2364,11 @@ class _SendScreenState extends State<SendScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppIcon(Icons.north_east, size: 22, color: Ui.green),
+                AppIcon(
+                  Icons.north_east,
+                  size: 22,
+                  color: Ui.colors(context).green,
+                ),
                 const Spacer(),
                 Text(
                   item.title,
@@ -2330,7 +2382,10 @@ class _SendScreenState extends State<SendScreen>
                       ? '${formatSize(item.transferBytesPerSecond.round())}/s'
                       : statusLabel(item),
                   maxLines: 1,
-                  style: const TextStyle(fontSize: 11, color: Ui.muted),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Ui.colors(context).muted,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 LinearProgressIndicator(
@@ -2459,13 +2514,16 @@ class _SendScreenState extends State<SendScreen>
               ? Container(
                   alignment: Alignment.center,
                   padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: Ui.input,
+                  decoration: BoxDecoration(
+                    color: Ui.colors(context).input,
                     borderRadius: Ui.fieldRadius,
                   ),
-                  child: const Text(
+                  child: Text(
                     '暂无其他设备',
-                    style: TextStyle(fontSize: 14, color: Ui.muted),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Ui.colors(context).muted,
+                    ),
                   ),
                 )
               : Listener(
@@ -2524,11 +2582,15 @@ class _SendScreenState extends State<SendScreen>
                                   ? '暂离线'
                                   : '在线',
                               child: Material(
-                                color: checked ? Ui.softGreen : Ui.input,
+                                color: checked
+                                    ? Ui.colors(context).softGreen
+                                    : Ui.colors(context).input,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: Ui.fieldRadius,
                                   side: BorderSide(
-                                    color: checked ? Ui.green : Ui.border,
+                                    color: checked
+                                        ? Ui.colors(context).green
+                                        : Ui.colors(context).border,
                                     width: checked ? 1.5 : 1,
                                   ),
                                 ),
@@ -2580,29 +2642,35 @@ class _SendScreenState extends State<SendScreen>
                                               SizedBox(
                                                 height: 24,
                                                 child: sent
-                                                    ? const Text(
+                                                    ? Text(
                                                         '已发送',
                                                         style: TextStyle(
                                                           fontSize: 13,
                                                           fontWeight:
                                                               FontWeight.w600,
-                                                          color: Ui.green,
+                                                          color: Ui.colors(
+                                                            context,
+                                                          ).green,
                                                         ),
                                                       )
                                                     : offline
-                                                    ? const Text(
+                                                    ? Text(
                                                         '暂离线',
                                                         style: TextStyle(
                                                           fontSize: 13,
-                                                          color: Ui.muted,
+                                                          color: Ui.colors(
+                                                            context,
+                                                          ).muted,
                                                         ),
                                                       )
                                                     : AppIcon(
                                                         deviceIcon(device),
                                                         size: 24,
                                                         color: checked
-                                                            ? Ui.green
-                                                            : Ui.muted,
+                                                            ? Ui.colors(context)
+                                                                  .green
+                                                            : Ui.colors(context)
+                                                                  .muted,
                                                       ),
                                               ),
                                               const SizedBox(height: 6),
@@ -2636,13 +2704,13 @@ class _SendScreenState extends State<SendScreen>
                                           ),
                                         )
                                       else if (checked)
-                                        const Positioned(
+                                        Positioned(
                                           top: 8,
                                           right: 8,
                                           child: AppIcon(
                                             Icons.check_circle,
                                             size: 16,
-                                            color: Ui.green,
+                                            color: Ui.colors(context).green,
                                           ),
                                         )
                                       else if (state == 'failed')
@@ -2788,9 +2856,12 @@ class _SendScreenState extends State<SendScreen>
                   textAlignVertical: TextAlignVertical.top,
                   style: const TextStyle(fontSize: 14, height: 1.5),
                   enabled: c.sharedTextSupported,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     hintText: '组内共同编辑',
-                    hintStyle: TextStyle(fontSize: 14, color: Ui.muted),
+                    hintStyle: TextStyle(
+                      fontSize: 14,
+                      color: Ui.colors(context).muted,
+                    ),
                     filled: false,
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
@@ -2807,12 +2878,12 @@ class _SendScreenState extends State<SendScreen>
     return Container(
       key: const ValueKey('shared-text-panel'),
       decoration: BoxDecoration(
-        color: Ui.input,
+        color: Ui.colors(context).input,
         borderRadius: Ui.fieldRadius,
         border: Border.all(
           color: unsynced || c.sharedTextConflict
               ? Theme.of(context).colorScheme.error
-              : Ui.border,
+              : Ui.colors(context).border,
         ),
       ),
       child: Column(
@@ -2822,10 +2893,10 @@ class _SendScreenState extends State<SendScreen>
             padding: const EdgeInsets.fromLTRB(14, 10, 10, 0),
             child: Row(
               children: [
-                const AppIcon(
+                AppIcon(
                   Icons.edit_note_rounded,
                   size: 18,
-                  color: Ui.muted,
+                  color: Ui.colors(context).muted,
                 ),
                 const SizedBox(width: 6),
                 const Text(
@@ -3012,7 +3083,7 @@ class _SendScreenState extends State<SendScreen>
               selecting
                   ? '${selected.length}/${items.length} 项'
                   : '${items.length} 项',
-              style: const TextStyle(fontSize: 12, color: Color(0xff829087)),
+              style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
             ),
             BulkFileDrag(
               key: const ValueKey('receive-drag-all'),
@@ -3086,7 +3157,7 @@ class _SendScreenState extends State<SendScreen>
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
                 if (items.isEmpty)
-                  const SliverFillRemaining(
+                  SliverFillRemaining(
                     hasScrollBody: false,
                     child: Center(
                       child: Column(
@@ -3095,12 +3166,12 @@ class _SendScreenState extends State<SendScreen>
                           AppIcon(
                             Icons.inbox_outlined,
                             size: 44,
-                            color: Color(0xffabb7af),
+                            color: Ui.colors(context).muted,
                           ),
                           SizedBox(height: 14),
                           Text(
                             '暂无接收',
-                            style: TextStyle(color: Color(0xff829087)),
+                            style: TextStyle(color: Ui.colors(context).muted),
                           ),
                         ],
                       ),
@@ -3150,10 +3221,10 @@ class _SendScreenState extends State<SendScreen>
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
             children: [
-              const AppIcon(
+              AppIcon(
                 Icons.description_outlined,
                 size: 19,
-                color: Color(0xff737d88),
+                color: Ui.colors(context).muted,
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -3166,7 +3237,7 @@ class _SendScreenState extends State<SendScreen>
               const SizedBox(width: 8),
               Text(
                 formatSize(item.size),
-                style: const TextStyle(fontSize: 12, color: Color(0xff737d88)),
+                style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
               ),
             ],
           ),
@@ -3174,7 +3245,7 @@ class _SendScreenState extends State<SendScreen>
       const SizedBox(height: 6),
       Text(
         '${relay ? '需中继 · ' : ''}${formatSize(size)}',
-        style: const TextStyle(fontSize: 13, color: Color(0xff737d88)),
+        style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
       ),
       const SizedBox(height: 12),
       Row(
@@ -3733,9 +3804,12 @@ class _SendScreenState extends State<SendScreen>
                     ),
                     if (item.receiveFailure && !item.outgoing) ...[
                       const SizedBox(height: 16),
-                      const Text(
+                      Text(
                         '接收目录',
-                        style: TextStyle(fontSize: 13, color: Ui.muted),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Ui.colors(context).muted,
+                        ),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -3896,9 +3970,9 @@ class _SendScreenState extends State<SendScreen>
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 '未选文件将拒绝',
-                style: TextStyle(fontSize: 12, color: Color(0xff737d88)),
+                style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
               ),
             ],
           ),
@@ -4045,9 +4119,9 @@ class _SendScreenState extends State<SendScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 18),
-        const Text(
+        Text(
           '清理类别',
-          style: TextStyle(fontSize: 13, color: Color(0xff6b786e)),
+          style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -4139,7 +4213,7 @@ class _SendScreenState extends State<SendScreen>
             child: TextButton(
               key: const ValueKey('save-cleanup-filter'),
               style: TextButton.styleFrom(
-                disabledForegroundColor: const Color(0xff738176),
+                disabledForegroundColor: Ui.colors(context).muted,
               ),
               onPressed: working || !cleanupFilterChanged
                   ? null
@@ -4157,6 +4231,7 @@ class _SendScreenState extends State<SendScreen>
       child: ListView(
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
         children: [
+          settingsSection('外观', [const AppearancePicker()]),
           settingsSection('本机', [
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: name,
@@ -4175,7 +4250,7 @@ class _SendScreenState extends State<SendScreen>
                         ? TextButton(
                             key: const ValueKey('save-device-name'),
                             style: TextButton.styleFrom(
-                              disabledForegroundColor: const Color(0xff738176),
+                              disabledForegroundColor: Ui.colors(context).muted,
                             ),
                             onPressed:
                                 working ||
@@ -4438,7 +4513,7 @@ class _SendScreenState extends State<SendScreen>
                         ? TextButton(
                             key: const ValueKey('save-relay-limit'),
                             style: TextButton.styleFrom(
-                              disabledForegroundColor: const Color(0xff738176),
+                              disabledForegroundColor: Ui.colors(context).muted,
                             ),
                             onPressed:
                                 working ||
@@ -4596,9 +4671,9 @@ class _SendScreenState extends State<SendScreen>
               ],
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               '到期后删除收到的文件',
-              style: TextStyle(fontSize: 12, color: Color(0xff737d88)),
+              style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
             ),
             cleanupFilterFields(),
           ]),
@@ -4611,10 +4686,10 @@ class _SendScreenState extends State<SendScreen>
             ),
           ]),
           Material(
-            color: Colors.white,
+            color: Ui.colors(context).surface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: Color(0xffe3e7e0)),
+              side: BorderSide(color: Ui.colors(context).border),
             ),
             clipBehavior: Clip.antiAlias,
             child: AppExpansionTile(
@@ -4836,7 +4911,7 @@ class NativeDropFeedback extends StatelessWidget {
               key: const ValueKey('native-drop-feedback'),
               padding: const EdgeInsets.all(20),
               alignment: Alignment.center,
-              color: const Color(0xffe3e6e4).withValues(alpha: .91),
+              color: Ui.colors(context).input.withValues(alpha: .91),
               child: CustomPaint(
                 painter: const _DashedDropBorder(),
                 child: Center(
@@ -4847,10 +4922,10 @@ class NativeDropFeedback extends StatelessWidget {
                       if (importing)
                         const CircularProgressIndicator(strokeWidth: 2),
                       if (!importing)
-                        const AppIcon(
+                        AppIcon(
                           Icons.file_download_outlined,
                           size: 38,
-                          color: Color(0xff5d6b63),
+                          color: Ui.colors(context).muted,
                         ),
                       if (importing) const SizedBox(height: 14),
                       if (!importing) const SizedBox(height: 14),
@@ -4858,7 +4933,7 @@ class NativeDropFeedback extends StatelessWidget {
                         importing ? '正在添加…' : '松手',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           decoration: TextDecoration.none,
-                          color: Color(0xff35463b),
+                          color: Ui.colors(context).ink,
                           fontSize: 21,
                           fontWeight: FontWeight.w600,
                         ),
@@ -4924,7 +4999,7 @@ class _ComposeTextDialogState extends State<_ComposeTextDialog> {
 
   @override
   Widget build(BuildContext context) => Dialog(
-    backgroundColor: Colors.white,
+    backgroundColor: Ui.colors(context).surface,
     insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 680),
@@ -4994,9 +5069,9 @@ class _ComposeTextDialogState extends State<_ComposeTextDialog> {
                     children: [
                       Text(
                         '${value.text.runes.length} 字符',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
-                          color: Color(0xff829087),
+                          color: Ui.colors(context).muted,
                         ),
                       ),
                       const Spacer(),

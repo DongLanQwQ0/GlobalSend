@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 
 import 'api.dart';
+import 'appearance.dart';
 import 'models.dart';
 import 'content_groups.dart';
 import 'network_bridge.dart';
@@ -99,6 +100,7 @@ typedef _PreparedRoutes = ({
 });
 
 class SendController extends ChangeNotifier {
+  final appearance = AppearanceSettings();
   String get _platformName => Platform.isWindows
       ? 'windows'
       : Platform.isAndroid
@@ -1085,6 +1087,7 @@ class SendController extends ChangeNotifier {
     try {
       await backgroundReceive.initialize();
       root = await stateDirectory();
+      await appearance.load(File('${root!.path}/appearance.json'));
       await _loadStagedOutbox(restoreQueue: true);
       final file = File('${root!.path}/profiles.json');
       if (await file.exists()) {
@@ -5530,6 +5533,7 @@ class SendController extends ChangeNotifier {
     receivedNotifications.dispose();
     backgroundReceive.dispose();
     reachability.dispose();
+    appearance.dispose();
     super.dispose();
   }
 }

@@ -77,13 +77,13 @@ class ReceivedContentPreview extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.all(11),
                         decoration: BoxDecoration(
-                          color: const Color(0xffe9f2ec),
+                          color: Ui.colors(context).softGreen,
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: AppIcon(
                           platformIcon,
                           size: 25,
-                          color: const Color(0xff176b50),
+                          color: Ui.colors(context).green,
                         ),
                       ),
                       const SizedBox(width: 13),
@@ -107,9 +107,9 @@ class ReceivedContentPreview extends StatelessWidget {
                                   : transfer.label.isNotEmpty
                                   ? transfer.label
                                   : '收到文件',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 13,
-                                color: Color(0xff7a887e),
+                                color: Ui.colors(context).muted,
                               ),
                             ),
                           ],
@@ -177,9 +177,9 @@ class ReceivedContentPreview extends StatelessWidget {
                               : entry.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
-                            color: Color(0xff7a887e),
+                            color: Ui.colors(context).muted,
                           ),
                         ),
                       ),
@@ -371,7 +371,7 @@ class _ReceiptFrame extends StatelessWidget {
   Widget build(BuildContext context) => embedded
       ? Material(
           key: const ValueKey('receipt-preview'),
-          color: Ui.input,
+          color: Ui.colors(context).input,
           borderRadius: BorderRadius.circular(20),
           clipBehavior: Clip.antiAlias,
           child: child,
@@ -382,7 +382,7 @@ class _ReceiptFrame extends StatelessWidget {
             horizontal: 18,
             vertical: 24,
           ),
-          backgroundColor: Colors.white,
+          backgroundColor: Ui.colors(context).surface,
           clipBehavior: Clip.antiAlias,
           child: child,
         );
@@ -400,10 +400,10 @@ class _IncomingProgressBody extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const AppIcon(
+            AppIcon(
               Icons.insert_drive_file_outlined,
               size: 56,
-              color: Ui.green,
+              color: Ui.colors(context).green,
             ),
             const SizedBox(height: 20),
             Text(
@@ -416,7 +416,7 @@ class _IncomingProgressBody extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               bytesLabel(entry.size),
-              style: const TextStyle(color: Ui.muted),
+              style: TextStyle(color: Ui.colors(context).muted),
             ),
             if (state.showProgress) ...[
               const SizedBox(height: 20),
@@ -426,7 +426,7 @@ class _IncomingProgressBody extends StatelessWidget {
               const SizedBox(height: 10),
               Text(
                 '${bytesLabel(entry.transferBytesPerSecond.round())}/s',
-                style: const TextStyle(fontSize: 13, color: Ui.muted),
+                style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
               ),
             ],
             if (state.failed && entry.error.isNotEmpty) ...[
@@ -481,10 +481,10 @@ class _ReceivedFileBodyState extends State<_ReceivedFileBody> {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const AppIcon(
+        AppIcon(
           Icons.insert_drive_file_outlined,
           size: 70,
-          color: Color(0xff7b9c88),
+          color: Ui.colors(context).muted,
         ),
         const SizedBox(height: 20),
         Text(
@@ -497,7 +497,7 @@ class _ReceivedFileBodyState extends State<_ReceivedFileBody> {
         const SizedBox(height: 8),
         Text(
           bytesLabel(widget.entry.size),
-          style: const TextStyle(color: Color(0xff7a887e)),
+          style: TextStyle(color: Ui.colors(context).muted),
         ),
       ],
     ),

@@ -187,7 +187,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
             const SizedBox(height: 12),
             Text(
               file.path,
-              style: const TextStyle(fontSize: 13, color: Ui.muted),
+              style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
             ),
           ],
         ),
@@ -323,7 +323,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
     final files = sortSavedFiles(c.savedFiles, sort);
     final scheme = Theme.of(context).colorScheme;
     final scaffold = Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Ui.colors(context).surface,
       appBar: widget.embedded
           ? null
           : AppBar(
@@ -685,16 +685,16 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
     width: 66,
     height: 76,
     decoration: BoxDecoration(
-      color: const Color(0xffedf3ee),
+      color: Ui.colors(context).softGreen,
       borderRadius: BorderRadius.circular(10),
     ),
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const AppIcon(
+        AppIcon(
           Icons.insert_drive_file_outlined,
           size: 30,
-          color: Color(0xff47795e),
+          color: Ui.colors(context).green,
         ),
         const SizedBox(height: 4),
         Text(
@@ -704,10 +704,10 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                   0,
                   math.min(extension.length, 6),
                 ),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.w600,
-            color: Color(0xff47795e),
+            color: Ui.colors(context).green,
           ),
         ),
       ],

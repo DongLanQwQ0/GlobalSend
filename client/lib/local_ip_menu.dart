@@ -71,7 +71,7 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                       padding: const EdgeInsets.symmetric(vertical: 24),
                       child: Text(
                         snapshot.hasError ? '无法获取地址' : '暂无 IP 地址',
-                        style: const TextStyle(color: Ui.muted),
+                        style: TextStyle(color: Ui.colors(context).muted),
                       ),
                     );
                   }
@@ -108,8 +108,8 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                                     const SizedBox(height: 3),
                                     Text(
                                       source.subtitle,
-                                      style: const TextStyle(
-                                        color: Ui.muted,
+                                      style: TextStyle(
+                                        color: Ui.colors(context).muted,
                                         fontSize: 12,
                                         height: 1.4,
                                       ),
@@ -126,7 +126,7 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                           Padding(
                             padding: const EdgeInsets.only(bottom: 6),
                             child: Material(
-                              color: Ui.input,
+                              color: Ui.colors(context).input,
                               borderRadius: Ui.fieldRadius,
                               child: ListTile(
                                 key: ValueKey(
@@ -148,9 +148,9 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                                 ),
                                 subtitle: Text(
                                   address.categoryLabel,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
-                                    color: Ui.muted,
+                                    color: Ui.colors(context).muted,
                                   ),
                                 ),
                                 onTap: () =>

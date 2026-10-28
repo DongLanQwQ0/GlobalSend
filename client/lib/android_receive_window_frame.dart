@@ -91,7 +91,7 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
     borderRadius: BorderRadius.circular(20),
     clipBehavior: Clip.antiAlias,
     child: ColoredBox(
-      color: Ui.input,
+      color: Ui.colors(context).input,
       child: Stack(
         children: [
           Column(
@@ -100,14 +100,14 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
                 sizing: false,
                 child: Semantics(
                   label: '拖动移动接收窗',
-                  child: const SizedBox(
+                  child: SizedBox(
                     width: double.infinity,
                     height: 28,
                     child: Center(
                       child: AppIcon(
                         Icons.drag_handle,
                         size: 22,
-                        color: Ui.muted,
+                        color: Ui.colors(context).muted,
                       ),
                     ),
                   ),
@@ -133,7 +133,7 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
               sizing: true,
               child: Semantics(
                 label: '拖动调整接收窗大小',
-                child: const SizedBox(
+                child: SizedBox(
                   width: 36,
                   height: 36,
                   child: Align(
@@ -143,7 +143,7 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
                       child: AppIcon(
                         Icons.south_east_rounded,
                         size: 17,
-                        color: Ui.muted,
+                        color: Ui.colors(context).muted,
                       ),
                     ),
                   ),

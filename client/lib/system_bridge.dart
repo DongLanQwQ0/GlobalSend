@@ -65,6 +65,7 @@ class SystemBridge {
   static Future<Map<String, dynamic>> presentReceiveDock({
     required List<Map<String, dynamic>> items,
     required int serial,
+    Map<String, String>? appearance,
   }) async {
     if (!Platform.isWindows) {
       return const {'presentation': 'main', 'shown': true};
@@ -74,6 +75,7 @@ class SystemBridge {
       await channel.invokeMethod<Map>('presentReceiveDock', {
             'items': items,
             'serial': serial,
+            if (appearance != null) 'appearance': appearance,
           }) ??
           {},
     );

@@ -75,11 +75,11 @@ class CompactContentCard extends StatelessWidget {
               SavedFileCategory.text,
             }.contains(category);
     final card = Material(
-      color: surfaceColor ?? Colors.white,
+      color: surfaceColor ?? Ui.colors(context).surface,
       shape: RoundedRectangleBorder(
         borderRadius: Ui.cardRadius,
         side: BorderSide(
-          color: selected ? Ui.green : Ui.border,
+          color: selected ? Ui.colors(context).green : Ui.colors(context).border,
           width: selected ? 1.5 : 1,
         ),
       ),
@@ -104,12 +104,12 @@ class CompactContentCard extends StatelessWidget {
                   )
                 else if (entry.isDirectory)
                   ColoredBox(
-                    color: previewColor ?? Ui.input,
-                    child: const Center(
+                    color: previewColor ?? Ui.colors(context).input,
+                    child: Center(
                       child: AppIcon(
                         Icons.folder_outlined,
                         size: 56,
-                        color: Ui.green,
+                        color: Ui.colors(context).green,
                       ),
                     ),
                   )
@@ -147,7 +147,7 @@ class CompactContentCard extends StatelessWidget {
                     top: 5,
                     child: ContentDragControl(
                       child: Material(
-                        color: menuColor ?? Colors.white.withValues(alpha: .94),
+                        color: menuColor ?? Ui.colors(context).surface.withValues(alpha: .94),
                         borderRadius: BorderRadius.circular(10),
                         child: SizedBox(width: 36, height: 32, child: menu),
                       ),
@@ -159,7 +159,7 @@ class CompactContentCard extends StatelessWidget {
                     bottom: 6,
                     child: ContentDragControl(
                       child: Material(
-                        color: Colors.white.withValues(alpha: .82),
+                        color: Ui.colors(context).surface.withValues(alpha: .82),
                         borderRadius: BorderRadius.circular(10),
                         child: TextButton(
                           key: copyKey,
@@ -186,7 +186,7 @@ class CompactContentCard extends StatelessWidget {
                     right: 5,
                     bottom: 6,
                     child: Material(
-                      color: Colors.white.withValues(alpha: .82),
+                      color: Ui.colors(context).surface.withValues(alpha: .82),
                       borderRadius: BorderRadius.circular(10),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
@@ -211,7 +211,7 @@ class CompactContentCard extends StatelessWidget {
                                             ? Theme.of(context)
                                                   .colorScheme
                                                   .error
-                                            : Ui.ink,
+                                            : Ui.colors(context).ink,
                                       ),
                                     ),
                                   if (speed.isNotEmpty)
@@ -219,9 +219,9 @@ class CompactContentCard extends StatelessWidget {
                                       speed,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 10,
-                                        color: Ui.muted,
+                                        color: Ui.colors(context).muted,
                                       ),
                                     ),
                                 ],
@@ -267,7 +267,7 @@ class CompactContentCard extends StatelessWidget {
           ),
           if (!previewOnly && image)
             Container(
-              color: metadataColor ?? Ui.input,
+              color: metadataColor ?? Ui.colors(context).input,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Wrap(
                 spacing: 8,
@@ -279,7 +279,7 @@ class CompactContentCard extends StatelessWidget {
                       sender,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11, color: Ui.muted),
+                      style: TextStyle(fontSize: 11, color: Ui.colors(context).muted),
                     ),
                   Text(
                     [
@@ -288,7 +288,7 @@ class CompactContentCard extends StatelessWidget {
                     ].where((part) => part.isNotEmpty).join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, color: Ui.muted),
+                    style: TextStyle(fontSize: 11, color: Ui.colors(context).muted),
                   ),
                   if (!selecting && (stateLabel.isNotEmpty || speed.isNotEmpty))
                     Text(
@@ -300,7 +300,7 @@ class CompactContentCard extends StatelessWidget {
                         fontSize: 11,
                         color: entry.status == 'failed'
                             ? Theme.of(context).colorScheme.error
-                            : Ui.muted,
+                            : Ui.colors(context).muted,
                       ),
                     ),
                   if (!selecting && action != null)
@@ -310,7 +310,7 @@ class CompactContentCard extends StatelessWidget {
             )
           else if (!previewOnly)
             Container(
-              color: metadataColor ?? Ui.input,
+              color: metadataColor ?? Ui.colors(context).input,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -346,7 +346,7 @@ class CompactContentCard extends StatelessWidget {
                           fontSize: 12,
                           color: entry.status == 'failed'
                               ? Theme.of(context).colorScheme.error
-                              : Ui.muted,
+                              : Ui.colors(context).muted,
                         ),
                       ),
                     ),
@@ -371,10 +371,10 @@ class CompactContentCard extends StatelessWidget {
                                         .join(' · '),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 height: 1.3,
-                                color: Ui.muted,
+                                color: Ui.colors(context).muted,
                               ),
                             ),
                             if (sender.isNotEmpty)
@@ -382,10 +382,10 @@ class CompactContentCard extends StatelessWidget {
                                 sender,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
                                   height: 1.3,
-                                  color: Ui.muted,
+                                  color: Ui.colors(context).muted,
                                 ),
                               ),
                           ],
@@ -464,7 +464,7 @@ class _DockFileSummary extends StatelessWidget {
   final Color? color;
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: color ?? Ui.input,
+    color: color ?? Ui.colors(context).input,
     child: Padding(
       padding: EdgeInsets.fromLTRB(10, 24, 10, bottomSpace),
       child: Column(
@@ -481,7 +481,7 @@ class _DockFileSummary extends StatelessWidget {
                     _ => Icons.insert_drive_file_outlined,
                   },
             size: bottomSpace > 8 ? 28 : 40,
-            color: Ui.green,
+            color: Ui.colors(context).green,
           ),
           const SizedBox(height: 6),
           Flexible(
@@ -490,7 +490,7 @@ class _DockFileSummary extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, height: 1.3, color: Ui.ink),
+              style: TextStyle(fontSize: 12, height: 1.3, color: Ui.colors(context).ink),
             ),
           ),
         ],

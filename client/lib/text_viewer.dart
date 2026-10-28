@@ -33,7 +33,7 @@ Future<void> showTextViewer(
   final route = DialogRoute<void>(
     context: context,
     builder: (_) => Dialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Ui.colors(context).surface,
       clipBehavior: Clip.antiAlias,
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
@@ -229,9 +229,9 @@ class _TextViewerState extends State<_TextViewer> {
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                   child: Text(
                     widget.notice!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: Color(0xff69756d),
+                      color: Ui.colors(context).muted,
                     ),
                   ),
                 ),

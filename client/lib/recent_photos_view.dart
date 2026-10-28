@@ -26,10 +26,10 @@ class RecentPhotosView extends StatelessWidget {
         padding: const EdgeInsets.only(left: 12, right: 4),
         child: Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
                 '新图片',
-                style: TextStyle(fontSize: 12, color: Ui.muted),
+                style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
               ),
             ),
             IconButton(
@@ -62,17 +62,17 @@ class RecentPhotosView extends StatelessWidget {
                       child: InkWell(
                         key: ValueKey('suggested-photo-${photo.id}'),
                         onTap: enabled ? () => onAdd(photo.id) : null,
-                        child: const Align(
+                        child: Align(
                           alignment: Alignment.bottomRight,
                           child: Padding(
                             padding: EdgeInsets.all(5),
                             child: CircleAvatar(
                               radius: 12,
-                              backgroundColor: Colors.white,
+                              backgroundColor: Ui.colors(context).surface,
                               child: AppIcon(
                                 Icons.add_rounded,
                                 size: 18,
-                                color: Ui.green,
+                                color: Ui.colors(context).green,
                               ),
                             ),
                           ),

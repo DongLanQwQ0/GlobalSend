@@ -15,6 +15,7 @@ import 'content_drag_surface.dart';
 import 'models.dart';
 import 'text_selection_surface.dart';
 import 'ui_tokens.dart';
+import 'appearance.dart';
 import 'received_order.dart';
 import 'incoming_receipt_state.dart';
 
@@ -362,247 +363,272 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    debugShowCheckedModeBanner: false,
-    theme: Ui.theme().copyWith(
-      popupMenuTheme: Ui.theme().popupMenuTheme.copyWith(
-        color: const Color(0xFFEDF4EF),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        menuPadding: const EdgeInsets.symmetric(vertical: 4),
-        shape: const RoundedRectangleBorder(
-          borderRadius: Ui.fieldRadius,
-          side: BorderSide(color: Ui.border),
+  Widget build(BuildContext context) {
+    final appearance = Appearance.fromJson(
+      payload['appearance'] as Map? ?? const {},
+    );
+    final theme = Ui.theme(appearance), palette = UiPalette.from(appearance);
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: theme.copyWith(
+        popupMenuTheme: theme.popupMenuTheme.copyWith(
+          color: palette.softGreen,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          menuPadding: const EdgeInsets.symmetric(vertical: 4),
+          shape: RoundedRectangleBorder(
+            borderRadius: Ui.fieldRadius,
+            side: BorderSide(color: palette.border),
+          ),
         ),
       ),
-    ),
-    // Keep labels out of the compact content strip; buttons retain semantics.
-    // One opacity layer includes routes (menus), images and controls. Painting
-    // individual translucent layers over each other made cards almost opaque.
-    builder: (_, child) => Opacity(
-      opacity: .7,
-      child: TooltipVisibility(visible: false, child: child!),
-    ),
-    home: CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () => action('close'),
-      },
-      child: Focus(
-        autofocus: true,
-        child: Scaffold(
-          key: const ValueKey('dock-pane'),
-          backgroundColor: const Color(0xFFEDF4EF),
-          body: Listener(
-            // Translucent gesture hits in the pane's gaps must also reach this
-            // listener; otherwise window movement reuses an older down point.
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: (event) {
-              heldPointer ??= event.pointer;
-              pointerOrigin = event.position;
-              pointerTouch = event.kind != PointerDeviceKind.mouse;
-              setPointerHeld(true);
-              if (HardwareKeyboard.instance.isAltPressed) {
-                beginMove();
-              }
-            },
-            onPointerUp: (_) => setPointerHeld(false),
-            onPointerCancel: (_) => setPointerHeld(false),
-            child: RawGestureDetector(
-              behavior: HitTestBehavior.translucent,
-              gestures: {
-                _DockMovePan:
-                    GestureRecognizerFactoryWithHandlers<_DockMovePan>(
-                      _DockMovePan.new,
-                      (recognizer) => recognizer.onStart = (_) => beginMove(),
-                    ),
+      // Keep labels out of the compact content strip; buttons retain semantics.
+      // One opacity layer includes routes (menus), images and controls. Painting
+      // individual translucent layers over each other made cards almost opaque.
+      builder: (_, child) => Opacity(
+        opacity: .7,
+        child: TooltipVisibility(visible: false, child: child!),
+      ),
+      home: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): () =>
+              action('close'),
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            key: const ValueKey('dock-pane'),
+            backgroundColor: palette.softGreen,
+            body: Listener(
+              // Translucent gesture hits in the pane's gaps must also reach this
+              // listener; otherwise window movement reuses an older down point.
+              behavior: HitTestBehavior.opaque,
+              onPointerDown: (event) {
+                heldPointer ??= event.pointer;
+                pointerOrigin = event.position;
+                pointerTouch = event.kind != PointerDeviceKind.mouse;
+                setPointerHeld(true);
+                if (HardwareKeyboard.instance.isAltPressed) {
+                  beginMove();
+                }
               },
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        height: 30,
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Row(
-                                children: [
-                                  DecoratedBox(
-                                    key: const ValueKey('dock-count'),
-                                    decoration: BoxDecoration(
-                                      color: Colors.transparent,
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 9,
-                                        vertical: 5,
+              onPointerUp: (_) => setPointerHeld(false),
+              onPointerCancel: (_) => setPointerHeld(false),
+              child: RawGestureDetector(
+                behavior: HitTestBehavior.translucent,
+                gestures: {
+                  _DockMovePan:
+                      GestureRecognizerFactoryWithHandlers<_DockMovePan>(
+                        _DockMovePan.new,
+                        (recognizer) => recognizer.onStart = (_) => beginMove(),
+                      ),
+                },
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: 30,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    DecoratedBox(
+                                      key: const ValueKey('dock-count'),
+                                      decoration: BoxDecoration(
+                                        color: Colors.transparent,
+                                        borderRadius: BorderRadius.circular(10),
                                       ),
-                                      child: Text(
-                                        '收到 ${items.length} 项',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 9,
+                                          vertical: 5,
+                                        ),
+                                        child: Text(
+                                          '收到 ${items.length} 项',
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                  bulkDragHandle(),
-                                ],
+                                    bulkDragHandle(),
+                                  ],
+                                ),
                               ),
-                            ),
-                            DecoratedBox(
-                              key: const ValueKey('dock-open'),
-                              decoration: BoxDecoration(
-                                color: Colors.transparent,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: ContentDragControl(
-                                child: Semantics(
-                                  label: '打开 GlobalSend',
-                                  child: IconButton(
-                                    constraints: const BoxConstraints.tightFor(
-                                      width: 30,
-                                      height: 28,
-                                    ),
-                                    padding: EdgeInsets.zero,
-                                    tooltip: '打开 GlobalSend',
-                                    onPressed: () => action('open'),
-                                    icon: const AppIcon(
-                                      Icons.open_in_full,
-                                      size: 19,
+                              DecoratedBox(
+                                key: const ValueKey('dock-open'),
+                                decoration: BoxDecoration(
+                                  color: Colors.transparent,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: ContentDragControl(
+                                  child: Semantics(
+                                    label: '打开 GlobalSend',
+                                    child: IconButton(
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                            width: 30,
+                                            height: 28,
+                                          ),
+                                      padding: EdgeInsets.zero,
+                                      tooltip: '打开 GlobalSend',
+                                      onPressed: () => action('open'),
+                                      icon: const AppIcon(
+                                        Icons.open_in_full,
+                                        size: 19,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 6),
-                            DecoratedBox(
-                              key: const ValueKey('dock-close'),
-                              decoration: BoxDecoration(
-                                color: Colors.transparent,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: ContentDragControl(
-                                child: Semantics(
-                                  label: '关闭',
-                                  child: IconButton(
-                                    constraints: const BoxConstraints.tightFor(
-                                      width: 30,
-                                      height: 28,
+                              const SizedBox(width: 6),
+                              DecoratedBox(
+                                key: const ValueKey('dock-close'),
+                                decoration: BoxDecoration(
+                                  color: Colors.transparent,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: ContentDragControl(
+                                  child: Semantics(
+                                    label: '关闭',
+                                    child: IconButton(
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                            width: 30,
+                                            height: 28,
+                                          ),
+                                      padding: EdgeInsets.zero,
+                                      tooltip: '关闭',
+                                      onPressed: () => action('close'),
+                                      icon: const AppIcon(
+                                        Icons.close,
+                                        size: 20,
+                                      ),
                                     ),
-                                    padding: EdgeInsets.zero,
-                                    tooltip: '关闭',
-                                    onPressed: () => action('close'),
-                                    icon: const AppIcon(Icons.close, size: 20),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Expanded(
-                        child: LayoutBuilder(
-                          key: const ValueKey('dock-content-strip'),
-                          builder: (context, bounds) {
-                            final edge = bounds.maxHeight;
-                            final values = {
-                              for (final item in items)
-                                item['id'] as String: item,
-                            };
-                            return Listener(
-                              onPointerSignal: (event) {
-                                if (event is PointerScrollEvent &&
-                                    scroll.hasClients) {
-                                  GestureBinding.instance.pointerSignalResolver
-                                      .register(event, (_) {
-                                        scroll.jumpTo(
-                                          (scroll.offset +
-                                                  event.scrollDelta.dy +
-                                                  event.scrollDelta.dx)
-                                              .clamp(
-                                                0.0,
-                                                scroll.position.maxScrollExtent,
-                                              ),
-                                        );
-                                      });
-                                }
-                              },
-                              child: SingleChildScrollView(
-                                key: const ValueKey('dock-horizontal-scroll'),
-                                controller: scroll,
-                                scrollDirection: Axis.horizontal,
-                                child: SizedBox(
-                                  width: ((edge + 10) * order.length - 10)
-                                      .clamp(bounds.maxWidth, double.infinity),
-                                  height: edge,
-                                  child: Stack(
-                                    children: [
-                                      for (var i = 0; i < order.length; i++)
-                                        AnimatedPositioned(
-                                          key: ValueKey(
-                                            'dock-tile-${order[i]}',
-                                          ),
-                                          duration: const Duration(
-                                            milliseconds: 240,
-                                          ),
-                                          curve: Curves.easeOutCubic,
-                                          left: i * (edge + 10),
-                                          top: 0,
-                                          width: edge,
-                                          height: edge,
-                                          child: TweenAnimationBuilder<double>(
-                                            key: ValueKey(
-                                              'dock-arrival-${order[i]}',
-                                            ),
-                                            tween: Tween(
-                                              begin: entering.contains(order[i])
-                                                  ? 1
-                                                  : 0,
-                                              end: 0,
-                                            ),
-                                            duration: const Duration(
-                                              milliseconds: 260,
-                                            ),
-                                            curve: Curves.easeOutCubic,
-                                            builder: (_, value, child) =>
-                                                Transform.translate(
-                                                  offset: Offset(
-                                                    0,
-                                                    -edge * value,
-                                                  ),
-                                                  child: Opacity(
-                                                    opacity: 1 - value,
-                                                    child: child,
-                                                  ),
-                                                ),
-                                            child: SizedBox.expand(
-                                              child: card(values[order[i]]!),
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      if (error.isNotEmpty)
-                        Padding(
-                          key: const ValueKey('dock-error'),
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            error,
-                            style: const TextStyle(color: Colors.red),
+                            ],
                           ),
                         ),
-                    ],
+                        const SizedBox(height: 4),
+                        Expanded(
+                          child: LayoutBuilder(
+                            key: const ValueKey('dock-content-strip'),
+                            builder: (context, bounds) {
+                              final edge = bounds.maxHeight;
+                              final values = {
+                                for (final item in items)
+                                  item['id'] as String: item,
+                              };
+                              return Listener(
+                                onPointerSignal: (event) {
+                                  if (event is PointerScrollEvent &&
+                                      scroll.hasClients) {
+                                    GestureBinding
+                                        .instance
+                                        .pointerSignalResolver
+                                        .register(event, (_) {
+                                          scroll.jumpTo(
+                                            (scroll.offset +
+                                                    event.scrollDelta.dy +
+                                                    event.scrollDelta.dx)
+                                                .clamp(
+                                                  0.0,
+                                                  scroll
+                                                      .position
+                                                      .maxScrollExtent,
+                                                ),
+                                          );
+                                        });
+                                  }
+                                },
+                                child: SingleChildScrollView(
+                                  key: const ValueKey('dock-horizontal-scroll'),
+                                  controller: scroll,
+                                  scrollDirection: Axis.horizontal,
+                                  child: SizedBox(
+                                    width: ((edge + 10) * order.length - 10)
+                                        .clamp(
+                                          bounds.maxWidth,
+                                          double.infinity,
+                                        ),
+                                    height: edge,
+                                    child: Stack(
+                                      children: [
+                                        for (var i = 0; i < order.length; i++)
+                                          AnimatedPositioned(
+                                            key: ValueKey(
+                                              'dock-tile-${order[i]}',
+                                            ),
+                                            duration: const Duration(
+                                              milliseconds: 240,
+                                            ),
+                                            curve: Curves.easeOutCubic,
+                                            left: i * (edge + 10),
+                                            top: 0,
+                                            width: edge,
+                                            height: edge,
+                                            child:
+                                                TweenAnimationBuilder<double>(
+                                                  key: ValueKey(
+                                                    'dock-arrival-${order[i]}',
+                                                  ),
+                                                  tween: Tween(
+                                                    begin:
+                                                        entering.contains(
+                                                          order[i],
+                                                        )
+                                                        ? 1
+                                                        : 0,
+                                                    end: 0,
+                                                  ),
+                                                  duration: const Duration(
+                                                    milliseconds: 260,
+                                                  ),
+                                                  curve: Curves.easeOutCubic,
+                                                  builder: (_, value, child) =>
+                                                      Transform.translate(
+                                                        offset: Offset(
+                                                          0,
+                                                          -edge * value,
+                                                        ),
+                                                        child: Opacity(
+                                                          opacity: 1 - value,
+                                                          child: child,
+                                                        ),
+                                                      ),
+                                                  child: SizedBox.expand(
+                                                    child: card(
+                                                      values[order[i]]!,
+                                                    ),
+                                                  ),
+                                                ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        if (error.isNotEmpty)
+                          Padding(
+                            key: const ValueKey('dock-error'),
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              error,
+                              style: const TextStyle(color: Colors.red),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -610,8 +636,8 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _DockMovePan extends PanGestureRecognizer {

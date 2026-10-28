@@ -104,9 +104,9 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                 child: ListView(
                   padding: const EdgeInsets.all(20),
                   children: [
-                    const Text(
+                    Text(
                       '源地址与目标地址 · 以实际检测为准',
-                      style: TextStyle(color: Ui.muted, fontSize: 13),
+                      style: TextStyle(color: Ui.colors(context).muted, fontSize: 13),
                     ),
                     if (!monitor.connected)
                       const Padding(
@@ -236,33 +236,33 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               if (device['platform'] == 'web')
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: Text(
                     '浏览器未公开 IP 时，显示 RTC 通道检测结果',
                     style: TextStyle(
-                      color: Ui.muted,
+                      color: Ui.colors(context).muted,
                       fontSize: 12,
                       height: 1.5,
                     ),
                   ),
                 ),
               if (expired)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: Text(
                     '直连地址已过期，等待设备更新',
-                    style: TextStyle(color: Ui.muted, fontSize: 12),
+                    style: TextStyle(color: Ui.colors(context).muted, fontSize: 12),
                   ),
                 ),
               if (results
                   .where((result) => result.scope != ReachabilityScope.relay)
                   .isEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 12),
                   child: Text(
                     '尚无直连地址或 RTC 检测结果',
-                    style: TextStyle(color: Ui.muted, fontSize: 13),
+                    style: TextStyle(color: Ui.colors(context).muted, fontSize: 13),
                   ),
                 ),
               for (final label in const [
@@ -278,10 +278,10 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                     padding: const EdgeInsets.only(top: 20, bottom: 8),
                     child: Text(
                       label,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: Ui.muted,
+                        color: Ui.colors(context).muted,
                       ),
                     ),
                   ),
@@ -313,7 +313,7 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
     final relay = result.scope == ReachabilityScope.relay;
     final rtc = result.transport == 'rtc';
     final color = !result.tested
-        ? Ui.muted
+        ? Ui.colors(context).muted
         : result.reachable
         ? Theme.of(context).colorScheme.primary
         : Theme.of(context).colorScheme.error;
@@ -334,8 +334,8 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: DecoratedBox(
-        decoration: const BoxDecoration(
-          color: Ui.input,
+        decoration: BoxDecoration(
+          color: Ui.colors(context).input,
           borderRadius: Ui.fieldRadius,
         ),
         child: Padding(
@@ -360,13 +360,13 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                     const SizedBox(width: 12),
                     Text(
                       '${result.elapsedMs} ms',
-                      style: const TextStyle(color: Ui.muted, fontSize: 12),
+                      style: TextStyle(color: Ui.colors(context).muted, fontSize: 12),
                     ),
                     const Spacer(),
                     Flexible(
                       child: Text(
                         timestamp,
-                        style: const TextStyle(color: Ui.muted, fontSize: 11),
+                        style: TextStyle(color: Ui.colors(context).muted, fontSize: 11),
                       ),
                     ),
                   ],
@@ -400,8 +400,8 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                     : result.cellular
                     ? '蜂窝网络（系统绑定）'
                     : '系统路由',
-                style: const TextStyle(
-                  color: Ui.muted,
+                style: TextStyle(
+                  color: Ui.colors(context).muted,
                   fontSize: 11,
                   height: 1.5,
                 ),
@@ -415,7 +415,7 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                     height: 1.4,
                     color: result.tested
                         ? Theme.of(context).colorScheme.error
-                        : Ui.muted,
+                        : Ui.colors(context).muted,
                   ),
                 ),
               ],

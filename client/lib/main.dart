@@ -11,6 +11,7 @@ import 'screen.dart';
 import 'system_bridge.dart';
 import 'ui_session.dart';
 import 'ui_tokens.dart';
+import 'appearance.dart';
 import 'receive_dock_window.dart';
 import 'ios_back_swipe.dart';
 import 'file_share.dart';
@@ -71,7 +72,10 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           },
         )
         .toList();
-    final encoded = jsonEncode(items);
+    final encoded = jsonEncode({
+      'items': items,
+      'appearance': controller.appearance.value.toJson(),
+    });
     if (controller.receiptSerial == receiptSerial &&
         encoded == receiptPayload) {
       return;
@@ -105,6 +109,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
       final state = await SystemBridge.presentReceiveDock(
         items: items,
         serial: serial,
+        appearance: controller.appearance.value.toJson(),
       );
       if (!mounted ||
           request != presentationRequest ||
@@ -208,6 +213,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     WidgetsBinding.instance.addObserver(this);
     receiptSerial = controller.receiptSerial;
     controller.addListener(receiptChanged);
+    controller.appearance.addListener(appearanceChanged);
     if (Platform.isWindows || Platform.isAndroid) {
       windowSubscription = SystemBridge.windowEvents.listen(windowEvent);
     }
@@ -249,6 +255,11 @@ class _GlobalSendAppState extends State<GlobalSendApp>
       windowEvent({'receiptFloating': state['floating'] == true});
     }
     updateForeground(WidgetsBinding.instance.lifecycleState);
+  }
+
+  void appearanceChanged() {
+    // Refresh an already visible UI-only dock without pretending a new file arrived.
+    receiptChanged();
   }
 
   void windowEvent(Map<String, dynamic> event) {
@@ -338,11 +349,13 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != controller) {
       oldWidget.controller.removeListener(receiptChanged);
+      oldWidget.controller.appearance.removeListener(appearanceChanged);
       oldWidget.controller.dispose();
       receiptSerial = controller.receiptSerial;
       receiptPayload = '';
       presentationRequest++;
       controller.addListener(receiptChanged);
+      controller.appearance.addListener(appearanceChanged);
       session = SendUiSession();
       initialize();
     }
@@ -354,6 +367,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     shareSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(receiptChanged);
+    controller.appearance.removeListener(appearanceChanged);
     controller.dispose();
     super.dispose();
   }
@@ -361,24 +375,30 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   @override
   Widget build(BuildContext context) => !windowVisible
       ? const SizedBox.shrink(key: ValueKey('window-ui-unloaded'))
-      : MaterialApp(
-          title: 'GlobalSend',
-          debugShowCheckedModeBanner: false,
-          navigatorObservers: [session.routes],
-          navigatorKey: navigatorKey,
-          theme: Ui.theme(),
-          builder: (context, navigator) => AnimatedBuilder(
-            animation: controller,
-            child: navigator,
-            builder: (context, child) => IosBackSwipe(
+      : AppearanceScope(
+          settings: controller.appearance,
+          child: AnimatedBuilder(
+            animation: controller.appearance,
+            builder: (context, _) => MaterialApp(
+              title: 'GlobalSend',
+              debugShowCheckedModeBanner: false,
+              navigatorObservers: [session.routes],
               navigatorKey: navigatorKey,
-              child: NativeDropFeedback(
-                active: controller.nativeDragActive,
-                importing: controller.nativeImporting,
-                child: child!,
+              theme: Ui.theme(controller.appearance.value),
+              builder: (context, navigator) => AnimatedBuilder(
+                animation: controller,
+                child: navigator,
+                builder: (context, child) => IosBackSwipe(
+                  navigatorKey: navigatorKey,
+                  child: NativeDropFeedback(
+                    active: controller.nativeDragActive,
+                    importing: controller.nativeImporting,
+                    child: child!,
+                  ),
+                ),
               ),
+              home: SendScreen(controller: controller, session: session),
             ),
           ),
-          home: SendScreen(controller: controller, session: session),
         );
 }
