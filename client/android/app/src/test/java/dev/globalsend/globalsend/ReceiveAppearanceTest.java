@@ -27,7 +27,8 @@ public class ReceiveAppearanceTest {
             output.write("{\"mode\":\"dark\",\"accent\":\"blue\"}".getBytes(StandardCharsets.UTF_8));
         }
         ReceiveAppearance p=ReceiveAppearance.load(context);
-        assertEquals(0xff1c2324,p.surface);assertEquals(0xffe6eeee,p.ink);assertEquals(0xff9ecaff,p.accent);
+        assertEquals(0xff202124,p.surface);assertEquals(0xffe9eaed,p.ink);assertEquals(0xff9ecaff,p.accent);
+        assertNotEquals(new ReceiveAppearance("dark","green").field,p.field);
         ReceiveAppearance neutral=new ReceiveAppearance("neutral","purple");
         assertEquals(0xfff7f7f8,neutral.surface);assertEquals(0xff7051a8,neutral.accent);
         assertTrue(file.delete());
@@ -47,10 +48,10 @@ public class ReceiveAppearanceTest {
         overlay.show(new ReceiveNotifications.Receipt("theme","1","电脑","暗色接收小窗",null,null,0),1,shown -> {});
         java.lang.reflect.Field field=ReceiveOverlay.class.getDeclaredField("root");field.setAccessible(true);
         View root=(View)field.get(overlay);assertNotNull(root);
-        assertEquals(0xf51c2324,((GradientDrawable)root.getBackground()).getColor().getDefaultColor());
+        assertEquals(0xf5202124,((GradientDrawable)root.getBackground()).getColor().getDefaultColor());
         field=ReceiveOverlay.class.getDeclaredField("row");field.setAccessible(true);
         LinearLayout row=(LinearLayout)field.get(overlay),card=(LinearLayout)row.getChildAt(0);
-        TextView text=(TextView)card.getChildAt(0);assertEquals(0xffe6eeee,text.getCurrentTextColor());
+        TextView text=(TextView)card.getChildAt(0);assertEquals(0xffe9eaed,text.getCurrentTextColor());
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
         WindowManager.LayoutParams size=(WindowManager.LayoutParams)root.getLayoutParams();
         root.measure(View.MeasureSpec.makeMeasureSpec(size.width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(size.height,View.MeasureSpec.EXACTLY));

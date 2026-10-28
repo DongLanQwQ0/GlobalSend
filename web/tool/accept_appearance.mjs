@@ -43,7 +43,7 @@ try{
    await evaluate(`(()=>{const c=window.__client;c.appearance.set({mode:${JSON.stringify(mode)},accent:${JSON.stringify(accent)}});c.mobileView='receive';c.render();})()`);await delay(240);
    const result=await evaluate(`(()=>{const q=s=>document.querySelector(s),style=s=>getComputedStyle(q(s));return{mode:document.documentElement.dataset.theme,accent:document.documentElement.dataset.accent,canvas:getComputedStyle(document.documentElement).backgroundColor,panel:style('.dock-panel').backgroundColor,text:style('.card-text').color,card:style('.card-text').backgroundColor,filter:style('.content-card').filter,overflow:document.documentElement.scrollWidth>innerWidth}})()`);
    assert.equal(result.mode,mode);assert.equal(result.accent,accent);assert.equal(result.overflow,false);assert.equal(result.filter,'none');
-   if(mode==='dark'){assert.equal(result.canvas,'rgb(18, 24, 25)');assert.equal(result.panel,'rgb(28, 35, 36)');assert.equal(result.text,'rgb(230, 238, 238)');}
+   if(mode==='dark'){assert.equal(result.canvas,'rgb(20, 21, 22)');assert.equal(result.panel,'rgb(32, 33, 36)');assert.equal(result.text,'rgb(233, 234, 237)');}
    evidence.push({width,...result,screenshot:await capture(width+'-'+mode)});
   }
  }

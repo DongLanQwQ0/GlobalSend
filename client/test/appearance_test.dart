@@ -56,6 +56,21 @@ void main() {
         expect(contrast(p.muted, p.input), greaterThan(4.5));
         expect(contrast(p.green, p.surface), greaterThan(4.5));
         expect(contrast(p.green, p.onAccent), greaterThan(4.5));
+        final baseline = UiPalette.from(Appearance(mode: mode));
+        expect(
+          p.background,
+          baseline.background,
+          reason: 'The page canvas is neutral, not a fixed green wash.',
+        );
+        if (accent != AccentColor.green) {
+          expect(p.softGreen, isNot(baseline.softGreen));
+          if (mode != AppearanceMode.neutral)
+            expect(
+              p.input,
+              isNot(baseline.input),
+              reason: 'Input, shared text and preview surfaces derive from the chosen accent.',
+            );
+        }
       }
     }
     settings.dispose();

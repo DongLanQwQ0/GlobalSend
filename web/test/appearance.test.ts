@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {parseHTML} from 'linkedom';
-import {AppearancePreferences,appearancePalette,parseAppearance} from '../src/appearance.ts';
+import {AppearancePreferences,appearancePalette,parseAppearance,accentColors} from '../src/appearance.ts';
 
 test('light green default and persisted mode/accent restore independently',()=>{
  assert.deepEqual(parseAppearance(null),{mode:'light',accent:'green'});
@@ -24,4 +24,14 @@ test('switching themes updates surfaces and controls without remounting editors 
  const restored=new AppearancePreferences(document as any,()=>saved,()=>{});
  assert.deepEqual(restored.value,{mode:'dark',accent:'blue'});
  preferences.set({mode:'neutral'});assert.equal(appearancePalette(preferences.value).canvas,'#e9eaec');
+});
+test('all non-green accents recolor the former green fields while keeping page neutrals stable',()=>{
+ for(const mode of ['light','dark'] as const){
+  const green=appearancePalette({mode,accent:'green'});
+  for(const accent of accentColors.filter(color=>color!=='green')){
+   const palette=appearancePalette({mode,accent});
+   assert.notEqual(palette.field,green.field,accent);
+   assert.equal(palette.canvas,green.canvas);assert.equal(palette.muted,green.muted);
+  }
+ }
 });

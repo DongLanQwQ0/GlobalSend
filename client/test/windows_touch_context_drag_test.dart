@@ -75,9 +75,13 @@ void main() {
           expect(menus, 0);
           await drag.moveBy(const Offset(35, 0));
           await pumpNativeDrag(tester);
+          // Handoff must already happen INSIDE our HWND. Waiting until the
+          // finger crosses the edge prevents the desktop touch OLE adapter
+          // from acquiring its source and leaves only a Flutter avatar.
+          expect(exports, List.filled(repeat + 1, kind.name));
           expect(
             find.byKey(const ValueKey('drag-feedback-touch-context')),
-            findsOneWidget,
+            findsNothing,
           );
           await drag.moveTo(const Offset(830, 200));
           await pumpNativeDrag(tester);

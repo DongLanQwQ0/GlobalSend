@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'dock_platform.dart';
+import 'ui_tokens.dart';
 
 class SharedBatch {
   SharedBatch({
@@ -147,12 +148,7 @@ class _BulkDragHandleState extends State<BulkDragHandle> {
         },
         child: SizedBox.square(
           dimension: widget.size,
-          child: CustomPaint(
-            painter: _HandlePainter(
-              DefaultTextStyle.of(context).style.color ??
-                  const Color(0xff176b50),
-            ),
-          ),
+          child: CustomPaint(painter: _HandlePainter(Ui.colors(context).green)),
         ),
       );
     return const SizedBox.shrink();

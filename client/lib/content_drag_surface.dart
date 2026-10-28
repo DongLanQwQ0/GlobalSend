@@ -54,9 +54,19 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   final previewKey = GlobalKey();
 
   Future<NativeDragPreview?> capturePreview() async {
-    final element = previewKey.currentContext;
-    final boundary = element?.findRenderObject();
-    if (boundary is! RenderRepaintBoundary || boundary.debugNeedsPaint)
+    // Touch hands off on its first movement, while still inside the source.
+    // Its newly mounted avatar needs one paint before we can reuse the pixels.
+    var element = previewKey.currentContext;
+    var boundary = element?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary || boundary.debugNeedsPaint) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return null;
+      element = previewKey.currentContext;
+      boundary = element?.findRenderObject();
+    }
+    if (boundary is! RenderRepaintBoundary ||
+        !boundary.attached ||
+        boundary.debugNeedsPaint)
       return null;
     var opacity = 1.0;
     element!.visitAncestorElements((element) {
@@ -94,11 +104,15 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   }
 
   void update(DragUpdateDetails details) {
+    final desktopTouch =
+        Theme.of(context).platform == TargetPlatform.windows &&
+        pointerKind != 'mouse';
     if (nativePending ||
         external.value ||
-        (Offset.zero & MediaQuery.sizeOf(context))
-            .inflate(2)
-            .contains(details.globalPosition))
+        (!desktopTouch &&
+            (Offset.zero & MediaQuery.sizeOf(context))
+                .inflate(2)
+                .contains(details.globalPosition)))
       return;
     nativePending = true;
     // OLE owns the physical pointer from here. Retire only Flutter's pointer
@@ -108,7 +122,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
         // Refresh the pixels at the handoff: image decoding may have finished
         // after the first drag frame. Keep the avatar mounted until readback.
         final card = Platform.isWindows ? await capturePreview() : null;
-        if (!mounted) return;
+        if (!mounted || sourcePointer == null) return;
         external.value = true;
         final pointer = sourcePointer;
         if (pointer != null) GestureBinding.instance.cancelPointer(pointer);
@@ -158,13 +172,20 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(
                     children: [
-                      AppIcon(Icons.add, size: 16, color: Ui.colors(context).green),
+                      AppIcon(
+                        Icons.add,
+                        size: 16,
+                        color: Ui.colors(context).green,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         widget.itemCount == null
                             ? '复制'
                             : '复制 ${widget.itemCount} 项',
-                        style: TextStyle(fontSize: 12, color: Ui.colors(context).green),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Ui.colors(context).green,
+                        ),
                       ),
                     ],
                   ),

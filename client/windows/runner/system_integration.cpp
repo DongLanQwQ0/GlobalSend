@@ -207,7 +207,8 @@ class DragSource final : public IDropSource {
   ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
   ULONG STDMETHODCALLTYPE Release() override { auto count = --references_; if (!count) delete this; return count; }
   HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape, DWORD keys) override {
-    if (escape || (touch_ && GlobalSendDesktopTouchDragCancelled())) return DRAGDROP_S_CANCEL;
+    if (touch_) return GlobalSendDesktopTouchDragStatus(escape);
+    if (escape) return DRAGDROP_S_CANCEL;
     return (keys & MK_LBUTTON) ? S_OK : DRAGDROP_S_DROP;
   }
   HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override { return DRAGDROP_S_USEDEFAULTCURSORS; }

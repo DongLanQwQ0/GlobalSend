@@ -28,6 +28,9 @@ void StartGlobalSendDesktopTouchDrag(std::wstring text,
     std::function<void(bool, const std::string&)> completed,
     std::function<HBITMAP()> prepare_preview = {});
 bool GlobalSendDesktopTouchDragCancelled();
+// OLE mouse key bits can lag behind promoted right-click input. The real held
+// contact decides touch continuation/drop; mouse drags retain their own keys.
+HRESULT GlobalSendDesktopTouchDragStatus(BOOL escape);
 INPUT GlobalSendTouchMouseInput(POINT screen_point, DWORD flags, RECT desktop);
 #ifdef GLOBALSEND_TOUCH_DRAG_TESTING
 // A deterministic cancellation boundary after real asynchronous file loading.

@@ -4913,7 +4913,7 @@ class NativeDropFeedback extends StatelessWidget {
               alignment: Alignment.center,
               color: Ui.colors(context).input.withValues(alpha: .91),
               child: CustomPaint(
-                painter: const _DashedDropBorder(),
+                painter: _DashedDropBorder(Ui.colors(context).muted),
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -4950,7 +4950,8 @@ class NativeDropFeedback extends StatelessWidget {
 }
 
 class _DashedDropBorder extends CustomPainter {
-  const _DashedDropBorder();
+  const _DashedDropBorder(this.color);
+  final Color color;
   @override
   void paint(Canvas canvas, Size size) {
     final path = Path()
@@ -4960,7 +4961,7 @@ class _DashedDropBorder extends CustomPainter {
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5
-      ..color = const Color(0xff7c8b80);
+      ..color = color;
     for (final metric in path.computeMetrics()) {
       for (double distance = 0; distance < metric.length; distance += 15) {
         canvas.drawPath(
@@ -4972,7 +4973,8 @@ class _DashedDropBorder extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_DashedDropBorder oldDelegate) => false;
+  bool shouldRepaint(_DashedDropBorder oldDelegate) =>
+      color != oldDelegate.color;
 }
 
 class _ComposeTextDialog extends StatefulWidget {

@@ -175,9 +175,9 @@ struct DesktopMouseGuard {
     if (!hook) return false;
     source = owner;
     previous_capture = GetCapture();
-    // The Flutter internal drag may only hand us the gesture at the window
-    // edge. Capture our own source before DOWN, so the adapter cannot click an
-    // unrelated application underneath that physical touch position.
+    // Capture only our source while converting its held touch to mouse input.
+    // A preview readback can finish after the finger has moved farther; DOWN
+    // must not click an unrelated application under that newer position.
     SetCapture(source);
     return GetCapture() == source;
 #endif
@@ -365,9 +365,12 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state) {
     // mouse path (which assumes MK_LBUTTON already exists), and never retries
     // the unbound WinRT operation first.
     state->synthetic_down = true;
-    if (SendDesktopMouse(state, MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_MOVE)) {
+    if (SendDesktopMouse(state, MOUSEEVENTF_LEFTDOWN)) {
       DWORD effect = DROPEFFECT_NONE;
-      const HRESULT result = state->cancelled ? DRAGDROP_S_CANCEL : state->run_drag(preview, &effect);
+      // OLE requires a DOWN followed by a distinct MOVE (as in Chromium's
+      // desktop touch adapter), not one combined packet at the window edge.
+      const bool moved = !state->cancelled && SendDesktopMouse(state, MOUSEEVENTF_MOVE);
+      const HRESULT result = moved ? state->run_drag(preview, &effect) : DRAGDROP_S_CANCEL;
       ReleaseDesktopMouse(state);
       copied = result == DRAGDROP_S_DROP && effect == DROPEFFECT_COPY && !state->cancelled;
       if (FAILED(result)) {
@@ -626,6 +629,12 @@ void StartGlobalSendDesktopTouchDrag(std::wstring text,
 
 bool GlobalSendDesktopTouchDragCancelled() {
   return !operation || !operation->desktop || operation->cancelled;
+}
+
+HRESULT GlobalSendDesktopTouchDragStatus(BOOL escape) {
+  if (escape || GlobalSendDesktopTouchDragCancelled()) return DRAGDROP_S_CANCEL;
+  return contact == operation->pointer && contact_sequence == operation->contact_sequence
+      ? S_OK : DRAGDROP_S_DROP;
 }
 
 void UnregisterGlobalSendTouchDrag() {

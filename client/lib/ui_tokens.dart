@@ -50,7 +50,7 @@ class UiPalette extends ThemeExtension<UiPalette> {
     final neutral = appearance.mode == AppearanceMode.neutral;
     final surface = Color(
       dark
-          ? 0xff1c2324
+          ? 0xff202124
           : neutral
           ? 0xfff7f7f8
           : 0xffffffff,
@@ -58,46 +58,45 @@ class UiPalette extends ThemeExtension<UiPalette> {
     return UiPalette(
       background: Color(
         dark
-            ? 0xff121819
+            ? 0xff141516
             : neutral
             ? 0xffe9eaec
-            : 0xfff4f6f2,
+            : 0xfff5f5f6,
       ),
       surface: surface,
-      input: Color(
-        dark
-            ? 0xff242c2d
-            : neutral
-            ? 0xffefeff1
-            : 0xfffafcf9,
-      ),
+      input: neutral
+          ? const Color(0xffefeff1)
+          : Color.alphaBlend(
+              Color(accent).withValues(alpha: dark ? .055 : .03),
+              surface,
+            ),
       ink: Color(
         dark
-            ? 0xffe6eeee
+            ? 0xffe9eaed
             : neutral
             ? 0xff25272b
-            : 0xff202923,
+            : 0xff25272b,
       ),
       muted: Color(
         dark
-            ? 0xffa8b5b1
+            ? 0xffabb0b8
             : neutral
             ? 0xff62666d
-            : 0xff667068,
+            : 0xff62666d,
       ),
       border: Color(
         dark
-            ? 0xff3b4748
+            ? 0xff3c4046
             : neutral
             ? 0xffd5d7dc
-            : 0xffdfe6df,
+            : 0xffdedfe3,
       ),
       green: Color(accent),
       softGreen: Color.alphaBlend(
         Color(accent).withValues(alpha: dark ? .13 : .08),
         surface,
       ),
-      onAccent: dark ? const Color(0xff102321) : Colors.white,
+      onAccent: dark ? const Color(0xff16191d) : Colors.white,
     );
   }
   @override

@@ -13,16 +13,19 @@ export function parseAppearance(raw:string|null):Appearance {
 const lightAccents=['#176b50','#245ea8','#7051a8','#a34363','#815c17','#4c6375'];
 const darkAccents=['#81d6b4','#9ecaff','#c9b6ff','#f3aec0','#eac17c','#b7c9d8'];
 const accentLabels=['绿','蓝','紫','玫瑰','琥珀','石板'];
+function tint(accent:string,surface:string,opacity:number){
+  const channel=(value:string,offset:number)=>parseInt(value.slice(offset,offset+2),16);
+  return '#'+[1,3,5].map(offset=>Math.round(channel(accent,offset)*opacity+channel(surface,offset)*(1-opacity)).toString(16).padStart(2,'0')).join('');
+}
 export function appearancePalette(value:Appearance) {
   const dark=value.mode==='dark',neutral=value.mode==='neutral';
-  return {canvas:dark?'#121819':neutral?'#e9eaec':'#f4f6f2',
-    surface:dark?'#1c2324':neutral?'#f7f7f8':'#ffffff',
-    field:dark?'#242c2d':neutral?'#efeff1':'#fafcf9',
-    text:dark?'#e6eeee':neutral?'#25272b':'#202923',
-    muted:dark?'#a8b5b1':neutral?'#62666d':'#667068',
-    line:dark?'#3b4748':neutral?'#d5d7dc':'#dfe6df',
-    green:(dark?darkAccents:lightAccents)[accentColors.indexOf(value.accent)],
-    'on-accent':dark?'#102321':'#ffffff',red:dark?'#ffb4a7':'#a94237',
+  const accent=(dark?darkAccents:lightAccents)[accentColors.indexOf(value.accent)],surface=dark?'#202124':neutral?'#f7f7f8':'#ffffff';
+  return {canvas:dark?'#141516':neutral?'#e9eaec':'#f5f5f6',surface,
+    field:neutral?'#efeff1':tint(accent,surface,dark ? .055 : .03),
+    text:dark?'#e9eaed':'#25272b',
+    muted:dark?'#abb0b8':'#62666d',
+    line:dark?'#3c4046':neutral?'#d5d7dc':'#dedfe3',green:accent,
+    'on-accent':dark?'#16191d':'#ffffff',red:dark?'#ffb4a7':'#a94237',
     warning:dark?'#eac17c':'#85662b'};
 }
 

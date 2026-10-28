@@ -74,7 +74,7 @@ int main() {
       GlobalSendDesktopForeignMouseForTest(WM_LBUTTONDOWN);
     }
     if (fail_down && (input.mi.dwFlags & MOUSEEVENTF_LEFTDOWN)) return false;
-    return !(fail_move && (input.mi.dwFlags & MOUSEEVENTF_MOVE) &&
+    return !(fail_move && sent.size() > 2 && (input.mi.dwFlags & MOUSEEVENTF_MOVE) &&
         !(input.mi.dwFlags & MOUSEEVENTF_LEFTDOWN));
   }, [&](HWND expected) { assert(expected == owner || expected == dock); return available; });
   auto run = [](HBITMAP, DWORD*) -> HRESULT { assert(false); return E_FAIL; };
@@ -172,16 +172,23 @@ int main() {
     StartGlobalSendDesktopTouchDrag(L"fixture", {}, owner,
       [&](HBITMAP bitmap, DWORD* effect) -> HRESULT {
         ++runs;
-        assert(bitmap && sent.size() == 1);
+        assert(bitmap && sent.size() == 2);
         assert(sent.front().mi.dwFlags & MOUSEEVENTF_LEFTDOWN);
+        assert(!(sent.front().mi.dwFlags & MOUSEEVENTF_MOVE));
+        assert(sent[1].mi.dwFlags & MOUSEEVENTF_MOVE);
+        assert(!(sent[1].mi.dwFlags & MOUSEEVENTF_LEFTDOWN));
+        assert(GlobalSendDesktopTouchDragStatus(FALSE) == S_OK);
+        assert(GlobalSendDesktopTouchDragStatus(TRUE) == DRAGDROP_S_CANCEL);
         if (scenario == 0 || scenario == 6) {
           point = {220, 240};
           Pointer(view, WM_POINTERUPDATE);
           point = {900, 900};
           Pointer(view, WM_POINTERDOWN, 8, POINTER_FLAG_INCONTACT);
-          assert(sent.size() == (scenario == 6 ? 3u : 2u));
+          assert(sent.size() == (scenario == 6 ? 4u : 3u));
           assert(!GlobalSendDesktopTouchDragCancelled() || scenario == 6);
           Pointer(owner, WM_POINTERUP, 7, 0);
+          assert(GlobalSendDesktopTouchDragStatus(FALSE) ==
+              (scenario == 6 ? DRAGDROP_S_CANCEL : DRAGDROP_S_DROP));
         } else if (scenario == 1) {
           Pointer(view, WM_POINTERUPDATE, 7, POINTER_FLAG_CANCELED | POINTER_FLAG_PRIMARY);
           assert(GlobalSendDesktopTouchDragCancelled());
@@ -232,7 +239,7 @@ int main() {
       continue;
     }
     assert(runs == 1);
-    if (scenario == 5) assert(sent.size() == 1); // Never release another physical left press.
+    if (scenario == 5) assert(sent.size() == 2); // Never release another physical left press.
     else assert(sent.back().mi.dwFlags & MOUSEEVENTF_LEFTUP);
     assert(copied == (scenario == 0 || scenario == 3 || scenario == 15 || scenario == 16));
     assert(error.empty() == (scenario != 4 && scenario != 6));
@@ -255,7 +262,7 @@ int main() {
         assert(copied && error.empty()); dock_done = true;
       });
   Pump(dock_done);
-  assert(sent.size() == 2);
+  assert(sent.size() == 3);
   DetachGlobalSendTouchDragWindow(dock);
 
   // Destruction while nested OLE is running releases only this adapter's press,
@@ -267,7 +274,7 @@ int main() {
       [&](HBITMAP, DWORD*) -> HRESULT {
         DestroyWindow(view);
         assert(GlobalSendDesktopTouchDragCancelled());
-        assert(sent.size() == 2 && (sent.back().mi.dwFlags & MOUSEEVENTF_LEFTUP));
+        assert(sent.size() == 3 && (sent.back().mi.dwFlags & MOUSEEVENTF_LEFTUP));
         destroyed = true;
         return DRAGDROP_S_CANCEL;
       }, [](bool, const std::string&) { assert(false); });
