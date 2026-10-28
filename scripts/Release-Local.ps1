@@ -43,14 +43,34 @@ function Invoke-Checked([string]$Exe, [string[]]$Arguments) {
 function Install-PhoneApk([string]$Device, [string]$Package) {
     $output = Join-Path $logs "release-local-$version-build$buildNumber-install.log"
     $errors = Join-Path $logs "release-local-$version-build$buildNumber-install-error.log"
-    $installer = Start-Process -FilePath $adb -ArgumentList @('-s',$Device,'install','-r',('"' + $Package + '"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput $output -RedirectStandardError $errors
-    if (-not $installer.WaitForExit(120000)) {
-        # Stop only our waiting adb client, not the daemon, phone app or installer UI.
-        $installer.Kill(); $installer.WaitForExit()
-        throw 'Phone installation is waiting for system confirmation; the APK remains in Download/GlobalSend-latest.apk'
-    }
-    Get-Content -LiteralPath $output,$errors | Write-Output
-    if ($installer.ExitCode -ne 0) { throw "Phone installation was not completed ($($installer.ExitCode)); APK retained for manual installation" }
+    # Keep ownership of the native process handle. Windows PowerShell 5's
+    # Start-Process wrapper can return a null ExitCode after a successful wait.
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $adb
+    $start.Arguments = ('-s "{0}" install -r "{1}"' -f $Device,$Package)
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $installer = New-Object Diagnostics.Process
+    $installer.StartInfo = $start
+    try {
+        if (-not $installer.Start()) { throw 'Unable to start phone installer' }
+        $stdout = $installer.StandardOutput.ReadToEndAsync()
+        $stderr = $installer.StandardError.ReadToEndAsync()
+        $finished = $installer.WaitForExit(120000)
+        if (-not $finished) {
+            # Stop only our waiting client, never the daemon or phone installer.
+            $installer.Kill()
+        }
+        $installer.WaitForExit()
+        $exitCode = $installer.ExitCode
+        [IO.File]::WriteAllText($output,$stdout.GetAwaiter().GetResult())
+        [IO.File]::WriteAllText($errors,$stderr.GetAwaiter().GetResult())
+        Get-Content -LiteralPath $output,$errors | Write-Output
+        if (-not $finished) { throw 'Phone installation is waiting for system confirmation; the APK remains in Download/GlobalSend-latest.apk' }
+        if ($exitCode -ne 0) { throw "Phone installation was not completed ($exitCode); APK retained for manual installation" }
+    } finally { $installer.Dispose() }
 }
 try {
     $env:APPDATA = $config
