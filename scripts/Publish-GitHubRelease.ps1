@@ -53,8 +53,15 @@ $tag = "v$Version-build$BuildNumber"
 if (-not $Publish) { return }
 
 # GitHub hosts packages. The center server is never used for distribution.
-& $gh release view $tag --repo $repo --json tagName 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+# Windows PowerShell 5 turns expected native stderr ("release not found")
+# into a terminating ErrorRecord under Stop, before LASTEXITCODE is checked.
+$priorErrorAction = $ErrorActionPreference
+try {
+  $ErrorActionPreference = 'Continue'
+  & $gh release view $tag --repo $repo --json tagName 2>$null | Out-Null
+  $releaseExists = $LASTEXITCODE -eq 0
+} finally { $ErrorActionPreference = $priorErrorAction }
+if (-not $releaseExists) {
   & $gh release create $tag --repo $repo --target $SourceCommit --title "GlobalSend $Version ($BuildNumber)" --notes 'Download the package matching your platform. IPA files require manual signing.'
   if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed.' }
 }

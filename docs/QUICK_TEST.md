@@ -4,12 +4,12 @@
 
 截至 2026-10-28，发布记录确认：
 
-- Windows 已更新、启动 **1.0.28+37**，位于 `E:\Programs\GlobalSend`。
-- [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.28-android-arm64-v8a.apk)：约 16.22 MB。已通过新地址 `10.195.39.39:43975` 推送、覆盖安装并启动 **1.0.28+37**；包信息与进程确认一致，原数据保留。
-- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.28-windows-x64.zip)。不要只替换 EXE。
-- 中心与 [网页版](https://123.207.180.163/globalsend/app/) 已上线 `globalsend:interaction-fixes-20261028-193816`；本轮仅原生代码变化，不重复部署相同 Web 资源。
+- Windows 已更新、启动 **1.0.29+38**，位于 `E:\Programs\GlobalSend`，进程响应。
+- [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.29-android-arm64-v8a.apk)：16,232,012 字节，约 15.48 MiB。当前 ADB 没有在线设备，**尚未安装到手机**；手机最后确认版本仍为 **1.0.28+37**，原数据保留。
+- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.29-windows-x64.zip)。不要只替换 EXE。
+- 中心与 [网页版](https://123.207.180.163/globalsend/app/) 已上线 `globalsend:shelf-theme-20261028-214157`，包括跟随系统及居中拖影；原有数据和中继卷保留。
 
-版本以 [本机发布记录](../artifacts/releases/latest-local.json) 和 [中心部署记录](../artifacts/deploy/current-workspace-deployment.json) 为准。手机启动已见原有收发工作区及电脑设备；接下来重点验证文件库、长按不切换多选、接收坞删除/出现延迟，以及已测通路径复用；步骤见 [UI 验收](UI_ACCEPTANCE.md)。
+版本以 [本机发布记录](../artifacts/releases/latest-local.json) 和 [中心部署记录](../artifacts/deploy/current-workspace-deployment.json) 为准。新版手机重点为 [独立暂存坞](TEMPORARY_SHELF.md)、系统拖影主题及应用安装包选择；不能把框架测试当作手机更新或物理跨应用拖放验收。步骤见 [UI 验收](UI_ACCEPTANCE.md)。
 
 ## 快速走一遍
 

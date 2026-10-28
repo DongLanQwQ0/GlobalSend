@@ -17,6 +17,6 @@
 2. 贴左/右边收起、上下移动、向内拉出；坞外区域仍可操作其它应用。
 3. 单项和全部拖出到其它应用；成功 3 秒后移除，轻点取消；取消拖动和回投不移除。
 4. 不同主题下检查原生拖影，图片本身不被主题染色。
-5. 冷后台时的第三方 URI 读取仍需真机验收：Android 公开接口将拖放读取授权绑定到 Activity；当前复用仍存活的宿主 Activity，不增加隐藏权限接口或无障碍服务。
+5. 冷后台时的第三方 URI 读取仍需真机验收：[Android 公开接口](https://developer.android.com/reference/android/app/Activity#requestDragAndDropPermissions(android.view.DragEvent))将拖放读取授权绑定到 Activity；当前复用仍存活的宿主 Activity，不增加隐藏权限接口或无障碍服务。
 
 已验证：Android 框架混合投放与后台复制、原生完成结果、分区、窗口实际缩放、3 秒移除及取消逻辑；Flutter 主题/应用选择与桌面拖影锚点。真机跨应用拖放不以框架测试代替。
