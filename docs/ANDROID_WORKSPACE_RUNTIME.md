@@ -1,8 +1,12 @@
-# Android 工作区运行验收
+# Android 工作区历史运行验收
+
+以下是旧源码快照的历史记录，不是当前版本的验收结论。当前所有项目只复用公共 `F:\Android\Avd` 下的 `Chrona_Classroom_36`；禁止新建、复制或继续使用项目专用 AVD。旧消费构建脚本包含已经退役的归档接口，不作为当前源码的构建入口。
+
+当前组内共享不触发通知或接收小窗，文件夹按目录结构直接传输，不打包归档。最新 Android 调试记录在 `artifacts/reports/android-existing-build32-debug-20261028.json`。用户冻结手机更新期间，不向手机推送或安装任何测试包。
 
 ## 运行对象
 
-项目专用 `GlobalSend_JNI_36` AVD，Android 16 / API 36 / x86_64。
+历史记录使用了项目专用 `GlobalSend_JNI_36` AVD，Android 16 / API 36 / x86_64；此做法已停用。
 
 独立消费程序 `dev.globalsend.workspaceprobe` 直接编译生产 Java 桥接源码快照。它没有 INTERNET 权限，只使用本地合成文本、图片和 DocumentsProvider 文件树，不安装到用户手机，也不覆盖 GlobalSend 主应用。
 

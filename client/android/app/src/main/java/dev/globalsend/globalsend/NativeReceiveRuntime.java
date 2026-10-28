@@ -93,7 +93,13 @@ final class NativeReceiveRuntime {
     private RtcDataBridge rtcDataBridge;
     private ReceiveNotificationBridge receivedNotifications;
     private final ExecutorService transfers = Executors.newFixedThreadPool(16);
-    private final ExecutorService connectionChecks = Executors.newFixedThreadPool(2);
+    private final ExecutorService connectionChecks = peerProbeExecutor();
+    static ExecutorService peerProbeExecutor() {
+        // Dart races all candidate pairs under one decision deadline. Queuing a
+        // working address behind stalled Network/TLS handshakes makes that race
+        // incorrectly fall back to relay. Idle workers are reclaimed by the pool.
+        return Executors.newCachedThreadPool();
+    }
     private final java.util.concurrent.ScheduledExecutorService writeTimeouts = Executors.newSingleThreadScheduledExecutor();
     private final java.util.concurrent.ConcurrentHashMap<String, HttpsURLConnection> activeDownloads = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Set<String> canceled = java.util.concurrent.ConcurrentHashMap.newKeySet();
