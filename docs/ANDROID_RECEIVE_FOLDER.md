@@ -16,6 +16,8 @@
 
 旧记录只有物理路径时，应用会尝试通过已经保存的文件夹授权恢复文档位置。权限暂不可用时保留原引用；确认文件不存在时才移除。文件的读取授权不等于允许自动清理原件，清理仍仅处理应用登记的接收文件。
 
+拖出与系统分享共用同一个只读文件 URI 注册入口。对用户已能读取的 `Download/GlobalSend` 原件，不再额外要求其位于应用私有目录；不复制原件，也不因此取得删除权限。此修正在 1.0.23+32 真机复现后完成源码和 Java 检查，按用户要求暂不安装新包。
+
 ## 本次失败的实际原因
 
 实体 vivo 的 `GlobalSendDestination` 日志记录：`provider=com.android.externalstorage.documents, writable=true, cause=ErrnoException, errno=13`。系统已给出 SAF 文件描述符，但原接收链需要经 `/proc/self/fd` 再次打开，重开时被系统拒绝（EACCES）。此前“请选择本机目录”不能准确解释这个本机目录失败。

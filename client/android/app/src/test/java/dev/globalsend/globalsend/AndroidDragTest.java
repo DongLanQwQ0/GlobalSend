@@ -550,6 +550,38 @@ public class AndroidDragTest {
         catch (java.io.FileNotFoundException expected) {}
     }
 
+    @Test @Config(shadows = NativeDragView.class)
+    public void savedPublicDownloadCanStartSystemDragAndReturnOriginalWithoutCopy() throws Exception {
+        NativeDragView.resetFixture();
+        File directory = new File(android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS), "GlobalSend");
+        assertTrue(directory.isDirectory() || directory.mkdirs());
+        File image = new File(directory, "IMG_20261026_181405 (1).jpg");
+        byte[] bytes = {1, 3, 5, 7}; Files.write(image.toPath(), bytes);
+        assertTrue(image.isFile() && image.canRead());
+        assertFalse(image.getCanonicalPath().startsWith(activity.getDataDir().getCanonicalPath() + File.separator));
+        assertFalse(image.getCanonicalPath().startsWith(activity.getExternalFilesDir(null).getCanonicalPath() + File.separator));
+        DockShareProvider provider = new DockShareProvider();
+        ProviderInfo info = new ProviderInfo(); info.authority = activity.getPackageName() + ".dock-files";
+        provider.attachInfo(activity, info); ShadowContentResolver.registerProviderInternal(info.authority, provider);
+        View source = new View(activity); activity.setContentView(source); queueBounds();
+        assertTrue(DockCoordinator.startDrag(source, image.getPath(), null, image.getName()));
+        Uri uri = NativeDragView.clips.get(0).getItemAt(0).getUri();
+        try (java.io.InputStream stream = activity.getContentResolver().openInputStream(uri)) {
+            assertArrayEquals(bytes, stream.readAllBytes());
+        }
+        DockCoordinator.LocalDrag local = (DockCoordinator.LocalDrag) NativeDragView.states.get(0);
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_STARTED, local, 0, 0));
+        assertTrue(coordinator.acceptDrag(localEvent(DragEvent.ACTION_DROP, local, 100, 200)));
+        Map<?, ?> imported = awaitDrop();
+        assertEquals(List.of(image.getPath()), imported.get("paths"));
+        assertEquals(List.of(), imported.get("temporaryPaths"));
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED, local, 0, 0));
+        assertArrayEquals(bytes, Files.readAllBytes(image.toPath()));
+        try { provider.openFile(uri, "w"); fail("Drag grants read access only"); }
+        catch (java.io.FileNotFoundException expected) { }
+    }
+
     public static class FixtureProvider extends ContentProvider {
         File directory;
         @Override public boolean onCreate() { return true; }

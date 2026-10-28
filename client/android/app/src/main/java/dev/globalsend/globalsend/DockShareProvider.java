@@ -22,20 +22,17 @@ public final class DockShareProvider extends ContentProvider {
     }
     private static final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
     static Uri register(android.content.Context context, File file, String label) throws Exception {
-        return register(context,file,label,true);
-    }
-    static Uri registerForShare(android.content.Context context,File file,String label) throws Exception {
-        return register(context,file,label,false);
-    }
-    private static Uri register(android.content.Context context, File file, String label,boolean requireOwned) throws Exception {
         File canonical = file.getCanonicalFile();
-        String path = canonical.getPath(), data = context.getDataDir().getCanonicalPath() + File.separator;
-        File external = context.getExternalFilesDir(null);
-        boolean allowed = path.startsWith(data) || (external != null && path.startsWith(external.getCanonicalPath() + File.separator));
-        if ((requireOwned&&!allowed) || !canonical.isFile() || !canonical.canRead()) throw new SecurityException("文件不存在或无法读取");
+        // Explicit drag/share exports require read access, not cleanup ownership.
+        // A user-selected Download/GlobalSend file is not app-private, but is a
+        // valid original for this same read-only URI capability.
+        if (!canonical.isFile() || !canonical.canRead()) throw new SecurityException("文件不存在或无法读取");
         entries.entrySet().removeIf(e -> e.getValue().expires < System.currentTimeMillis());
         String id = UUID.randomUUID().toString(); entries.put(id, new Entry(canonical, label));
         return new Uri.Builder().scheme("content").authority(context.getPackageName() + ".dock-files").appendPath("share").appendPath(id).build();
+    }
+    static Uri registerForShare(android.content.Context context,File file,String label) throws Exception {
+        return register(context,file,label);
     }
     private Entry lookup(Uri uri) throws FileNotFoundException {
         if (uri.getPathSegments().size() != 2 || !uri.getPathSegments().get(0).equals("share")) throw new FileNotFoundException();
