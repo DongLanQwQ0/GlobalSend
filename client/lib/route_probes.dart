@@ -107,14 +107,15 @@ class RouteProbes {
     bool? cellular,
     bool? lan,
   ) sync* {
-    for (final address in addresses) {
-      for (final route in _routes.values) {
-        if (route.address == address &&
-            (cellular == null || route.cellular == cellular) &&
-            (lan == null || route.lan == lan) &&
-            !_rejected.contains(route.key))
-          yield route;
-      }
+    // Verified pairs were inserted in measured priority order. The peer's
+    // original address list is an allowlist, not a replacement for that rank.
+    final allowed = addresses.toSet();
+    for (final route in _routes.values) {
+      if (allowed.contains(route.address) &&
+          (cellular == null || route.cellular == cellular) &&
+          (lan == null || route.lan == lan) &&
+          !_rejected.contains(route.key))
+        yield route;
     }
   }
 

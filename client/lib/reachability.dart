@@ -349,22 +349,39 @@ class ReachabilityMonitor extends ChangeNotifier {
         .firstOrNull?['peer'];
     if (peer is! Map || peer['certificateSha256'] != fingerprint) return [];
     final advertised = List<String>.from(peer['candidates'] ?? []);
+    final checks =
+        forDevice(deviceId)
+            .where(
+              (check) =>
+                  check.reachable &&
+                  check.tested &&
+                  check.transport == 'https' &&
+                  (!check.cellular || cellular) &&
+                  addresses.contains(check.address) &&
+                  advertised.contains(check.address) &&
+                  _clock().difference(check.checkedAt) <
+                      const Duration(minutes: 2),
+            )
+            .toList()
+          ..sort((a, b) {
+            final scope = a.scope.index.compareTo(b.scope.index);
+            if (scope != 0) return scope;
+            final latency = a.elapsedMs.compareTo(b.elapsedMs);
+            if (latency != 0) return latency;
+            if (a.cellular != b.cellular) return a.cellular ? 1 : -1;
+            return addresses
+                .indexOf(a.address)
+                .compareTo(addresses.indexOf(b.address));
+          });
     return [
-      for (final check in forDevice(deviceId))
-        if (check.reachable &&
-            check.tested &&
-            check.transport == 'https' &&
-            (!check.cellular || cellular) &&
-            addresses.contains(check.address) &&
-            advertised.contains(check.address) &&
-            _clock().difference(check.checkedAt) < const Duration(minutes: 2))
-          CandidateRoute(
-            address: check.address,
-            lan: check.scope == ReachabilityScope.lan,
-            sourceAddress: check.sourceAddress,
-            sourceName: check.sourceName,
-            cellular: check.cellular,
-          ),
+      for (final check in checks)
+        CandidateRoute(
+          address: check.address,
+          lan: check.scope == ReachabilityScope.lan,
+          sourceAddress: check.sourceAddress,
+          sourceName: check.sourceName,
+          cellular: check.cellular,
+        ),
     ];
   }
 

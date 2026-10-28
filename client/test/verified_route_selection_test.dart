@@ -197,4 +197,79 @@ void main() {
     expect(coldLan.inMilliseconds, inInclusiveRange(300, 350));
     expect(deadline.scopeBudget(last: true).inMilliseconds, greaterThan(900));
   });
+
+  test('verified pairs retain LAN priority, then use measured RTT rather than a hidden non-cellular preference', () {
+    const local = CandidateRoute(address: 'https://10.0.0.2:9443', lan: true);
+    final monitor = ReachabilityMonitor()
+      ..devices = [
+        {
+          'deviceId': 'phone',
+          'peer': {
+            'candidates': [local.address, public],
+            'certificateSha256': 'pin',
+          },
+        },
+      ];
+    addTearDown(monitor.dispose);
+    final report = monitor.captureReporter('phone');
+    report(local, (reachable: true, elapsedMs: 300, error: ''));
+    report(wifi, (reachable: true, elapsedMs: 90, error: ''));
+    report(cellular, (reachable: true, elapsedMs: 5, error: ''));
+    expect(
+      monitor
+          .verifiedRoutes(
+            'phone',
+            [local.address, public],
+            'pin',
+            cellular: true,
+          )
+          .map((r) => r.key),
+      [local.key, cellular.key, wifi.key],
+    );
+    expect(
+      monitor
+          .verifiedRoutes(
+            'phone',
+            [local.address, public],
+            'pin',
+            cellular: false,
+          )
+          .map((r) => r.key),
+      [local.key, wifi.key],
+    );
+  });
+
+  test(
+    'original advertisement order cannot override the ranked verified pairs',
+    () async {
+      const slow = CandidateRoute(
+        address: 'https://[240e::10]:9443',
+        lan: false,
+      );
+      const fast = CandidateRoute(
+        address: 'https://[240e::20]:9443',
+        lan: false,
+      );
+      final checks = RouteProbes(
+        [slow.address, fast.address],
+        [],
+        'pin',
+        const Duration(seconds: 1),
+        routes: [slow, fast],
+        verified: [fast, slow],
+        probe: (_, _, _) =>
+            throw StateError('Verified pairs must not be re-probed'),
+      );
+      addTearDown(checks.close);
+      expect(
+        (await checks.firstRoute([slow.address, fast.address]))!.key,
+        fast.key,
+      );
+      checks.discard(fast);
+      expect(
+        (await checks.firstRoute([slow.address, fast.address]))!.key,
+        slow.key,
+      );
+    },
+  );
 }
