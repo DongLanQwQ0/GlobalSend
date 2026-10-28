@@ -38,6 +38,7 @@ import 'reverse_https_probe.dart';
 import 'local_ip_addresses.dart';
 import 'candidate_routes.dart';
 import 'transfer_operation.dart';
+import 'transfer_route_selection.dart';
 
 String newId() {
   final r = Random.secure();
@@ -98,6 +99,8 @@ typedef _PreparedRoutes = ({
   List<String> advertised,
   ({List<String> lan, List<String> public}) stages,
   RouteProbes probes,
+  Map<String, Future<Map<String, dynamic>?>> reverseChecks,
+  Map<String, Future<bool?>> rtcChecks,
 });
 
 class SendController extends ChangeNotifier {
@@ -4573,6 +4576,33 @@ class SendController extends ChangeNotifier {
     final advertised = senderPeer == null
         ? <String>[]
         : List<String>.from(senderPeer['candidates'] ?? []);
+    final scopes = [if (mode != 'public') 'lan', if (mode != 'lan') 'public'];
+    // All of these are read-only handshakes. Do not open competing receive
+    // slots or file grants while measuring forward, reverse and RTC paths.
+    final reverseChecks = <String, Future<Map<String, dynamic>?>>{
+      if (peer?.pushEnabled == true &&
+          senderPeer?['push'] == true &&
+          info['features']?['directPush'] == true &&
+          reverseHttpsProbes != null)
+        for (final scope in scopes)
+          scope: reverseHttpsProbes!.check(
+            item.source,
+            scope,
+            limit: deadline.remaining,
+          ),
+    };
+    final rtcChecks = <String, Future<bool?>>{
+      if (rtc != null && sourceRtc != null)
+        for (final scope in scopes)
+          if ((sourceRtc['scopes'] as List).contains(scope))
+            scope: _waitRtcReadiness(item.source, scope, deadline.remaining),
+    };
+    if (rtcChecks.isNotEmpty &&
+        rtcProbes?.active == true &&
+        rtcProbes?.parallel == true) {
+      // Legacy/background discovery eligibility is not a file prerequisite.
+      unawaited(rtcProbes!.refreshNow(peerId: item.source));
+    }
     final stages = await _addressStages(advertised);
     final probes = RouteProbes(
       deadline.expired
@@ -4602,7 +4632,46 @@ class SendController extends ChangeNotifier {
       advertised: advertised,
       stages: stages,
       probes: probes,
+      reverseChecks: reverseChecks,
+      rtcChecks: rtcChecks,
     );
+  }
+
+  bool _rtcReady(String id, String phase) => reachability
+      .forDevice(id)
+      .any(
+        (check) =>
+            check.transport == 'rtc' &&
+            check.reachable &&
+            check.scope ==
+                (phase == 'lan'
+                    ? ReachabilityScope.lan
+                    : ReachabilityScope.public),
+      );
+
+  Future<bool?> _waitRtcReadiness(
+    String id,
+    String phase,
+    Duration limit,
+  ) async {
+    if (_rtcReady(id, phase)) return true;
+    if (rtcProbes?.active != true || limit <= Duration.zero) return null;
+    final result = Completer<bool?>();
+    void changed() {
+      if (!result.isCompleted && _rtcReady(id, phase)) result.complete(true);
+    }
+
+    reachability.addListener(changed);
+    final timer = Timer(limit, () {
+      if (!result.isCompleted) result.complete(null);
+    });
+    try {
+      changed();
+      return await result.future;
+    } finally {
+      timer.cancel();
+      reachability.removeListener(changed);
+    }
   }
 
   Future<void> _pullByStages(
@@ -4957,8 +5026,7 @@ class SendController extends ChangeNotifier {
       }
     }
 
-    final choices =
-        <({String phase, String label, Future<bool> Function() run})>[];
+    final choices = <TransferRouteChoice>[];
     for (final phase in phases) {
       final scopeLabel = phase == 'lan' ? '局域网' : '公网';
       final preferRtc = reachability.preferRtc(
@@ -4974,87 +5042,133 @@ class SendController extends ChangeNotifier {
           info['features']?['directPush'] == true &&
           senderPeer != null &&
           senderPeer['push'] == true;
-      if (preferRtc && hasRtc)
-        choices.add((
+      final addresses = phase == 'lan'
+          ? advertisedStages.lan
+          : advertisedStages.public;
+      final forward = probes.readyRoute(
+        addresses,
+        cellular: phase == 'lan' ? false : null,
+        lan: phase == 'lan' ? true : null,
+      );
+      Future<bool?> forwardReady() async =>
+          (await probes.firstRoute(
+            addresses,
+            cellular: phase == 'lan' ? false : null,
+            lan: phase == 'lan' ? true : null,
+          )) !=
+          null;
+      int? measuredLatency(String transport) {
+        final checks = reachability
+            .forDevice(item.source)
+            .where(
+              (check) =>
+                  check.transport == transport &&
+                  check.reachable &&
+                  check.scope ==
+                      (phase == 'lan'
+                          ? ReachabilityScope.lan
+                          : ReachabilityScope.public),
+            );
+        return checks.isEmpty
+            ? null
+            : checks.map((check) => check.elapsedMs).reduce(min);
+      }
+
+      bool? reverseReady(Map<String, dynamic>? result, bool cellular) =>
+          result == null || result['tested'] != true
+          ? null
+          : result['reachable'] != true
+          ? false
+          : (result['cellular'] == true) == cellular
+          ? true
+          : null;
+      TransferRouteChoice rtcChoice() => TransferRouteChoice(
+        phase: phase,
+        label: '$scopeLabel WebRTC直传',
+        run: () => dataChannel(phase),
+        ready: _rtcReady(item.source, phase) ? true : null,
+        readiness: plan.rtcChecks[phase],
+        latency: () => measuredLatency('rtc'),
+      );
+      TransferRouteChoice reverseChoice(bool cellular) {
+        var result = reverseHttpsProbes?.cached(item.source, phase);
+        return TransferRouteChoice(
           phase: phase,
-          label: '$scopeLabel WebRTC直传',
-          run: () => dataChannel(phase),
-        ));
+          label: '$scopeLabel${cellular ? '蜂窝' : ''}反向直传',
+          run: () => reverse(phase, cellular),
+          ready: reverseReady(result, cellular),
+          readiness: plan.reverseChecks[phase]?.then((value) {
+            result = value;
+            return reverseReady(value, cellular);
+          }),
+          latency: () => result?['elapsedMs'] as int?,
+        );
+      }
+
+      if (preferRtc && hasRtc) choices.add(rtcChoice());
       if ((phase == 'lan' ? advertisedStages.lan : advertisedStages.public)
               .isNotEmpty ||
           !peerLive && info['features']?['direct'] == true)
-        choices.add((
-          phase: phase,
-          label: '$scopeLabel直连',
-          run: () => attempt(phase),
-        ));
-      if (hasReverse)
-        choices.add((
-          phase: phase,
-          label: '$scopeLabel反向直传',
-          run: () => reverse(phase, false),
-        ));
-      if (!preferRtc && hasRtc)
-        choices.add((
-          phase: phase,
-          label: '$scopeLabel WebRTC直传',
-          run: () => dataChannel(phase),
-        ));
+        choices.add(
+          TransferRouteChoice(
+            phase: phase,
+            label: '$scopeLabel直连',
+            run: () => attempt(phase),
+            ready: forward != null ? true : null,
+            // With no advertised peer, only the legacy file grant knows its
+            // candidates. Keep that entry point usable without preflight.
+            readiness: advertised.isEmpty ? null : forwardReady(),
+            latency: () => measuredLatency('https'),
+          ),
+        );
+      if (hasReverse) choices.add(reverseChoice(false));
+      if (!preferRtc && hasRtc) choices.add(rtcChoice());
       // Cellular HTTPS is already raced with ordinary public source pairs.
       if (phase == 'public' && hasReverse && senderPeer['cellularPush'] == true)
-        choices.add((
-          phase: phase,
-          label: '公网蜂窝反向直传',
-          run: () => reverse(phase, true),
-        ));
+        choices.add(reverseChoice(true));
     }
+    final selection = TransferRouteSelection(choices);
     try {
-      String? activePhase;
-      Stopwatch? phaseWatch;
-      Duration phaseLimit = Duration.zero;
-      for (
-        var index = 0;
-        index < choices.length && !deadline.expired;
-        index++
-      ) {
-        try {
-          final choice = choices[index];
-          if (activePhase != choice.phase) {
-            activePhase = choice.phase;
-            phaseWatch = Stopwatch()..start();
-            final hasPublic = choices
-                .skip(index)
-                .any((c) => c.phase == 'public');
-            final publicReady =
-                probes.readyRoute(advertisedStages.public) != null;
-            final lanReady =
-                probes.readyRoute(
-                  advertisedStages.lan,
-                  cellular: false,
-                  lan: true,
-                ) !=
-                null;
-            // Budget network scopes, not every transport separately. A warm
-            // public path reserves most of the second when LAN is unmeasured.
-            phaseLimit = deadline.scopeBudget(
-              last: choice.phase == 'public' || !hasPublic,
-              verified: lanReady,
-              nextVerified: publicReady,
-            );
+      for (final phase in phases) {
+        if (deadline.expired) break;
+        final phaseWatch = Stopwatch()..start();
+        final phaseLimit = deadline.scopeBudget(
+          last: phase == 'public' || !choices.any((c) => c.phase == 'public'),
+          verified: selection.readyIn(phase),
+          nextVerified: selection.readyIn('public'),
+        );
+        while (!deadline.expired) {
+          final remaining = phaseLimit - phaseWatch.elapsed;
+          if (remaining <= Duration.zero) break;
+          final wait = Duration(
+            microseconds: (remaining.inMicroseconds * .35).floor(),
+          );
+          final choice = await selection.next(
+            phase,
+            wait > const Duration(milliseconds: 200)
+                ? const Duration(milliseconds: 200)
+                : wait,
+          );
+          if (choice == null) break;
+          final budget = selection.attemptBudget(
+            choice,
+            phaseLimit - phaseWatch.elapsed,
+          );
+          choice.attempted = true;
+          if (budget <= Duration.zero) break;
+          try {
+            // Exactly one file writer; cancellation/teardown completes before
+            // any other ready transport is allowed to acquire its file grant.
+            if (await ConnectionWindow(budget).run(choice.run)) return;
+          } catch (error) {
+            _requireSession(epoch, a, p);
+            if (item.locallyCanceled) rethrow;
+            failures.add('${choice.label}不可用：$error');
           }
-          final remaining = phaseLimit - phaseWatch!.elapsed;
-          if (remaining <= Duration.zero) continue;
-          if (await ConnectionWindow(remaining).run(choice.run)) return;
-        } catch (error) {
-          _requireSession(epoch, a, p);
-          if (item.locallyCanceled) rethrow;
-          final label = item.routeDetail.startsWith('正在尝试')
-              ? item.routeDetail.substring(4)
-              : choices[index].label;
-          failures.add('$label不可用：$error');
         }
       }
     } finally {
+      selection.close();
       await probes.close();
     }
     throw StateError(failures.join('；'));

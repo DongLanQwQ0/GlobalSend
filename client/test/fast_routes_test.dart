@@ -35,7 +35,7 @@ class FastApi extends CenterApi {
       return {
         'transfer': {
           'files': [
-            {
+            <String, dynamic>{
               'fileId': 'f',
               'status': 'accepted',
               'transport': null,
@@ -160,6 +160,14 @@ void main() {
     identity = createPeerIdentity('fast-route-fixture');
   });
   setUp(() async {
+    // Route ordering may reach RTC before this file's explicit late-create
+    // fixture. Do not poison its process-wide initialization with a missing
+    // host plugin; this suite supplies no real platform WebRTC engine.
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const method = MethodChannel('FlutterWebRTC.Method');
+    messenger.setMockMethodCallHandler(method, (_) async => <String, Object>{});
+    addTearDown(() => messenger.setMockMethodCallHandler(method, null));
     final parent = await Directory('build/test-tmp/fast-routes')
         .create(recursive: true);
     directory = await parent.createTemp('case-');
@@ -755,6 +763,44 @@ void main() {
     expect(await partial.readAsBytes(), [1, 2, 3, 4]);
     api.close();
   });
+
+  test(
+    'failed native RTC creation still retires cleanly before fallback',
+    () async {
+      final api = FastApi('');
+      final transport = RtcFileTransport(
+        api,
+        connectionFactory:
+            ({
+              required scope,
+              required allowCellular,
+              required iceServers,
+            }) async {
+              throw StateError('fixture native create failed');
+            },
+      );
+      final partial = await File('${directory.path}/failed-create.part')
+          .writeAsBytes([1, 2]);
+      try {
+        await expectLater(
+          transport.receive(
+            fileRoute: '/transfers/t/files/f',
+            attemptId: 'failed',
+            scope: 'lan',
+            destination: partial,
+            size: 4,
+            onProgress: (_) => fail('no RTC bytes expected'),
+          ),
+          throwsA(isA<StateError>()),
+        );
+        await transport.close();
+        expect(await partial.readAsBytes(), [1, 2]);
+      } finally {
+        await transport.close();
+        api.close();
+      }
+    },
+  );
 
   test('refresh publishes new local candidates before reading the group and coalesces concurrent requests', () async {
     final order = <String>[], gate = Completer<void>();

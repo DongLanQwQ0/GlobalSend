@@ -640,7 +640,15 @@ class _RtcFileSession {
         try {
           await channel?.close();
         } finally {
-          final value = pc ?? await _creating;
+          var value = pc;
+          if (value == null && _creating != null) {
+            try {
+              value = await _creating;
+            } catch (_) {
+              // run() reports creation failure. There is no peer to close;
+              // teardown must still finish so the next transport may proceed.
+            }
+          }
           await value?.close();
         }
       }
