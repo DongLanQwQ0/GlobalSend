@@ -213,7 +213,7 @@ export class LocalLibraryView {
     ${this.error?`<p class="library-error" role="alert">${e(this.error)}</p>`:''}
     ${preview?this.previewHtml(preview):`${this.toolbarHtml(peers,pending)}${this.renameId?`<form id="library-rename-form" class="library-rename-form"><label class="field" for="library-rename-name">文件名<input id="library-rename-name" value="${e(this.renameName)}" maxlength="255" required></label><button class="primary" type="submit" ${this.busy?'disabled':''}>保存</button><button class="quiet" type="button" data-library-action="cancel-rename">取消</button></form>`:''}
     ${this.loading && !this.entries.length?'<div class="library-empty">读取中…</div>':!this.entries.length?'<div class="library-empty">暂无已保存文件</div>':`<div class="library-grid">${sortLocalFiles(this.entries,this.sort).map(entry=>this.cardHtml(entry)).join('')}</div>`}
-    ${this.cleanupHtml()}`}${this.menuId?`<div class="content-menu" role="menu" style="left:${this.menuPosition.x}px;top:${this.menuPosition.y}px">${[['preview','打开'],['requeue','加入待发送'],['download','下载'],['rename','重命名'],['delete','删除'],['preview','详情']].map(([action,label])=>`<button data-library-command="${action}" role="menuitem">${label}</button>`).join('')}</div>`:''}</section>${embedded?'':'</div>'}`;
+    ${this.cleanupHtml()}`}${this.menuId?`<div class="content-menu" role="menu" style="left:${this.menuPosition.x}px;top:${this.menuPosition.y}px">${[['preview','打开'],['download','下载'],['requeue','加入待发送'],['rename','重命名'],['delete','删除'],['preview','详情']].map(([action,label])=>`<button data-library-command="${action}" role="menuitem">${label}</button>`).join('')}</div>`:''}</section>${embedded?'':'</div>'}`;
   }
   private cleanupHtml() {
     const labels=['图片','视频','音频','文本','压缩包','其他'];

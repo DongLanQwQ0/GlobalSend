@@ -296,7 +296,15 @@ class PeerTransport {
         }
         request.response.headers.contentType = ContentType.json;
         request.response.write(
-          jsonEncode({'nonce': nonce, 'certificateSha256': fingerprint}),
+          jsonEncode({
+            'nonce': nonce,
+            'certificateSha256': fingerprint,
+            if (request.connectionInfo case final connection?)
+              'observedSource': {
+                'address': connection.remoteAddress.address,
+                'port': connection.remotePort,
+              },
+          }),
         );
         return;
       }

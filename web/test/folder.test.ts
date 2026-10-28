@@ -26,3 +26,22 @@ test('structured sends allow more than 32 entries but reject over 10000 before r
   await assert.rejects(prepareFolderSend([folder],()=>Array.from({length:10001},()=>({path:'root/x',file})),async()=>{hashes++;return '';}),/10000/);assert.equal(hashes,0);
   await assert.rejects(prepareFolderSend(Array(33).fill(file),()=>undefined,async()=>''),/32/);
 });
+
+ test('native FileList fallback is captured before drop closes and folder batches keep their tree',async()=>{
+  const {droppedFiles}=await import('../src/folder.ts');
+  const a=new File(['a'],'甲.txt'),b=new File(['b'],'乙.txt');let readable=true;
+  const data={get files(){assert.equal(readable,true);return [a,b];},items:[{kind:'file',webkitGetAsEntry(){throw new Error('Native source has no Entry');},getAsFile:()=>null},{kind:'file',getAsFile:()=>b}]};
+  const pending=droppedFiles(data as any);readable=false;assert.deepEqual((await pending).files,[a,b]);
+  const entry={name:'资料',isDirectory:true,isFile:false,createReader(){
+    let sent=false;
+    return {readEntries(resolve:any){
+      if(sent)resolve([]);
+      else {sent=true;resolve([
+        {name:'空目录',isDirectory:true,createReader:()=>({readEntries:(done:any)=>done([])})},
+        {name:a.name,isFile:true,file:(done:any)=>done(a)},
+      ]);}
+    }};
+  }};
+  const tree=await droppedFiles({items:[{kind:'file',getAsFile:()=>null,webkitGetAsEntry:()=>entry}],files:[]} as any);
+  assert.deepEqual(tree.folders[0].parts.map(part=>part.path),['资料/','资料/空目录/','资料/甲.txt']);assert.equal(tree.folders[0].parts[2].file,a);
+});

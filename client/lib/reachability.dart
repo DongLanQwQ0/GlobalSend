@@ -1136,7 +1136,10 @@ Future<({bool reachable, int elapsedMs, String error})> probePeerAddress(
       client = PeerTransport.pinnedClient(
         fingerprint,
         sourceAddress: sourceAddress,
-        onConnected: (socket) => endpoints = probeSocketEndpoints(socket),
+        onConnected: (socket) => endpoints = probeSocketEndpoints(
+          socket,
+          boundSourceAddress: sourceAddress,
+        ),
       );
   cancellation?.onCancel(() => client.close(force: true));
   try {
@@ -1161,7 +1164,24 @@ Future<({bool reachable, int elapsedMs, String error})> probePeerAddress(
     if (reply['nonce'] != nonce || reply['certificateSha256'] != fingerprint) {
       throw const FormatException('设备身份不匹配');
     }
-    if (endpoints != null) onConnected?.call(endpoints!);
+    if (endpoints != null) {
+      // The peer reports the actual TCP source it observed, including NAT.
+      // Socket.address is the address used to connect, not getsockname().
+      final observed = reply['observedSource'];
+      if (observed is Map &&
+          observed['address'] is String &&
+          observed['port'] is int) {
+        final address = InternetAddress.tryParse(observed['address'] as String);
+        final port = observed['port'] as int;
+        if (address != null && port > 0 && port <= 65535) {
+          endpoints = (
+            sourceEndpoint: probeEndpoint(address, port),
+            targetEndpoint: endpoints!.targetEndpoint,
+          );
+        }
+      }
+      onConnected?.call(endpoints!);
+    }
     return (reachable: true, elapsedMs: watch.elapsedMilliseconds, error: '');
   } catch (error) {
     return (
@@ -1245,8 +1265,15 @@ Future<({bool reachable, int elapsedMs, String error})> probeCenter(
 String probeEndpoint(InternetAddress address, int port) =>
     '${address.type == InternetAddressType.IPv6 ? '[${address.address}]' : address.address}:$port';
 
-ProbeEndpoints probeSocketEndpoints(Socket connection) => (
-  sourceEndpoint: probeEndpoint(connection.address, connection.port),
+ProbeEndpoints probeSocketEndpoints(
+  Socket connection, {
+  String? boundSourceAddress,
+}) => (
+  // Only an explicitly bound source is known from the outgoing Dart socket.
+  // For system routing an authenticated peer can supply observedSource above.
+  sourceEndpoint: boundSourceAddress == null || boundSourceAddress.isEmpty
+      ? ''
+      : probeEndpoint(InternetAddress(boundSourceAddress), connection.port),
   targetEndpoint: probeEndpoint(
     connection.remoteAddress,
     connection.remotePort,

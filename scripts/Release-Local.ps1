@@ -163,7 +163,7 @@ try {
         $report.serial=$Serial
         if ($PushOnlyPhone) {
             $report.phoneInstallSkipped=$true
-            $report.phoneError='Push only: the previous installation was rejected by the phone'
+            $report.phoneError='APK pushed; installation deferred by PushOnlyPhone'
         } else {
             Install-PhoneApk $Serial $apk
             Invoke-Checked $adb @('-s',$Serial,'shell','am','start','-n','dev.globalsend.globalsend/.MainActivity')

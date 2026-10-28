@@ -81,6 +81,20 @@ void main() {
         'challenge',
       );
       expect(validated, 0);
+      final probeClient = PeerTransport.pinnedClient(peer.fingerprint);
+      try {
+        final request = await probeClient.getUrl(
+          Uri.parse('$route/probe?nonce=observed-source'),
+        );
+        final response = await request.close();
+        final reply = jsonDecode(await utf8.decoder.bind(response).join());
+        expect(reply['nonce'], 'observed-source');
+        expect(reply['observedSource']['address'], '127.0.0.1');
+        expect(reply['observedSource']['port'], isNot(Uri.parse(route).port));
+        expect(reply['observedSource']['port'], greaterThan(0));
+      } finally {
+        probeClient.close(force: true);
+      }
       final wrong = PeerTransport.pinnedClient(List.filled(64, '0').join());
       try {
         await expectLater(() async {

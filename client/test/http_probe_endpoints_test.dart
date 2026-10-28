@@ -14,11 +14,12 @@ void main() {
       ..usePrivateKeyBytes(utf8.encode(identity['privateKey']!));
     final pin = certificateFingerprint(identity['certificate']!);
     final server = await HttpServer.bindSecure(
-      InternetAddress.loopbackIPv4,
+      InternetAddress('127.0.0.2'),
       0,
       context,
     );
     final seenPorts = <int>[];
+    var reportObservedSource = true;
     server.listen((request) async {
       seenPorts.add(request.connectionInfo!.remotePort);
       request.response.headers.contentType = ContentType.json;
@@ -26,6 +27,11 @@ void main() {
         jsonEncode({
           'nonce': request.uri.queryParameters['nonce'],
           'certificateSha256': pin,
+          if (reportObservedSource)
+            'observedSource': {
+              'address': request.connectionInfo!.remoteAddress.address,
+              'port': request.connectionInfo!.remotePort,
+            },
         }),
       );
       await request.response.close();
@@ -34,7 +40,7 @@ void main() {
       for (final source in [null, '127.0.0.1']) {
         ProbeEndpoints? observed;
         final result = await probePeerAddress(
-          'https://127.0.0.1:${server.port}',
+          'https://127.0.0.2:${server.port}',
           pin,
           false,
           sourceAddress: source,
@@ -42,11 +48,26 @@ void main() {
         );
         expect(result.reachable, isTrue, reason: result.error);
         expect(observed!.sourceEndpoint, '127.0.0.1:${seenPorts.last}');
-        expect(observed!.targetEndpoint, '127.0.0.1:${server.port}');
+        expect(observed!.targetEndpoint, '127.0.0.2:${server.port}');
       }
+      reportObservedSource = false;
+      ProbeEndpoints? legacy;
+      final oldPeer = await probePeerAddress(
+        'https://127.0.0.2:${server.port}',
+        pin,
+        false,
+        onConnected: (value) => legacy = value,
+      );
+      expect(oldPeer.reachable, isTrue);
+      expect(
+        legacy!.sourceEndpoint,
+        isEmpty,
+        reason: 'legacy peers remain reachable without inventing a source',
+      );
+      expect(legacy!.targetEndpoint, '127.0.0.2:${server.port}');
       ProbeEndpoints? unverified;
       final wrong = await probePeerAddress(
-        'https://127.0.0.1:${server.port}',
+        'https://127.0.0.2:${server.port}',
         '0' * 64,
         false,
         onConnected: (value) => unverified = value,
@@ -62,11 +83,9 @@ void main() {
     }
   });
 
-  test('center readiness reports its actual endpoints and keeps HTTP failure unconnected', () async {
+  test('center readiness never invents a source from the connect host and keeps HTTP failure unconnected', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    var sourcePort = 0;
     server.listen((request) async {
-      sourcePort = request.connectionInfo!.remotePort;
       request.response.statusCode = request.uri.path == '/ready' ? 200 : 503;
       request.response.write('{}');
       await request.response.close();
@@ -80,7 +99,11 @@ void main() {
         onConnected: (value) => observed = value,
       );
       expect(success.reachable, isTrue, reason: success.error);
-      expect(observed!.sourceEndpoint, '127.0.0.1:$sourcePort');
+      expect(
+        observed!.sourceEndpoint,
+        isEmpty,
+        reason: 'Dart outgoing Socket.address is not the local interface',
+      );
       expect(observed!.targetEndpoint, '127.0.0.1:${server.port}');
       observed = null;
       final failed = await probeCenter(

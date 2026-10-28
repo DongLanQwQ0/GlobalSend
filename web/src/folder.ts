@@ -34,8 +34,15 @@ export async function droppedFiles(transfer:DataTransfer):Promise<{files:File[];
   };
   const items=Array.from(transfer.items || []).filter(item=>item.kind==='file');
   // Capture entries before awaiting: the drag data store is only readable during drop.
-  const sources=items.map(item=>({entry:item.webkitGetAsEntry?.() as unknown as Entry|null,file:item.getAsFile()}));
-  if(!sources.length)return {files:Array.from(transfer.files),folders};
+  const listed=Array.from(transfer.files);
+  const sources=items.map((item,index)=>{
+    // Some native OLE/virtual file sources expose FileList but no Entry object.
+    let entry:Entry|null=null;
+    try{entry=item.webkitGetAsEntry?.() as unknown as Entry|null;}catch{/* FileList remains a valid source. */}
+    return {entry,file:item.getAsFile() || listed[index]};
+  });
+  if(!sources.length)return {files:listed,folders};
   for(const source of sources){if(source.entry?.isDirectory){const parts:FolderPart[]=[];await visit(source.entry,source.entry.name,parts);folders.push({name:source.entry.name,parts});}else if(source.file)files.push(source.file);}
+  files.push(...listed.slice(sources.length));
   return {files,folders};
 }

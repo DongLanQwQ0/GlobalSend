@@ -912,7 +912,7 @@ test('right click and more button share one context menu action set',()=>{
   const rightClick=new Event('contextmenu',{bubbles:true,cancelable:true});Object.assign(rightClick,{clientX:900,clientY:600});
   document.querySelector('[data-drag-text]')!.dispatchEvent(rightClick);
   const actions=Array.from(document.querySelectorAll('[data-card-command]')).map(node=>node.textContent);
-  assert.deepEqual(actions,['详情','复制','加入待发送','删除']);assert.equal(rightClick.defaultPrevented,true);
+  assert.deepEqual(actions,['复制','加入待发送','删除','详情']);assert.equal(rightClick.defaultPrevented,true);
   c.contextMenu=null;render();const more=document.querySelector<HTMLButtonElement>('[data-card-menu]')!;
   more.getBoundingClientRect=()=>({right:100,bottom:100} as DOMRect);more.click();
   assert.deepEqual(Array.from(document.querySelectorAll('[data-card-command]')).map(node=>node.textContent),actions);
@@ -1650,4 +1650,49 @@ test('a touch hold enters selection without detaching the source and a later hol
   const menu=new Event('contextmenu',{bubbles:true,cancelable:true});card.dispatchEvent(menu);assert.equal(c.contextMenu,null);assert.equal(card.isConnected,true);assert.equal(view==='library'?c.fileLibrary.editing:view==='sent'?c.sentSelecting:c.receiveSelecting,true);const selection=view==='library'?c.fileLibrary.selected:view==='sent'?c.sentSelected:c.selected;assert.deepEqual(Array.from(selection),[view==='library'?'scope/0':'hold-a']);
   render();const second=document.querySelector(view==='library'?'[data-library-id="scope/1"]':'[data-drag-text="hold-b"]')!,again=new Event('pointerdown',{bubbles:true,cancelable:true});Object.assign(again,{pointerType:'touch',clientX:30,clientY:40});second.dispatchEvent(again);timers.pop()!();assert.deepEqual(Array.from(selection),[view==='library'?'scope/0':'hold-a']);
  }
+});
+
+test('external native text and files still drop after a missing internal dragend, and cross-window card markers are external',async()=>{
+  for(const marker of [false,true]){
+    const {c,document,render,Event}=fixture();c.render=render;c.installWindowDrop();render();
+    const stale=document.querySelector('[data-queue-drop]')!;stale.setAttribute('data-internal-drag','true');
+    c.internalPayload={text:'old gesture'};
+    const file=new File(['native file'],'桌面文件.txt',{type:'text/plain'});
+    const data={types:marker?['application/x-globalsend-card','Files']:['Files'],files:[file],items:[{kind:'file',getAsFile:()=>file}],getData:()=>''};
+    const over=new Event('dragover',{bubbles:true,cancelable:true});Object.assign(over,{dataTransfer:data});document.querySelector('.brand')!.dispatchEvent(over);
+    assert.equal(over.defaultPrevented,true,'external drag is accepted throughout the window');
+    const drop=new Event('drop',{bubbles:true,cancelable:true});Object.assign(drop,{dataTransfer:data});document.querySelector('.brand')!.dispatchEvent(drop);
+    await new Promise(resolve=>setImmediate(resolve));assert.equal(c.picked[0],file);assert.equal(c.stagedTexts.length,0);
+  }
+});
+
+test('URL-only drags and plain text on nested elements enter the queue without navigating or losing whitespace',async()=>{
+  const {c,document,render,Event}=fixture();c.render=render;c.installWindowDrop();render();
+  for(const [type,value,expected] of [['text/uri-list','# browser link\r\nhttps://example.com/path\r\n','https://example.com/path'],['text/plain','  一段文字\n保留换行  ','  一段文字\n保留换行  ']]){
+    const drop=new Event('drop',{bubbles:true,cancelable:true});Object.assign(drop,{dataTransfer:{types:[type],files:[],items:[],getData:(key:string)=>key===type?value:''}});
+    document.querySelector('.brand span')!.dispatchEvent(drop);assert.equal(drop.defaultPrevented,true);await new Promise(resolve=>setImmediate(resolve));assert.equal(c.stagedTexts.at(-1).text,expected);
+  }
+});
+
+test('crossing child elements during native drag does not flash the full-window drop feedback',()=>{
+  const {c,document,render,Event}=fixture();c.render=render;c.installWindowDrop();render();
+  const data={types:['Files'],dropEffect:'',files:[],items:[],getData:()=>''};
+  const send=(type:string,target:Element,relatedTarget:Element|null)=>{const event=new Event(type,{bubbles:true,cancelable:true});Object.assign(event,{dataTransfer:data,relatedTarget,clientX:80,clientY:90});target.dispatchEvent(event);};
+  send('dragenter',document.querySelector('.brand')!,null);const overlay=document.querySelector('#window-drop')!;assert.equal(overlay.classList.contains('visible'),true);
+  send('dragleave',document.querySelector('.brand span')!,null);assert.equal(overlay.classList.contains('visible'),true,'native null-relatedTarget is not an immediate window exit');
+  send('dragover',document.querySelector('[data-queue-drop]')!,null);assert.equal(overlay.classList.contains('visible'),true);
+  send('drop',document.querySelector('[data-queue-drop]')!,null);assert.equal(overlay.classList.contains('visible'),false);
+});
+
+test('Web card actions keep the app action hierarchy with details last and browser download replacing unavailable locate',()=>{
+ const {c,document}=fixture();
+ for(const [kind,labels] of [['file',['打开','下载','加入待发送','删除','详情']],['text',['复制','加入待发送','删除','详情']],['receipt',['加入待发送','关闭此项','详情']]]){
+  c.contextMenu={kind,key:'sample',x:20,y:20};document.querySelector('#app')!.innerHTML=c.cardMenuHtml();assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(node=>node.textContent),labels);
+ }
+});
+
+test('Web diagnostics do not draw a reachable-address arrow when either observed endpoint is unknown',()=>{
+ const {c,document}=fixture();c.networkDevice='sender';c.rtcProbes={results:[{initiatorDeviceId:'receiver',responderDeviceId:'sender',scope:'lan',success:true,elapsedMs:4,checkedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),initiatorAddress:'10.0.0.1:2000'}]};
+ document.querySelector('#app')!.innerHTML=c.deviceNetworkHtml();assert.doesNotMatch(document.querySelector('.probe-addresses')!.textContent!,/→/);assert.match(document.querySelector('.probe-addresses')!.textContent!,/目标：未获取/);
+ c.rtcProbes.results[0].responderAddress='10.0.0.2:3000';document.querySelector('#app')!.innerHTML=c.deviceNetworkHtml();assert.match(document.querySelector('.probe-addresses')!.textContent!,/10.0.0.1:2000 → 10.0.0.2:3000/);
 });

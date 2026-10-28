@@ -14,6 +14,7 @@ import { LocalLibraryView } from './library_view';
 import type { LocalFileEntry } from './library';
 import { RtcProbeMonitor, orientedProbeAddresses } from './rtc_probe';
 import { droppedFiles, completeFolderParts, directoryParts } from './folder';
+import { acceptsWindowDrop, droppedText, WindowDropFeedback } from './drop';
 import { prepareFolderSend, emptyFileHash } from './folder_send';
 import type { OfferFile } from './folder_send';
 import type { QueueOffer } from './send_batch';
@@ -202,7 +203,8 @@ class GlobalSend {
   previewKey=0;
   folderBusy=false;
   private dropInstalled=false;
-  private dragDepth=0;
+  private windowDropVisible=false;
+  private readonly internalDragType='application/x-globalsend-source-'+id();
   private folderPickerGeneration:number|null=null;
   shared=new SharedGroupEditor(()=>this.api,()=>this.render());
   fileSources = new Map<string,File>();
@@ -258,7 +260,7 @@ class GlobalSend {
     const peer=this.device(this.networkDevice),self=this.session?.device.deviceId;
     const results=(this.rtcProbes?.results || []).filter(result=>[result.initiatorDeviceId,result.responderDeviceId].includes(this.networkDevice) && [result.initiatorDeviceId,result.responderDeviceId].includes(self || '') && Date.parse(result.expiresAt)>Date.now()).sort((a,b)=>b.checkedAt.localeCompare(a.checkedAt));
     const candidates=(peer?.peer?.candidates || []).map(value=>literalIp(value)).filter((value):value is NonNullable<typeof value>=>!!value);
-    return `<div class="modal-backdrop"><section class="modal device-network-modal" role="dialog" aria-modal="true" aria-labelledby="device-network-title"><div class="modal-header"><h2 id="device-network-title">${e(this.deviceLabel(this.networkDevice))}</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭连接检测">${icon('close')}</button></div><p class="muted">本机与此设备 · RTC 路径检测</p><div class="device-network-paths">${(['lan','public'] as const).map(scope=>{const result=results.find(item=>item.scope===scope);return `<div class="setting-row"><span>${scope==='lan'?'局域网':'公网'} · RTC</span><span>${result?result.success?`可达 · ${result.elapsedMs} ms`:'本次未连通':'未测试'}${result?` · ${time(result.checkedAt)}`:''}</span>${result?.success?`<code class="probe-addresses">${e(orientedProbeAddresses(result,self || '').source || '源地址未提供')} → ${e(orientedProbeAddresses(result,self || '').target || '目标地址未提供')}</code>`:''}</div>`;}).join('')}<div class="setting-row"><span>中继中心</span><span>${this.connected?'已连接':'未连接'}</span></div></div>${candidates.length?`<div class="modal-section"><h3>对方地址</h3>${candidates.map(value=>`<p><small>${IP_GROUPS[value.group]} · 未单独检测</small><br><code>${e(value.address)}</code></p>`).join('')}</div>`:''}<p class="device-network-note muted">浏览器通过 RTC 测试；没有公开地址时不显示 IP。中心连接不代表端到端文件已通过。</p><button class="secondary" data-action="refresh-device-network">${icon('retry')}重新检测</button></section></div>`;
+    return `<div class="modal-backdrop"><section class="modal device-network-modal" role="dialog" aria-modal="true" aria-labelledby="device-network-title"><div class="modal-header"><h2 id="device-network-title">${e(this.deviceLabel(this.networkDevice))}</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭连接检测">${icon('close')}</button></div><p class="muted">本机与此设备 · RTC 路径检测</p><div class="device-network-paths">${(['lan','public'] as const).map(scope=>{const result=results.find(item=>item.scope===scope);return `<div class="setting-row"><span>${scope==='lan'?'局域网':'公网'} · RTC</span><span>${result?result.success?`可达 · ${result.elapsedMs} ms`:'本次未连通':'未测试'}${result?` · ${time(result.checkedAt)}`:''}</span>${result?.success?(()=>{const {source,target}=orientedProbeAddresses(result,self || '');return `<code class="probe-addresses">${source && target?`${e(source)} → ${e(target)}`:`源：${e(source || '未获取')}<br>目标：${e(target || '未获取')}`}</code>`;})():''}</div>`;}).join('')}<div class="setting-row"><span>中继中心</span><span>${this.connected?'已连接':'未连接'}</span></div></div>${candidates.length?`<div class="modal-section"><h3>对方地址</h3>${candidates.map(value=>`<p><small>${IP_GROUPS[value.group]} · 未单独检测</small><br><code>${e(value.address)}</code></p>`).join('')}</div>`:''}<p class="device-network-note muted">浏览器通过 RTC 测试；没有公开地址时不显示 IP。中心连接不代表端到端文件已通过。</p><button class="secondary" data-action="refresh-device-network">${icon('retry')}重新检测</button></section></div>`;
   }
   ipSources:IpSource[]=[];
   ipLoading=false;
@@ -685,19 +687,23 @@ class GlobalSend {
       else if(this.exitSelection())event.preventDefault();
       else if(this.contentView!=='receive'){event.preventDefault();this.contentView='receive';this.render();}
     });
-    const external=(event:DragEvent)=>!!event.dataTransfer && Array.from(event.dataTransfer.types).some(type=>['Files','text/plain','text/uri-list'].includes(type));
-    const show=(visible:boolean)=>document.querySelector('#window-drop')?.classList.toggle('visible',visible);
+    const show=(visible:boolean)=>{this.windowDropVisible=visible;document.querySelector('#window-drop')?.classList.toggle('visible',visible);};
+    const feedback=new WindowDropFeedback(show);
     const queue=(event:Event)=>(event.target as Element).closest?.('[data-queue-drop]');
+    const external=(event:DragEvent)=>acceptsWindowDrop(event.dataTransfer);
     document.addEventListener('dragstart',event=>{const field=(event.target as Element).closest<HTMLElement>('[data-drag-shared]');if(field)this.beginContentDrag(event,field);});
-    document.addEventListener('dragenter',event=>{if(!this.session)return;if(this.isInternalDrag(event)){if(queue(event))event.preventDefault();return;}if(!external(event))return;event.preventDefault();this.dragDepth++;show(true);});
+    document.addEventListener('dragenter',event=>{if(!this.session)return;if(this.isInternalDrag(event)){if(queue(event))event.preventDefault();return;}if(!external(event))return;event.preventDefault();this.endContentDrag();feedback.enter();},true);
     document.addEventListener('dragover',event=>{
       if(!this.session)return;
       if(this.isInternalDrag(event)){const target=queue(event);document.querySelector('[data-queue-drop]')?.classList.toggle('queue-drop-active',!!target);if(target){event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='copy';}return;}
-      if(!external(event))return;event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='copy';show(true);
-    });
-    document.addEventListener('dragleave',event=>{if(!this.session)return;if(--this.dragDepth<=0 || !event.relatedTarget){this.dragDepth=0;show(false);}const target=queue(event);if(target && !target.contains(event.relatedTarget as Node))target.classList.remove('queue-drop-active');});
-    document.addEventListener('dragend',()=>{this.dragDepth=0;show(false);this.endContentDrag();});
+      if(!external(event))return;event.preventDefault();this.endContentDrag();if(event.dataTransfer)event.dataTransfer.dropEffect='copy';feedback.enter();
+    },true);
+    document.addEventListener('dragleave',event=>{if(!this.session)return;if(!event.relatedTarget || !document.documentElement.contains(event.relatedTarget as Node))feedback.leave();const target=queue(event);if(target && !target.contains(event.relatedTarget as Node))target.classList.remove('queue-drop-active');},true);
+    document.addEventListener('dragend',()=>{feedback.reset();this.endContentDrag();},true);
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'){feedback.reset();this.endContentDrag();}},true);
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){feedback.reset();this.endContentDrag();}});
     document.addEventListener('drop',event=>{
+      feedback.reset();
       if(!this.session)return;
       if(this.isInternalDrag(event)){
         const payload=this.internalPayload,target=queue(event);this.endContentDrag();
@@ -711,10 +717,10 @@ class GlobalSend {
         return;
       }
       if(!external(event))return;
-      event.preventDefault();this.dragDepth=0;show(false);const transfer=event.dataTransfer!,text=transfer.getData('text/plain'),generation=this.generation;
-      const files=droppedFiles(transfer);
-      void this.run(async()=>{const content=await files;if(generation!==this.generation)return;if(content.files.length)this.addFiles(content.files);if(content.folders.length)await this.addFolders(content.folders);if(!content.files.length && !content.folders.length && text.trim()){this.stagedTexts.push({id:id(),text});this.setMobileView('send');this.render();}});
-    });
+      event.preventDefault();this.endContentDrag();const transfer=event.dataTransfer!,generation=this.generation;
+      const files=droppedFiles(transfer),text=droppedText(transfer);
+      void this.run(async()=>{const [content,value]=await Promise.all([files,text]);if(generation!==this.generation)return;if(content.files.length)this.addFiles(content.files);if(content.folders.length)await this.addFolders(content.folders);if(!content.files.length && !content.folders.length && value.trim()){this.stagedTexts.push({id:id(),text:value});this.setMobileView('send');this.render();}});
+    },true);
   }
   bulkDragFiles(outgoing:boolean){
     const selection=outgoing?this.sentSelected:this.selected,selecting=outgoing?this.sentSelecting:this.receiveSelecting;
@@ -732,7 +738,7 @@ class GlobalSend {
   }
   beginBulkDrag(event:Event,node:HTMLElement){
     const drag=event as DragEvent,files=node.dataset.dragAll==='library'?this.fileLibrary.filesForBulkDrag():this.bulkDragFiles(node.dataset.dragAll==='sent');if(!drag.dataTransfer || !files.length){drag.preventDefault();return;}
-    this.internalPayload={files};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');
+    this.internalPayload={files};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');drag.dataTransfer.setData(this.internalDragType,'1');
     for(const file of files)drag.dataTransfer.items.add(file);
     const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=icon('file')+'<span>'+files.length+' 个文件</span><span class="drag-copy">＋ 复制</span>';document.body.append(ghost);drag.dataTransfer.setDragImage(ghost,24,24);window.setTimeout(()=>ghost.remove(),0);
     document.body.classList.add('content-dragging');
@@ -746,7 +752,7 @@ class GlobalSend {
     const files=node.dataset.dragLibrary?this.fileLibrary.filesForBulkDrag():this.bulkDragFiles(outgoing);
     const texts=node.dataset.dragLibrary?[]:this.displayTexts(outgoing).filter(event=>selection.has(event.eventId)).map(event=>event.payload.text || '');
     const drag=event as DragEvent;if(!drag.dataTransfer || !files.length && !texts.length)return false;
-    this.internalPayload={files,text:texts.length?texts.join('\n\n'):undefined};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');
+    this.internalPayload={files,text:texts.length?texts.join('\n\n'):undefined};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');drag.dataTransfer.setData(this.internalDragType,'1');
     for(const file of files)drag.dataTransfer.items.add(file);if(texts.length)drag.dataTransfer.setData('text/plain',texts.join('\n\n'));
     const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=icon(files.length?'file':'text')+'<span>'+ (files.length+texts.length)+' 项</span><span class="drag-copy">＋ 复制</span>';document.body.append(ghost);drag.dataTransfer.setDragImage(ghost,24,24);window.setTimeout(()=>ghost.remove(),0);document.body.classList.add('content-dragging');return true;
   }
@@ -763,7 +769,7 @@ class GlobalSend {
     else if(node.dataset.dragLibrary)file=this.fileLibrary.fileForDrag(node.dataset.dragLibrary);
     else file=this.localFile(node.dataset.dragFile!);
     if(text===undefined && !file){drag.preventDefault();this.toast('请先将文件接收到本机',true);return;}
-    this.internalPayload={text,file,...(node.dataset.dragLibrary?{libraryId:node.dataset.dragLibrary}:{}),...(node.dataset.dragFile?{receivedKey:node.dataset.dragFile}:{}),...(node.dataset.dragReceipt && file?{receivedKey:(this.receiptBatch.get(node.dataset.dragReceipt) || this.receipt)?.fileKey}: {})};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');
+    this.internalPayload={text,file,...(node.dataset.dragLibrary?{libraryId:node.dataset.dragLibrary}:{}),...(node.dataset.dragFile?{receivedKey:node.dataset.dragFile}:{}),...(node.dataset.dragReceipt && file?{receivedKey:(this.receiptBatch.get(node.dataset.dragReceipt) || this.receipt)?.fileKey}: {})};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');drag.dataTransfer.setData(this.internalDragType,'1');
     if(text!==undefined)drag.dataTransfer.setData('text/plain',text);
     if(file && file.type!=='inode/directory'){drag.dataTransfer.items.add(file);const url=URL.createObjectURL(file);drag.dataTransfer.setData('DownloadURL',(file.type || 'application/octet-stream')+':'+file.name+':'+url);window.setTimeout(()=>URL.revokeObjectURL(url),60000);}
     document.body.classList.add('content-dragging');
@@ -771,7 +777,7 @@ class GlobalSend {
     ghost.innerHTML+='<span class="drag-copy">＋ 复制</span>';ghost.style.left=Math.max(0,drag.clientX-24)+'px';ghost.style.top=Math.max(0,drag.clientY-24)+'px';document.body.append(ghost);drag.dataTransfer.setDragImage(ghost,24,24);window.setTimeout(()=>ghost.remove(),0);
   }
   endContentDrag(){this.internalPayload=null;document.body.classList.remove('content-dragging');document.querySelector('[data-queue-drop]')?.classList.remove('queue-drop-active');document.querySelectorAll<HTMLElement>('[data-internal-drag]').forEach(node=>delete node.dataset.internalDrag);}
-  isInternalDrag(event:DragEvent){return !!event.dataTransfer?.types.includes('application/x-globalsend-card') || !!document.querySelector('[data-internal-drag="true"]');}
+  isInternalDrag(event:DragEvent){return !!this.internalPayload && Array.from(event.dataTransfer?.types || []).includes(this.internalDragType);}
   pickedKey(file:File){let key=this.pickedKeys.get(file);if(!key){key=`picked-${++this.previewKey}`;this.pickedKeys.set(file,key);}return key;}
   pickedSize(file:File){return this.folderParts.get(file)?.reduce((size,part)=>size+(part.file?.size || 0),0) ?? file.size;}
   previewHtml(key:string,name:string,mimeType=''){
@@ -1055,7 +1061,7 @@ class GlobalSend {
   openCardMenu(kind:'text'|'file'|'receipt',key:string,x:number,y:number){this.contextMenu={kind,key,x:Math.min(x,window.innerWidth-188),y:Math.min(y,window.innerHeight-214)};this.render();document.querySelector<HTMLElement>('.content-menu button')?.focus();}
   cardMenuHtml(){
     const menu=this.contextMenu;if(!menu)return '';
-    const actions=menu.kind==='receipt'?[['details','详情'],['requeue','加入待发送'],['dismiss','关闭此项']]:menu.kind==='text'?[['details','详情'],['copy','复制'],['requeue','加入待发送'],['delete','删除']]:[['open','打开'],['requeue','加入待发送'],['download','下载'],['delete','删除'],['details','详情']];
+    const actions=menu.kind==='receipt'?[['requeue','加入待发送'],['dismiss','关闭此项'],['details','详情']]:menu.kind==='text'?[['copy','复制'],['requeue','加入待发送'],['delete','删除'],['details','详情']]:[['open','打开'],['download','下载'],['requeue','加入待发送'],['delete','删除'],['details','详情']];
     return `<div class="content-menu" role="menu" aria-label="内容操作" style="left:${Math.max(8,menu.x)}px;top:${Math.max(8,menu.y)}px">${actions.map(([action,label])=>`<button role="menuitem" data-card-command="${action}">${label}</button>`).join('')}</div>`;
   }
   async cardCommand(action:string){
@@ -2190,6 +2196,7 @@ class GlobalSend {
     if (this.loading) app.innerHTML = `<div class="loading-view"><span class="spinner"></span>连接中…</div>`;
     else if (!this.session) app.innerHTML = this.onboarding();
     else app.innerHTML = this.workspace() + (heldReceipt?'':this.modalHtml()) + this.cardMenuHtml();
+    document.querySelector('#window-drop')?.classList.toggle('visible',this.windowDropVisible);
     if(heldReceipt)this.updateReceiptDom(heldReceipt);
     else if(this.modal==='receipt'){const receipt=document.querySelector('.receipt-backdrop');if(receipt)document.body.append(receipt);}
     this.mountEditor();this.mountTextViewer();this.mountAutoAcceptLimit();this.shared.mount();this.bind();this.fileLibrary.bind();this.mountPreviews();
