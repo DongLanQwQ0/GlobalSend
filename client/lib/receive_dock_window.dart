@@ -136,6 +136,15 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
         }
       });
       unawaited(refreshExportableFiles(next));
+      if (items.isEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !identical(payload, next)) return;
+          // This engine belongs only to the dock. Keeping it warm should not
+          // retain decoded photos after its hidden content has been cleared.
+          PaintingBinding.instance.imageCache.clear();
+          PaintingBinding.instance.imageCache.clearLiveImages();
+        });
+      }
       if (!presented && items.isNotEmpty) {
         presented = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {

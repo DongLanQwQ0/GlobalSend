@@ -422,14 +422,49 @@ final class ReceiveDirectory {
         value.put("location", location); value.put("name", ""); value.put("size", 0L); value.put("exists", false);
         try (Cursor cursor = context.getContentResolver().query(document,
             new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
+            if (cursor == null) throw new IOException("文件服务暂不可用，请重试");
+            if (cursor.moveToFirst()) {
                 value.put("exists", true); value.put("name", cursor.getString(0));
                 value.put("size", cursor.isNull(1) ? -1L : cursor.getLong(1));
             }
         } catch (RuntimeException error) {
-            if (!(error.getCause() instanceof FileNotFoundException)) throw error;
+            // ExternalStorageProvider may fail its tree ancestry check before
+            // querying a deleted leaf. Across Binder this can arrive as a
+            // SecurityException with no FileNotFoundException cause attached.
+            // Confirm absence by listing the same granted tree; a denied or
+            // unavailable provider must never be interpreted as deletion.
+            Throwable cause = error;
+            while (cause != null && !(cause instanceof FileNotFoundException)) cause = cause.getCause();
+            if (cause == null && !missingFromGrantedParent(document)) throw error;
         }
         return value;
+    }
+
+    private boolean missingFromGrantedParent(Uri document) {
+        if (!DocumentsContract.isTreeUri(document)) return false;
+        try {
+            String id = DocumentsContract.getDocumentId(document);
+            String root = DocumentsContract.getTreeDocumentId(document);
+            if (id.equals(root)) return false;
+            if ("com.android.externalstorage.documents".equals(document.getAuthority()) &&
+                id.startsWith(root.endsWith(":") ? root : root + "/")) {
+                String parent = root;
+                String relative = id.substring(root.length());
+                if (relative.startsWith("/")) relative = relative.substring(1);
+                for (String segment : relative.split("/")) {
+                    String child = parent + (parent.endsWith(":") ? "" : "/") + segment;
+                    Uri parentUri = DocumentsContract.buildDocumentUriUsingTree(document, parent);
+                    if (!children(parentUri, null).ids.contains(child)) return true;
+                    parent = child;
+                }
+                return false;
+            }
+            String parent = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString("parent:" + document, null);
+            return parent != null && !children(Uri.parse(parent), null).ids.contains(id);
+        } catch (Exception unavailable) {
+            return false;
+        }
     }
 
     Map<String, Object> rename(String location, String name) throws Exception {

@@ -110,7 +110,7 @@ public class ReceiveDirectoryTest {
         assertArrayEquals(bytes, Files.readAllBytes(original.file.toPath()));
     }
 
-    @Test @Config(shadows = {ModernDocumentQueries.class, GrantedEnvironment.class, HiddenPathStat.class})
+    @Test @Config(sdk = 34, shadows = {ModernDocumentQueries.class, GrantedEnvironment.class, HiddenPathStat.class})
     public void hiddenPhysicalPathUsesExistingTreeGrantBeforeBeingTreatedAsDeleted() throws Exception {
         String name = "hidden-" + UUID.randomUUID() + ".txt";
         Entry backing = provider.add(name, new byte[]{6, 2, 6});
@@ -135,7 +135,34 @@ public class ReceiveDirectoryTest {
             assertArrayEquals(new byte[]{6, 2, 6}, input.readAllBytes());
         }
         provider.documents.remove(id);
+        provider.missingChildThrows = true;
         assertFalse("A deleted document is still removed when the provider confirms absence", directory.localExists(path));
+    }
+
+    @Test @Config(sdk = 34)
+    public void missingLeafAncestryFailureWithoutBinderCauseDoesNotBreakOtherDocuments() throws Exception {
+        Map<String,Object> created = directory.create(tree.toString(), "missing.jpg");
+        String location = (String) created.get("location");
+        directory.close((String) created.get("handle"), null);
+        provider.documents.remove(DocumentsContract.getDocumentId(Uri.parse(location)));
+        provider.missingChildThrows = true;
+        assertEquals(false, directory.stat(location).get("exists"));
+        Entry good = provider.add("healthy.jpg", new byte[]{4, 2});
+        assertEquals(true, directory.stat(DocumentsContract.buildDocumentUriUsingTree(tree, good.id).toString()).get("exists"));
+    }
+
+    @Test @Config(sdk = 34)
+    public void deniedOrUnavailableDocumentMustNotBeReportedAsDeleted() throws Exception {
+        Map<String,Object> created = directory.create(tree.toString(), "kept.jpg");
+        String location = (String) created.get("location");
+        directory.close((String) created.get("handle"), null);
+        provider.denyDocumentQuery = true;
+        for (boolean denyChildren : new boolean[]{false, true}) {
+            provider.denyChildrenQuery = denyChildren;
+            try { directory.stat(location); fail("An existing or unreadable tree is not a missing file"); }
+            catch (SecurityException expected) { assertTrue(expected.getMessage().contains("fixture permission")); }
+        }
+        assertTrue(provider.documents.containsKey(DocumentsContract.getDocumentId(Uri.parse(location))));
     }
 
     @Implements(className = "libcore.io.Linux", isInAndroidSdk = false)
@@ -420,6 +447,7 @@ public class ReceiveDirectoryTest {
         String rootId = "selected";
         File folder; Entry lastOpened; Uri lastCreated; ParcelFileDescriptor lastDescriptor;
         Thread lastQueryThread;
+        boolean missingChildThrows, denyDocumentQuery, denyChildrenQuery;
         final Map<String, Entry> documents = new LinkedHashMap<>();
         @Override public boolean onCreate() { return true; }
         Entry add(String name, byte[] bytes) throws IOException {
@@ -431,6 +459,7 @@ public class ReceiveDirectoryTest {
             return new MatrixCursor(new String[]{DocumentsContract.Root.COLUMN_ROOT_ID, DocumentsContract.Root.COLUMN_DOCUMENT_ID});
         }
         @Override public Cursor queryDocument(String id, String[] projection) {
+            if (denyDocumentQuery) throw new SecurityException("fixture permission denied");
             lastQueryThread = Thread.currentThread();
             String[] columns = projection == null ? new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_SIZE,
@@ -443,6 +472,7 @@ public class ReceiveDirectoryTest {
             cursor.addRow(values); return cursor;
         }
         @Override public Cursor queryChildDocuments(String parentId, String[] projection, String order) {
+            if (denyChildrenQuery) throw new SecurityException("fixture permission denied");
             String[] columns = projection == null ? new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME} : projection;
             MatrixCursor cursor = new MatrixCursor(columns);
             for (Entry entry : documents.values()) {
@@ -463,6 +493,9 @@ public class ReceiveDirectoryTest {
             return data;
         }
         @Override public boolean isChildDocument(String parent, String id) {
+            if (missingChildThrows && !documents.containsKey(id) && !id.equals(rootId))
+                throw new SecurityException("Failed to determine if " + id + " is child of " + parent +
+                    ": java.io.FileNotFoundException: Missing file for " + id);
             // Filesystem ancestry does not cease when the leaf is deleted.
             return parent.equals(rootId) && (documents.containsKey(id) ||
                 rootId.startsWith("primary:") && id.startsWith(rootId + "/"));

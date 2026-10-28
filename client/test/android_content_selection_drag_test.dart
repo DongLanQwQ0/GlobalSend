@@ -71,8 +71,9 @@ void main() {
           String id,
           List<String> paths,
           List<String> texts,
-          Set<String> selected,
-        ) async {
+          Set<String> selected, {
+          bool selecting = true,
+        }) async {
           final count = drags.length;
           final pointer = await tester.startGesture(
             tester.getCenter(find.byKey(ValueKey('select-$id'))),
@@ -89,13 +90,24 @@ void main() {
           expect(drags.last['paths'], paths);
           expect(drags.last['texts'], texts);
           expect(Set<String>.from(state.selected), selected);
-          expect(state.selecting, isTrue);
+          expect(state.selecting, selecting);
           expect(find.byType(Draggable<DockEntry>), findsNothing);
           await pointer.up();
           await tester.pumpAndSettle();
         }
 
-        await hold('file', ['content://original/file'], [], {'file'});
+        await hold(
+          'file',
+          ['content://original/file'],
+          [],
+          {},
+          selecting: false,
+        );
+        await hold('text', [], ['待拖动的文字'], {}, selecting: false);
+        await tester.tap(find.text('多选'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('select-file')));
+        await tester.pumpAndSettle();
         await hold('text', ['content://original/file'], [], {'file'});
         await tester.tap(find.byKey(const ValueKey('select-text')));
         await tester.pumpAndSettle();

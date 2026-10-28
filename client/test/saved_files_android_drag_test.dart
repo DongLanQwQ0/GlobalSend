@@ -72,7 +72,15 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      await hold('a', ['content://original/a'], {'a'});
+      await hold('a', ['content://original/a'], {});
+      expect(state.selecting, isFalse);
+      await hold('b', ['content://original/b'], {});
+      expect(state.selecting, isFalse);
+      expect(selectionChanges, 0);
+      await tester.tap(find.text('编辑'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('saved-file-a')));
+      await tester.pumpAndSettle();
       expect(state.selecting, isTrue);
       await hold('b', ['content://original/a'], {'a'});
       await tester.tap(find.byKey(const ValueKey('saved-file-b')));
@@ -92,8 +100,8 @@ void main() {
       await hold('a', ['content://original/a'], {});
       expect(
         selectionChanges,
-        4,
-        reason: 'only the first hold and three actual taps change selection',
+        5,
+        reason: 'only the explicit edit button and four taps change selection',
       );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -133,7 +141,9 @@ void main() {
       for (final action in ['system', 'appbar', 'escape']) {
         await tester.tap(find.text('打开文件库'));
         await tester.pumpAndSettle();
-        await tester.longPress(find.byKey(const ValueKey('saved-file-a')));
+        await tester.tap(find.text('编辑'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('saved-file-a')));
         await tester.pumpAndSettle();
         final state = tester.state<SavedFilesScreenState>(
           find.byType(SavedFilesScreen),

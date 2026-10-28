@@ -38,7 +38,8 @@ class GlobalSendWindowLifecycle {
   void Activate();
   void DismissReceived(std::optional<uint64_t> expected_generation = std::nullopt);
   uint64_t ReceiptArrivalGeneration() const { return receipt_arrival_generation_; }
-  void NotifyReceived(const std::wstring& title, const std::wstring& body);
+  bool NotifyReceived(const std::wstring& title, const std::wstring& body, bool update = false);
+  bool UpdateNotice() const { return update_notice_; }
  private:
   bool AddTray();
   void Show();
@@ -48,6 +49,7 @@ class GlobalSendWindowLifecycle {
   Save save_;
   UINT taskbar_created_;
   bool tray_ = false;
+  bool update_notice_ = false;
   bool exiting_ = false;
   bool restoring_ = false;
   bool maximized_ = false;

@@ -91,12 +91,8 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
   }
 
   Future<void> loadFiles() async {
-    try {
-      await c.refreshSavedFiles();
-      if (mounted) setState(() => error = '');
-    } catch (e) {
-      if (mounted) setState(() => error = '读取失败：$e');
-    }
+    await c.refreshLocalLibrary();
+    if (mounted) setState(() => error = c.savedFilesIssue);
   }
 
   Future<void> perform(Future<void> Function() action, String success) async {
@@ -320,6 +316,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
 
   @override
   Widget build(BuildContext context) {
+    final issue = error.isNotEmpty ? error : c.savedFilesIssue;
     final files = sortSavedFiles(c.savedFiles, sort);
     final scheme = Theme.of(context).colorScheme;
     final scaffold = Scaffold(
@@ -452,14 +449,14 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                     ),
                 ],
               ),
-              if (error.isNotEmpty)
+              if (issue.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                   child: Row(
                     children: [
                       Expanded(
                         child: Text(
-                          error,
+                          issue,
                           style: TextStyle(color: scheme.error),
                         ),
                       ),
@@ -597,7 +594,6 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
       selecting: selecting,
       selected: selected.contains(file.id),
       onToggle: () => toggle(file),
-      onLongPress: windows || android ? null : () => toggle(file),
       menu: PopupMenuButton<String>(
         tooltip: '更多',
         icon: const AppIcon(Icons.more_horiz, size: 20),
@@ -658,17 +654,10 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
           await c.dragOut(item, pointerKind: kind);
           return;
         }
-        if (!selecting)
-          updateSelection(() {
-            selecting = true;
-            selected
-              ..clear()
-              ..add(file.id);
-          });
         // Long press exports the existing selection, never toggles or silently
         // adds the card being held. A zero-selection drag uses only that source.
         final paths = c.savedFiles
-            .where((entry) => selected.contains(entry.id))
+            .where((entry) => selecting && selected.contains(entry.id))
             .map((entry) => entry.path)
             .toSet()
             .toList();

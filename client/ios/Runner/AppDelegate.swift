@@ -2,6 +2,7 @@ import Flutter
 import UIKit
 import CryptoKit
 import Security
+import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -23,6 +24,35 @@ import Security
       switch call.method {
       case "deviceName":
         result(UIDevice.current.name)
+      case "updateNotificationPermission":
+        let explicit = (call.arguments as? [String: Any])?["explicit"] as? Bool ?? false
+        let center = UNUserNotificationCenter.current()
+        if explicit {
+          center.requestAuthorization(options: [.alert, .sound, .badge]) { allowed, _ in
+            DispatchQueue.main.async { result(allowed) }
+          }
+        } else {
+          center.getNotificationSettings { settings in
+            DispatchQueue.main.async { result(Self.updateNotificationsAllowed(settings.authorizationStatus)) }
+          }
+        }
+      case "notifyUpdate":
+        guard let args = call.arguments as? [String: Any], let version = args["version"] as? String else {
+          result(false); return
+        }
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+          guard Self.updateNotificationsAllowed(settings.authorizationStatus) else {
+            DispatchQueue.main.async { result(false) }; return
+          }
+          let content = UNMutableNotificationContent()
+          content.title = "GlobalSend 有新版本"
+          content.body = "\(version) 可更新，打开应用下载 IPA"
+          content.sound = .default
+          center.add(UNNotificationRequest(identifier: "globalsend-update", content: content, trigger: nil)) { error in
+            DispatchQueue.main.async { result(error == nil) }
+          }
+        }
       case "openWebUrl":
         guard let args = call.arguments as? [String: Any],
               let value = args["url"] as? String, let url = URL(string: value),
@@ -63,6 +93,10 @@ import Security
   override func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
     if url.isFileURL { FileSharing.shared.importURLs([url]); return true }
     return super.application(app, open: url, options: options)
+  }
+
+  private static func updateNotificationsAllowed(_ status: UNAuthorizationStatus) -> Bool {
+    status == .authorized || status == .provisional || status == .ephemeral
   }
 
   private static func vaultKey() throws -> SymmetricKey {

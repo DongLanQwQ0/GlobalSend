@@ -2460,7 +2460,7 @@ class GlobalSend {
     on('[data-receive-key],[data-sent-key]','pointerdown',(event,node)=>{
       const pointer=event as PointerEvent;this.heldCardKey='';clearTimeout(this.cardHoldTimer);if(pointer.pointerType==='mouse' || (event.target as Element).closest('button,a,input,textarea,select'))return;
       const x=pointer.clientX,y=pointer.clientY,source=node.dataset.receiveKey || node.dataset.sentKey!;
-      this.cardHoldTimer=window.setTimeout(()=>{this.heldCardKey=source;if(node.dataset.sentKey){if(!this.sentSelecting){this.sentSelecting=true;this.sentSelected.add(source);}}else if(!this.receiveSelecting){this.receiveSelecting=true;this.selected.add(source);}},450);
+      this.cardHoldTimer=window.setTimeout(()=>{this.heldCardKey=source;},450);
       const move=(event:PointerEvent)=>{if(Math.hypot(event.clientX-x,event.clientY-y)>12)clearTimeout(this.cardHoldTimer);};
       const finish=()=>{clearTimeout(this.cardHoldTimer);node.removeEventListener('pointermove',move);if(this.heldCardKey===source)window.setTimeout(()=>{if(!document.body.classList.contains('content-dragging'))this.render();},0);};
       node.addEventListener('pointermove',move);node.addEventListener('pointerup',finish,{once:true});node.addEventListener('pointercancel',finish,{once:true});

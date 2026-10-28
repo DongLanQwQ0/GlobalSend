@@ -118,6 +118,50 @@ void main() {
   });
 
   testWidgets(
+    'prewarmed empty dock presents on arrival and can clear and reuse the same UI',
+    (tester) async {
+      tester.view.physicalSize = const Size(480, 184);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(ReceiveDockApp.channel, (call) async {
+        calls.add(call);
+        if (call.method == 'ready') return payload(0, []);
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(ReceiveDockApp.channel, null),
+      );
+      await tester.pumpWidget(const ReceiveDockApp());
+      await frame(tester);
+      expect(calls.where((call) => call.method == 'presented'), isEmpty);
+      final state = tester.state(find.byType(ReceiveDockApp));
+      await update(tester, 1, [file('first')]);
+      expect(calls.where((call) => call.method == 'presented'), hasLength(1));
+      await update(tester, 1, []);
+      expect(find.byKey(const ValueKey('dock-tile-first')), findsNothing);
+      await messenger.handlePlatformMessage(
+        ReceiveDockApp.channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          MethodCall('content', {
+            ...payload(2, [file('second')]),
+            'reveal': true,
+          }),
+        ),
+        (_) {},
+      );
+      await frame(tester);
+      expect(identical(state, tester.state(find.byType(ReceiveDockApp))), true);
+      expect(find.byKey(const ValueKey('dock-tile-second')), findsOneWidget);
+      expect(calls.where((call) => call.method == 'ready'), hasLength(1));
+      expect(calls.where((call) => call.method == 'presented'), hasLength(2));
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
     'dock begins before bytes then progresses and completes in its original slot without another presentation',
     (tester) async {
       tester.view.physicalSize = const Size(480, 184);

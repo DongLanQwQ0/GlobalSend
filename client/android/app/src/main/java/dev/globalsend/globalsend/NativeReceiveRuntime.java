@@ -112,6 +112,7 @@ final class NativeReceiveRuntime {
         receivedNotifications = new ReceiveNotificationBridge(context, engine.getDartExecutor().getBinaryMessenger());
         new MethodChannel(engine.getDartExecutor().getBinaryMessenger(), "dev.globalsend/system").setMethodCallHandler((call, result) -> {
             if ("deviceName".equals(call.method)) result.success(AndroidDeviceName.read(context));
+            else if ("notifyUpdate".equals(call.method)) result.success(AppUpdateNotifications.show(context, call.argument("version"), call.argument("downloadUrl")));
             else if ("localIpInterfaces".equals(call.method)) {
                 try { result.success(LocalIpInterfaces.read(context)); }
                 catch (java.net.SocketException error) { result.error("IP_INTERFACES", "无法读取网卡地址", null); }

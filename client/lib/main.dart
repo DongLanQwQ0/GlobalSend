@@ -12,6 +12,7 @@ import 'system_bridge.dart';
 import 'ui_session.dart';
 import 'ui_tokens.dart';
 import 'appearance.dart';
+import 'app_update_ui.dart';
 import 'receive_dock_window.dart';
 import 'ios_back_swipe.dart';
 import 'file_share.dart';
@@ -182,10 +183,19 @@ class _GlobalSendAppState extends State<GlobalSendApp>
             await SystemBridge.revealFile(entry.localPath);
           }
         case 'delete':
-          if (entry != null) {
-            await controller.removeHistoryEntries([entry]);
-            controller.dismissReceipts([entry.id]);
+          // Remove the presentation before filesystem/persistence work. Deletion
+          // used to notify while the receipt was still present, then dismiss it
+          // without notifying again, leaving a stale card until another event.
+          if (id != null) {
+            controller.dismissReceipts([id]);
+            session.pendingReceipts.remove(id);
+            session.pendingReceipt = session.pendingReceipts.values.lastOrNull;
+            if (controller.pendingReceipts.isEmpty) {
+              controller.receiptPresentedExternally = false;
+            }
+            controller.changed();
           }
+          if (entry != null) await controller.removeHistoryEntries([entry]);
         case 'details':
           if (entry != null) {
             await SystemBridge.activateWindow();
@@ -248,6 +258,11 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         '${controller.root!.path}/window.json',
         restore: false,
       );
+    }
+    if (Platform.isWindows) {
+      // Startup/connection owns warm-up, not the first incoming receipt.
+      // Native keeps this content-free UI engine for subsequent arrivals.
+      unawaited(SystemBridge.prepareReceiveDock().catchError((Object _) {}));
     }
     if (Platform.isAndroid) {
       final state = await SystemBridge.receivedWindowState();
@@ -326,6 +341,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     final active =
         windowVisible && (state == null || state == AppLifecycleState.resumed);
     controller.setAppForeground(active);
+    controller.updates.setForeground(active);
     controller.setProbeForeground(
       windowVisible && (state == null || state == AppLifecycleState.resumed),
     );
@@ -375,29 +391,32 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   @override
   Widget build(BuildContext context) => !windowVisible
       ? const SizedBox.shrink(key: ValueKey('window-ui-unloaded'))
-      : AppearanceScope(
-          settings: controller.appearance,
-          child: AnimatedBuilder(
-            animation: controller.appearance,
-            builder: (context, _) => MaterialApp(
-              title: 'GlobalSend',
-              debugShowCheckedModeBanner: false,
-              navigatorObservers: [session.routes],
-              navigatorKey: navigatorKey,
-              theme: Ui.theme(controller.appearance.value),
-              builder: (context, navigator) => AnimatedBuilder(
-                animation: controller,
-                child: navigator,
-                builder: (context, child) => IosBackSwipe(
-                  navigatorKey: navigatorKey,
-                  child: NativeDropFeedback(
-                    active: controller.nativeDragActive,
-                    importing: controller.nativeImporting,
-                    child: child!,
+      : AppUpdatesScope(
+          updates: controller.updates,
+          child: AppearanceScope(
+            settings: controller.appearance,
+            child: AnimatedBuilder(
+              animation: controller.appearance,
+              builder: (context, _) => MaterialApp(
+                title: 'GlobalSend',
+                debugShowCheckedModeBanner: false,
+                navigatorObservers: [session.routes],
+                navigatorKey: navigatorKey,
+                theme: Ui.theme(controller.appearance.value),
+                builder: (context, navigator) => AnimatedBuilder(
+                  animation: controller,
+                  child: navigator,
+                  builder: (context, child) => IosBackSwipe(
+                    navigatorKey: navigatorKey,
+                    child: NativeDropFeedback(
+                      active: controller.nativeDragActive,
+                      importing: controller.nativeImporting,
+                      child: AppUpdateNotice(child: child!),
+                    ),
                   ),
                 ),
+                home: SendScreen(controller: controller, session: session),
               ),
-              home: SendScreen(controller: controller, session: session),
             ),
           ),
         );

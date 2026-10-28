@@ -60,7 +60,9 @@ class GlobalSendReceiveDock final : public Win32Window {
   bool Open();
   void Update(Map payload);
   void HideAnimated();
+  void ClearContent();
   bool Shown() const { return shown_; }
+  bool Ready() const { return ready_; }
   bool ClosingFinished() const { return closing_finished_; }
   bool Interacting() const { return dragging_ || moving_; }
   int64_t Generation() const;
@@ -86,6 +88,7 @@ class GlobalSendReceiveDock final : public Win32Window {
   IDropTarget* drop_target_ = nullptr;
   std::vector<HWND> drop_windows_;
   bool shown_ = false;
+  bool ready_ = false;
   bool presentation_scheduled_ = false;
   bool closing_ = false;
   bool closing_finished_ = false;

@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 
 import 'controller.dart';
 import 'ui_tokens.dart';
+import 'app_update_ui.dart';
 import 'dock_platform.dart';
 import 'android_queue_drop_host.dart';
 import 'directories.dart';
@@ -939,15 +940,22 @@ class _SendScreenState extends State<SendScreen>
           actions: [
             if (!loggedIn)
               IconButton(
-                tooltip: '外观',
+                tooltip: '设置',
                 icon: const AppIcon(Icons.settings_outlined, size: 20),
                 onPressed: () => showDialog<void>(
                   context: context,
                   builder: (dialog) => AlertDialog(
-                    title: const Text('外观'),
+                    title: const Text('设置'),
                     content: const SizedBox(
                       width: 360,
-                      child: AppearancePicker(),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          AppearancePicker(),
+                          SizedBox(height: 16),
+                          UpdateCheckControl(),
+                        ],
+                      ),
                     ),
                     actions: [
                       TextButton(
@@ -3452,28 +3460,21 @@ class _SendScreenState extends State<SendScreen>
           ? (kind) => dragContentSelection(item)
           : null,
     );
-    // Keep the Android recognizer mounted when the first held pointer enters
-    // selection. Later holds export the selected batch; taps alone change it.
+    // Keep the Android recognizer mounted across explicit selection changes.
+    // Holds only export; the multi-select button and taps change selection.
     return android && selectionEnabled
         ? KeyedSubtree(key: ValueKey('select-${item.id}'), child: surface)
         : surface;
   }
 
   Future<void> dragContentSelection(DockEntry item) => perform(() async {
-    if (!selecting) {
-      setState(() {
-        selecting = true;
-        selected
-          ..clear()
-          ..add(item.id);
-      });
-    }
     final entries =
         mergeContentCards(
               c.historyDock.where((entry) => entry.outgoing == item.outgoing),
             )
             .where(
               (entry) =>
+                  selecting &&
                   selected.contains(entry.id) &&
                   (entry.kind == 'text' || entry.localPath.isNotEmpty),
             )
@@ -4232,6 +4233,7 @@ class _SendScreenState extends State<SendScreen>
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
         children: [
           settingsSection('外观', [const AppearancePicker()]),
+          settingsSection('更新', [const UpdateCheckControl()]),
           settingsSection('本机', [
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: name,
@@ -4769,7 +4771,7 @@ class _SendScreenState extends State<SendScreen>
                   onTap: () => showLicensePage(
                     context: context,
                     applicationName: 'GlobalSend',
-                    applicationVersion: '1.0.0',
+                    applicationVersion: c.updates.build.label,
                   ),
                 ),
               ],

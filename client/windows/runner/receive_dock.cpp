@@ -104,7 +104,7 @@ bool GlobalSendReceiveDock::OnCreate() {
       controller_->engine()->messenger(), "dev.globalsend/receive-dock",
       &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler([this](const auto& call, auto result) {
-    if (call.method_name() == "ready") { result->Success(Value(payload_)); return; }
+    if (call.method_name() == "ready") { ready_ = true; result->Success(Value(payload_)); return; }
     if (call.method_name() == "hitRegions") {
       // One translucent pane includes the gaps between cards. Leave its native
       // region unset so DWM antialiases the outer corners without repeated cuts.
@@ -194,6 +194,15 @@ void GlobalSendReceiveDock::HideAnimated() {
     closing_finished_ = true;
     if (closed_) closed_(Generation());
   }
+}
+
+void GlobalSendReceiveDock::ClearContent() {
+  if (!closing_finished_ || Interacting()) return;
+  // Keep the display-only engine warm, but release the old card/image tree.
+  // The next real arrival must still pass the content-bearing frame gate.
+  payload_[Value("items")] = Value(flutter::EncodableList{});
+  payload_.erase(Value("reveal"));
+  if (channel_) channel_->InvokeMethod("content", std::make_unique<Value>(payload_));
 }
 
 void GlobalSendReceiveDock::BeginMove(const Map& args) {

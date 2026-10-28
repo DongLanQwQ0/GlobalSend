@@ -10,6 +10,7 @@ import 'package:file_picker/file_picker.dart';
 
 import 'api.dart';
 import 'appearance.dart';
+import 'app_updates.dart';
 import 'models.dart';
 import 'content_groups.dart';
 import 'network_bridge.dart';
@@ -101,6 +102,7 @@ typedef _PreparedRoutes = ({
 
 class SendController extends ChangeNotifier {
   final appearance = AppearanceSettings();
+  final AppUpdates updates;
   String get _platformName => Platform.isWindows
       ? 'windows'
       : Platform.isAndroid
@@ -117,6 +119,7 @@ class SendController extends ChangeNotifier {
     Future<List<LocalIpAddress>> Function()? ipAddresses,
     ReceivedNotifications? receivedNotifications,
     BackgroundReceive? backgroundReceive,
+    AppUpdates? updates,
   }) : documentsDirectory = documentsDirectory ?? receivedDirectory,
        stateDirectory = stateDirectory ?? appDataDirectory,
        _addressStages = addressStages ?? PeerTransport.candidateStages,
@@ -124,6 +127,7 @@ class SendController extends ChangeNotifier {
        _readIpAddresses = ipAddresses ?? readLocalIpAddresses,
        receivedNotifications = receivedNotifications ?? ReceivedNotifications(),
        _providedBackgroundReceive = backgroundReceive,
+       updates = updates ?? AppUpdates(),
        vault = vault ?? PlatformVault() {
     this.reachability =
         reachability ??
@@ -583,6 +587,34 @@ class SendController extends ChangeNotifier {
     }();
   }
 
+  String savedFilesIssue = '';
+  Future<void> _libraryWork = Future<void>.value();
+  Future<void> get localLibraryIdle => _libraryWork;
+  Future<void> refreshLocalLibrary({bool migrate = false}) {
+    final pending = _refreshLocalLibrary(migrate: migrate);
+    _libraryWork = Future.wait<void>([_libraryWork, pending]).then((_) {});
+    return pending;
+  }
+
+  Future<void> _refreshLocalLibrary({required bool migrate}) async {
+    try {
+      if (migrate) {
+        await _migrateSavedFiles();
+      } else {
+        await refreshSavedFiles();
+      }
+      savedFilesIssue = '';
+    } catch (error) {
+      // Local files are independent of center authentication. Keep their
+      // index/identity intact and offer a library retry instead of aborting login.
+      savedFilesIssue =
+          error is PlatformException || error is FileSystemException
+          ? '部分本地文件暂不可读，请重新授权接收文件夹后重试'
+          : '文件库暂不可用，请重试';
+    }
+    if (!disposed) changed();
+  }
+
   Future<void> refreshSavedFiles({bool cleanup = false}) async {
     await pruneSentReferences();
     final store = await _savedStore();
@@ -817,6 +849,9 @@ class SendController extends ChangeNotifier {
       size: item.size,
       updated: updated,
     );
+    // Present received content before persistence, delivery ACKs and the rest
+    // of reconciliation. Those operations may wait on disk or the network.
+    changed();
   }
 
   void _showReceipt(DockEntry item, String version) {
@@ -1088,6 +1123,7 @@ class SendController extends ChangeNotifier {
       await backgroundReceive.initialize();
       root = await stateDirectory();
       await appearance.load(File('${root!.path}/appearance.json'));
+      unawaited(updates.initialize(File('${root!.path}/updates.json')));
       await _loadStagedOutbox(restoreQueue: true);
       final file = File('${root!.path}/profiles.json');
       if (await file.exists()) {
@@ -1096,7 +1132,6 @@ class SendController extends ChangeNotifier {
             .toList();
       }
       await _loadLocalHistory();
-      await _migrateSavedFiles();
       _nextSavedFilesCleanup = DateTime.now()
           .add(const Duration(minutes: 15))
           .millisecondsSinceEpoch;
@@ -1141,10 +1176,10 @@ class SendController extends ChangeNotifier {
             dock = _restoreLocalHistoryEntries(recent, dock);
           }
         }
-        await refreshSavedFiles();
         await refreshCredentialRecoveries();
       }
       changed();
+      unawaited(refreshLocalLibrary(migrate: true));
       if (recent != null && _connectRequest == 0) await _restoreRecent(recent);
     } catch (e) {
       message = '本地配置读取失败：$e';
@@ -1314,7 +1349,7 @@ class SendController extends ChangeNotifier {
     }
     await _loadStagedOutbox();
     dock = _restoreLocalHistoryEntries(p, dock);
-    await refreshSavedFiles();
+    unawaited(refreshLocalLibrary());
     if (disposed || request != _connectRequest) return;
     await refreshCredentialRecoveries();
     String token;
@@ -2783,12 +2818,21 @@ class SendController extends ChangeNotifier {
         final path = entry.sourceReference.isNotEmpty
             ? entry.sourceReference
             : sources[entry.fileId] ?? entry.localPath;
-        final exists =
-            path.isEmpty ||
-            (entry.sourceReference.isNotEmpty &&
-                    !ReceivedFileAccess.isContentUri(path)
-                ? await Directory(path).exists()
-                : await ReceivedFileAccess.exists(path));
+        bool exists;
+        try {
+          exists =
+              path.isEmpty ||
+              (entry.sourceReference.isNotEmpty &&
+                      !ReceivedFileAccess.isContentUri(path)
+                  ? await Directory(path).exists()
+                  : await ReceivedFileAccess.exists(path));
+        } on PlatformException {
+          // A revoked provider grant affects this reference, not the library.
+          // Keep it for reauthorization and continue checking the other files.
+          continue;
+        } on FileSystemException {
+          continue;
+        }
         if (epoch != generation || disposed) return;
         if (!exists) {
           _hiddenDockIds.add(entry.id);
@@ -2828,11 +2872,18 @@ class SendController extends ChangeNotifier {
             ? item.sourceReference
             : item.localPath;
         if (path.isEmpty) continue;
-        final exists =
-            item.sourceReference.isNotEmpty &&
-                !ReceivedFileAccess.isContentUri(path)
-            ? await Directory(path).exists()
-            : await ReceivedFileAccess.exists(path);
+        bool exists;
+        try {
+          exists =
+              item.sourceReference.isNotEmpty &&
+                  !ReceivedFileAccess.isContentUri(path)
+              ? await Directory(path).exists()
+              : await ReceivedFileAccess.exists(path);
+        } on PlatformException {
+          continue;
+        } on FileSystemException {
+          continue;
+        }
         if (epoch != generation || disposed) return;
         if (!exists) {
           _localHistory!.remove(record.key);
@@ -5534,6 +5585,7 @@ class SendController extends ChangeNotifier {
     backgroundReceive.dispose();
     reachability.dispose();
     appearance.dispose();
+    updates.dispose();
     super.dispose();
   }
 }

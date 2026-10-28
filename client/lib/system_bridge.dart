@@ -62,6 +62,11 @@ class SystemBridge {
     });
   }
 
+  static Future<void> prepareReceiveDock() async {
+    if (!Platform.isWindows) return;
+    await channel.invokeMethod<bool>('prepareReceiveDock', <String, dynamic>{});
+  }
+
   static Future<Map<String, dynamic>> presentReceiveDock({
     required List<Map<String, dynamic>> items,
     required int serial,

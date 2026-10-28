@@ -106,15 +106,17 @@ void GlobalSendWindowLifecycle::DismissReceived(std::optional<uint64_t> expected
   Restore(before_receipt_);
 }
 
-void GlobalSendWindowLifecycle::NotifyReceived(const std::wstring& title,
-                                              const std::wstring& body) {
-  if (!tray_ && !AddTray()) return;
+bool GlobalSendWindowLifecycle::NotifyReceived(const std::wstring& title,
+                                              const std::wstring& body, bool update) {
+  if (!tray_ && !AddTray()) return false;
   auto data = TrayData(window_);
   data.uFlags = NIF_INFO;
   data.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
   wcsncpy_s(data.szInfoTitle, title.c_str(), _TRUNCATE);
   wcsncpy_s(data.szInfo, body.c_str(), _TRUNCATE);
-  Shell_NotifyIconW(NIM_MODIFY, &data);
+  if (!Shell_NotifyIconW(NIM_MODIFY, &data)) return false;
+  update_notice_ = update;
+  return true;
 }
 
 GlobalSendWindowState GlobalSendWindowLifecycle::State() const {

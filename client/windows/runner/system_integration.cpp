@@ -314,6 +314,21 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
   if (status == DRAGDROP_S_DROP || status == DRAGDROP_S_CANCEL) result->Success(Value(status == DRAGDROP_S_DROP && effect == DROPEFFECT_COPY));
   else result->Error("DRAG_FAILED", "Windows OLE drag could not start");
 }
+bool PrepareReceiveDock(Map payload) {
+  if (receive_dock) return true;
+  receive_dock = std::make_unique<GlobalSendReceiveDock>(std::move(payload),
+    [](const Map& action) {
+      if (channel) channel->InvokeMethod("receiveDockAction", std::make_unique<Value>(action));
+      if (String(action, "action") == "close") CloseDockLater(Integer(action, "arrivalGeneration"));
+    }, [](const Map& values, auto completion, HWND window) {
+      Drag(values, std::move(completion), window);
+    }, [] { CompleteDockReplies(); }, [](int64_t generation) {
+      PostMessageW(owner, kDestroyReceiveDock, static_cast<WPARAM>(generation), 0);
+    });
+  if (receive_dock->Open()) return true;
+  receive_dock.reset();
+  return false;
+}
 }  // namespace
 
 void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, HWND flutter_view) {
@@ -365,6 +380,19 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
               ? window_lifecycle->ReceiptArrivalGeneration() : 0))}}));
       return;
     }
+    if (call.method_name() == "prepareReceiveDock") {
+      // No content, focus activation or visible window during warm-up.
+      result->Success(Value(PrepareReceiveDock(Map{
+        {Value("items"), Value(flutter::EncodableList{})}
+      })));
+      return;
+    }
+    if (call.method_name() == "notifyUpdate") {
+      const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+      result->Success(Value(args && window_lifecycle && window_lifecycle->NotifyReceived(
+          L"GlobalSend 有新版本", Wide(String(*args, "version")) + L" 可更新，点击查看", true)));
+      return;
+    }
     const auto* arguments = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
     if (!arguments) { result->Error("BAD_ARGUMENT", "Expected operation map"); return; }
     if (call.method_name() == "presentReceiveDock") {
@@ -392,17 +420,7 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
           receive_dock->Update(std::move(payload));
           if (receive_dock->Shown()) CompleteDockReplies();
         } else {
-          receive_dock = std::make_unique<GlobalSendReceiveDock>(std::move(payload),
-            [](const Map& action) {
-              if (channel) channel->InvokeMethod("receiveDockAction", std::make_unique<Value>(action));
-              if (String(action, "action") == "close") CloseDockLater(Integer(action, "arrivalGeneration"));
-            }, [](const Map& values, auto completion, HWND window) {
-              Drag(values, std::move(completion), window);
-            }, [] { CompleteDockReplies(); }, [](int64_t generation) {
-              PostMessageW(owner, kDestroyReceiveDock, static_cast<WPARAM>(generation), 0);
-            });
-          if (!receive_dock->Open()) {
-            receive_dock.reset();
+          if (!PrepareReceiveDock(std::move(payload))) {
             CompleteDockReplies();
             if (window_lifecycle) window_lifecycle->NotifyReceived(L"GlobalSend", L"收到新内容");
           }
@@ -529,7 +547,7 @@ bool HandleGlobalSendWindowMessage(UINT message, WPARAM wparam, LPARAM lparam,
       if (receive_dock->ClosingFinished()) {
         if (!receive_dock->Interacting()) {
           CompleteDockReplies();
-          receive_dock.reset();
+          receive_dock->ClearContent();
         }
       }
       else receive_dock->HideAnimated();
@@ -537,7 +555,8 @@ bool HandleGlobalSendWindowMessage(UINT message, WPARAM wparam, LPARAM lparam,
     *result = 0;
     return true;
   }
-  if (message == WM_APP + 73 && LOWORD(lparam) == NIN_BALLOONUSERCLICK && channel) {
+  if (message == WM_APP + 73 && LOWORD(lparam) == NIN_BALLOONUSERCLICK && channel &&
+      !(window_lifecycle && window_lifecycle->UpdateNotice())) {
     channel->InvokeMethod("receivedNotificationOpened", std::make_unique<Value>());
   }
   return window_lifecycle && window_lifecycle->Handle(message, wparam, lparam, result);

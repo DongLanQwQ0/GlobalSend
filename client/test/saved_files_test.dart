@@ -390,6 +390,7 @@ void main() {
     final c = OfflineLibraryController(folder);
     addTearDown(c.dispose);
     await c.init();
+    await c.localLibraryIdle;
     expect(c.profile!.key, p.key);
     expect(c.api, isNull);
     expect(c.connected, false);
@@ -403,6 +404,7 @@ void main() {
     final restarted = OfflineLibraryController(folder);
     addTearDown(restarted.dispose);
     await restarted.init();
+    await restarted.localLibraryIdle;
     expect(restarted.savedFiles.single.name, '离线重命名.txt');
     expect(restarted.savedFileRetentionHours, 72);
     restarted.profile = ServerProfile(

@@ -269,8 +269,8 @@ export class LocalLibraryView {
       const id=node.dataset.libraryId!;
       node.addEventListener('click',event=>{if((event.target as Element).closest('button') || this.busy || this.actions.pendingForward())return;if(this.pressedId===id){this.pressedId='';return;}this.editing?this.toggleSelection(id):void this.preview(id);});
       node.addEventListener('keydown',event=>{const key=event as KeyboardEvent;if(event.target===node && ['Enter',' '].includes(key.key)){event.preventDefault();node.click();}});
-      node.addEventListener('contextmenu',event=>{event.preventDefault();if(!this.editing)this.enterEdit(id);});
-      node.addEventListener('pointerdown',event=>{if(this.busy || this.actions.pendingForward())return;this.pressedId='';this.cancelPress();if(event.pointerType==='mouse')return;this.pressStart={x:event.clientX,y:event.clientY};this.pressTimer=window.setTimeout(()=>{this.pressedId=id;if(!this.editing){this.editing=true;this.selected.add(id);}this.error='';/* Keep the source mounted until the browser's native drag starts/ends. */},450);});
+      node.addEventListener('contextmenu',event=>{event.preventDefault();});
+      node.addEventListener('pointerdown',event=>{if(this.busy || this.actions.pendingForward())return;this.pressedId='';this.cancelPress();if(event.pointerType==='mouse')return;this.pressStart={x:event.clientX,y:event.clientY};this.pressTimer=window.setTimeout(()=>{this.pressedId=id;/* A hold only suppresses the trailing click; native drag owns the gesture. */},450);});
       node.addEventListener('pointermove',event=>{if(this.pressStart && Math.hypot(event.clientX-this.pressStart.x,event.clientY-this.pressStart.y)>12)this.cancelPress();});
       for(const event of ['pointerup','pointercancel','pointerleave'])node.addEventListener(event,()=>{this.cancelPress();if(this.pressedId===id)window.setTimeout(()=>{if(!document.body.classList.contains('content-dragging'))this.actions.changed();},0);});
       node.addEventListener('dragend',()=>this.actions.changed());
