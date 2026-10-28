@@ -1609,6 +1609,41 @@ test('a missing saved file falls through to ordinary acceptance, and unsupported
   await c.acceptFiles(t,[t.files[0].fileId],true);assert.deepEqual(calls,supported?['lookup','/transfers/cache-missing/accept']:['/transfers/cache-missing/accept']);
  }
 });
+
+function folderReuseFixture(){
+ const f=fixture();f.context.Worker=class {};f.context.navigator.storage={getDirectory:async()=>{}};f.c.info.features={folderReuse:true};
+ const t=transfer('folder-reuse');const leaf={...t.files[0],fileId:'leaf',name:'a.txt',relativePath:'Folder/a.txt',entryKind:'file'};
+ t.files=[{...leaf,fileId:'root',name:'Folder',relativePath:'Folder',entryKind:'directory',size:0},leaf] as any;f.c.transfers=[t];
+ return {...f,t,keys:t.files.map(file=>`${t.transferId}:${file.fileId}`)};
+}
+test('folder reuse negotiates the complete manifest before accept and applies one receipt to every member',async()=>{
+ const {c,t,keys}=folderReuseFixture(),calls:any[]=[],at='2026-10-28T06:00:00.000Z';
+ const local=new Map(keys.map(key=>[key,new File(['local'],'saved')]));
+ c.ensureFileStore=async()=>({reuseFolder:async(id:string,files:any[])=>{calls.push(['verify',files.map(file=>file.fileId)]);return local;},confirmFolderReuse:async(ids:string[],time:string)=>{assert.deepEqual(Array.from(ids),keys);assert.equal(time,at);},expiry:()=>Infinity});
+ c.api.request=async(path:string,body:any)=>{calls.push([path,body]);if(path.endsWith('/reuse'))return {files:t.files.map(file=>({...file,status:'received',reused:true,receivedAt:at}))};return {transfer:c.transfers[0]};};
+ await c.acceptFiles(t,t.files.map(file=>file.fileId),true);
+ assert.equal(calls[0][0],'verify');assert.match(calls[1][0],/\/folders\/root\/reuse$/);assert.equal(calls[1][1].files.length,2);
+ assert.ok(c.transfers[0].files.every((file:any)=>file.status==='received'));for(const key of keys){assert.equal(c.rtcLocalFiles.get(key),local.get(key));assert.equal(c.receivedAt[key],at);}
+});
+test('partial selection and old centers retain normal folder acceptance without binding a reused root',async()=>{
+ for(const mode of ['partial','old']){
+  const {c,t}=folderReuseFixture(),calls:any[]=[];if(mode==='old')c.info.features={};
+  c.ensureFileStore=async()=>{throw new Error('must not match a partial/unsupported folder');};
+  c.api.request=async(path:string,body:any)=>{calls.push({path,body});return {transfer:t};};
+  const selected=mode==='partial'?['leaf']:t.files.map(file=>file.fileId);await c.acceptFiles(t,selected,true);
+  assert.equal(calls.length,1);assert.match(calls[0].path,/\/accept$/);assert.deepEqual(Array.from(calls[0].body.fileIds),selected);
+ }
+});
+test('folder reuse started-race unlinks only new aliases, but a lost receipt preserves durable bindings',async()=>{
+ for(const lost of [false,true]){
+  const {c,context,t,keys}=folderReuseFixture(),unlinked:string[]=[],calls:string[]=[];
+  c.ensureFileStore=async()=>({reuseFolder:async()=>new Map(keys.map(key=>[key,new File([],'saved')])),unlinkReuse:async(key:string)=>unlinked.push(key)});
+  c.api.request=async(path:string)=>{calls.push(path);if(path.endsWith('/reuse'))throw lost?new Error('response lost'):new context.module.exports.ApiError(409,'TRANSFER_STARTED','started');return {transfer:t};};
+  if(lost){await assert.rejects(c.acceptFiles(t,t.files.map(file=>file.fileId),true),/response lost/);assert.deepEqual(unlinked,[]);assert.equal(calls.length,1);}
+  else {await c.acceptFiles(t,t.files.map(file=>file.fileId),true);assert.deepEqual(unlinked,keys);assert.match(calls[1],/\/accept$/);}
+ }
+});
+
 test('Receive, History and Files use the same compact toolbar in normal and selected modes',()=>{
  const {c,document,render}=fixture();c.render=render;
  for(const view of ['receive','sent','library'])for(const selecting of [false,true]){

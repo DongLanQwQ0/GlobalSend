@@ -9,7 +9,7 @@ import { dockScopeKey, expiryLabel, fileItemKey, localTextDeadline, textItemKey,
 import type { HiddenItems } from './dock';
 import { RtcFileChannel, RtcFileStore, rtcStorageSupported } from './rtc';
 import type { RtcScope, RtcView } from './rtc';
-import type { RoutePreference } from '../../packages/protocol/src/index';
+import type { RoutePreference, FolderReuseRequest, FolderReuseReceipt } from '../../packages/protocol/src/index';
 import { LocalLibraryView } from './library_view';
 import type { LocalFileEntry } from './library';
 import { RtcProbeMonitor, orientedProbeAddresses } from './rtc_probe';
@@ -1734,6 +1734,31 @@ class GlobalSend {
     this.accepting.add(transferId);this.render();
     try{
       const selected=new Set(fileIds);
+      if(this.info?.features?.folderReuse && fileIds.length && localStorageSupported()){
+        let folderReused=false;
+        for(const root of transfer.files.filter(file=>file.entryKind==='directory' && file.relativePath && !file.relativePath.includes('/'))){
+          const members=transfer.files.filter(file=>file.fileId===root.fileId || file.relativePath?.startsWith(root.relativePath!+'/'));
+          if(!members.every(file=>selected.has(file.fileId) && file.status==='offered' && !this.canceled.has(fileKey(transferId,file.fileId)) && !this.paused.has(fileKey(transferId,file.fileId))))continue;
+          const store=await this.ensureFileStore();
+          const local=await store.reuseFolder(transferId,members);if(!local)continue;
+          const keys=members.map(file=>fileKey(transferId,file.fileId));
+          if(generation!==this.generation || keys.some(key=>this.canceled.has(key) || this.paused.has(key))){await Promise.all(keys.map(key=>store.unlinkReuse(key)));return;}
+          try{
+            const request:FolderReuseRequest={files:members.map(({fileId,sha256,size})=>({fileId,sha256,size}))};
+            const response=await this.api.request<FolderReuseReceipt>(`/transfers/${transferId}/folders/${root.fileId}/reuse`,request);
+            const receivedAt=response.files[0].receivedAt!;await store.confirmFolderReuse(keys,receivedAt);
+            if(generation!==this.generation)return;
+            for(const file of response.files){const key=fileKey(transferId,file.fileId);this.rtcLocalFiles.set(key,local.get(key)!);this.rtcFileExpiry.set(key,store.expiry(key));this.receivedAt[key]=file.receivedAt!;this.setFile(transferId,file);selected.delete(file.fileId);}
+            this.persist();folderReused=true;
+          }catch(error){
+            // Keep durable aliases after an unknown/lost response: the center
+            // may have committed its receipt, and refresh must find the bytes.
+            if(!(error instanceof ApiError && error.code==='TRANSFER_STARTED'))throw error;
+            await Promise.all(keys.map(key=>store.unlinkReuse(key)));
+          }
+        }
+        if(folderReused)await this.fileLibrary.refresh();
+      }
       if(this.info?.features?.fileReuse && fileIds.length && localStorageSupported()){
         const store=await this.ensureFileStore();
         for(const file of transfer.files.filter(file=>selected.has(file.fileId) && file.status==='offered' && !file.relativePath && file.entryKind!=='directory')){

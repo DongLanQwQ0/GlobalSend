@@ -1,7 +1,7 @@
 import test from 'node:test';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,readFile,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rmdir,unlink} from 'node:fs/promises';
 import {existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -112,6 +112,51 @@ test('file reuse verifies existing bytes, refreshes one library entry and adds o
   assert.equal(readFileSync(join(chosen.path,'first.txt'),'utf8'),text);assert.equal(await (await restarted.call('get',{key:'new:file'})).file.text(),text);
   await restarted.call('remove',{key:'new:file'});assert.equal((await current.call('library-list')).entries.length,0);assert.equal(existsSync(join(chosen.path,'first.txt')),false);
   await assert.rejects(old.call('get',{key:'old:file'}),{name:'NotFoundError'});
+});
+
+async function savedTree(f:Awaited<ReturnType<typeof fixture>>,worker:ReturnType<Awaited<ReturnType<typeof fixture>>['worker']>){
+  const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
+  const files=[
+    {key:'old:root',name:'资料',relativePath:'资料',entryKind:'directory',size:0,sha256:hash(''),transferId:'old'},
+    {key:'old:sub',name:'sub',relativePath:'资料/sub',entryKind:'directory',size:0,sha256:hash(''),transferId:'old'},
+    {key:'old:empty',name:'空目录',relativePath:'资料/空目录',entryKind:'directory',size:0,sha256:hash(''),transferId:'old'},
+    {key:'old:text',name:'文字.txt',relativePath:'资料/sub/文字.txt',entryKind:'file',size:4,sha256:hash('good'),transferId:'old'},
+    {key:'old:zero',name:'empty.bin',relativePath:'资料/sub/empty.bin',entryKind:'file',size:0,sha256:hash(''),transferId:'old'},
+  ];
+  for(const file of files){if(file.entryKind==='directory')await worker.call('directory',file);else await save(worker,file.key,file.name,file.size?'good':'',file);}
+  return {files:files.map(file=>({...file,key:file.key.replace('old:','new:'),transferId:'new',name:file.key==='old:root'?'改名资料':file.name,relativePath:file.relativePath.replace(/^资料/,'改名资料')})),base:join(f.root.path,'globalsend-received-v1','old-scope','received','资料')};
+}
+
+test('whole folder reuse retains one real tree across restart, forwarding, migration and deletion through its aliases',async()=>{
+  const f=await fixture(),old=f.worker('old-scope'),next=f.worker('new-scope');await old.ready;await next.ready;
+  const {files,base}=await savedTree(f,old),before=(await old.call('get',{key:'old:root'})).meta.receivedAt;
+  const reused=await next.call('reuse-folder',{files});assert.equal(reused.files.length,5);
+  const receivedAt=new Date(Date.now()+10).toISOString();await next.call('confirm-folder-reuse',{keys:files.map(file=>file.key),receivedAt});
+  assert.ok(Date.parse(receivedAt)>before);assert.equal((await old.call('get',{key:'old:root'})).meta.receivedAt,Date.parse(receivedAt));
+  assert.equal(existsSync(join(f.root.path,'globalsend-received-v1','new-scope','received')),false,'metadata aliases add no second root');
+  assert.equal(readFileSync(join(base,'sub','文字.txt'),'utf8'),'good');
+  const restarted=f.worker('new-scope');await restarted.ready;
+  assert.equal(await (await restarted.call('get',{key:'new:text'})).file.text(),'good');
+  assert.equal((await restarted.call('get',{key:'new:empty'})).directory,true);
+  const expanded=(await restarted.call('library-expand',{ids:['new-scope/new%3Aroot']})).entries;
+  assert.equal(expanded.length,5);assert.ok(expanded.every((value:any)=>value.entry.receivedAt===Date.parse(receivedAt)));
+  assert.ok(expanded.every((value:any)=>value.entry.relativePath.startsWith('改名资料')));
+  const library=(await next.call('library-list')).entries;assert.equal(library.length,5);assert.equal(library.filter((entry:any)=>!entry.relativePath.includes('/')).length,1);
+  const chosen=new DiskDirectory(join(f.path,'chosen'),true);const moved=await next.call('destination-set',{id:'chosen',handle:chosen});assert.equal(moved.moved,5);
+  assert.equal(existsSync(base),false);assert.equal(await (await restarted.call('get',{key:'new:text'})).file.text(),'good');
+  await writeFile(join(chosen.path,'资料','user.txt'),'user');await restarted.call('remove',{key:'new:root'});
+  assert.equal(readFileSync(join(chosen.path,'资料','user.txt'),'utf8'),'user');assert.equal(existsSync(join(chosen.path,'资料','sub')),false);
+  assert.equal((await next.call('library-list')).entries.length,0);await assert.rejects(old.call('get',{key:'old:text'}),{name:'NotFoundError'});
+});
+
+for(const changed of ['bytes','empty-directory','extra-user-file','missing-index'])test(`whole folder reuse rejects ${changed} without copying or binding a partial tree`,async()=>{
+  const f=await fixture(),old=f.worker('old-scope'),next=f.worker('new-scope');await old.ready;await next.ready;
+  const {files,base}=await savedTree(f,old);
+  if(changed==='bytes')await writeFile(join(base,'sub','文字.txt'),'evil');
+  if(changed==='empty-directory')await rmdir(join(base,'空目录'));
+  if(changed==='extra-user-file')await writeFile(join(base,'user.txt'),'user');
+  if(changed==='missing-index')await unlink(join(f.root.path,'globalsend-received-v1','old-scope','old%3Aempty.json'));
+  assert.equal((await next.call('reuse-folder',{files})).files,undefined);await assert.rejects(next.call('get',{key:'new:root'}),{name:'NotFoundError'});
 });
 
 test('reuse never trusts a name, stale digest, deleted source, uncommitted prefix or another folder path',async()=>{

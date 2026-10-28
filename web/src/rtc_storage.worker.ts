@@ -125,7 +125,7 @@ async function removeOwned(meta:Metadata,target:Directory){
     const child=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
     if(child.key!==meta.key && child.transferId===meta.transferId && child.relativePath?.startsWith(meta.relativePath!+'/'))owned.push(child);
   }
-  owned.sort((a,b)=>(a.entryKind==='directory'?1:0)-(b.entryKind==='directory'?1:0) || (b.storagePath?.split('/').length || 0)-(a.storagePath?.split('/').length || 0));
+  owned.sort((a,b)=>(a.entryKind==='directory'?1:0)-(b.entryKind==='directory'?1:0) || (b.relativePath?.split('/').length || 0)-(a.relativePath?.split('/').length || 0));
   for(const child of owned){if(target===directory)await close(child.key);await removeLibraryFile(target,child.key);}
 }
 type MoveEntry={scope:string;old:Metadata;next:Metadata};
@@ -220,6 +220,70 @@ async function changeDestination(data:{id?:string;handle?:FileSystemDirectoryHan
   const cleanupPending=await finishMigration(record),{id,name}=await receivingDestination();
   return {id,name,moved:record.entries.length,cleanupPending,relocated};
 }
+async function reuseFolder(incoming:Metadata[]) {
+  const offeredRoot=incoming.find(meta=>meta.entryKind==='directory' && meta.relativePath && !meta.relativePath.includes('/'));
+  if(!offeredRoot || new Set(incoming.map(meta=>meta.key)).size!==incoming.length)return {};
+  const suffix=(meta:Metadata)=>meta.relativePath===offeredRoot.relativePath?'':meta.relativePath?.startsWith(offeredRoot.relativePath!+'/')?meta.relativePath.slice(offeredRoot.relativePath!.length+1):undefined;
+  const wanted=new Map(incoming.map(meta=>[suffix(meta),meta]));
+  if(wanted.has(undefined) || wanted.size!==incoming.length)return {};
+  const rules=await cleanupPreferences(),kind=(meta:Metadata)=>meta.entryKind==='directory'?'directory':'file';
+  for await(const scope of appDirectory.values()){
+    if(scope.kind!=='directory')continue;
+    const target=scope as Directory,records:Metadata[]=[];
+    for await(const handle of target.values()){
+      if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
+      const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
+      if(!meta.alias && meta.complete && meta.relativePath)records.push(meta);
+    }
+    for(const root of records.filter(meta=>meta.entryKind==='directory' && !meta.relativePath!.includes('/'))){
+      const members=records.filter(meta=>meta.transferId===root.transferId && (meta.key===root.key || meta.relativePath!.startsWith(root.relativePath!+'/')));
+      if(members.length!==incoming.length || !root.storagePath)continue;
+      const indexed=new Map(members.map(meta=>[meta.key===root.key?'':meta.relativePath!.slice(root.relativePath!.length+1),meta]));
+      if(indexed.size!==wanted.size || [...indexed].some(([path,meta])=>{
+        const file=wanted.get(path);
+        return !file || kind(meta)!==kind(file) || meta.storagePath!==root.storagePath+(path?'/'+path:'') || meta.destinationId!==root.destinationId ||
+          cleanupDue({...meta,receivedAt:meta.receivedAt ?? meta.expires-86400000},rules) || kind(meta)==='file' && (meta.size!==file.size || meta.sha256!==file.sha256);
+      }))continue;
+      // Compare the real tree, including empty directories and user-added files.
+      // Matching metadata from separate old roots must never assemble a folder.
+      const actual=new Map<string,File|null>();
+      try {
+        const {parent,name}=await new FolderStorage(target).parent(root);
+        const visit=async(folder:Directory,prefix:string)=>{
+          actual.set(prefix,null);
+          for await(const handle of folder.values()){
+            const path=prefix?prefix+'/'+handle.name:handle.name;
+            if(handle.kind==='directory')await visit(handle as Directory,path);
+            else actual.set(path,await (handle as FileSystemFileHandle).getFile());
+          }
+        };
+        await visit(await parent.getDirectoryHandle(name) as Directory,'');
+      }catch(error){if(['NotFoundError','NotAllowedError'].includes((error as Error).name))continue;throw error;}
+      if(actual.size!==wanted.size)continue;
+      let matches=true;
+      for(const [path,meta] of wanted){
+        if(!actual.has(path!)){matches=false;break;}
+        const file=actual.get(path!)!;
+        if(meta.entryKind==='directory'){if(file!==null){matches=false;break;}continue;}
+        if(!file || file.size!==meta.size){matches=false;break;}
+        const digest=sha256.create();
+        for(let offset=0;offset<file.size;offset+=1048576)digest.update(new Uint8Array(await file.slice(offset,offset+1048576).arrayBuffer()));
+        if(Array.from(digest.digest(),byte=>byte.toString(16).padStart(2,'0')).join('')!==meta.sha256){matches=false;break;}
+      }
+      if(!matches)continue;
+      const now=Date.now(),files=[];
+      for(const [path,meta] of wanted){
+        const owner=indexed.get(path!)!;owner.receivedAt=now;owner.expires=now+86400000;await metadata(owner,target);
+        const alias:Metadata={...meta,complete:true,receivedAt:now,expires:owner.expires,alias:{scope:scope.name,key:owner.key}};
+        if(target.name!==directory.name || owner.key!==alias.key)await metadata(alias);
+        files.push({key:meta.key,file:actual.get(path!),meta:{...alias,expires:cleanupMatches(owner,rules)?now+rules.retentionHours*3600000:Infinity}});
+      }
+      return {files};
+    }
+  }
+  return {};
+}
+
 async function execute(command:string,data:any):Promise<unknown> {
   switch(command) {
     case 'init': {
@@ -270,6 +334,16 @@ async function execute(command:string,data:any):Promise<unknown> {
       const rules=await cleanupPreferences(),receivedAt=meta.receivedAt ?? meta.expires-86400000;
       if(!meta.complete || cleanupDue({...meta,receivedAt},rules))return {};
       return {file:await dataFile(meta),directory:meta.entryKind==='directory',meta:{...meta,expires:cleanupMatches(meta,rules)?receivedAt+rules.retentionHours*3600000:Infinity}};
+    }
+    case 'reuse-folder': return reuseFolder(data.files);
+    case 'confirm-folder-reuse': {
+      const receivedAt=Date.parse(data.receivedAt),rules=await cleanupPreferences(),files=[];
+      for(const key of data.keys as string[]){
+        const {meta,target}=await canonical(await readMeta(key),directory);
+        meta.receivedAt=receivedAt;meta.expires=receivedAt+86400000;await metadata(meta,target);
+        files.push({key,expires:cleanupMatches(meta,rules)?receivedAt+rules.retentionHours*3600000:Infinity});
+      }
+      return {files};
     }
     case 'reuse': {
       if(data.relativePath || data.entryKind==='directory')return {};
@@ -365,7 +439,8 @@ async function execute(command:string,data:any):Promise<unknown> {
           if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
           const child=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
           if(!child.complete || child.key!==meta.key && !(meta.entryKind==='directory' && child.transferId===meta.transferId && child.relativePath?.startsWith(meta.relativePath!+'/')))continue;
-          const file=await dataFile(child,target);const entry=libraryEntry(scope,child,file,await cleanupPreferences());expanded.set(entry.id,{entry,file});
+          const saved=await libraryFile(`${scope}/${keyName(child.key)}`);
+          const entry=libraryEntry(scope,saved.meta,saved.file,await cleanupPreferences());expanded.set(entry.id,{entry,file:saved.file});
         }
       }
       return {entries:[...expanded.values()]};

@@ -84,6 +84,17 @@ export class RtcFileStore {
     return undefined;
   }
   async unlinkReuse(key:string){await this.call('unlink-reuse',{key});this.expiries.delete(key);this.receivedTimes.delete(key);}
+  async reuseFolder(transferId:string,files:TransferFile[]) {
+    const result=await this.call<{files?:{key:string;file:File|null;meta:{name:string;mimeType:string;receivedAt:number;expires:number}}[]}>('reuse-folder',{files:files.map(file=>({...file,key:`${transferId}:${file.fileId}`,transferId}))});
+    if(!result.files)return undefined;
+    const reused=new Map<string,File>();
+    for(const {key,file,meta} of result.files){
+      this.expiries.set(key,meta.expires);this.receivedTimes.set(key,new Date(meta.receivedAt).toISOString());
+      reused.set(key,new File(file?[file]:[],meta.name,{type:meta.mimeType || '',lastModified:file?.lastModified || meta.receivedAt}));
+    }
+    return reused;
+  }
+  async confirmFolderReuse(keys:string[],receivedAt:string){const result=await this.call<{files:{key:string;expires:number}[]}>('confirm-folder-reuse',{keys,receivedAt});for(const {key,expires} of result.files){this.receivedTimes.set(key,receivedAt);this.expiries.set(key,expires);}}
   async close(key:string) {await this.ready;await this.call('close',{key});}
   async remove(key:string) {await this.ready;await this.call('remove',{key});}
   async cleanup() {await this.ready;await this.call('cleanup',{});}

@@ -100,6 +100,17 @@ test('real Web controller + production OPFS worker + real center transfer a 70-f
     assert.equal(forwarded.files.length,74);assert.deepEqual(forwarded.files.map((file:any)=>file.relativePath).sort(),transfer.files.map((file:any)=>file.relativePath).sort());
     assert.ok(forwarded.files.every((file:any)=>file.entryKind==='directory' || restarted.fileSources.get(`${forwarded.transferId}:${file.fileId}`) instanceof File));
     assert.equal(rootEntry.receivedAt,recordedTime);
+    const originalMtime=statSync(join(received,'资料','sub','resume.txt')).mtimeMs;
+    await sender.addFolders([{name:'资料',parts}]);await sender.sendQueue([receiverSession.device.deviceId]);const repeated=sender.transfers[0];
+    restarted.transfers=[repeated,...restarted.transfers];await restarted.acceptFiles(repeated,repeated.files.map((file:any)=>file.fileId),true);
+    const reused=(await call(base,receiverSession,`/transfers/${repeated.transferId}`)).transfer;
+    assert.ok(reused.files.every((file:any)=>file.status==='received' && file.reused && file.offset===0));
+    assert.equal(new Set(reused.files.map((file:any)=>file.receivedAt)).size,1);
+    assert.equal(statSync(join(received,'资料','sub','resume.txt')).mtimeMs,originalMtime,'reuse does not rewrite original file bytes');
+    assert.equal(readdirSync(received).length,1,'repeat receive adds no second physical root');
+    assert.equal(requests.filter(request=>request.url.includes(repeated.transferId)&&request.url.includes('/chunks')).length,0);
+    assert.ok(requests.some(request=>request.url.includes(`/transfers/${repeated.transferId}/folders/`)&&request.url.endsWith('/reuse')));
+    for(const file of reused.files)assert.ok(await (await restarted.ensureFileStore()).get(`${repeated.transferId}:${file.fileId}`));
     const activeStore=await restarted.ensureFileStore();await activeStore.directory('different-transfer:root',{...transfer.files[0],relativePath:'资料',name:'资料',entryKind:'directory'});
     assert.ok(existsSync(join(received,'资料 (1)')),'a different transfer gets a distinct root rather than overwriting the first');
     await sender.addFolders([{name:'完全空',parts:[]}]);await sender.sendQueue([receiverSession.device.deviceId]);const empty=sender.transfers[0];assert.equal(empty.files.length,1);
