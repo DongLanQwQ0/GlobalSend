@@ -43,6 +43,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private long visibilityRevision, lastHideRevision;
     private float downX, downY;
     private int startX, startY, startWidth, startHeight;
+    private ReceiveAppearance appearance;
     private static final java.util.concurrent.ExecutorService thumbnails =
         java.util.concurrent.Executors.newSingleThreadExecutor();
 
@@ -113,18 +114,19 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void create() {
+        appearance = ReceiveAppearance.load(context);
         rootAdded = false;
         root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(6), dp(2), dp(6), dp(4));
-        root.setBackground(shape(0xf5f7faf6, 18));
+        root.setBackground(shape((appearance.surface & 0x00ffffff) | 0xf5000000, 18));
         root.setClipToOutline(true);
         root.setElevation(dp(8));
         root.setAlpha(0); root.setTranslationX(dp(20));
         root.setScaleX(.96f); root.setScaleY(.96f);
         LinearLayout header = new LinearLayout(context);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        count = label("", 12, 0xff4f625a);
+        count = label("", 12, appearance.muted);
         count.setSingleLine(true);
         header.addView(count, new LinearLayout.LayoutParams(0, dp(30), 1));
         TextView open = control("↗", "打开 GlobalSend", () -> actions.open(items.keySet().iterator().next()));
@@ -140,7 +142,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         scroll.addView(row, new HorizontalScrollView.LayoutParams(-2, -1));
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         // A small bottom grip changes the actual OS window, not a full-screen wrapper.
-        TextView resize = label("⌟", 12, 0xff7e9187);
+        TextView resize = label("⌟", 12, appearance.muted);
         resize.setGravity(Gravity.RIGHT);
         resize.setContentDescription("拖动调整大小");
         installMove(resize, true);
@@ -169,21 +171,21 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             LinearLayout card = new LinearLayout(context);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setPadding(dp(8), dp(6), dp(8), dp(4));
-            card.setBackground(shape(0xffeaf2ec, 12));
+            card.setBackground(shape(appearance.soft, 12));
             View content;
             if (receipt.text == null && !receipt.localPath.isEmpty() &&
                 receipt.fileName.toLowerCase(java.util.Locale.ROOT).matches(".*\\.(png|jpe?g|webp|gif|bmp|heic|heif)$")) {
                 ImageView image = new ImageView(context);
                 image.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 image.setContentDescription(receipt.fileName);
-                image.setBackgroundColor(0xffdae7df);
+                image.setBackgroundColor(appearance.field);
                 content = image;
                 thumbnails.execute(() -> {
                     Bitmap bitmap = thumbnail(receipt.localPath, dp(160));
                     main.post(() -> { if (image.getParent() != null && bitmap != null) image.setImageBitmap(bitmap); });
                 });
             } else {
-                TextView text = label(receipt.text == null ? "▧\n" + receipt.fileName : receipt.text, 14, 0xff24372e);
+                TextView text = label(receipt.text == null ? "▧\n" + receipt.fileName : receipt.text, 14, appearance.ink);
                 text.setMaxLines(3);
                 text.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 content = text;
@@ -191,7 +193,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             card.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
             LinearLayout footer = new LinearLayout(context);
             footer.setGravity(Gravity.CENTER_VERTICAL);
-            TextView source = label(receipt.source, 10, 0xff7c8d83);
+            TextView source = label(receipt.source, 10, appearance.muted);
             source.setSingleLine(true); source.setEllipsize(android.text.TextUtils.TruncateAt.END);
             footer.addView(source, new LinearLayout.LayoutParams(0, dp(24), 1));
             if (receipt.text != null) footer.addView(control("复制", "复制", () -> actions.copy(receipt.id)),
@@ -289,7 +291,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         return new Rect(0, 0, metrics.widthPixels, metrics.heightPixels);
     }
     private TextView control(String text, String description, Runnable action) {
-        TextView button = label(text, 13, 0xff126e53);
+        TextView button = label(text, 13, appearance.accent);
         button.setGravity(Gravity.CENTER); button.setContentDescription(description);
         button.setOnClickListener(view -> action.run());
         return button;
