@@ -1045,7 +1045,7 @@ class _SendScreenState extends State<SendScreen>
                             ? Padding(
                                 padding: const EdgeInsets.fromLTRB(
                                   20,
-                                  4,
+                                  0,
                                   20,
                                   20,
                                 ),
@@ -1059,7 +1059,10 @@ class _SendScreenState extends State<SendScreen>
                                     const SizedBox(width: 16),
                                     Expanded(
                                       flex: 11,
-                                      child: workspacePane(contentPane()),
+                                      child: workspacePane(
+                                        contentPane(),
+                                        joined: true,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1728,61 +1731,67 @@ class _SendScreenState extends State<SendScreen>
 
   Widget desktopContentTabs() => SizedBox(
     key: const ValueKey('content-tabs'),
-    height: 44,
-    child: Row(
-      children: [
-        for (final (index, label) in const ['接收', '已发送', '文件库'].indexed)
-          Expanded(
-            child: Semantics(
-              key: ValueKey(
-                index == 1
-                    ? 'sent-history'
-                    : index == 2
-                    ? 'open-library'
-                    : 'receive-tab',
-              ),
-              selected: contentTab == index,
-              button: true,
-              child: InkWell(
-                key: ValueKey('content-tab-$index'),
-                onTap: () => setState(() {
-                  contentTab = index;
-                  selecting = false;
-                  selected.clear();
-                }),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(12),
-                ),
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: contentTab == index
-                        ? Ui.softGreen
-                        : Colors.transparent,
+    height: kToolbarHeight,
+    child: Align(
+      alignment: Alignment.bottomCenter,
+      child: SizedBox(
+        height: 44,
+        child: Row(
+          children: [
+            for (final (index, label) in const ['接收', '已发送', '文件库'].indexed)
+              Expanded(
+                child: Semantics(
+                  key: ValueKey(
+                    index == 1
+                        ? 'sent-history'
+                        : index == 2
+                        ? 'open-library'
+                        : 'receive-tab',
+                  ),
+                  selected: contentTab == index,
+                  button: true,
+                  child: InkWell(
+                    key: ValueKey('content-tab-$index'),
+                    onTap: () => setState(() {
+                      contentTab = index;
+                      selecting = false;
+                      selected.clear();
+                    }),
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(12),
                     ),
-                    border: contentTab == index
-                        ? const Border(
-                            bottom: BorderSide(color: Ui.green, width: 2),
-                          )
-                        : null,
-                  ),
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: contentTab == index
-                          ? FontWeight.w600
-                          : FontWeight.w400,
-                      color: contentTab == index ? Ui.green : Ui.muted,
+                    child: Container(
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: contentTab == index
+                            ? Ui.softGreen
+                            : Colors.transparent,
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(12),
+                        ),
+                        border: contentTab == index
+                            ? const Border(
+                                bottom: BorderSide(color: Ui.green, width: 2),
+                              )
+                            : null,
+                      ),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: contentTab == index
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: contentTab == index ? Ui.green : Ui.muted,
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
-      ],
+          ],
+        ),
+      ),
     ),
   );
 
@@ -1903,13 +1912,21 @@ class _SendScreenState extends State<SendScreen>
   double cardExtent() =>
       230 + math.max(0, MediaQuery.textScalerOf(context).scale(14) - 14) * 8;
 
-  Widget workspacePane(Widget child) => DecoratedBox(
+  Widget workspacePane(Widget child, {bool joined = false}) => DecoratedBox(
+    key: joined ? const ValueKey('desktop-content-pane') : null,
     decoration: BoxDecoration(
       color: Colors.white,
       border: Border.all(color: const Color(0xffe3e7e3)),
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: joined
+          ? const BorderRadius.vertical(bottom: Radius.circular(20))
+          : BorderRadius.circular(20),
     ),
-    child: ClipRRect(borderRadius: BorderRadius.circular(20), child: child),
+    child: ClipRRect(
+      borderRadius: joined
+          ? const BorderRadius.vertical(bottom: Radius.circular(20))
+          : BorderRadius.circular(20),
+      child: child,
+    ),
   );
 
   Widget actionTile(

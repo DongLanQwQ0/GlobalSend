@@ -1219,6 +1219,8 @@ test('desktop content tabs live in the right header beside compact connection/se
   assert.equal(document.querySelector('.dock-panel .content-tabs'),null);
   assert.ok(document.querySelector('.right-header [data-action="connection"]'));assert.ok(document.querySelector('.right-header [data-action="settings"]'));
   assert.equal(document.querySelectorAll('.mobile-view-tabs button').length,4);
+  assert.equal(document.querySelector('.brand-icon'),null);
+  assert.equal(document.querySelector('.brand')!.textContent,'GlobalSend');
   document.querySelector<HTMLButtonElement>('[data-content-view="sent"]')!.click();assert.equal(c.contentView,'sent');
 });
 test('Web file menu starts with open and keeps delete and details as its last actions',()=>{
@@ -1705,7 +1707,7 @@ test('URL-only drags and plain text on nested elements enter the queue without n
   const {c,document,render,Event}=fixture();c.render=render;c.installWindowDrop();render();
   for(const [type,value,expected] of [['text/uri-list','# browser link\r\nhttps://example.com/path\r\n','https://example.com/path'],['text/plain','  一段文字\n保留换行  ','  一段文字\n保留换行  ']]){
     const drop=new Event('drop',{bubbles:true,cancelable:true});Object.assign(drop,{dataTransfer:{types:[type],files:[],items:[],getData:(key:string)=>key===type?value:''}});
-    document.querySelector('.brand span')!.dispatchEvent(drop);assert.equal(drop.defaultPrevented,true);await new Promise(resolve=>setImmediate(resolve));assert.equal(c.stagedTexts.at(-1).text,expected);
+    document.querySelector('.compose-action span')!.dispatchEvent(drop);assert.equal(drop.defaultPrevented,true);await new Promise(resolve=>setImmediate(resolve));assert.equal(c.stagedTexts.at(-1).text,expected);
   }
 });
 
@@ -1714,7 +1716,7 @@ test('crossing child elements during native drag does not flash the full-window 
   const data={types:['Files'],dropEffect:'',files:[],items:[],getData:()=>''};
   const send=(type:string,target:Element,relatedTarget:Element|null)=>{const event=new Event(type,{bubbles:true,cancelable:true});Object.assign(event,{dataTransfer:data,relatedTarget,clientX:80,clientY:90});target.dispatchEvent(event);};
   send('dragenter',document.querySelector('.brand')!,null);const overlay=document.querySelector('#window-drop')!;assert.equal(overlay.classList.contains('visible'),true);
-  send('dragleave',document.querySelector('.brand span')!,null);assert.equal(overlay.classList.contains('visible'),true,'native null-relatedTarget is not an immediate window exit');
+  send('dragleave',document.querySelector('.compose-action span')!,null);assert.equal(overlay.classList.contains('visible'),true,'native null-relatedTarget is not an immediate window exit');
   send('dragover',document.querySelector('[data-queue-drop]')!,null);assert.equal(overlay.classList.contains('visible'),true);
   send('drop',document.querySelector('[data-queue-drop]')!,null);assert.equal(overlay.classList.contains('visible'),false);
 });

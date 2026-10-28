@@ -40,7 +40,7 @@ import { MobileViewport } from './mobile_viewport';
 import { PageDisplay } from './page_display';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
-const brand = `<button class="brand brand-button" type="button" data-action="ip-addresses" aria-label="GlobalSend，本机地址"><span class="brand-icon">${icon('logo')}</span>GlobalSend</button>`;
+const brand = `<button class="brand brand-button" type="button" data-action="ip-addresses" aria-label="GlobalSend，本机地址">GlobalSend</button>`;
 const id = () => crypto.randomUUID();
 const fileKey = (transferId: string,fileId: string) => `${transferId}:${fileId}`;
 const time = (date: string) => new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(new Date(date));
@@ -181,6 +181,7 @@ class GlobalSend {
   private receiptsInitialized=false;
   contextMenu:{kind:'text'|'file'|'receipt';key:string;x:number;y:number}|null=null;
   private modalClosing=false;
+  private modalOpenedAt=0;
   private renderedModalKey='';
   private receiptBindings=new WeakMap<HTMLElement,Set<string>>();
   pendingNotificationId='';
@@ -566,6 +567,7 @@ class GlobalSend {
     document.querySelectorAll<HTMLButtonElement>('[data-text-send]').forEach(button=>{button.disabled=!this.text.trim() || this.busy;});
   }
   toggleEditor(expanded: boolean) {
+    if(!expanded){this.closeModal();return;}
     const field=this.editorElement;
     const selection=field?{start:field.selectionStart,end:field.selectionEnd,direction:field.selectionDirection,scroll:field.scrollTop}:null;
     this.modal=expanded?'editor':null;this.render();
@@ -1017,10 +1019,16 @@ class GlobalSend {
     if(!receipt)return;this.pendingNotificationId='';this.receiptBatch.set(key,receipt);this.receipt=receipt;this.receiptFocusId=key;this.modal='receipt';this.render();
   }
   closeModal(){
+    if(this.modalClosing)return;
+    const closingModal=this.modal;
     const addressMenu=this.modal==='ip-addresses';if(addressMenu)this.ipAbort?.abort();
     if(this.modal==='receipt'){this.receiptBatch.clear();this.receiptFocusId='';this.receipt=null;this.pendingReceipt=null;}
     const close=()=>{this.modalClosing=false;const readerId=this.readingEventId,view=this.viewedText();if(view)view.composing=false;this.readingEventId='';this.deviceNameDraft=null;this.deviceNameError='';this.modal=null;this.render();if(readerId)document.getElementById(`read-${readerId}`)?.focus();if(addressMenu)document.querySelector<HTMLElement>('[data-action="ip-addresses"]')?.focus();};
-    if(this.modal==='settings' && !this.modalClosing){this.modalClosing=true;document.querySelector('.settings-modal')?.closest('.modal-backdrop')?.classList.add('leaving');window.setTimeout(close,150);}else close();
+    const backdrop=document.querySelector<HTMLElement>('.modal-backdrop');
+    if(backdrop && typeof backdrop.animate==='function' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+      this.modalClosing=true;backdrop.classList.add('leaving');
+      window.setTimeout(()=>{if(this.modal===closingModal)close();else this.modalClosing=false;},150);
+    }else close();
   }
   receiptCardHtml(receipt:NonNullable<GlobalSend['receipt']>){
     const transfer=receipt.fileKey?this.localTransfer(receipt.fileKey.split(':')[0]):undefined,file=transfer?.files.find(item=>item.fileId===receipt.fileKey?.split(':')[1]);
@@ -2227,7 +2235,16 @@ class GlobalSend {
     this.mountEditor();this.mountTextViewer();this.mountAutoAcceptLimit();this.shared.mount();this.bind();this.fileLibrary.bind();this.mountPreviews();
     this.animateWorkspaceView();
     const modalKey=this.modal || '';
-    if(modalKey===this.renderedModalKey)document.querySelector<HTMLElement>('.settings-modal,.receipt-modal')?.style.setProperty('animation','none');this.renderedModalKey=modalKey;
+    const backdrop=document.querySelector<HTMLElement>('.modal-backdrop');
+    if(modalKey!==this.renderedModalKey)this.modalOpenedAt=Date.now();
+    const modalElapsed=Date.now()-this.modalOpenedAt;
+    if(modalElapsed>=180){backdrop?.classList.add('motion-steady');backdrop?.querySelector<HTMLElement>('.modal')?.style.setProperty('animation','none');}
+    else if(modalKey===this.renderedModalKey && !heldReceipt){
+      backdrop?.style.setProperty('animation-delay',`-${modalElapsed}ms`);
+      backdrop?.querySelector<HTMLElement>('.modal')?.style.setProperty('animation-delay',`-${modalElapsed}ms`);
+    }
+    if(this.modalClosing)backdrop?.classList.add('leaving');
+    this.renderedModalKey=modalKey;
     if(this.modal==='receipt')this.paintReceiptReady();
     document.querySelectorAll<HTMLDetailsElement>('details.advanced-join').forEach((node,index)=>{if(openDetails[index])node.open=true;});
     if (focusId) {

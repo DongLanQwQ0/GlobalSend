@@ -132,6 +132,11 @@ void main() {
           find.byKey(const ValueKey('receive-scroll')),
         );
         expect(tester.getTopLeft(tabs).dx, closeTo(right.left, 1));
+        expect(
+          tester.getBottomRight(tabs).dy,
+          tester.getTopLeft(find.byKey(const ValueKey('desktop-content-pane'))).dy,
+          reason: 'Desktop tabs connect directly to their content pane.',
+        );
         expect(tester.getBottomRight(tabs).dy, lessThan(right.top));
         expect(
           tester.getSize(find.byKey(const ValueKey('receive-toolbar'))).height,
