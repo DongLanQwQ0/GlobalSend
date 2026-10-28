@@ -135,7 +135,7 @@ void main() {
         expect(tester.getBottomRight(tabs).dy, lessThan(right.top));
         expect(
           tester.getSize(find.byKey(const ValueKey('receive-toolbar'))).height,
-          lessThanOrEqualTo(41),
+          48,
         );
         expect(
           tester.getSize(find.byTooltip('设置')).width,
@@ -341,10 +341,11 @@ void main() {
         'F:/example/two.bin',
       });
       await tester.tap(find.byKey(const ValueKey('receive-multi-select')));
-      await tester.pumpAndSettle();
+      // The still-offered fixture intentionally keeps its progress animation.
+      await tester.pump(const Duration(milliseconds: 300));
       expect(receive().paths, isEmpty);
       await tester.tap(find.byKey(const ValueKey('select-one')));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(receive().paths, ['F:/example/one.bin']);
       await tester.tap(find.byKey(const ValueKey('content-tab-1')));
       await tester.pumpAndSettle();

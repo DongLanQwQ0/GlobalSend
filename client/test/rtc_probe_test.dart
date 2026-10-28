@@ -17,10 +17,11 @@ class ProbeApi extends CenterApi {
   final results = <Map<String, dynamic>>[];
   final probes = <Map<String, dynamic>>[];
   String peer = 'b';
+  String self = 'a';
   Map<String, dynamic> view(String id, String scope) => {
     'attemptId': id,
-    'initiatorDeviceId': 'a',
-    'responderDeviceId': 'b',
+    'initiatorDeviceId': self,
+    'responderDeviceId': peer,
     'scope': scope,
     'offer': null,
     'answer': {'type': 'answer', 'sdp': dataSdp},
@@ -65,6 +66,10 @@ class ProbeApi extends CenterApi {
         ...probe!,
         'success': path.endsWith('/complete'),
         'elapsedMs': value['elapsedMs'],
+        if (value['initiatorAddress'] != null)
+          'initiatorAddress': value['initiatorAddress'],
+        if (value['responderAddress'] != null)
+          'responderAddress': value['responderAddress'],
         'checkedAt': DateTime.now().toUtc().toIso8601String(),
         'expiresAt': DateTime.now()
             .add(const Duration(minutes: 2))
@@ -114,12 +119,13 @@ class EchoChannel implements RtcDataChannel {
 }
 
 class ProbeConnection implements RtcDataConnection {
-  ProbeConnection({this.failOffer = false}) {
+  ProbeConnection({this.failOffer = false, this.pair}) {
     channel = EchoChannel(this);
   }
   final bool failOffer;
+  final RtcSelectedPair? pair;
   late EchoChannel channel;
-  int closes = 0, authorizations = 0;
+  int closes = 0, authorizations = 0, statsReads = 0;
   @override
   set onIceCandidate(void Function(RTCIceCandidate)? value) {}
   @override
@@ -159,6 +165,12 @@ class ProbeConnection implements RtcDataConnection {
   }
 
   @override
+  Future<RtcSelectedPair?> selectedCandidatePair() async {
+    statsReads++;
+    return pair;
+  }
+
+  @override
   Future<void> close() async {
     closes++;
   }
@@ -173,6 +185,127 @@ Future<void> eventually(bool Function() ready) async {
 }
 
 void main() {
+  test(
+    'probe publishes only the actual selected pair after a successful echo',
+    () async {
+      final api = ProbeApi(),
+          pc = ProbeConnection(
+            pair: const RtcSelectedPair('10.0.0.2:5000', '[2001:db8::3]:6000'),
+          );
+      final view = api.view('pair-probe', 'public');
+      api.probes.add(view);
+      await RtcProbeSession(
+        api,
+        'a',
+        view,
+        supportsAddressReporting: true,
+        initialize: () async {},
+        addresses: () async => [],
+        connectionFactory: ({
+          required scope,
+          required allowCellular,
+          required iceServers,
+        }) async => pc,
+      ).run();
+      expect(api.results.single['initiatorAddress'], '10.0.0.2:5000');
+      expect(api.results.single['responderAddress'], '[2001:db8::3]:6000');
+    },
+  );
+
+  test('an old center receives only its original completion body', () async {
+    final api = ProbeApi(),
+        pc = ProbeConnection(
+          pair: const RtcSelectedPair('10.0.0.1:5000', '10.0.0.2:6000'),
+        );
+    final view = api.view('old-center', 'lan');
+    api.probes.add(view);
+    await RtcProbeSession(
+      api,
+      'a',
+      view,
+      initialize: () async {},
+      addresses: () async => [],
+      connectionFactory: ({
+        required scope,
+        required allowCellular,
+        required iceServers,
+      }) async => pc,
+    ).run();
+    expect(pc.statsReads, 0);
+    expect(api.results.single.containsKey('initiatorAddress'), false);
+    expect(api.results.single.containsKey('responderAddress'), false);
+    expect(api.results.single['success'], true);
+  });
+
+  test(
+    'manual refresh reruns cached scopes, including from the larger device ID',
+    () async {
+      final api = ProbeApi()
+        ..self = 'z'
+        ..peer = 'a';
+      final monitor = RtcProbeMonitor(
+        api,
+        'z',
+        initialize: () async {},
+        connectionFactory: ({
+          required scope,
+          required allowCellular,
+          required iceServers,
+        }) async => ProbeConnection(),
+      );
+      addTearDown(monitor.close);
+      monitor.update(
+        online: true,
+        foreground: true,
+        devices: [
+          {
+            'deviceId': 'a',
+            'online': true,
+            'rtc': {
+              'scopes': ['lan', 'public'],
+            },
+          },
+        ],
+      );
+      await monitor.refresh();
+      await monitor.refreshNow(peerId: 'a');
+      await eventually(
+        () => api.results.length == 2 && !monitor.hasActiveSession,
+      );
+      await monitor.refreshNow(peerId: 'a');
+      await eventually(
+        () => api.results.length == 4 && !monitor.hasActiveSession,
+      );
+      expect(api.results.map((r) => r['scope']), [
+        'lan',
+        'public',
+        'lan',
+        'public',
+      ]);
+    },
+  );
+
+  test('RTC endpoint direction is local to the current device, never inferred on failure', () {
+    final now = DateTime.now();
+    final monitor = ReachabilityMonitor()
+      ..devices = [
+        {'deviceId': 'b'},
+      ];
+    addTearDown(monitor.dispose);
+    final result = {
+      'initiatorDeviceId': 'b',
+      'responderDeviceId': 'a',
+      'scope': 'lan',
+      'success': true,
+      'initiatorAddress': '10.0.0.2:5000',
+      'responderAddress': '10.0.0.1:6000',
+      'checkedAt': now.toIso8601String(),
+      'expiresAt': now.add(const Duration(minutes: 2)).toIso8601String(),
+    };
+    monitor.setRtcResults('a', [result]);
+    expect(monitor.forDevice('b').single.sourceAddress, '10.0.0.1:6000');
+    expect(monitor.forDevice('b').single.address, '10.0.0.2:5000');
+  });
   test(
     'nonce/echo authorizes before payload and closes without any file request',
     () async {

@@ -38,9 +38,11 @@ class ReceiveFileHandle {
     required this.handle,
     required this.name,
     required this.size,
+    this.descriptorOnly = false,
   });
   final String location, ioPath, handle, name;
   final int size;
+  final bool descriptorOnly;
   factory ReceiveFileHandle.fromMap(Map<String, dynamic> value) =>
       ReceiveFileHandle(
         location: value['location'] as String,
@@ -48,6 +50,7 @@ class ReceiveFileHandle {
         handle: value['handle'] as String,
         name: value['name'] as String,
         size: (value['size'] as num).toInt(),
+        descriptorOnly: value['descriptorOnly'] == true,
       );
 }
 
@@ -69,6 +72,26 @@ class ReceiveDestination {
     }
     throw UnsupportedError('此平台尚不支持接收保存目录');
   }
+
+  static Future<ReceiveFileHandle> openLocalRead(String path) async =>
+      ReceiveFileHandle.fromMap(
+        (await channel.invokeMapMethod<String, dynamic>('openLocalRead', {
+          'path': path,
+        }))!,
+      );
+
+  static Future<bool> localExists(String path) async =>
+      (await channel.invokeMethod<bool>('localExists', {'path': path}))!;
+
+  static Future<List<int>> readDescriptor(
+    String handle,
+    int offset,
+    int length,
+  ) async => (await channel.invokeMethod<List<int>>('readDescriptor', {
+    'handle': handle,
+    'offset': offset,
+    'length': length,
+  }))!;
 
   static Future<bool> allFilesAccess() async =>
       Platform.isAndroid &&
@@ -241,6 +264,12 @@ class ReceiveDestination {
         }))!,
       );
     }
+    if (Platform.isAndroid)
+      return ReceiveFileInfo.fromMap(
+        (await channel.invokeMapMethod<String, dynamic>('localStat', {
+          'path': location,
+        }))!,
+      );
     final file = File(location);
     final type = await FileSystemEntity.type(location);
     final exists =
@@ -264,6 +293,10 @@ class ReceiveDestination {
       _requireOwned(owned, location);
       final file = File(location);
       final type = await FileSystemEntity.type(location);
+      if (Platform.isAndroid && type == FileSystemEntityType.notFound &&
+          (await stat(location)).exists) {
+        throw FileSystemException('文件仍在，但暂时没有删除权限；请重新授权所在文件夹', location);
+      }
       final exists =
           type == FileSystemEntityType.file ||
           type == FileSystemEntityType.directory;

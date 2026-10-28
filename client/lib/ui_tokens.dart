@@ -194,6 +194,47 @@ abstract final class Ui {
   }
 }
 
+/// The accepted receipt toolbar spacing, shared by local content pages.
+/// Keep the existing 44px batch-drag hit area even when it is temporarily absent.
+class UiContentToolbar extends StatelessWidget {
+  const UiContentToolbar({super.key, required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+    child: SizedBox(
+      height: 44,
+      child: TextButtonTheme(
+        data: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            minimumSize: const Size(40, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            visualDensity: VisualDensity.standard,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, bounds) => ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context)
+                .copyWith(scrollbars: false),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: bounds.maxWidth),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: children,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class UiField extends StatelessWidget {
   const UiField({super.key, required this.label, required this.child});
   final String label;

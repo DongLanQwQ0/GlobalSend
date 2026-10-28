@@ -75,6 +75,8 @@ export interface RtcProbeResult {
   scope: RtcScope;
   success: boolean;
   elapsedMs: number | null;
+  initiatorAddress?: string;
+  responderAddress?: string;
   checkedAt: string;
   expiresAt: string;
   error?: string;
@@ -110,6 +112,9 @@ export interface TransferFile {
   attemptId: string;
   errorCode: string | null;
   receiveFailure?: boolean;
+  /** Receiver reused verified local bytes; no file payload was transferred. */
+  reused?: boolean;
+  receivedAt?: string;
   transport?: "relay" | "direct" | null;
   directPush?: DirectPush;
   rtc?: RtcSession;
@@ -145,7 +150,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean };
+  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";

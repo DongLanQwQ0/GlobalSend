@@ -26,8 +26,13 @@ class AddressCheck {
     this.tested = true,
     this.sourceAddress = '',
     this.sourceName = '',
+    this.sourceEndpoint = '',
+    this.targetEndpoint = '',
   });
   final String deviceId, address, error, transport, sourceAddress, sourceName;
+
+  /// Observed socket endpoints are display data, never source-bind inputs.
+  final String sourceEndpoint, targetEndpoint;
   final ReachabilityScope scope;
   final bool reachable, cellular, tested;
   final DateTime checkedAt;
@@ -41,6 +46,7 @@ typedef AddressProbe =
       bool cellular,
     );
 typedef ProbeResult = ({bool reachable, int elapsedMs, String error});
+typedef ProbeEndpoints = ({String sourceEndpoint, String targetEndpoint});
 typedef CancelableAddressProbe = Future<ProbeResult> Function(
   String address,
   String fingerprint,
@@ -112,6 +118,7 @@ class ReachabilityMonitor extends ChangeNotifier {
        _localAddresses = localAddresses,
        _routeProbe = routeProbe,
        _usesInjectedProbe = probe != null || cancelableProbe != null,
+       _usesInjectedRelayProbe = relayProbe != null,
        _clock = clock ?? DateTime.now;
 
   final CancelableAddressProbe _probe, _relayProbe;
@@ -122,6 +129,7 @@ class ReachabilityMonitor extends ChangeNotifier {
   final Future<List<LocalIpAddress>> Function()? _localAddresses;
   final RouteAddressProbe? _routeProbe;
   final bool _usesInjectedProbe;
+  final bool _usesInjectedRelayProbe;
   List<LocalIpAddress> _localSnapshot = [];
   bool _localKnown = false;
   String _localSignature = '';
@@ -503,12 +511,30 @@ class ReachabilityMonitor extends ChangeNotifier {
     }) async {
       if (!current() || timedOut) return;
       final watch = Stopwatch()..start();
+      ProbeEndpoints? endpoints;
+      void connected(ProbeEndpoints value) => endpoints = value;
       try {
         final result = await _runProbe(
           relay
-              ? _relayProbe
+              ? _usesInjectedRelayProbe
+                    ? _relayProbe
+                    : (a, b, c, stop) => probeCenter(
+                        a,
+                        b,
+                        c,
+                        cancellation: stop,
+                        onConnected: connected,
+                      )
               : route == null
-              ? _probe
+              ? _usesInjectedProbe
+                    ? _probe
+                    : (a, b, c, stop) => probePeerAddress(
+                        a,
+                        b,
+                        c,
+                        cancellation: stop,
+                        onConnected: connected,
+                      )
               : (a, b, c, stop) => _routeProbe != null
                     ? _routeProbe(route, b, stop)
                     : _usesInjectedProbe
@@ -519,6 +545,7 @@ class ReachabilityMonitor extends ChangeNotifier {
                         c,
                         cancellation: stop,
                         sourceAddress: route.sourceAddress,
+                        onConnected: connected,
                       ),
           relay ? '$address/health/ready' : address,
           fingerprint,
@@ -538,6 +565,12 @@ class ReachabilityMonitor extends ChangeNotifier {
             checkedAt: _clock(),
             sourceAddress: route?.sourceAddress ?? '',
             sourceName: route?.sourceName ?? '',
+            sourceEndpoint: result?.reachable == true
+                ? endpoints?.sourceEndpoint ?? ''
+                : '',
+            targetEndpoint: result?.reachable == true
+                ? endpoints?.targetEndpoint ?? ''
+                : '',
           ),
         );
       } catch (error) {
@@ -652,20 +685,49 @@ class ReachabilityMonitor extends ChangeNotifier {
       ..clear()
       ..addAll(
         values
-            .where((r) => DateTime.parse(r['expiresAt']).isAfter(_clock()))
+            .where(
+              (r) =>
+                  (r['initiatorDeviceId'] == self ||
+                      r['responderDeviceId'] == self) &&
+                  DateTime.parse(r['expiresAt']).isAfter(_clock()),
+            )
             .map(
               (r) => AddressCheck(
                 deviceId: r['initiatorDeviceId'] == self
                     ? r['responderDeviceId']
                     : r['initiatorDeviceId'],
-                address: 'WebRTC',
+                address:
+                    (r['initiatorDeviceId'] == self
+                            ? r['responderAddress']
+                            : r['initiatorAddress'])
+                        as String? ??
+                    'WebRTC',
+                sourceAddress:
+                    (r['initiatorDeviceId'] == self
+                            ? r['initiatorAddress']
+                            : r['responderAddress'])
+                        as String? ??
+                    '',
+                sourceName: 'WebRTC',
+                sourceEndpoint:
+                    (r['initiatorDeviceId'] == self
+                            ? r['initiatorAddress']
+                            : r['responderAddress'])
+                        as String? ??
+                    '',
+                targetEndpoint:
+                    (r['initiatorDeviceId'] == self
+                            ? r['responderAddress']
+                            : r['initiatorAddress'])
+                        as String? ??
+                    '',
                 scope: r['scope'] == 'lan'
                     ? ReachabilityScope.lan
                     : ReachabilityScope.public,
                 reachable: r['success'] == true,
                 checkedAt: DateTime.parse(r['checkedAt']),
                 elapsedMs: r['elapsedMs'] as int? ?? 0,
-                error: '',
+                error: r['error'] as String? ?? '',
                 transport: 'rtc',
               ),
             ),
@@ -871,12 +933,21 @@ class ReachabilityMonitor extends ChangeNotifier {
               _deviceVersions[device['deviceId']] ?? 0,
       };
       ProbeResult? relay;
+      ProbeEndpoints? relayEndpoints;
       Future<void> checkRelay() async {
         if (snapshot.isEmpty) return;
         final clock = Stopwatch()..start();
         try {
           relay = await _runProbe(
-            _relayProbe,
+            _usesInjectedRelayProbe
+                ? _relayProbe
+                : (a, b, c, stop) => probeCenter(
+                    a,
+                    b,
+                    c,
+                    cancellation: stop,
+                    onConnected: (value) => relayEndpoints = value,
+                  ),
             '$center/health/ready',
             '',
             false,
@@ -914,6 +985,12 @@ class ReachabilityMonitor extends ChangeNotifier {
               elapsedMs: relay!.elapsedMs,
               error: relay!.error,
               checkedAt: _clock(),
+              sourceEndpoint: relay!.reachable
+                  ? relayEndpoints?.sourceEndpoint ?? ''
+                  : '',
+              targetEndpoint: relay!.reachable
+                  ? relayEndpoints?.targetEndpoint ?? ''
+                  : '',
             ),
           );
         }
@@ -1027,6 +1104,7 @@ Future<({bool reachable, int elapsedMs, String error})> probePeerAddress(
   bool cellular, {
   ProbeCancellation? cancellation,
   String? sourceAddress,
+  void Function(ProbeEndpoints)? onConnected,
 }) async {
   final nonce = List.generate(
     16,
@@ -1041,16 +1119,24 @@ Future<({bool reachable, int elapsedMs, String error})> probePeerAddress(
       cellular: true,
       operationId: nonce,
     );
+    if (result['reachable'] == true) {
+      onConnected?.call((
+        sourceEndpoint: result['sourceEndpoint'] as String? ?? '',
+        targetEndpoint: result['targetEndpoint'] as String? ?? '',
+      ));
+    }
     return (
       reachable: result['reachable'] == true,
       elapsedMs: result['elapsedMs'] as int? ?? 0,
       error: result['error'] as String? ?? '',
     );
   }
+  ProbeEndpoints? endpoints;
   final watch = Stopwatch()..start(),
       client = PeerTransport.pinnedClient(
         fingerprint,
         sourceAddress: sourceAddress,
+        onConnected: (socket) => endpoints = probeSocketEndpoints(socket),
       );
   cancellation?.onCancel(() => client.close(force: true));
   try {
@@ -1075,6 +1161,7 @@ Future<({bool reachable, int elapsedMs, String error})> probePeerAddress(
     if (reply['nonce'] != nonce || reply['certificateSha256'] != fingerprint) {
       throw const FormatException('设备身份不匹配');
     }
+    if (endpoints != null) onConnected?.call(endpoints!);
     return (reachable: true, elapsedMs: watch.elapsedMilliseconds, error: '');
   } catch (error) {
     return (
@@ -1092,15 +1179,53 @@ Future<({bool reachable, int elapsedMs, String error})> probeCenter(
   String fingerprint,
   bool cellular, {
   ProbeCancellation? cancellation,
+  void Function(ProbeEndpoints)? onConnected,
 }) async {
   final watch = Stopwatch()..start();
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+  ProbeEndpoints? endpoints;
+  client.connectionFactory = (url, proxyHost, proxyPort) async {
+    final tcp = await Socket.startConnect(
+      proxyHost ?? url.host.replaceAll(RegExp(r'^\[|\]$'), ''),
+      proxyPort ?? url.port,
+    );
+    Socket? raw, secure;
+    var canceled = false;
+    final socket = tcp.socket.then<Socket>((connected) async {
+      raw = connected;
+      if (canceled) {
+        connected.destroy();
+        throw const SocketException('连接已取消');
+      }
+      final result = proxyHost == null && url.scheme == 'https'
+          ? await SecureSocket.secure(
+              connected,
+              host: url.host.replaceAll(RegExp(r'^\[|\]$'), ''),
+            )
+          : connected;
+      secure = result;
+      if (canceled) {
+        result.destroy();
+        throw const SocketException('连接已取消');
+      }
+      endpoints = probeSocketEndpoints(result);
+      return result;
+    });
+    return ConnectionTask.fromSocket(socket, () {
+      canceled = true;
+      tcp.cancel();
+      raw?.destroy();
+      secure?.destroy();
+    });
+  };
   cancellation?.onCancel(() => client.close(force: true));
   try {
     final request = await client.getUrl(Uri.parse(address));
     request.followRedirects = false;
     final response = await request.close().timeout(const Duration(seconds: 4));
     await response.drain<void>().timeout(const Duration(seconds: 4));
+    if (response.statusCode == 200 && endpoints != null)
+      onConnected?.call(endpoints!);
     return (
       reachable: response.statusCode == 200,
       elapsedMs: watch.elapsedMilliseconds,
@@ -1116,3 +1241,14 @@ Future<({bool reachable, int elapsedMs, String error})> probeCenter(
     client.close(force: true);
   }
 }
+
+String probeEndpoint(InternetAddress address, int port) =>
+    '${address.type == InternetAddressType.IPv6 ? '[${address.address}]' : address.address}:$port';
+
+ProbeEndpoints probeSocketEndpoints(Socket connection) => (
+  sourceEndpoint: probeEndpoint(connection.address, connection.port),
+  targetEndpoint: probeEndpoint(
+    connection.remoteAddress,
+    connection.remotePort,
+  ),
+);

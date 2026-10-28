@@ -47,7 +47,7 @@ export function enableTextSelection(document:Document,release=()=>{}) {
   document.addEventListener('pointerdown',event=>{
     restore();
     state.down=true;state.active=isTextSelectionPoint(event);
-    if(!state.active){const card=(event.target as Element).closest<HTMLElement>('[data-drag-text],[data-drag-receipt],[data-drag-shared]');if(card && !card.closest('[data-multi-select="true"]')){activated.set(card,card.getAttribute('draggable') || 'false');card.setAttribute('draggable','true');}return;}
+    if(!state.active){const card=(event.target as Element).closest<HTMLElement>('[data-drag-text],[data-drag-receipt],[data-drag-shared]');if(card){activated.set(card,card.getAttribute('draggable') || 'false');card.setAttribute('draggable','true');}return;}
     let node=(event.target as Element).closest<HTMLElement>('[draggable="true"]');
     while(node){suspended.set(node,'true');node.setAttribute('draggable','false');node=node.parentElement?.closest<HTMLElement>('[draggable="true"]') || null;}
   });

@@ -71,6 +71,8 @@ class PendingPeer implements RtcDataConnection {
   @override
   Future<void> authorizeData() async {}
   @override
+  Future<RtcSelectedPair?> selectedCandidatePair() async => null;
+  @override
   Future<void> addCandidate(RTCIceCandidate candidate) async {}
   @override
   Future<RtcDataChannel> createDataChannel(String label) =>

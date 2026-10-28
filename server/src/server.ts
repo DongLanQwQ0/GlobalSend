@@ -247,6 +247,7 @@ export async function buildApp(options: Options = {}) {
   if (!fileColumns.includes("relative_path")) db.exec("ALTER TABLE files ADD COLUMN relative_path TEXT");
   if (!fileColumns.includes("entry_kind")) db.exec("ALTER TABLE files ADD COLUMN entry_kind TEXT");
   if (!fileColumns.includes("receive_failure")) db.exec("ALTER TABLE files ADD COLUMN receive_failure TEXT");
+  if (!fileColumns.includes("reused_at")) db.exec("ALTER TABLE files ADD COLUMN reused_at TEXT");
   db.exec("PRAGMA user_version=3");
   const get = (sql: string, ...args: any[]) =>
     db.prepare(sql).get(...args) as Row | undefined;
@@ -465,6 +466,7 @@ export async function buildApp(options: Options = {}) {
     attemptId: f.attempt,
     errorCode: f.error ?? null,
     receiveFailure: Boolean(f.receive_failure),
+    ...(f.reused_at ? { reused: true, receivedAt: f.reused_at } : {}),
     transport: f.transport ?? null,
     ...(() => {
       const push = directPushes.get(`${f.transfer_id}/${f.id}`);
@@ -644,7 +646,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true },
+    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -868,7 +870,7 @@ export async function buildApp(options: Options = {}) {
     const d = device(req); cleanupProbes();
     const ownScopes = rtc.capability(d.id)?.scopes ?? [];
     const peers = !online(d.id) || !rtcProbes.presence(d.id).foreground ? [] : all("SELECT id,platform FROM devices WHERE group_id=? AND revoked=0 AND id<>?", d.group_id, d.id)
-      .filter(peer => online(peer.id) && (d.platform === "web" || peer.platform === "web") && rtcProbes.presence(peer.id).foreground)
+      .filter(peer => online(peer.id) && rtcProbes.presence(peer.id).foreground)
       .map(peer => ({ deviceId: peer.id, scopes: (rtc.capability(peer.id)?.scopes ?? []).filter(scope => ownScopes.includes(scope)), foregroundExpiresAt: rtcProbes.presence(peer.id).expiresAt! }))
       .filter(peer => peer.scopes.length > 0);
     return { ...rtcProbes.snapshot(d.id), peers };
@@ -878,7 +880,6 @@ export async function buildApp(options: Options = {}) {
   } } }, async (req) => {
     const d = device(req), peer = target(d, (req.params as any).peerId), b = req.body as { attemptId: string; scope: RtcScope };
     cleanupProbes(); requireOnline(d.id); requireOnline(peer.id);
-    if (d.platform !== "web" && peer.platform !== "web") fail("PROBE_UNAVAILABLE", "A probe requires a Web participant", 409);
     for (const participant of [d, peer]) if (!rtc.capability(participant.id)?.scopes.includes(b.scope)) fail("RTC_UNAVAILABLE", "Both devices must support this WebRTC scope", 409);
     const probe = rtcProbes.create(d.id, peer.id, b.attemptId, b.scope); probesChanged([d.id, peer.id]); return { probe };
   });
@@ -906,9 +907,14 @@ export async function buildApp(options: Options = {}) {
     probesChanged([probe.initiatorDeviceId, probe.responderDeviceId]); return { probe };
   });
   app.post(`${probePath}/complete`, { schema: { body: {
-    type: "object", additionalProperties: false, required: ["elapsedMs"], properties: { elapsedMs: { type: "number", minimum: 0, maximum: 12000 } },
+    type: "object", additionalProperties: false, required: ["elapsedMs"], properties: {
+      elapsedMs: { type: "number", minimum: 0, maximum: 12000 },
+      initiatorAddress: { type: "string", minLength: 1, maxLength: 512 },
+      responderAddress: { type: "string", minLength: 1, maxLength: 512 },
+    },
   } } }, async req => {
-    const { d, probe } = probeRequest(req), result = rtcProbes.complete(probe, d.id, (req.body as { elapsedMs: number }).elapsedMs);
+    const { d, probe } = probeRequest(req), body = req.body as { elapsedMs: number; initiatorAddress?: string; responderAddress?: string },
+      result = rtcProbes.complete(probe, d.id, body.elapsedMs, body);
     probesChanged([probe.initiatorDeviceId, probe.responderDeviceId]); return { result };
   });
   app.post(`${probePath}/fail`, { schema: { body: {
@@ -1991,6 +1997,34 @@ export async function buildApp(options: Options = {}) {
       t = transfer(d, p.transferId),
       f = file(t, p.fileId);
     cancelFile(f);
+    changed(t);
+    return { file: fileView(file(t, f.id)) };
+  });
+  // Check the receiver's local inventory before accepting an offer, so the
+  // sender never starts uploading a duplicate. The client verifies the bytes;
+  // the center only records the receipt, even after old offers have expired.
+  app.post(`${filePath}/reuse`, {
+    schema: { body: {
+      type: "object", additionalProperties: false, required: ["sha256", "size"],
+      properties: {
+        sha256: fileOfferSchema.properties.sha256,
+        size: fileOfferSchema.properties.size,
+      },
+    } },
+  }, async (req) => {
+    const d = device(req), p = req.params as any, t = transfer(d, p.transferId);
+    role(d, t, "target");
+    const f = file(t, p.fileId), b = req.body as { sha256: string; size: number };
+    if (f.entry_kind === "directory") fail("NOT_A_FILE", "Directories use their normal receipt", 409);
+    if (b.sha256 !== f.sha || b.size !== f.size)
+      fail("CONTENT_MISMATCH", "Local file does not match the offered content", 409);
+    if (f.status === "received" && f.reused_at) return { file: fileView(f) };
+    if (!["offered", "accepted"].includes(f.status) || f.offset !== 0 || locks.has(`${t.id}/${f.id}`))
+      fail("TRANSFER_STARTED", "Local reuse must be confirmed before payload transfer", 409);
+    clearDirect(t.id, f.id);
+    removeBytes(f);
+    run("UPDATE files SET status='received',transport='direct',offset=0,error=NULL,receive_failure=NULL,reused_at=? WHERE transfer_id=? AND id=?",
+      iso(), t.id, f.id);
     changed(t);
     return { file: fileView(file(t, f.id)) };
   });

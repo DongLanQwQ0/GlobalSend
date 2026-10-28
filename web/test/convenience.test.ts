@@ -1144,7 +1144,7 @@ test('receive select-all includes mixed file types, copy counts text only and do
   assert.equal(c.selected.size,4);assert.equal(c.selectedTextCount(),2);assert.equal(c.allReceiveSelected(),true);
   assert.equal(c.selectedTargets.size,1);assert.equal(c.multiSend,false);
   assert.equal(document.querySelectorAll('.dock-items [role="checkbox"]').length,4);
-  assert.equal(document.querySelectorAll('.dock-items [draggable="true"]').length,0);
+  assert.equal(document.querySelectorAll('.dock-items .content-card[draggable="true"]').length,4);
   assert.equal(document.querySelector('[data-action="copy-selected"]')!.textContent,'复制 2');
   let copied='';c.copy=(text:string)=>{copied=text;};c.copySelected();assert.equal(copied,'a\n\nb');
   c.toggleAllReceive();assert.equal(c.selected.size,0);assert.equal(c.selectedTextCount(),0);
@@ -1588,4 +1588,66 @@ test('retry clicked during receiver error reporting waits for that same failure 
   const retrying=c.retryFile(t.transferId,t.files[0].fileId);assert.equal(paths.length,1);
   gate.resolve({file:{...t.files[0],status:'failed',receiveFailure:true}});await receiving;await retrying;
   assert.equal(paths.length,2);assert.match(paths[1],/\/receive-retry$/);assert.equal(c.transfers[0].files[0].offset,3);assert.equal(c.transfers[0].files[0].status,'uploading');
+});
+
+
+test('file reuse is negotiated before acceptance and refreshes receipt without any payload route',async()=>{
+ const {c,context}=fixture();context.Worker=class {};context.navigator.storage={getDirectory:async()=>{}};
+ c.info.features={fileReuse:true};const t=transfer('reuse-now');t.files[0].size=40*1024*1024;c.transfers=[t];
+ const calls:any[]=[],at='2026-10-28T01:00:00.000Z',file=new File(['existing'],'sample.txt');
+ c.ensureFileStore=async()=>({reuse:async(key:string)=>{calls.push(['local-verify',key]);return file;},expiry:()=>Infinity,receivedAt:()=>at,unlinkReuse:async()=>{throw new Error('should not unlink saved match');}});
+ c.api.request=async(path:string,body:any)=>{calls.push([path,body]);if(path.endsWith('/reuse'))return {file:{...t.files[0],status:'received',transport:'direct',reused:true,receivedAt:at}};return {transfer:{...t,files:[{...t.files[0],status:'received',transport:'direct',reused:true}]}};};
+ await c.acceptIncoming();assert.equal(calls.length,3);assert.equal(calls[0][0],'local-verify');assert.match(calls[1][0],/\/reuse$/);assert.match(calls[2][0],/\/accept$/);assert.deepEqual(Array.from(calls[2][1].fileIds),[]);
+ assert.equal(c.rtcLocalFiles.get('reuse-now:file-reuse-now'),file);assert.equal(c.receivedAt['reuse-now:file-reuse-now'],at);assert.equal(c.transfers[0].files[0].status,'received');
+ assert.equal(c.uploads.size+c.rtcReceives.size,0);assert.equal(c.uploadProgress.size,0);
+});
+test('a missing saved file falls through to ordinary acceptance, and unsupported centers keep their contract',async()=>{
+ for(const supported of [true,false]){
+  const {c,context}=fixture();context.Worker=class {};context.navigator.storage={getDirectory:async()=>{}};c.info.features={fileReuse:supported};const t=transfer('cache-missing');c.transfers=[t];const calls:any[]=[];
+  c.ensureFileStore=async()=>({reuse:async()=>{calls.push('lookup');return undefined;}});
+  c.api.request=async(path:string,body:any)=>{calls.push(path);assert.match(path,/\/accept$/);assert.deepEqual(Array.from(body.fileIds),[t.files[0].fileId]);return {transfer:{...t,files:[{...t.files[0],status:'accepted'}]}};};
+  await c.acceptFiles(t,[t.files[0].fileId],true);assert.deepEqual(calls,supported?['lookup','/transfers/cache-missing/accept']:['/transfers/cache-missing/accept']);
+ }
+});
+test('Receive, History and Files use the same compact toolbar in normal and selected modes',()=>{
+ const {c,document,render}=fixture();c.render=render;
+ for(const view of ['receive','sent','library'])for(const selecting of [false,true]){
+  c.contentView=view;c.receiveSelecting=selecting;c.sentSelecting=selecting;c.fileLibrary.editing=selecting;c.fileLibrary.opened=true;
+  render();const toolbar=document.querySelector('.dock-panel .content-toolbar');assert.ok(toolbar,view);assert.equal(document.querySelectorAll('.dock-panel .content-toolbar').length,1);
+  if(view==='library'){assert.equal(document.querySelector('.library-selection'),null);assert.equal(document.querySelector('.library-pane-header .library-subtitle')?.textContent,'');assert.ok(toolbar.querySelector(selecting?'[data-library-action="select-all"]':'#library-sort'));}
+ }
+});
+test('device diagnostic shows selected source-to-target endpoints and separates untested from failed',()=>{
+ const {c}=fixture();c.networkDevice='sender';const base={attemptId:'rtc',initiatorDeviceId:'sender',responderDeviceId:'receiver',scope:'lan',success:true,elapsedMs:3,checkedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),initiatorAddress:'10.1.2.3:123',responderAddress:'10.2.3.4:456'};
+ c.rtcProbes={results:[base]};let html=c.deviceNetworkHtml();assert.match(html,/10.2.3.4:456 → 10.1.2.3:123/);assert.match(html,/未测试/);
+ c.rtcProbes={results:[{...base,success:false}]};html=c.deviceNetworkHtml();assert.match(html,/本次未连通/);assert.doesNotMatch(html,/probe-addresses/);
+});
+
+
+test('selected cards keep native HTML drag enabled on Receive, History and Files without changing selection',()=>{
+ for(const view of ['receive','sent','library']){
+  const {c,document,render,Event}=fixture();c.render=render;c.contentView=view;c.receiveSelecting=view==='receive';c.sentSelecting=view==='sent';c.fileLibrary.editing=view==='library';c.fileLibrary.opened=true;
+  const files=[0,1,2].map(index=>new File(['data'],'item-'+index+'.bin'));
+  if(view==='library'){
+   c.fileLibrary.entries=files.map((file,index)=>({id:'scope/'+index,key:String(index),scope:'scope',name:file.name,mimeType:file.type,size:file.size,receivedAt:Date.now(),expiresAt:Date.now()+60000}));
+   files.forEach((file,index)=>c.fileLibrary.files.set('scope/'+index,file));c.fileLibrary.selected=new Set(['scope/0','scope/1']);
+  }else{
+   c.transfers=files.map((file,index)=>{const t=transfer('drag-'+index,'received');t.files[0].sha256=String(index).repeat(64);if(view==='sent'){t.sourceDeviceId='receiver';t.targetDeviceId='sender';c.fileSources.set(t.transferId+':'+t.files[0].fileId,file);}else c.rtcLocalFiles.set(t.transferId+':'+t.files[0].fileId,file);return t;});
+   const selected=new Set(['file:drag-0:file-drag-0','file:drag-1:file-drag-1']);if(view==='sent')c.sentSelected=selected;else c.selected=selected;
+  }
+  render();const selector=view==='library'?'[data-library-id="scope/2"]':'[data-drag-file="drag-2:file-drag-2"]',card=document.querySelector(selector)!;assert.equal(card.getAttribute('draggable'),'true');
+  const before=Array.from(view==='library'?c.fileLibrary.selected:view==='sent'?c.sentSelected:c.selected),values=new Map(),added:any[]=[],drag=new Event('dragstart',{bubbles:true,cancelable:true});
+  Object.assign(drag,{dataTransfer:{items:{add:(file:File)=>added.push(file)},setData:(key:string,value:string)=>values.set(key,value),setDragImage(){}}});card.dispatchEvent(drag);
+  assert.equal(drag.defaultPrevented,false);assert.equal(added.length,2);assert.deepEqual(added,files.slice(0,2));assert.deepEqual(Array.from(view==='library'?c.fileLibrary.selected:view==='sent'?c.sentSelected:c.selected),before);assert.equal(values.get('application/x-globalsend-card'),'1');
+ }
+});
+test('a touch hold enters selection without detaching the source and a later hold never changes existing picks',()=>{
+ for(const view of ['receive','sent','library']){
+  const {c,document,render,Event,context}=fixture();c.render=render;c.contentView=view;c.fileLibrary.opened=true;const timers:(()=>void)[]=[];context.window.setTimeout=(fn:()=>void,ms:number)=>{if(ms===450)timers.push(fn);return 1;};
+  if(view==='library'){c.fileLibrary.entries=[0,1].map(index=>({id:'scope/'+index,key:String(index),scope:'scope',name:'item.bin',mimeType:'application/octet-stream',size:4,receivedAt:Date.now(),expiresAt:Date.now()+60000}));}
+  else c.events=[textEvent('hold-a',view==='sent'),textEvent('hold-b',view==='sent','second')];
+  render();const selector=view==='library'?'[data-library-id="scope/0"]':'[data-drag-text="hold-a"]',card=document.querySelector(selector)!,down=new Event('pointerdown',{bubbles:true,cancelable:true});Object.assign(down,{pointerType:'touch',clientX:30,clientY:40});card.dispatchEvent(down);timers.pop()!();
+  const menu=new Event('contextmenu',{bubbles:true,cancelable:true});card.dispatchEvent(menu);assert.equal(c.contextMenu,null);assert.equal(card.isConnected,true);assert.equal(view==='library'?c.fileLibrary.editing:view==='sent'?c.sentSelecting:c.receiveSelecting,true);const selection=view==='library'?c.fileLibrary.selected:view==='sent'?c.sentSelected:c.selected;assert.deepEqual(Array.from(selection),[view==='library'?'scope/0':'hold-a']);
+  render();const second=document.querySelector(view==='library'?'[data-library-id="scope/1"]':'[data-drag-text="hold-b"]')!,again=new Event('pointerdown',{bubbles:true,cancelable:true});Object.assign(again,{pointerType:'touch',clientX:30,clientY:40});second.dispatchEvent(again);timers.pop()!();assert.deepEqual(Array.from(selection),[view==='library'?'scope/0':'hold-a']);
+ }
 });

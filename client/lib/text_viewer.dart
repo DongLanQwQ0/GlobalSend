@@ -14,6 +14,7 @@ import 'text_selection_surface.dart';
 import 'content_drag_surface.dart';
 import 'dock_platform.dart';
 import 'models.dart';
+import 'received_file_access.dart';
 
 Future<void> showTextViewer(
   BuildContext context, {
@@ -440,14 +441,20 @@ Future<TextFilePreview?> readTextFilePreview(
   String? title,
 }) async {
   if (!isTextPreviewFile(title ?? path)) return null;
-  final file = await File(path).open();
+  final access = await ReceivedFileAccess.open(path);
+  RandomAccessFile? file;
   late final int totalBytes;
   late final List<int> bytes;
   try {
+    file = await access.file.open();
     totalBytes = await file.length();
     bytes = await file.read(math.min(maxBytes, totalBytes));
   } finally {
-    await file.close();
+    try {
+      await file?.close();
+    } finally {
+      await access.close();
+    }
   }
   final truncated = totalBytes > bytes.length;
   String? decoded;

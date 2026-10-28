@@ -1,4 +1,5 @@
 import 'system_font_fixture.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -99,14 +100,14 @@ void main() {
       expect(calls, hasLength(3));
       expect(calls.any((v) => v.contains('10.0.0.99')), false);
       expect(find.text('另一个设备'), findsNothing);
-      expect(find.text('本机 → 对方 · 反向未测'), findsOneWidget);
+      expect(find.text('源地址与目标地址 · 以实际检测为准'), findsOneWidget);
       final sections = ['局域网', '公网 IPv4', '公网 IPv6', '中继'];
       final offsets = sections
           .map((label) => tester.getTopLeft(find.text(label)).dy)
           .toList();
       expect(offsets, orderedEquals([...offsets]..sort()));
       expect(find.text('中心可达'), findsOneWidget);
-      expect(find.text('本机 → 中心，未验证目标接收'), findsOneWidget);
+      expect(find.text('仅验证中心可达，未验证目标接收'), findsOneWidget);
       await tester.runAsync(() async {
         final image =
             await (capture.currentContext!.findRenderObject()
@@ -183,16 +184,104 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('WebRTC · 未公开端点地址'), findsNWidgets(2));
+      expect(find.text('本机：未提供\n对方：未提供'), findsNWidgets(2));
       expect(find.text('公网 · RTC'), findsOneWidget);
       expect(find.text('28 ms'), findsOneWidget);
       expect(find.text('成功'), findsOneWidget);
       expect(find.text('未测'), findsOneWidget);
       expect(find.text('中心可达'), findsOneWidget);
-      expect(find.text('本机 → 对方 · 反向未测'), findsOneWidget);
+      expect(find.text('源地址与目标地址 · 以实际检测为准'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'refresh includes RTC and displays selected endpoints in this device direction only after success',
+    (tester) async {
+      tester.view.physicalSize = const Size(600, 820);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final now = DateTime.now();
+      final monitor = ReachabilityMonitor()
+        ..connected = true
+        ..devices = [
+          {
+            'deviceId': 'phone',
+            'name': '我的手机',
+            'rtc': {
+              'scopes': ['lan', 'public'],
+            },
+          },
+        ];
+      addTearDown(monitor.dispose);
+      var refreshes = 0;
+      final capture = GlobalKey();
+      final theme = Ui.theme();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: theme.copyWith(
+            appBarTheme: theme.appBarTheme.copyWith(
+              titleTextStyle: theme.appBarTheme.titleTextStyle?.copyWith(
+                fontFamily: 'Microsoft YaHei',
+              ),
+            ),
+          ),
+          home: RepaintBoundary(
+            key: capture,
+            child: ReachabilityScreen(
+              monitor: monitor,
+              deviceId: 'phone',
+              onRefresh: () async {
+                refreshes++;
+                monitor.setRtcResults('self', [
+                  for (final success in [true, false])
+                    {
+                      'initiatorDeviceId': 'phone',
+                      'responderDeviceId': 'self',
+                      'scope': success ? 'lan' : 'public',
+                      'success': success,
+                      'initiatorAddress': '[2001:db8::2]:6000',
+                      'responderAddress': '[2001:db8::1]:5000',
+                      'elapsedMs': 8,
+                      'checkedAt': now.toIso8601String(),
+                      'expiresAt': now
+                          .add(const Duration(minutes: 2))
+                          .toIso8601String(),
+                    },
+                ]);
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(refreshes, 1);
+      expect(
+        find.text('[2001:db8::1]:5000 → [2001:db8::2]:6000'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('本机：[2001:db8::1]:5000\n对方：[2001:db8::2]:6000'),
+        findsOneWidget,
+      );
+      expect(find.text('失败'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('refresh-reachability')));
+      await tester.pumpAndSettle();
+      expect(refreshes, 2);
+      await tester.runAsync(() async {
+        final image =
+            await (capture.currentContext!.findRenderObject()
+                    as RenderRepaintBoundary)
+                .toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('../artifacts/screenshots/rtc-selected-endpoints.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+      expect(tester.takeException(), isNull);
     },
   );
 

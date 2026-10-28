@@ -429,7 +429,11 @@ class PeerTransport {
     }
   }
 
-  static HttpClient pinnedClient(String fingerprint, {String? sourceAddress}) {
+  static HttpClient pinnedClient(
+    String fingerprint, {
+    String? sourceAddress,
+    void Function(Socket socket)? onConnected,
+  }) {
     if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(fingerprint)) {
       throw const FormatException('无效设备指纹');
     }
@@ -442,17 +446,30 @@ class PeerTransport {
       ..connectionTimeout = const Duration(seconds: 3)
       ..badCertificateCallback = (certificate, host, port) =>
           accepts(certificate);
-    if (sourceAddress != null && sourceAddress.isNotEmpty) {
+    if (sourceAddress != null && sourceAddress.isNotEmpty ||
+        onConnected != null) {
       client.connectionFactory = (url, proxyHost, proxyPort) async {
         final host = url.host.replaceAll(RegExp(r'^\[|\]$'), '');
         final tcp = await Socket.startConnect(
           proxyHost ?? host,
           proxyPort ?? url.port,
-          sourceAddress: sourceAddress,
+          sourceAddress: sourceAddress?.isNotEmpty == true
+              ? sourceAddress
+              : null,
         );
         // Proxy CONNECT/TLS is still owned by HttpClient. Direct HTTPS factories
         // must return SecureSocket themselves (the SDK does not upgrade them).
-        if (proxyHost != null || url.scheme != 'https') return tcp;
+        if (proxyHost != null || url.scheme != 'https') {
+          if (onConnected != null) {
+            unawaited(
+              tcp.socket.then<void>(
+                onConnected,
+                onError: (Object _, StackTrace _) {},
+              ),
+            );
+          }
+          return tcp;
+        }
         final done = Completer<Socket>();
         Socket? raw;
         SecureSocket? secure;
@@ -475,6 +492,7 @@ class PeerTransport {
                   secure!.destroy();
                   return;
                 }
+                onConnected?.call(secure!);
                 done.complete(secure);
               })
               .catchError((Object error, StackTrace trace) {

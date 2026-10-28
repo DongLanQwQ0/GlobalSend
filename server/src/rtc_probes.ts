@@ -40,7 +40,6 @@ export class RtcProbeRegistry {
       return previous;
     }
     if (this.results.has(attemptId)) fail("PROBE_ENDED", "Probe attempt has ended", 410);
-    if (initiatorDeviceId >= responderDeviceId) fail("PROBE_INITIATOR", "The smaller device ID initiates the probe");
     for (const deviceId of [initiatorDeviceId, responderDeviceId]) {
       if (!this.presence(deviceId).foreground) fail("PROBE_BACKGROUND", "Both devices must be in the foreground");
       if ([...this.probes.values()].some(value => participants(value).includes(deviceId))) fail("PROBE_BUSY", "A device already has an active probe");
@@ -78,10 +77,14 @@ export class RtcProbeRegistry {
       scope: probe.scope, success: !error, elapsedMs, checkedAt: new Date(this.now()).toISOString(), expiresAt: new Date(this.now() + PROBE_RESULT_MS).toISOString(), ...(error ? { error } : {}) };
     this.results.set(probe.attemptId, result); return result;
   }
-  complete(probe: RtcProbeView, actor: string, elapsedMs: number) {
+  complete(probe: RtcProbeView, actor: string, elapsedMs: number,
+    addresses: Pick<RtcProbeResult, "initiatorAddress" | "responderAddress"> = {}) {
     if (actor !== probe.initiatorDeviceId) fail("FORBIDDEN", "Only probe initiator records round-trip time", 403);
     if (!probe.offer || !probe.answer) fail("INVALID_STATE", "Probe negotiation is incomplete");
-    return this.finish(probe, elapsedMs);
+    const result = this.finish(probe, elapsedMs);
+    if (addresses.initiatorAddress) result.initiatorAddress = addresses.initiatorAddress;
+    if (addresses.responderAddress) result.responderAddress = addresses.responderAddress;
+    return result;
   }
   stop(probe: RtcProbeView) { this.probes.delete(probe.attemptId); }
   snapshot(deviceId: string) {

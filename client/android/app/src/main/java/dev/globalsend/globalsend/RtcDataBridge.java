@@ -32,6 +32,7 @@ import org.webrtc.MediaStream;
 import org.webrtc.NetworkMonitor;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
+import org.webrtc.RTCStats;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 
@@ -144,6 +145,7 @@ final class RtcDataBridge {
                     reply.success(value.data.state().name().toLowerCase(Locale.ROOT)); return;
                 }
                 case "authorize": value.requireDataPermission(); break;
+                case "stats": value.stats(reply); return;
                 case "bufferedAmount": reply.success(value.data.bufferedAmount()); return;
                 case "send": {
                     value.requireDataPermission();
@@ -178,6 +180,19 @@ final class RtcDataBridge {
             for (int i = 8; i + 1 < parts.length; i += 2) if ("raddr".equals(parts[i])) return parts[i + 1];
         }
         return parts[4];
+    }
+
+    static List<Map<String, Object>> statsRows(Map<String, RTCStats> stats) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (RTCStats stat : stats.values()) {
+            Map<String, Object> row = map("id", stat.getId(), "type", stat.getType());
+            for (String name : new String[] {"selectedCandidatePairId", "selected", "nominated", "state", "localCandidateId", "remoteCandidateId", "address", "ip", "ipAddress", "port"}) {
+                Object value = stat.getMembers().get(name);
+                if (value instanceof String || value instanceof Boolean || value instanceof Number) row.put(name, value instanceof Number ? ((Number) value).longValue() : value);
+            }
+            rows.add(row);
+        }
+        return rows;
     }
 
     private final class Session implements RtcNetworkPolicy.Owner {
@@ -288,6 +303,15 @@ final class RtcDataBridge {
                 @Override public void onCreateFailure(String error) { finish(null, error); }
                 @Override public void onSetFailure(String error) { finish(null, error); }
             };
+        }
+
+        void stats(Reply reply) {
+            pending.add(reply);
+            peer.getStats(report -> execute(() -> {
+                if (closed) return;
+                pending.remove(reply);
+                reply.success(statsRows(report.getStatsMap()));
+            }));
         }
 
         void attach(DataChannel value, boolean remote) {

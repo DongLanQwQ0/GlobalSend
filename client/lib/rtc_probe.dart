@@ -28,6 +28,7 @@ class RtcProbeSession {
     Future<void> Function()? initialize,
     Future<List<InternetAddress>> Function()? addresses,
     this.timeout = const Duration(seconds: 11),
+    this.supportsAddressReporting = false,
   }) : connectionFactory = connectionFactory ?? createRtcProbeConnection,
        initialize = initialize ?? RtcFileTransport.initialize,
        addresses = addresses ?? _addresses;
@@ -39,6 +40,7 @@ class RtcProbeSession {
   final Future<void> Function() initialize;
   final Future<List<InternetAddress>> Function() addresses;
   final Duration timeout;
+  final bool supportsAddressReporting;
   Timer? _deadline;
   static Future<List<InternetAddress>> _addresses() async =>
       (await NetworkInterface.list(includeLinkLocal: true))
@@ -249,8 +251,25 @@ class RtcProbeSession {
           sent = true;
         }
         if (initiator && _echo.isCompleted) {
+          final elapsed = ping!.elapsedMilliseconds;
+          RtcSelectedPair? pair;
+          if (supportsAddressReporting) {
+            try {
+              pair = await _pc!.selectedCandidatePair().timeout(
+                const Duration(milliseconds: 350),
+                onTimeout: () => null,
+              );
+            } catch (_) {
+              // The echo is valid even if this platform withholds endpoint stats.
+            }
+          }
+          _check();
           await api.call('POST', '$route/complete', {
-            'elapsedMs': ping!.elapsedMilliseconds,
+            'elapsedMs': elapsed,
+            if (pair?.localAddress.isNotEmpty == true)
+              'initiatorAddress': pair!.localAddress,
+            if (pair?.remoteAddress.isNotEmpty == true)
+              'responderAddress': pair!.remoteAddress,
           });
           return;
         }
@@ -293,6 +312,7 @@ class RtcProbeMonitor {
     this.onResults,
     this.connectionFactory,
     this.initialize,
+    this.supportsAddressReporting = false,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
   final CenterApi api;
@@ -300,8 +320,10 @@ class RtcProbeMonitor {
   final void Function(List<Map<String, dynamic>>)? onResults;
   final RtcConnectionFactory? connectionFactory;
   final Future<void> Function()? initialize;
+  final bool supportsAddressReporting;
   final DateTime Function() clock;
   final _attempted = <String, DateTime>{};
+  final _requestedScopes = <String>{};
   List<Map<String, dynamic>> results = [];
   Timer? _timer;
   bool _online = false,
@@ -389,6 +411,7 @@ class RtcProbeMonitor {
       onResults?.call(results);
       if (!active) {
         _attempted.clear();
+        _requestedScopes.clear();
         _published = null;
         if (online) unawaited(_publish(false).catchError((Object _) {}));
       }
@@ -423,6 +446,19 @@ class RtcProbeMonitor {
     await _cancelSession();
     if (_online) await _publish(false);
     if (active) await refresh();
+  }
+
+  /// A user refresh rechecks both scopes now rather than waiting for the
+  /// background two-minute cadence. One owner still serializes each probe.
+  Future<void> refreshNow({String? peerId}) async {
+    if (!active) return;
+    for (final id in _onlineIds.where((id) => peerId == null || id == peerId)) {
+      for (final scope in ['lan', 'public']) {
+        _requestedScopes.add('$id/$scope');
+        _attempted.remove('$id/$scope');
+      }
+    }
+    await refresh();
   }
 
   Future<void> refresh() async {
@@ -462,10 +498,12 @@ class RtcProbeMonitor {
           ..sort((a, b) => (a['deviceId'] as String).compareTo(b['deviceId']));
         for (final peer in peers) {
           final id = peer['deviceId'] as String;
-          if (deviceId.compareTo(id) >= 0 || !_onlineIds.contains(id)) continue;
+          if (!_onlineIds.contains(id)) continue;
           for (final scope in ['lan', 'public']) {
             if (!(peer['scopes'] as List).contains(scope)) continue;
             final key = '$id/$scope', previous = _attempted['$id/$scope'];
+            final requested = _requestedScopes.contains(key);
+            if (!requested && deviceId.compareTo(id) >= 0) continue;
             final recent = results.any(
               (r) =>
                   r['scope'] == scope &&
@@ -473,11 +511,14 @@ class RtcProbeMonitor {
                       r['responderDeviceId'] == id) &&
                   DateTime.parse(r['expiresAt']).isAfter(clock()),
             );
-            if (recent ||
-                previous != null &&
-                    clock().difference(previous) < const Duration(minutes: 2)) {
+            if (!requested &&
+                (recent ||
+                    previous != null &&
+                        clock().difference(previous) <
+                            const Duration(minutes: 2))) {
               continue;
             }
+            _requestedScopes.remove(key);
             _attempted[key] = clock();
             view = Map<String, dynamic>.from(
               (await api.call('POST', '/devices/$id/rtc-probes', {
@@ -501,6 +542,7 @@ class RtcProbeMonitor {
           view,
           connectionFactory: connectionFactory,
           initialize: initialize,
+          supportsAddressReporting: supportsAddressReporting,
         );
         _session = session;
         try {
@@ -529,6 +571,7 @@ class RtcProbeMonitor {
     _timer?.cancel();
     _timer = null;
     results = [];
+    _requestedScopes.clear();
     onResults?.call(results);
     await _cancelSession();
     if (_online) {

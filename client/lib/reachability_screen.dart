@@ -16,9 +16,11 @@ class ReachabilityScreen extends StatefulWidget {
     required this.monitor,
     this.deviceId,
     this.deviceName,
+    this.onRefresh,
   });
   final ReachabilityMonitor monitor;
   final String? deviceId, deviceName;
+  final Future<void> Function()? onRefresh;
 
   @override
   State<ReachabilityScreen> createState() => _ReachabilityScreenState();
@@ -26,9 +28,12 @@ class ReachabilityScreen extends StatefulWidget {
 
 class _ReachabilityScreenState extends State<ReachabilityScreen> {
   ReachabilityMonitor get monitor => widget.monitor;
-  bool get running => widget.deviceId == null
-      ? monitor.running
-      : monitor.checkingDevice(widget.deviceId!);
+  bool _refreshing = false;
+  bool get running =>
+      _refreshing ||
+      (widget.deviceId == null
+          ? monitor.running
+          : monitor.checkingDevice(widget.deviceId!));
 
   @override
   void initState() {
@@ -40,9 +45,21 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
     }
   }
 
-  Future<void> refresh() => widget.deviceId == null
-      ? monitor.refresh()
-      : monitor.refreshDevice(widget.deviceId!);
+  Future<void> refresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      if (widget.onRefresh != null) {
+        await widget.onRefresh!();
+      } else if (widget.deviceId == null) {
+        await monitor.refresh();
+      } else {
+        await monitor.refreshDevice(widget.deviceId!);
+      }
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -88,7 +105,7 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                   padding: const EdgeInsets.all(20),
                   children: [
                     const Text(
-                      '本机 → 对方 · 反向未测',
+                      '源地址与目标地址 · 以实际检测为准',
                       style: TextStyle(color: Ui.muted, fontSize: 13),
                     ),
                     if (!monitor.connected)
@@ -357,20 +374,32 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
               ),
               const SizedBox(height: 7),
               SelectableText(
-                rtc ? 'WebRTC · 未公开端点地址' : result.address,
+                result.reachable &&
+                        result.sourceEndpoint.isNotEmpty &&
+                        result.targetEndpoint.isNotEmpty
+                    ? '${result.sourceEndpoint} → ${result.targetEndpoint}'
+                    : '本机：${result.sourceEndpoint.isNotEmpty
+                          ? result.sourceEndpoint
+                          : result.sourceAddress.isEmpty
+                          ? '未提供'
+                          : result.sourceAddress}\n${relay ? '中心' : '对方'}：${result.targetEndpoint.isNotEmpty
+                          ? result.targetEndpoint
+                          : rtc && result.address == 'WebRTC'
+                          ? '未提供'
+                          : result.address}',
                 style: const TextStyle(fontSize: 13, height: 1.5),
               ),
               const SizedBox(height: 4),
               Text(
                 relay
-                    ? '本机 → 中心，未验证目标接收'
+                    ? '仅验证中心可达，未验证目标接收'
                     : rtc
                     ? 'RTC 通道往返检测'
                     : result.sourceAddress.isNotEmpty
-                    ? '${result.sourceName} · ${result.sourceAddress} → 对方'
+                    ? result.sourceName
                     : result.cellular
-                    ? '本机 → 设备 · 蜂窝网络（系统绑定）'
-                    : '本机 → 设备 · 系统路由',
+                    ? '蜂窝网络（系统绑定）'
+                    : '系统路由',
                 style: const TextStyle(
                   color: Ui.muted,
                   fontSize: 11,

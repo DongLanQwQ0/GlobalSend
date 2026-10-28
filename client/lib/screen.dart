@@ -1825,67 +1825,62 @@ class _SendScreenState extends State<SendScreen>
         ? const UiEmpty(icon: Icons.history, title: '暂无发送记录')
         : Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
-                child: Row(
-                  children: [
-                    Text(
-                      selecting
-                          ? '${selected.length}/${items.length} 项'
-                          : '${items.length} 项',
-                      style: const TextStyle(fontSize: 12, color: Ui.muted),
-                    ),
-                    const Spacer(),
-                    BulkFileDrag(
-                      key: const ValueKey('sent-drag-all'),
-                      paths: items
-                          .where(
-                            (item) =>
-                                item.kind == 'file' &&
-                                item.localPath.isNotEmpty &&
-                                (!selecting || selected.contains(item.id)),
-                          )
-                          .map((item) => item.localPath)
-                          .toList(),
-                      enabled: !working,
-                      onError: (error) => notice(shortError('$error')),
-                    ),
-                    if (selecting)
-                      TextButton(
-                        key: const ValueKey('sent-select-all'),
-                        onPressed: () => setState(() {
-                          if (items.every(
-                            (item) => selected.contains(item.id),
-                          )) {
-                            selected.clear();
-                          } else {
-                            selected.addAll(items.map((item) => item.id));
-                          }
-                        }),
-                        child: Text(
-                          items.every((item) => selected.contains(item.id))
-                              ? '取消全选'
-                              : '全选',
-                        ),
-                      ),
-                    if (selecting)
-                      TextButton(
-                        key: const ValueKey('sent-delete-selected'),
-                        onPressed: selected.isEmpty || working
-                            ? null
-                            : deleteSelected,
-                        child: const Text('删除'),
-                      ),
+              UiContentToolbar(
+                key: const ValueKey('sent-toolbar'),
+                children: [
+                  Text(
+                    selecting
+                        ? '${selected.length}/${items.length} 项'
+                        : '${items.length} 项',
+                    style: const TextStyle(fontSize: 12, color: Ui.muted),
+                  ),
+                  BulkFileDrag(
+                    key: const ValueKey('sent-drag-all'),
+                    paths: items
+                        .where(
+                          (item) =>
+                              item.kind == 'file' &&
+                              item.localPath.isNotEmpty &&
+                              (!selecting || selected.contains(item.id)),
+                        )
+                        .map((item) => item.localPath)
+                        .toList(),
+                    enabled: !working,
+                    onError: (error) => notice(shortError('$error')),
+                  ),
+                  if (selecting)
                     TextButton(
-                      key: const ValueKey('sent-multi-select'),
+                      key: const ValueKey('sent-select-all'),
                       onPressed: () => setState(() {
-                        selecting = !selecting;
-                        selected.clear();
+                        if (items.every((item) => selected.contains(item.id))) {
+                          selected.clear();
+                        } else {
+                          selected.addAll(items.map((item) => item.id));
+                        }
                       }),
-                      child: Text(selecting ? '取消' : '多选'),
+                      child: Text(
+                        items.every((item) => selected.contains(item.id))
+                            ? '取消全选'
+                            : '全选',
+                      ),
                     ),
-                  ],
-                ),
+                  if (selecting)
+                    TextButton(
+                      key: const ValueKey('sent-delete-selected'),
+                      onPressed: selected.isEmpty || working
+                          ? null
+                          : deleteSelected,
+                      child: const Text('删除'),
+                    ),
+                  TextButton(
+                    key: const ValueKey('sent-multi-select'),
+                    onPressed: () => setState(() {
+                      selecting = !selecting;
+                      selected.clear();
+                    }),
+                    child: Text(selecting ? '取消' : '多选'),
+                  ),
+                ],
               ),
               Expanded(
                 child: GridView.builder(
@@ -2530,6 +2525,10 @@ class _SendScreenState extends State<SendScreen>
                                             monitor: c.reachability,
                                             deviceId: id,
                                             deviceName: fullName,
+                                            onRefresh: () =>
+                                                c.refreshConnectionChecks(
+                                                  deviceId: id,
+                                                ),
                                           ),
                                         ),
                                       ),
@@ -2989,105 +2988,78 @@ class _SendScreenState extends State<SendScreen>
     }
     return Column(
       children: [
-        Padding(
+        UiContentToolbar(
           key: const ValueKey('receive-toolbar'),
-          padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
-          child: Wrap(
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text(
-                selecting
-                    ? '${selected.length}/${items.length} 项'
-                    : '${items.length} 项',
-                style: const TextStyle(fontSize: 12, color: Color(0xff829087)),
-              ),
-              BulkFileDrag(
-                key: const ValueKey('receive-drag-all'),
-                paths: items
-                    .where(
+          children: [
+            Text(
+              selecting
+                  ? '${selected.length}/${items.length} 项'
+                  : '${items.length} 项',
+              style: const TextStyle(fontSize: 12, color: Color(0xff829087)),
+            ),
+            BulkFileDrag(
+              key: const ValueKey('receive-drag-all'),
+              paths: items
+                  .where(
+                    (item) =>
+                        item.kind == 'file' &&
+                        item.localPath.isNotEmpty &&
+                        (!selecting || selected.contains(item.id)),
+                  )
+                  .map((item) => item.localPath)
+                  .toList(),
+              enabled: !working,
+              onError: (error) => notice(shortError('$error')),
+            ),
+            if (selecting)
+              TextButton(
+                key: const ValueKey('receive-copy-selected'),
+                onPressed:
+                    items.any(
                       (item) =>
-                          item.kind == 'file' &&
-                          item.localPath.isNotEmpty &&
-                          (!selecting || selected.contains(item.id)),
+                          item.kind == 'text' && selected.contains(item.id),
                     )
-                    .map((item) => item.localPath)
-                    .toList(),
-                enabled: !working,
-                onError: (error) => notice(shortError('$error')),
+                    ? copySelected
+                    : null,
+                child: Text(
+                  '复制 ${items.where((item) => item.kind == 'text' && selected.contains(item.id)).length} 项',
+                ),
               ),
-              if (selecting)
-                TextButton(
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(40, 36),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  key: const ValueKey('receive-copy-selected'),
-                  onPressed:
-                      items.any(
-                        (item) =>
-                            item.kind == 'text' && selected.contains(item.id),
-                      )
-                      ? copySelected
-                      : null,
-                  child: Text(
-                    '复制 ${items.where((item) => item.kind == 'text' && selected.contains(item.id)).length} 项',
-                  ),
+            if (selecting)
+              TextButton(
+                key: const ValueKey('receive-select-all'),
+                onPressed: () => setState(() {
+                  if (items.every((item) => selected.contains(item.id))) {
+                    selected.clear();
+                  } else {
+                    selected.addAll(items.map((item) => item.id));
+                  }
+                }),
+                child: Text(
+                  items.every((item) => selected.contains(item.id))
+                      ? '取消全选'
+                      : '全选',
                 ),
-              if (selecting)
-                TextButton(
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(40, 36),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  key: const ValueKey('receive-select-all'),
-                  onPressed: () => setState(() {
-                    if (items.every((item) => selected.contains(item.id))) {
-                      selected.clear();
-                    } else {
-                      selected.addAll(items.map((item) => item.id));
-                    }
-                  }),
-                  child: Text(
-                    items.every((item) => selected.contains(item.id))
-                        ? '取消全选'
-                        : '全选',
-                  ),
-                ),
-              if (selecting)
-                TextButton(
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(40, 36),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  key: const ValueKey('receive-delete-selected'),
-                  onPressed: selected.isEmpty || working
-                      ? null
-                      : deleteSelected,
-                  child: const Text('删除'),
-                ),
-              if (items.isNotEmpty)
-                TextButton(
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(40, 36),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  key: const ValueKey('receive-multi-select'),
-                  onPressed: () {
-                    setState(() {
-                      selecting = !selecting;
-                      selected.clear();
-                    });
-                    if (!selecting) scheduleReceipt();
-                  },
-                  child: Text(selecting ? '取消' : '多选'),
-                ),
-            ],
-          ),
+              ),
+            if (selecting)
+              TextButton(
+                key: const ValueKey('receive-delete-selected'),
+                onPressed: selected.isEmpty || working ? null : deleteSelected,
+                child: const Text('删除'),
+              ),
+            if (items.isNotEmpty)
+              TextButton(
+                key: const ValueKey('receive-multi-select'),
+                onPressed: () {
+                  setState(() {
+                    selecting = !selecting;
+                    selected.clear();
+                  });
+                  if (!selecting) scheduleReceipt();
+                },
+                child: Text(selecting ? '取消' : '多选'),
+              ),
+          ],
         ),
         Expanded(
           child: RefreshIndicator(
@@ -3283,6 +3255,7 @@ class _SendScreenState extends State<SendScreen>
     Widget? footer,
   }) {
     final selectingItem = selectionEnabled && selecting;
+    final android = Theme.of(context).platform == TargetPlatform.android;
     final draggable =
         item.kind == 'text' ||
         item.localPath.isNotEmpty &&
@@ -3380,15 +3353,59 @@ class _SendScreenState extends State<SendScreen>
             )
           : null,
     );
-    if (selectingItem)
+    if (selectingItem && !android)
       return KeyedSubtree(key: ValueKey('select-${item.id}'), child: card);
-    return dragSurface(
+    final surface = dragSurface(
       item,
       card,
       key: ValueKey('${draggable ? 'drag' : 'entry'}-${item.id}'),
       contextual: false,
+      onExport: android && selectionEnabled
+          ? (kind) => dragContentSelection(item)
+          : null,
     );
+    // Keep the Android recognizer mounted when the first held pointer enters
+    // selection. Later holds export the selected batch; taps alone change it.
+    return android && selectionEnabled
+        ? KeyedSubtree(key: ValueKey('select-${item.id}'), child: surface)
+        : surface;
   }
+
+  Future<void> dragContentSelection(DockEntry item) => perform(() async {
+    if (!selecting) {
+      setState(() {
+        selecting = true;
+        selected
+          ..clear()
+          ..add(item.id);
+      });
+    }
+    final entries =
+        mergeContentCards(
+              c.historyDock.where((entry) => entry.outgoing == item.outgoing),
+            )
+            .where(
+              (entry) =>
+                  selected.contains(entry.id) &&
+                  (entry.kind == 'text' || entry.localPath.isNotEmpty),
+            )
+            .toList();
+    // An empty selection can still drag its held source without selecting it.
+    if (entries.isEmpty) entries.add(item);
+    await DockPlatform.startDrag(
+      paths: entries
+          .where((entry) => entry.kind == 'file')
+          .map((entry) => entry.localPath)
+          .where((path) => path.isNotEmpty)
+          .toSet()
+          .toList(),
+      texts: entries
+          .where((entry) => entry.kind == 'text')
+          .map((entry) => entry.text)
+          .toList(),
+      label: '${entries.length} 项',
+    );
+  });
 
   List<PopupMenuEntry<String>> entryMenu(DockEntry item) {
     final directory = item.sourceReference.isNotEmpty;
@@ -3456,6 +3473,7 @@ class _SendScreenState extends State<SendScreen>
     Widget child, {
     Key? key,
     bool contextual = true,
+    Future<void> Function(String kind)? onExport,
   }) {
     final windows = Theme.of(context).platform == TargetPlatform.windows;
     final draggable =
@@ -3467,7 +3485,9 @@ class _SendScreenState extends State<SendScreen>
         key: key,
         entry: item,
         enabled: draggable && !working,
-        onExport: (kind) => perform(() => c.dragOut(item, pointerKind: kind)),
+        onExport:
+            onExport ??
+            (kind) => perform(() => c.dragOut(item, pointerKind: kind)),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: contextual
@@ -4235,7 +4255,10 @@ class _SendScreenState extends State<SendScreen>
               trailing: const AppIcon(Icons.chevron_right, size: 20),
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute(
-                  builder: (_) => ReachabilityScreen(monitor: c.reachability),
+                  builder: (_) => ReachabilityScreen(
+                    monitor: c.reachability,
+                    onRefresh: c.refreshConnectionChecks,
+                  ),
                 ),
               ),
             ),

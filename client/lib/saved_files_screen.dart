@@ -372,54 +372,49 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
           constraints: const BoxConstraints(maxWidth: 880),
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${files.length} 个文件',
-                        style: TextStyle(
-                          color: scheme.onSurfaceVariant,
-                          fontSize: 13,
-                        ),
-                      ),
+              UiContentToolbar(
+                key: const ValueKey('library-toolbar'),
+                children: [
+                  Text(
+                    selecting
+                        ? '${selected.length}/${files.length} 项'
+                        : '${files.length} 个文件',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 12,
                     ),
-                    BulkFileDrag(
-                      key: const ValueKey('library-drag-all'),
-                      paths: files
-                          .where(
-                            (file) => !selecting || selected.contains(file.id),
+                  ),
+                  BulkFileDrag(
+                    key: const ValueKey('library-drag-all'),
+                    paths: files
+                        .where(
+                          (file) => !selecting || selected.contains(file.id),
+                        )
+                        .map((file) => file.path)
+                        .toList(),
+                    enabled: !working,
+                    onError: (problem) {
+                      if (mounted) setState(() => error = '$problem');
+                    },
+                  ),
+                  if (!selecting)
+                    PopupMenuButton<SavedFilesSort>(
+                      tooltip: '排序',
+                      initialValue: sort,
+                      onSelected: (value) => setState(() => sort = value),
+                      itemBuilder: (context) => _sortLabels.entries
+                          .map(
+                            (entry) => AppCheckedPopupMenuItem(
+                              value: entry.key,
+                              checked: entry.key == sort,
+                              child: Text(entry.value),
+                            ),
                           )
-                          .map((file) => file.path)
                           .toList(),
-                      enabled: !working,
-                      onError: (problem) {
-                        if (mounted) setState(() => error = '$problem');
-                      },
-                    ),
-                    if (!selecting)
-                      PopupMenuButton<SavedFilesSort>(
-                        tooltip: '排序',
-                        initialValue: sort,
-                        onSelected: (value) => setState(() => sort = value),
-                        itemBuilder: (context) => _sortLabels.entries
-                            .map(
-                              (entry) => AppCheckedPopupMenuItem(
-                                value: entry.key,
-                                checked: entry.key == sort,
-                                child: Text(entry.value),
-                              ),
-                            )
-                            .toList(),
+                      child: SizedBox(
+                        height: 36,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 12,
-                            horizontal: 4,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -433,29 +428,29 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                           ),
                         ),
                       ),
-                    if (widget.embedded && selecting)
-                      TextButton(
-                        onPressed: () => updateSelection(() {
-                          if (selected.length == files.length)
-                            selected.clear();
-                          else
-                            selected.addAll(files.map((file) => file.id));
-                        }),
-                        child: Text(
-                          selected.length == files.length ? '取消全选' : '全选',
-                        ),
+                    ),
+                  if (widget.embedded && selecting)
+                    TextButton(
+                      onPressed: () => updateSelection(() {
+                        if (selected.length == files.length)
+                          selected.clear();
+                        else
+                          selected.addAll(files.map((file) => file.id));
+                      }),
+                      child: Text(
+                        selected.length == files.length ? '取消全选' : '全选',
                       ),
-                    if (widget.embedded && files.isNotEmpty)
-                      TextButton(
-                        onPressed: working
-                            ? null
-                            : () => selecting
-                                  ? finishSelection()
-                                  : startSelection(),
-                        child: Text(selecting ? '取消' : '多选'),
-                      ),
-                  ],
-                ),
+                    ),
+                  if (widget.embedded && files.isNotEmpty)
+                    TextButton(
+                      onPressed: working
+                          ? null
+                          : () => selecting
+                                ? finishSelection()
+                                : startSelection(),
+                      child: Text(selecting ? '取消' : '多选'),
+                    ),
+                ],
               ),
               if (error.isNotEmpty)
                 Padding(

@@ -596,18 +596,27 @@ class SendController extends ChangeNotifier {
                     entry.localPath.isNotEmpty,
               )
               .toList()) {
-        final registered = await store.register(profile: current, entry: entry);
-        if (registered != null && entry.receivedAtMillis == 0) {
-          entry.receivedAtMillis = registered.receivedAtMillis;
-        }
-        if (registered == null &&
-            !await ReceivedFileAccess.exists(entry.localPath)) {
-          entry.localPath = '';
-          entry.routeDetail = '本机副本已删除';
-          _localHistory?.remove('${current.key}:${entry.id}');
-          _hiddenDockIds.add(entry.id);
-          dock.remove(entry);
-          stalePaths = true;
+        try {
+          final registered = await store.register(
+            profile: current,
+            entry: entry,
+          );
+          if (registered != null && entry.receivedAtMillis == 0) {
+            entry.receivedAtMillis = registered.receivedAtMillis;
+          }
+          if (registered == null &&
+              !await ReceivedFileAccess.exists(entry.localPath)) {
+            entry.localPath = '';
+            entry.routeDetail = '本机副本已删除';
+            _localHistory?.remove('${current.key}:${entry.id}');
+            _hiddenDockIds.add(entry.id);
+            dock.remove(entry);
+            stalePaths = true;
+          }
+        } on FileSystemException {
+          entry.routeDetail = '本机文件暂不可读，请重新授权所在文件夹';
+        } on PlatformException {
+          entry.routeDetail = '本机文件暂不可读，请重新授权所在文件夹';
         }
       }
     }
@@ -626,7 +635,13 @@ class SendController extends ChangeNotifier {
       final values = jsonDecode(await state.readAsString()) as Map;
       for (final value in values['dock'] as List? ?? []) {
         final entry = DockEntry.fromJson(Map<String, dynamic>.from(value));
-        await store.register(profile: savedProfile, entry: entry);
+        try {
+          await store.register(profile: savedProfile, entry: entry);
+        } on FileSystemException {
+          // Keep the original dock reference until its directory is available.
+        } on PlatformException {
+          // Revoked external access must not prevent the remaining migration.
+        }
       }
     }
     await refreshSavedFiles(cleanup: true);
@@ -1006,6 +1021,7 @@ class SendController extends ChangeNotifier {
       api!,
       self,
       onResults: (results) => reachability.setRtcResults(self, results),
+      supportsAddressReporting: info['features']?['rtcProbeAddresses'] == true,
     );
     _updateReachability();
   }
@@ -1868,6 +1884,16 @@ class SendController extends ChangeNotifier {
   Future<void> refreshGroupDevices() => _deviceRefresh ??=
       _refreshGroupDevices().whenComplete(() => _deviceRefresh = null);
 
+  Future<void> refreshConnectionChecks({String? deviceId}) async {
+    if (disposed || !connected) return;
+    await Future.wait<void>([
+      deviceId == null
+          ? reachability.refresh()
+          : reachability.refreshDevice(deviceId),
+      if (rtcProbes != null) rtcProbes!.refreshNow(peerId: deviceId),
+    ]);
+  }
+
   Future<void> _refreshGroupDevices() async {
     if (disposed || api == null || api!.token.isEmpty) return;
     if (!connected) {
@@ -1876,11 +1902,11 @@ class SendController extends ChangeNotifier {
       } else {
         await openSocket(generation);
       }
-      if (!disposed && connected) await reachability.refresh();
+      if (!disposed && connected) await refreshConnectionChecks();
       return;
     }
     await _republishNetworkAddresses();
-    if (!disposed && connected) await reachability.refresh();
+    if (!disposed && connected) await refreshConnectionChecks();
   }
 
   Future<void> safeReconcile() async {
@@ -2218,6 +2244,21 @@ class SendController extends ChangeNotifier {
           item.routeDetail = '已送达';
         } else if (item.routeDetail.isEmpty) {
           item.routeDetail = '已保存';
+        }
+        if (!outgoing && f['reused'] == true && item.localPath.isNotEmpty) {
+          final receivedAt = DateTime.tryParse(f['receivedAt'] ?? '');
+          if (receivedAt != null &&
+              receivedAt.millisecondsSinceEpoch > item.receivedAtMillis) {
+            item.receivedAtMillis = receivedAt.millisecondsSinceEpoch;
+            // Also recovers a successful reuse receipt whose response was lost.
+            unawaited(
+              _rememberSavedFile(
+                item,
+                profile!,
+                receivedAt: receivedAt,
+              ).then((_) => save()),
+            );
+          }
         }
       }
       if (!outgoing &&
@@ -3462,6 +3503,110 @@ class SendController extends ChangeNotifier {
     bool reconcileAfter = true,
   }) async {
     final epoch = generation, a = api!, p = profile!;
+    final lock = '$epoch:${item.transferId}';
+    if (!_acceptingTransfers.add(lock)) return;
+    try {
+      await _receiveDirectoryMigration?.future;
+      if (info['features']?['fileReuse'] == true) {
+        for (final entry
+            in dock
+                .where(
+                  (entry) =>
+                      !entry.outgoing &&
+                      entry.transferId == item.transferId &&
+                      ids.contains(entry.fileId) &&
+                      (entry.status == 'offered' ||
+                          entry.relayPendingBeforeAccept),
+                )
+                .toList()) {
+          await _reuseSavedFile(entry);
+          _requireSession(epoch, a, p);
+        }
+      }
+      if (dock.any(
+        (entry) =>
+            entry.transferId == item.transferId &&
+            ids.contains(entry.fileId) &&
+            (entry.locallyPaused || entry.locallyCanceled),
+      ))
+        return;
+      await _acceptSelectedWork(item, ids, reconcileAfter: reconcileAfter);
+    } finally {
+      _acceptingTransfers.remove(lock);
+    }
+  }
+
+  Future<bool> _reuseSavedFile(DockEntry item) async {
+    if (item.locallyCanceled || item.locallyPaused) return false;
+    final epoch = generation, a = api!, owner = profile!;
+    final store = await _savedStore();
+    final saved = await store?.reusableFile(item);
+    _requireSession(epoch, a, owner);
+    if (saved == null || item.locallyCanceled || item.locallyPaused)
+      return false;
+    // Persist the binding before the receipt: if the process stops after the
+    // server commits, startup still knows which existing local file it owns.
+    final oldPath = item.localPath;
+    item.localPath = saved.path;
+    await save();
+    _requireSession(epoch, a, owner);
+    if (item.locallyCanceled || item.locallyPaused) return false;
+    Map<String, dynamic> response;
+    try {
+      response = await a.call('POST', '${fileRoute(item)}/reuse', {
+        'sha256': item.contentDigest,
+        'size': item.size,
+      });
+    } on ApiException catch (error) {
+      if (error.response?['error']?['code'] != 'TRANSFER_STARTED') rethrow;
+      item.localPath = oldPath;
+      await save();
+      return false;
+    }
+    _requireSession(epoch, a, owner);
+    if (item.locallyCanceled || item.locallyPaused) return false;
+    final remote = response['file'] as Map;
+    if (remote['status'] != 'received' || remote['reused'] != true) {
+      throw StateError('中心未确认本地文件复用');
+    }
+    final receivedAt =
+        DateTime.tryParse(remote['receivedAt'] ?? '') ?? DateTime.now();
+    item.receivedAtMillis = receivedAt.millisecondsSinceEpoch;
+    item.status = 'received';
+    item.progress = 1;
+    item.receivedBytes = item.size;
+    item.error = '';
+    item.route = 'direct';
+    item.routeDetail = '已保存';
+    item.relayConfirmationPending = false;
+    item.relayPendingBeforeAccept = false;
+    // Updating this one physical owner's timestamp extends retention without
+    // creating aliases that could delete each other's file during cleanup.
+    await _rememberSavedFile(
+      item,
+      owner,
+      receivedAt: receivedAt,
+      managedLocation: saved.managedLocation,
+    );
+    for (final entry in dock.where(
+      (entry) =>
+          !entry.outgoing &&
+          entry.localPath.isNotEmpty &&
+          ReceivedFileAccess.canonical(entry.localPath) == saved.path,
+    )) {
+      entry.receivedAtMillis = receivedAt.millisecondsSinceEpoch;
+    }
+    await save();
+    changed();
+    return true;
+  }
+
+  Future<void> _acceptSelectedWork(
+    DockEntry item,
+    List<String> ids, {
+    required bool reconcileAfter,
+  }) async {
+    final epoch = generation, a = api!, p = profile!;
     if (p.receiveRoutePreference == 'relay') {
       for (final entry in dock.where(
         (d) =>
@@ -3476,6 +3621,7 @@ class SendController extends ChangeNotifier {
       (d) =>
           d.transferId == item.transferId &&
           ids.contains(d.fileId) &&
+          d.status != 'received' &&
           (d.offerRoutePreference == 'relay' ||
               info['features']?['direct'] != true && rtc == null) &&
           needsRelayConsent(d),
@@ -3491,22 +3637,23 @@ class SendController extends ChangeNotifier {
       changed();
       return;
     }
-    final lock = '$epoch:${item.transferId}';
-    if (!_acceptingTransfers.add(lock)) return;
-    try {
-      final result = await a.call(
-        'POST',
-        '/transfers/${item.transferId}/accept',
-        {'fileIds': ids},
-      );
-      _requireSession(epoch, a, p);
-      if (result['transfer'] != null) {
-        updateTransfer(Map<String, dynamic>.from(result['transfer']));
-      }
+    if (!dock.any(
+      (entry) =>
+          entry.transferId == item.transferId && entry.status == 'offered',
+    )) {
       if (reconcileAfter) await reconcile();
-    } finally {
-      _acceptingTransfers.remove(lock);
+      return;
     }
+    final result = await a.call(
+      'POST',
+      '/transfers/${item.transferId}/accept',
+      {'fileIds': ids},
+    );
+    _requireSession(epoch, a, p);
+    if (result['transfer'] != null) {
+      updateTransfer(Map<String, dynamic>.from(result['transfer']));
+    }
+    if (reconcileAfter) await reconcile();
   }
 
   bool canControlTransfer(DockEntry item) =>

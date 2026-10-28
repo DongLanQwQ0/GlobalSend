@@ -119,7 +119,7 @@ final class FileShareBridge {
     private static void removePartial(File item){File[] children=item.listFiles();if(children!=null)for(File child:children)removePartial(child);item.delete();}
     void share(List<String> paths,String text) throws Exception {
         List<String> values=paths==null?java.util.Collections.emptyList():paths;ArrayList<Uri> uris=new ArrayList<>();String mime=null;
-        for(String path:values){Uri uri;if(path.startsWith("content://"))uri=Uri.parse(path);else uri=DockShareProvider.registerForShare(context,new File(path),new File(path).getName());uris.add(uri);String next=context.getContentResolver().getType(uri);if(next==null)next="application/octet-stream";if(mime==null)mime=next;else if(!mime.equals(next))mime=mime.split("/")[0].equals(next.split("/")[0])?mime.split("/")[0]+"/*":"*/*";}
+        for(String path:values){String readable=ReceiveDirectory.readableLocation(context,path);Uri uri;if(readable.startsWith("content://"))uri=Uri.parse(readable);else uri=DockShareProvider.registerForShare(context,new File(readable),new File(path).getName());uris.add(uri);String next=context.getContentResolver().getType(uri);if(next==null)next="application/octet-stream";if(mime==null)mime=next;else if(!mime.equals(next))mime=mime.split("/")[0].equals(next.split("/")[0])?mime.split("/")[0]+"/*":"*/*";}
         if(uris.isEmpty()&&(text==null||text.isEmpty()))return;
         Intent intent=new Intent(uris.size()>1?Intent.ACTION_SEND_MULTIPLE:Intent.ACTION_SEND).setType(mime==null?"text/plain":mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         if(text!=null&&!text.isEmpty())intent.putExtra(Intent.EXTRA_TEXT,text);

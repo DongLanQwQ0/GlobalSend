@@ -17,7 +17,66 @@ abstract class RtcDataConnection {
   Future<void> addCandidate(RTCIceCandidate candidate);
   Future<RtcDataChannel> createDataChannel(String label);
   Future<void> authorizeData();
+  Future<RtcSelectedPair?> selectedCandidatePair() async => null;
   Future<void> close();
+}
+
+class RtcSelectedPair {
+  const RtcSelectedPair(this.localAddress, this.remoteAddress);
+  final String localAddress, remoteAddress;
+}
+
+/// Report only the selected ICE pair, never the first advertised candidate.
+RtcSelectedPair? rtcSelectedPairFromStats(List<Map<String, dynamic>> stats) {
+  final byId = {for (final value in stats) value['id']: value};
+  Map<String, dynamic>? pair;
+  for (final transport in stats.where(
+    (value) => value['type'] == 'transport',
+  )) {
+    final selected = byId[transport['selectedCandidatePairId']];
+    if (selected?['type'] == 'candidate-pair') {
+      pair = selected;
+      break;
+    }
+  }
+  if (pair == null) {
+    final selected = stats
+        .where(
+          (value) =>
+              value['type'] == 'candidate-pair' && value['selected'] == true,
+        )
+        .toList();
+    if (selected.length == 1) pair = selected.single;
+  }
+  if (pair == null) {
+    final nominated = stats
+        .where(
+          (value) =>
+              value['type'] == 'candidate-pair' &&
+              value['nominated'] == true &&
+              value['state'] == 'succeeded',
+        )
+        .toList();
+    if (nominated.length == 1) pair = nominated.single;
+  }
+  if (pair == null) return null;
+  String endpoint(dynamic id) {
+    final candidate = byId[id];
+    if (candidate == null) return '';
+    final address =
+        candidate['address'] ?? candidate['ip'] ?? candidate['ipAddress'];
+    if (address is! String || address.isEmpty) return '';
+    final port = candidate['port'];
+    if (port == null || '$port'.isEmpty) return address;
+    final number = port is num ? port.toInt().toString() : '$port';
+    return '${address.contains(':') && !address.startsWith('[') ? '[$address]' : address}:$number';
+  }
+
+  final local = endpoint(pair['localCandidateId']),
+      remote = endpoint(pair['remoteCandidateId']);
+  return local.isEmpty && remote.isEmpty
+      ? null
+      : RtcSelectedPair(local, remote);
 }
 
 abstract class RtcDataChannel {
@@ -125,6 +184,19 @@ class _PluginConnection implements RtcDataConnection {
       );
   @override
   Future<void> authorizeData() async {}
+  @override
+  Future<RtcSelectedPair?> selectedCandidatePair() async =>
+      rtcSelectedPairFromStats(
+        (await peer.getStats())
+            .map(
+              (report) => <String, dynamic>{
+                ...Map<String, dynamic>.from(report.values),
+                'id': report.id,
+                'type': report.type,
+              },
+            )
+            .toList(),
+      );
   @override
   Future<void> close() => _closing ??= _close();
   Future<void> _close() async {
@@ -343,6 +415,16 @@ class AndroidRtcConnection implements RtcDataConnection {
 
   @override
   Future<void> authorizeData() => _call('authorize');
+  @override
+  Future<RtcSelectedPair?> selectedCandidatePair() async {
+    final stats = await _call<List>('stats');
+    return rtcSelectedPairFromStats(
+      (stats ?? const [])
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList(),
+    );
+  }
+
   @override
   Future<void> close() => _closing ??= _close();
   Future<void> _close() async {

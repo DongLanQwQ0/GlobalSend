@@ -318,7 +318,6 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         } catch (java.io.IOException | RuntimeException unavailable) { return null; }
     }
     private java.io.InputStream open(String path) throws java.io.IOException {
-        return path.startsWith("content://") ? context.getContentResolver().openInputStream(android.net.Uri.parse(path))
-            : new java.io.FileInputStream(path);
+        return AndroidReadSource.openStream(context, path);
     }
 }

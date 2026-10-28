@@ -156,3 +156,48 @@ test('a peer appearing after a signaling notification is consumed immediately, n
   try{await monitor.setForeground(true);assert.equal(started,0);monitor.setOnlinePeers(['b']);await until(()=>started===1);assert.deepEqual(server.scopes,['lan']);}
   finally{await monitor.dispose();}
 });
+
+
+test('RTC endpoint diagnostics use the selected candidate pair and orient source toward the current device',async()=>{
+  const {selectedProbeAddresses,orientedProbeAddresses}=await import('../src/rtc_probe.ts');
+  const report=new Map([
+    ['transport',{id:'transport',type:'transport',selectedCandidatePairId:'pair'}],
+    ['pair',{id:'pair',type:'candidate-pair',state:'succeeded',localCandidateId:'local',remoteCandidateId:'remote'}],
+    ['local',{id:'local',type:'local-candidate',address:'2408::1234',port:54321}],
+    ['remote',{id:'remote',type:'remote-candidate',ip:'10.2.3.4',port:23456}],
+    ['unused',{id:'unused',type:'candidate-pair',state:'in-progress',nominated:true,localCandidateId:'remote',remoteCandidateId:'local'}],
+  ]);
+  const addresses=selectedProbeAddresses(report);assert.deepEqual(addresses,{initiatorAddress:'[2408::1234]:54321',responderAddress:'10.2.3.4:23456'});
+  const result={...addresses,initiatorDeviceId:'a'};
+  assert.deepEqual(orientedProbeAddresses(result,'a'),{source:'[2408::1234]:54321',target:'10.2.3.4:23456'});
+  assert.deepEqual(orientedProbeAddresses(result,'b'),{source:'10.2.3.4:23456',target:'[2408::1234]:54321'});
+  assert.deepEqual(selectedProbeAddresses(new Map([['pair',{type:'candidate-pair',state:'failed',nominated:true}]])),{});
+  assert.deepEqual(selectedProbeAddresses(new Map([['pair',{type:'candidate-pair',state:'succeeded',selected:true,localCandidateId:'redacted'}]])),{initiatorAddress:undefined,responderAddress:undefined});
+});
+
+
+test('RTC completion reports selected endpoint stats only when the center advertises the address contract',async()=>{
+ for(const enabled of [false,true]){
+  const peer=peerFixture(true),probe=view(),{api,calls}=sessionApi(probe),session=new RtcProbeSession(api as any,probe,'a',new AbortController().signal,enabled);let statsReads=0;
+  peer.peers[0].getStats=async()=>{statsReads++;return new Map([
+   ['pair',{id:'pair',type:'candidate-pair',state:'succeeded',selected:true,localCandidateId:'local',remoteCandidateId:'remote'}],
+   ['local',{id:'local',type:'local-candidate',address:'10.1.1.1',port:123}],['remote',{id:'remote',type:'remote-candidate',address:'2408::2',port:456}],
+  ]);};
+  try{assert.equal((await session.run())?.success,true);const body=calls.find(call=>call.path.endsWith('/complete'))!.body;
+   assert.equal(statsReads,enabled?1:0);if(enabled){assert.equal(body.initiatorAddress,'10.1.1.1:123');assert.equal(body.responderAddress,'[2408::2]:456');}else assert.deepEqual(Object.keys(body),['elapsedMs']);
+  }finally{session.close();peer.restore();}
+ }
+});
+
+
+test('RTC endpoint fallback never guesses among several successful nominated or selected pairs',async()=>{
+ const {selectedProbeAddresses}=await import('../src/rtc_probe.ts');
+ const endpoints=[{id:'local',type:'local-candidate',address:'10.1.1.1',port:123},{id:'remote',type:'remote-candidate',address:'10.2.2.2',port:456}];
+ const first={id:'first',type:'candidate-pair',state:'succeeded',nominated:true,localCandidateId:'local',remoteCandidateId:'remote',timestamp:1};
+ const second={...first,id:'second',localCandidateId:'remote',remoteCandidateId:'local',timestamp:999};
+ const report=(pairs:any[])=>new Map([...endpoints,...pairs].map(value=>[value.id,value]));
+ assert.deepEqual(selectedProbeAddresses(report([first,second])),{},'a newer nomination is not evidence of the used route');
+ assert.deepEqual(selectedProbeAddresses(report([{...first,selected:true},{...second,selected:true}])),{},'several selected flags are ambiguous');
+ assert.deepEqual(selectedProbeAddresses(report([{...first,selected:true},second])),{initiatorAddress:'10.1.1.1:123',responderAddress:'10.2.2.2:456'},'one explicit selected flag wins over other nominations');
+ assert.deepEqual(selectedProbeAddresses(report([first])),{initiatorAddress:'10.1.1.1:123',responderAddress:'10.2.2.2:456'},'a single successful nomination remains usable');
+});

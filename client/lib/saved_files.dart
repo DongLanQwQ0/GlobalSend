@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 
 import 'models.dart';
@@ -152,6 +153,7 @@ class SavedFile {
     this.managedLocation = false,
     this.directory = false,
     this.relativePath = '',
+    this.contentDigest = '',
   });
 
   static const defaultRetentionHours = 24;
@@ -161,6 +163,7 @@ class SavedFile {
   final bool managedLocation;
   final bool directory;
   final String relativePath;
+  final String contentDigest;
   DateTime get receivedAt =>
       DateTime.fromMillisecondsSinceEpoch(receivedAtMillis);
   DateTime expiresAt(int retentionHours) =>
@@ -182,6 +185,7 @@ class SavedFile {
     managedLocation: managedLocation,
     directory: directory,
     relativePath: relativePath,
+    contentDigest: contentDigest,
   );
 
   SavedFile relocated(String location, {int? currentSize}) => SavedFile(
@@ -198,7 +202,26 @@ class SavedFile {
     managedLocation: true,
     directory: directory,
     relativePath: relativePath,
+    contentDigest: contentDigest,
   );
+
+  SavedFile refreshed({required int receivedAtMillis, String? digest}) =>
+      SavedFile(
+        id: id,
+        profileKey: profileKey,
+        deviceId: deviceId,
+        groupId: groupId,
+        transferId: transferId,
+        fileId: fileId,
+        path: path,
+        name: name,
+        size: size,
+        receivedAtMillis: receivedAtMillis,
+        managedLocation: managedLocation,
+        directory: directory,
+        relativePath: relativePath,
+        contentDigest: digest ?? contentDigest,
+      );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -214,6 +237,7 @@ class SavedFile {
     'managedLocation': managedLocation,
     'directory': directory,
     'relativePath': relativePath,
+    'contentDigest': contentDigest,
   };
 
   factory SavedFile.fromJson(Map<String, dynamic> value) => SavedFile(
@@ -230,6 +254,7 @@ class SavedFile {
     managedLocation: value['managedLocation'] ?? false,
     directory: value['directory'] ?? false,
     relativePath: value['relativePath'] ?? '',
+    contentDigest: value['contentDigest'] ?? '',
   );
 }
 
@@ -358,7 +383,8 @@ class SavedFilesStore {
           (await ReceiveDestination.stat(item.path)).exists;
     }
     final file = File(item.path), scope = ownedDirectory(item);
-    if (!await file.exists() || !await scope.exists()) return false;
+    if (!await ReceivedFileAccess.exists(item.path) || !await scope.exists())
+      return false;
     final documents = await documentsDirectory.resolveSymbolicLinks();
     final resolvedScope = await scope.resolveSymbolicLinks();
     final managedRoot = Directory('$documents/GlobalSend').absolute.path;
@@ -378,10 +404,31 @@ class SavedFilesStore {
     }
     final id =
         '${profile.key}:${profile.deviceId}:${profile.groupId}:${entry.transferId}:${entry.fileId}';
-    final existing = _items[id];
+    final canonicalPath = ReceivedFileAccess.canonical(entry.localPath);
+    // A repeated delivery references the same owned file, not another copy.
+    // Keep one cleanup owner even when the new transfer/profile has a new ID.
+    final existing =
+        _items[id] ??
+        _items.values.where((item) => item.path == canonicalPath).firstOrNull;
     if (existing != null &&
-        existing.path == ReceivedFileAccess.canonical(entry.localPath) &&
+        existing.path == canonicalPath &&
         await ownsExisting(existing)) {
+      final time =
+          receivedAt?.millisecondsSinceEpoch ??
+          (entry.receivedAtMillis > 0 ? entry.receivedAtMillis : null);
+      final digest = entry.contentDigest;
+      if (time != null && time > existing.receivedAtMillis ||
+          digest.isNotEmpty && digest != existing.contentDigest) {
+        final updated = existing.refreshed(
+          receivedAtMillis: time != null && time > existing.receivedAtMillis
+              ? time
+              : existing.receivedAtMillis,
+          digest: digest.isNotEmpty ? digest : null,
+        );
+        _items[existing.id] = updated;
+        await _persist();
+        return updated;
+      }
       return existing;
     }
     _items.remove(id);
@@ -407,16 +454,58 @@ class SavedFilesStore {
       // Older clients had no received-at field; their completed copy's mtime
       // is the best available timestamp and is fixed on first migration.
       receivedAtMillis:
-          (receivedAt ?? (managed ? DateTime.now() : await file.lastModified()))
+          (receivedAt ??
+                  (entry.receivedAtMillis > 0
+                      ? DateTime.fromMillisecondsSinceEpoch(
+                          entry.receivedAtMillis,
+                        )
+                      : managed
+                      ? DateTime.now()
+                      : await file.lastModified()))
               .millisecondsSinceEpoch,
       managedLocation: managed,
       directory: entry.isDirectory,
       relativePath: entry.relativePath,
+      contentDigest: entry.contentDigest,
     );
     if (!await ownsExisting(item)) return null;
     _items[id] = item;
     await _persist();
     return item;
+  });
+
+  /// Verify the actual retained bytes before acknowledging a repeated offer.
+  /// Folder members remain on the normal folder path so their directory tree
+  /// is never split between an old root and a newly allocated root.
+  Future<SavedFile?> reusableFile(DockEntry entry) => _write(() async {
+    if (entry.isDirectory ||
+        entry.relativePath.isNotEmpty ||
+        entry.contentDigest.isEmpty)
+      return null;
+    for (final candidate in _items.values.toList()) {
+      if (candidate.directory ||
+          candidate.relativePath.isNotEmpty ||
+          candidate.size != entry.size ||
+          candidate.contentDigest.isNotEmpty &&
+              candidate.contentDigest != entry.contentDigest)
+        continue;
+      ReceivedFileAccess? access;
+      try {
+        if (!await ownsExisting(candidate)) continue;
+        access = await ReceivedFileAccess.open(candidate.path);
+        if (await access.file.length() != entry.size) continue;
+        final digest = (await sha256.bind(access.file.openRead()).first)
+            .toString();
+        if (digest == entry.contentDigest) return candidate;
+      } on FileSystemException {
+        // A removed/changed/unreadable local copy is not a reusable delivery.
+      } on PlatformException {
+        // Revoked provider access must use the ordinary receive destination.
+      } finally {
+        await access?.close();
+      }
+    }
+    return null;
   });
 
   Future<void> rename(String id, String name) => _write(() async {
@@ -709,7 +798,15 @@ class SavedFilesStore {
           );
         for (final item in items) {
           if (!_items.containsKey(item.id)) continue;
-          final owned = await ownsExisting(item);
+          bool owned;
+          try {
+            owned = await ownsExisting(item);
+          } on FileSystemException {
+            // An unavailable external directory is not a deleted document.
+            continue;
+          } on PlatformException {
+            continue;
+          }
           if (owned &&
               (!removeExpired ||
                   !item.expiredAt(now, retentionHours) ||

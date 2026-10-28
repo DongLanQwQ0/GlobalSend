@@ -21,6 +21,29 @@ export function probeResultLabel(results:RtcProbeResult[],self:string,peer:strin
   }
   return valid.length?'RTC 暂不可达':'';
 }
+/** Addresses of the pair which actually carried the nonce, never a guessed ICE candidate. */
+export function selectedProbeAddresses(report:{forEach(callback:(value:any)=>void):void}) {
+  const values:any[]=[];report.forEach(value=>values.push(value));
+  const byId=new Map(values.map(value=>[value.id,value]));
+  const transport=values.find(value=>value.type==='transport' && value.selectedCandidatePairId);
+  const succeeded=values.filter(value=>value.type==='candidate-pair' && value.state==='succeeded');
+  const selected=succeeded.filter(value=>value.selected===true),nominated=succeeded.filter(value=>value.nominated===true);
+  // Several successful/nominated pairs can coexist during ICE changes. Without
+  // an explicit selection or a single candidate, their timestamps prove nothing.
+  const pair=transport?byId.get(transport.selectedCandidatePairId):selected.length===1?selected[0]:selected.length===0 && nominated.length===1?nominated[0]:undefined;
+  if(!pair || pair.state && pair.state!=='succeeded')return {};
+  const endpoint=(candidate:any)=>{
+    const address=candidate?.address || candidate?.ip;
+    if(typeof address!=='string' || !address)return undefined;
+    const host=address.includes(':') && !address.startsWith('[')?`[${address}]`:address;
+    return Number.isInteger(candidate.port) && candidate.port>0?`${host}:${candidate.port}`:host;
+  };
+  return {initiatorAddress:endpoint(byId.get(pair.localCandidateId)),responderAddress:endpoint(byId.get(pair.remoteCandidateId))};
+}
+export function orientedProbeAddresses(result:Pick<RtcProbeResult,'initiatorDeviceId'|'initiatorAddress'|'responderAddress'>,self:string){
+  return result.initiatorDeviceId===self?{source:result.initiatorAddress,target:result.responderAddress}:{source:result.responderAddress,target:result.initiatorAddress};
+}
+
 type ProbeApi=Pick<Api,'request'>;
 type ProbeRole='initiator'|'responder';
 
@@ -53,7 +76,9 @@ export class RtcProbeSession {
   private nonce=probeNonce();
   private pingAt:number|null=null;
   private elapsedMs=0;
-  constructor(api:ProbeApi,view:RtcProbeView,self:string,signal:AbortSignal) {
+  private reportAddresses=false;
+  constructor(api:ProbeApi,view:RtcProbeView,self:string,signal:AbortSignal,reportAddresses=false) {
+    this.reportAddresses=reportAddresses;
     this.api=api;this.view=view;this.signal=signal;this.role=view.initiatorDeviceId===self?'initiator':'responder';this.path=`/rtc-probes/${view.attemptId}`;
     this.pc=new RTCPeerConnection({iceServers:[]});
     this.externalAbort=()=>this.close();signal.addEventListener('abort',this.externalAbort,{once:true});
@@ -139,7 +164,14 @@ export class RtcProbeSession {
       }
       this.check();
       if(this.role==='initiator') {
-        const {result}=await this.api.request<{result:RtcProbeResult}>(this.path+'/complete',{elapsedMs:this.elapsedMs},'POST',this.rpc.signal);return result;
+        let addresses:ReturnType<typeof selectedProbeAddresses>={};
+        if(this.reportAddresses && typeof this.pc.getStats==='function'){
+          let timer:ReturnType<typeof setTimeout>|undefined;
+          try{addresses=await Promise.race([this.pc.getStats().then(selectedProbeAddresses),new Promise<{}>(resolve=>{timer=setTimeout(()=>resolve({}),500);})]);}
+          catch{/* Some browsers redact endpoint stats; the echoed path remains proven. */}
+          finally{clearTimeout(timer);}
+        }
+        const {result}=await this.api.request<{result:RtcProbeResult}>(this.path+'/complete',{elapsedMs:this.elapsedMs,...addresses},'POST',this.rpc.signal);return result;
       }
       return null;
     } catch(error) {
@@ -156,7 +188,7 @@ export class RtcProbeSession {
 }
 
 interface MonitorOptions {
-  api:ProbeApi;deviceId:string;changed:()=>void;
+  api:ProbeApi;deviceId:string;changed:()=>void;reportAddresses?:boolean;
   session?:(view:RtcProbeView,signal:AbortSignal)=>Pick<RtcProbeSession,'run'|'close'|'refresh'|'active'>;
 }
 /** Foreground-only coordinator; shared server results never change file policy. */
@@ -254,7 +286,7 @@ export class RtcProbeMonitor {
   private async session(view:RtcProbeView,epoch:number) {
     if(epoch!==this.epoch || !this.foreground || !this.online.has(probeOther(view,this.options.deviceId)))return null;
     const life=this.life.signal,abort=new AbortController(),cancel=()=>abort.abort();life.addEventListener('abort',cancel,{once:true});
-    const value=this.options.session?.(view,abort.signal) || new RtcProbeSession(this.options.api,view,this.options.deviceId,abort.signal);
+    const value=this.options.session?.(view,abort.signal) || new RtcProbeSession(this.options.api,view,this.options.deviceId,abort.signal,this.options.reportAddresses);
     const active={view,value,abort};this.activeSession=active;this.options.changed();
     try {
       const result=await value.run();

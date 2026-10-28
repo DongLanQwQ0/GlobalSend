@@ -1,5 +1,6 @@
 // OPFS uses a dedicated worker so Safari can stream into one file without a
 // second permanent copy or a file-sized in-memory Blob.
+import { sha256 } from '@noble/hashes/sha2.js';
 import { cleanupDue, cleanupMatches, defaultCleanup, validateCleanup } from './cleanup';
 import type { CleanupPreferences } from './cleanup';
 import { FolderStorage, destinationSetting, receivingDestination } from './folder_storage';
@@ -13,7 +14,7 @@ interface Access {
 }
 type Handle = FileSystemFileHandle & {createSyncAccessHandle():Promise<Access>};
 type Directory = FileSystemDirectoryHandle & {values():AsyncIterable<FileSystemHandle>};
-type Metadata = StoredLocation & {key:string;name:string;mimeType?:string;size:number;sha256?:string;receivedAt?:number;expires:number;complete:boolean};
+type Metadata = StoredLocation & {key:string;name:string;mimeType?:string;size:number;sha256?:string;receivedAt?:number;expires:number;complete:boolean;alias?:{scope:string;key:string}};
 let appDirectory:Directory;
 let directory: Directory;
 const opened = new Map<string,{access:Access;handle:Handle;offset:number;meta:Metadata}>();
@@ -36,11 +37,19 @@ async function accessFile(handle:FileSystemFileHandle,external=false):Promise<Ac
   return {getSize:()=>size,truncate:async n=>{await writer.truncate(n);size=n;},write:async(bytes,{at})=>{await writer.write({type:'write',position:at,data:bytes as Uint8Array<ArrayBuffer>});size=Math.max(size,at+bytes.length);return bytes.length;},flush:async()=>{await writer.close();writer=await handle.createWritable({keepExistingData:true});},close:()=>writer.close()};
 }
 async function dataHandle(meta:Metadata,target:Directory=directory,create=false){return meta.storagePath?new FolderStorage(target).file(meta,create):target.getFileHandle(`${keyName(meta.key)}.data`,{create});}
+async function canonical(meta:Metadata,target:Directory){
+  if(!meta.alias)return {meta,target};
+  target=await appDirectory.getDirectoryHandle(meta.alias.scope) as Directory;
+  meta=JSON.parse(await (await (await target.getFileHandle(`${keyName(meta.alias.key)}.json`)).getFile()).text()) as Metadata;
+  return {meta,target};
+}
 async function dataFile(meta:Metadata,target:Directory=directory){
+  ({meta,target}=await canonical(meta,target));
   if(meta.entryKind==='directory'){const folder=new FolderStorage(target);const {parent,name}=await folder.parent(meta);await parent.getDirectoryHandle(name);return null;}
   return (await dataHandle(meta,target)).getFile();
 }
 async function removeData(meta:Metadata,target:Directory=directory,cleanParents=false){
+  if(meta.alias)return;
   if(meta.storagePath)await new FolderStorage(target).remove(meta,cleanParents);
   else await target.removeEntry(keyName(meta.key)+'.data').catch(error=>{if(error.name!=='NotFoundError')throw error;});
 }
@@ -52,7 +61,7 @@ async function remove(key:string,cascade=true) {
   await close(key);
   let meta:Metadata;try{meta=await readMeta(key);}catch(error){if((error as Error).name==='NotFoundError')return;throw error;}
   if(cascade && meta.entryKind==='directory')await removeOwned(meta,directory);
-  else {await removeData(meta);await directory.removeEntry(keyName(key)+'.json');}
+  else await removeLibraryFile(directory,key);
 }
 async function cleanup() {
   const rules=await cleanupPreferences();
@@ -60,7 +69,7 @@ async function cleanup() {
   for await(const handle of directory.values()) {
     if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
     const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
-    if(meta.complete && cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},rules) && !opened.has(meta.key))expired.push(meta);
+    if(meta.complete && !meta.alias && cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},rules) && !opened.has(meta.key))expired.push(meta);
   }
   expired.sort((a,b)=>(a.entryKind==='directory'?1:0)-(b.entryKind==='directory'?1:0) || (b.relativePath?.split('/').length || 0)-(a.relativePath?.split('/').length || 0));
   for(const meta of expired)await remove(meta.key,false).catch(error=>{if(error.name!=='NotAllowedError')throw error;});
@@ -82,7 +91,8 @@ function libraryParts(id:string) {
 async function libraryFile(id:string) {
   const {scope,key}=libraryParts(id);
   const target=await appDirectory.getDirectoryHandle(scope) as Directory;
-  const meta=JSON.parse(await (await (await target.getFileHandle(`${keyName(key)}.json`)).getFile()).text()) as Metadata;
+  let meta=JSON.parse(await (await (await target.getFileHandle(`${keyName(key)}.json`)).getFile()).text()) as Metadata;
+  const source=await canonical(meta,target);if(meta.alias)meta={...meta,receivedAt:source.meta.receivedAt,expires:source.meta.expires};
   if(!meta.complete || cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},await cleanupPreferences()))throw new Error('文件已清理');
   const file=await dataFile(meta,target);
   return {target,meta,file,scope,key};
@@ -94,7 +104,19 @@ function libraryEntry(scope:string,meta:Metadata,file:File|null,rules:CleanupPre
 }
 async function removeLibraryFile(target:Directory,key:string) {
   const meta=JSON.parse(await (await (await target.getFileHandle(keyName(key)+'.json')).getFile()).text()) as Metadata;
-  await removeData(meta,target);await target.removeEntry(keyName(key)+'.json');
+  const owner=await canonical(meta,target);
+  // Every delivery references one physical file. Deleting it removes the
+  // aliases too, rather than leaving cards pointing at a deleted source.
+  for await(const scope of appDirectory.values()){
+    if(scope.kind!=='directory')continue;
+    const aliases=scope as Directory;
+    for await(const handle of aliases.values()){
+      if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
+      const link=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
+      if(link.alias?.scope===owner.target.name && link.alias.key===owner.meta.key)await aliases.removeEntry(handle.name);
+    }
+  }
+  await removeData(owner.meta,owner.target);await owner.target.removeEntry(keyName(owner.meta.key)+'.json');
 }
 async function removeOwned(meta:Metadata,target:Directory){
   const owned:Metadata[]=[meta];
@@ -162,7 +184,7 @@ async function changeDestination(data:{id?:string;handle?:FileSystemDirectoryHan
       for await(const handle of target.values()){
         if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
         const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
-        if(typeof meta.key==='string' && handle.name===`${keyName(meta.key)}.json`)metas.push(meta);
+        if(!meta.alias && typeof meta.key==='string' && handle.name===`${keyName(meta.key)}.json`)metas.push(meta);
       }
       // Parents precede their files, including intentionally empty directories.
       metas.sort((a,b)=>(a.relativePath?.split('/').length || 0)-(b.relativePath?.split('/').length || 0));
@@ -242,17 +264,49 @@ async function execute(command:string,data:any):Promise<unknown> {
       const meta=await readMeta(data.key);meta.complete=true;meta.receivedAt ||= Date.now();meta.expires=meta.receivedAt+86400000;await metadata(meta);const rules=await cleanupPreferences();return {receivedAt:meta.receivedAt,expires:cleanupMatches(meta,rules)?meta.receivedAt+rules.retentionHours*3600000:Infinity};
     }
     case 'get': {
-      const meta=await readMeta(data.key);
+      let meta=await readMeta(data.key);
+      const source=await canonical(meta,directory);
+      if(meta.alias)meta={...meta,receivedAt:source.meta.receivedAt,expires:source.meta.expires};
       const rules=await cleanupPreferences(),receivedAt=meta.receivedAt ?? meta.expires-86400000;
       if(!meta.complete || cleanupDue({...meta,receivedAt},rules))return {};
       return {file:await dataFile(meta),directory:meta.entryKind==='directory',meta:{...meta,expires:cleanupMatches(meta,rules)?receivedAt+rules.retentionHours*3600000:Infinity}};
+    }
+    case 'reuse': {
+      if(data.relativePath || data.entryKind==='directory')return {};
+      // Look up only committed local bytes. A relay-ready/download history is
+      // not proof that the browser still owns a saved file.
+      for await(const scope of appDirectory.values()){
+        if(scope.kind!=='directory')continue;
+        const target=scope as Directory;
+        for await(const handle of target.values()){
+          if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
+          const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
+          if(meta.alias || !meta.complete || meta.relativePath || meta.entryKind==='directory' || meta.sha256!==data.sha256 || meta.size!==data.size)continue;
+          if(cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},await cleanupPreferences()))continue;
+          let file:File;try{file=(await dataFile(meta,target))!;}catch(error){if((error as Error).name==='NotFoundError')continue;throw error;}
+          if(file.size!==data.size)continue;
+          const hash=sha256.create();
+          for(let offset=0;offset<file.size;offset+=1048576)hash.update(new Uint8Array(await file.slice(offset,offset+1048576).arrayBuffer()));
+          if(Array.from(hash.digest(),byte=>byte.toString(16).padStart(2,'0')).join('')!==data.sha256)continue;
+          const now=Date.now();meta.receivedAt=now;meta.expires=now+86400000;await metadata(meta,target);
+          const alias:Metadata={...data,complete:true,receivedAt:now,expires:meta.expires,alias:{scope:scope.name,key:meta.key}};
+          if(target.name!==directory.name || meta.key!==data.key)await metadata(alias);
+          const rules=await cleanupPreferences();return {file,receivedAt:now,expires:cleanupMatches(meta,rules)?now+rules.retentionHours*3600000:Infinity};
+        }
+      }
+      return {};
+    }
+    case 'unlink-reuse': {
+      try{const meta=await readMeta(data.key);if(meta.alias)await directory.removeEntry(keyName(data.key)+'.json');}
+      catch(error){if((error as Error).name!=='NotFoundError')throw error;}
+      return {};
     }
     case 'close': await close(data.key);return {};
     case 'remove': await remove(data.key);return {};
     case 'cleanup': await cleanup();return {};
     case 'library-list': {
       const rules=await cleanupPreferences();
-      const entries=[];
+      const entries=[],aliases:{scope:string;key:string;alias:{scope:string;key:string}}[]=[];
       for await(const scopeHandle of appDirectory.values()) {
         if(scopeHandle.kind!=='directory')continue;
         const target=scopeHandle as Directory;
@@ -260,6 +314,7 @@ async function execute(command:string,data:any):Promise<unknown> {
         for await(const handle of target.values()) {
           if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
           const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
+          if(meta.alias){aliases.push({scope:scopeHandle.name,key:meta.key,alias:meta.alias});continue;}
           if(!meta.complete)continue;
           if(cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},rules)) {
             // An active receiver may own this file in a second worker. Leave a
@@ -274,6 +329,24 @@ async function execute(command:string,data:any):Promise<unknown> {
         }
         expired.sort((a,b)=>(a.entryKind==='directory'?1:0)-(b.entryKind==='directory'?1:0) || (b.relativePath?.split('/').length || 0)-(a.relativePath?.split('/').length || 0));
         for(const meta of expired)await removeLibraryFile(target,meta.key).catch(error=>{if(!['NoModificationAllowedError','NotAllowedError'].includes(error.name))throw error;});
+      }
+      for(const entry of entries)(entry as typeof entry & {aliases:string[]}).aliases=aliases.filter(value=>value.alias.scope===entry.scope && value.alias.key===entry.key).map(value=>value.key);
+      return {entries};
+    }
+    case 'library-references': {
+      const wanted=new Set<string>(data.keys),entries=[];
+      for await(const scope of appDirectory.values()){
+        if(scope.kind!=='directory')continue;
+        const target=scope as Directory;
+        for await(const handle of target.values()){
+          if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
+          const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
+          if(!wanted.has(meta.key) || !meta.complete)continue;
+          try{
+            const saved=await libraryFile(`${scope.name}/${keyName(meta.key)}`);
+            entries.push({entry:libraryEntry(scope.name,saved.meta,saved.file,await cleanupPreferences()),file:saved.file});
+          }catch(error){if((error as Error).name!=='NotFoundError' && (error as Error).message!=='文件已清理')throw error;}
+        }
       }
       return {entries};
     }

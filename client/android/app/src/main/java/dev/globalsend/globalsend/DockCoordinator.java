@@ -521,11 +521,13 @@ final class DockCoordinator {
         List<ClipData.Item> items=new ArrayList<>();java.util.LinkedHashSet<String> types=new java.util.LinkedHashSet<>();
         int flags = View.DRAG_FLAG_GLOBAL;
         for(String path:paths) {
+            String readable = ReceiveDirectory.readableLocation(view.getContext(), path);
             Uri uri;
-            if (path.startsWith("content://")) {
-                if (!ReceiveDirectory.isOwned(view.getContext(), path)) throw new SecurityException("Only registered received documents may be dragged out");
-                uri = Uri.parse(path);
-            } else uri = DockShareProvider.register(view.getContext(), new File(path), label);
+            if (readable.startsWith("content://")) {
+                // Read permission, not cleanup ownership, governs exporting a
+                // document selected or shared by the user.
+                uri = Uri.parse(readable);
+            } else uri = DockShareProvider.register(view.getContext(), new File(readable), label);
             items.add(new ClipData.Item(uri));String type=view.getContext().getContentResolver().getType(uri);types.add(type==null?"application/octet-stream":type);flags |= View.DRAG_FLAG_GLOBAL_URI_READ;
         }
         for(String text:texts){if(text==null||text.length()>100000)throw new IllegalArgumentException("Invalid drag text");items.add(new ClipData.Item(text));types.add("text/plain");}
@@ -578,7 +580,7 @@ final class DockCoordinator {
             }
         }
         private InputStream stream(String path) throws Exception {
-            return path.startsWith("content://") ? getContext().getContentResolver().openInputStream(Uri.parse(path)) : new FileInputStream(path);
+            return AndroidReadSource.openStream(getContext(), path);
         }
         @Override protected void onDraw(Canvas canvas) {
             canvas.scale(dp, dp);

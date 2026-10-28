@@ -12,7 +12,7 @@ import type { RtcScope, RtcView } from './rtc';
 import type { RoutePreference } from '../../packages/protocol/src/index';
 import { LocalLibraryView } from './library_view';
 import type { LocalFileEntry } from './library';
-import { RtcProbeMonitor } from './rtc_probe';
+import { RtcProbeMonitor, orientedProbeAddresses } from './rtc_probe';
 import { droppedFiles, completeFolderParts, directoryParts } from './folder';
 import { prepareFolderSend, emptyFileHash } from './folder_send';
 import type { OfferFile } from './folder_send';
@@ -35,6 +35,8 @@ import type { IpSource } from './ip_addresses';
 import { applyTextDocuments } from './model';
 import type { TextDocument } from './model';
 import { WebNotifications } from './notifications';
+import { MobileViewport } from './mobile_viewport';
+import { PageDisplay } from './page_display';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const brand = `<button class="brand brand-button" type="button" data-action="ip-addresses" aria-label="GlobalSend，本机地址"><span class="brand-icon">${icon('logo')}</span>GlobalSend</button>`;
@@ -95,15 +97,9 @@ class GlobalSend {
     };
     document.addEventListener('compositionend',finishFormComposition);
     document.addEventListener('focusout',finishFormComposition);
-    const viewport=window.visualViewport;
-    const sizeViewport=()=>{
-      if(!viewport || viewport.scale!==1)return;
-      document.documentElement.style.setProperty('--app-viewport-height',`${viewport.height}px`);
-      if(this.shared.focusedActive)document.querySelector('#shared-group-text')?.scrollIntoView({block:'nearest'});
-    };
-    viewport?.addEventListener('resize',sizeViewport);
-    sizeViewport();
+    new MobileViewport(window,document);
   }
+  pageDisplay=new PageDisplay(document,window,()=>{if(!this.loading)this.render();});
   baseUrl = baseFromLocation(location);
   api = new Api(this.baseUrl);
   info: (ServerInfo & {enrollment?:{groupKey:boolean;allowGroupCreation:boolean;minGroupKeyLength:number;legacyBootstrap?:boolean}})|null = null;
@@ -128,6 +124,8 @@ class GlobalSend {
   filter: 'all'|'text'|'files' = 'all';
   selected = new Set<string>();
   receiveSelecting=false;
+  private heldCardKey='';
+  private cardHoldTimer=0;
   sentSelecting=false;
   sentSelected=new Set<string>();
   hiddenItems: HiddenItems = {};
@@ -260,7 +258,7 @@ class GlobalSend {
     const peer=this.device(this.networkDevice),self=this.session?.device.deviceId;
     const results=(this.rtcProbes?.results || []).filter(result=>[result.initiatorDeviceId,result.responderDeviceId].includes(this.networkDevice) && [result.initiatorDeviceId,result.responderDeviceId].includes(self || '') && Date.parse(result.expiresAt)>Date.now()).sort((a,b)=>b.checkedAt.localeCompare(a.checkedAt));
     const candidates=(peer?.peer?.candidates || []).map(value=>literalIp(value)).filter((value):value is NonNullable<typeof value>=>!!value);
-    return `<div class="modal-backdrop"><section class="modal device-network-modal" role="dialog" aria-modal="true" aria-labelledby="device-network-title"><div class="modal-header"><h2 id="device-network-title">${e(this.deviceLabel(this.networkDevice))}</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭连接检测">${icon('close')}</button></div><p class="muted">本机与此设备 · RTC 路径检测</p><div class="device-network-paths">${(['lan','public'] as const).map(scope=>{const result=results.find(item=>item.scope===scope);return `<div class="setting-row"><span>${scope==='lan'?'局域网':'公网'} · RTC</span><span>${result?result.success?`可达 · ${result.elapsedMs} ms`:'本次未连通':'未测试'}${result?` · ${time(result.checkedAt)}`:''}</span></div>`;}).join('')}<div class="setting-row"><span>中继中心</span><span>${this.connected?'已连接':'未连接'}</span></div></div>${candidates.length?`<div class="modal-section"><h3>对方地址</h3>${candidates.map(value=>`<p><small>${IP_GROUPS[value.group]} · 未单独检测</small><br><code>${e(value.address)}</code></p>`).join('')}</div>`:''}<p class="device-network-note muted">浏览器通过 RTC 测试；没有公开地址时不显示 IP。中心连接不代表端到端文件已通过。</p><button class="secondary" data-action="refresh-device-network">${icon('retry')}重新检测</button></section></div>`;
+    return `<div class="modal-backdrop"><section class="modal device-network-modal" role="dialog" aria-modal="true" aria-labelledby="device-network-title"><div class="modal-header"><h2 id="device-network-title">${e(this.deviceLabel(this.networkDevice))}</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭连接检测">${icon('close')}</button></div><p class="muted">本机与此设备 · RTC 路径检测</p><div class="device-network-paths">${(['lan','public'] as const).map(scope=>{const result=results.find(item=>item.scope===scope);return `<div class="setting-row"><span>${scope==='lan'?'局域网':'公网'} · RTC</span><span>${result?result.success?`可达 · ${result.elapsedMs} ms`:'本次未连通':'未测试'}${result?` · ${time(result.checkedAt)}`:''}</span>${result?.success?`<code class="probe-addresses">${e(orientedProbeAddresses(result,self || '').source || '源地址未提供')} → ${e(orientedProbeAddresses(result,self || '').target || '目标地址未提供')}</code>`:''}</div>`;}).join('')}<div class="setting-row"><span>中继中心</span><span>${this.connected?'已连接':'未连接'}</span></div></div>${candidates.length?`<div class="modal-section"><h3>对方地址</h3>${candidates.map(value=>`<p><small>${IP_GROUPS[value.group]} · 未单独检测</small><br><code>${e(value.address)}</code></p>`).join('')}</div>`:''}<p class="device-network-note muted">浏览器通过 RTC 测试；没有公开地址时不显示 IP。中心连接不代表端到端文件已通过。</p><button class="secondary" data-action="refresh-device-network">${icon('retry')}重新检测</button></section></div>`;
   }
   ipSources:IpSource[]=[];
   ipLoading=false;
@@ -709,7 +707,7 @@ class GlobalSend {
         else if(payload.receivedKey)void this.run(()=>this.stageReceivedFile(payload.receivedKey!));
         else if(payload.files)this.addFiles(payload.files);
         else if(payload.file)this.addFiles([payload.file]);
-        else if(payload.text?.trim()){this.stagedTexts.push({id:id(),text:payload.text});this.setMobileView('send');this.render();}
+        if(payload.text?.trim()){this.stagedTexts.push({id:id(),text:payload.text});this.setMobileView('send');this.render();}
         return;
       }
       if(!external(event))return;
@@ -739,8 +737,22 @@ class GlobalSend {
     const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=icon('file')+'<span>'+files.length+' 个文件</span><span class="drag-copy">＋ 复制</span>';document.body.append(ghost);drag.dataTransfer.setDragImage(ghost,24,24);window.setTimeout(()=>ghost.remove(),0);
     document.body.classList.add('content-dragging');
   }
+  beginSelectedDrag(event:Event,node:HTMLElement){
+    if(!node.hasAttribute('data-receive-key') && !node.hasAttribute('data-sent-key') && !node.dataset.dragLibrary)return false;
+    const outgoing=node.hasAttribute('data-sent-key'),selecting=node.dataset.dragLibrary?this.fileLibrary.editing:outgoing?this.sentSelecting:this.receiveSelecting;
+    if(!selecting)return false;
+    const selection=node.dataset.dragLibrary?this.fileLibrary.selected:outgoing?this.sentSelected:this.selected;
+    if(!selection.size)return false; // Empty selection still allows the pressed card.
+    const files=node.dataset.dragLibrary?this.fileLibrary.filesForBulkDrag():this.bulkDragFiles(outgoing);
+    const texts=node.dataset.dragLibrary?[]:this.displayTexts(outgoing).filter(event=>selection.has(event.eventId)).map(event=>event.payload.text || '');
+    const drag=event as DragEvent;if(!drag.dataTransfer || !files.length && !texts.length)return false;
+    this.internalPayload={files,text:texts.length?texts.join('\n\n'):undefined};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');
+    for(const file of files)drag.dataTransfer.items.add(file);if(texts.length)drag.dataTransfer.setData('text/plain',texts.join('\n\n'));
+    const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=icon(files.length?'file':'text')+'<span>'+ (files.length+texts.length)+' 项</span><span class="drag-copy">＋ 复制</span>';document.body.append(ghost);drag.dataTransfer.setDragImage(ghost,24,24);window.setTimeout(()=>ghost.remove(),0);document.body.classList.add('content-dragging');return true;
+  }
   beginContentDrag(event:Event,node:HTMLElement){
     const drag=event as DragEvent;if(!drag.dataTransfer)return;
+    if(this.beginSelectedDrag(event,node))return;
     // A native drag of selected glyphs keeps the browser's selected substring.
     if(this.dragOriginOnText || isTextSelectionPoint(drag))return;
     if((drag.target as Element).closest('button,input,select') && !node.hasAttribute('data-drag-library')){drag.preventDefault();return;}
@@ -1694,11 +1706,10 @@ class GlobalSend {
     const generation=this.generation;
     for(const transfer of this.transfers){
       if(generation!==this.generation || !this.session || !this.autoAccept)return;
-      if(this.requiresNative(transfer) || transfer.targetDeviceId!==this.session.device.deviceId || Date.parse(transfer.expiresAt)<=Date.now() || (this.autoAcceptRetryAt.get(transfer.transferId) || 0)>Date.now())continue;
+      if(transfer.targetDeviceId!==this.session.device.deviceId || Date.parse(transfer.expiresAt)<=Date.now() || (this.autoAcceptRetryAt.get(transfer.transferId) || 0)>Date.now())continue;
       const offered=transfer.files.filter(file=>file.status==='offered');
       // Accept is a batch decision: selecting only small items would reject the
       // remaining large files. Leave the whole mixed batch for one manual click.
-      if(offered.some(file=>file.size>this.autoAcceptMaxBytes) && !this.rtcPeer(transfer))continue;
       const fileIds=offered.map(file=>file.fileId);
       if(!fileIds.length || this.accepting.has(transfer.transferId))continue;
       try{await this.acceptFiles(transfer,fileIds,true);}
@@ -1713,11 +1724,35 @@ class GlobalSend {
     const generation=this.generation;
     const transferId=transfer.transferId;
     if(!this.session || transfer.targetDeviceId!==this.session.device.deviceId || this.accepting.has(transferId) || Date.parse(transfer.expiresAt)<=Date.now())return;
-    if(fileIds.length && this.requiresNative(transfer))throw new Error('发送方指定原生直连，请改为自动/中继或使用原生客户端。');
     if(!automatic)for(const fileId of fileIds)this.relayConfirmed.add(fileKey(transferId,fileId));
     this.accepting.add(transferId);this.render();
     try{
-      const response=await this.api.request<{transfer:Transfer}>(`/transfers/${transferId}/accept`,{fileIds});
+      const selected=new Set(fileIds);
+      if(this.info?.features?.fileReuse && fileIds.length && localStorageSupported()){
+        const store=await this.ensureFileStore();
+        for(const file of transfer.files.filter(file=>selected.has(file.fileId) && file.status==='offered' && !file.relativePath && file.entryKind!=='directory')){
+          const key=fileKey(transferId,file.fileId),local=await store.reuse(key,file);
+          if(!local)continue;
+          if(generation!==this.generation || this.canceled.has(key) || this.paused.has(key)){await store.unlinkReuse(key);return;}
+          try{
+            const response=await this.api.request<{file:TransferFile}>(`/transfers/${transferId}/files/${file.fileId}/reuse`,{sha256:file.sha256,size:file.size});
+            if(generation!==this.generation)return;
+            this.rtcLocalFiles.set(key,local);this.rtcFileExpiry.set(key,store.expiry(key));
+            this.receivedAt[key]=response.file.receivedAt || store.receivedAt(key) || new Date().toISOString();
+            this.setFile(transferId,response.file);selected.delete(file.fileId);this.persist();
+          }catch(error){await store.unlinkReuse(key);if(!(error instanceof ApiError && error.code==='TRANSFER_STARTED'))throw error;}
+        }
+        await this.fileLibrary.refresh();
+      }
+      const remaining=transfer.files.filter(file=>selected.has(file.fileId));
+      if(remaining.length && this.requiresNative(transfer)){
+        if(automatic)return;
+        throw new Error('发送方指定原生直连，请改为自动/中继或使用原生客户端。');
+      }
+      // Reused large files need no relay confirmation. A mixed batch still
+      // waits for consent on all remaining bytes instead of rejecting them.
+      if(automatic && remaining.some(file=>file.size>this.autoAcceptMaxBytes) && !this.rtcPeer(transfer))return;
+      const response=await this.api.request<{transfer:Transfer}>(`/transfers/${transferId}/accept`,{fileIds:[...selected]});
       if(generation!==this.generation)return;
       this.transfers=this.transfers.map(item=>item.transferId===transferId?{...response.transfer,files:response.transfer.files.map(file=>this.canceled.has(fileKey(transferId,file.fileId))?{...file,status:'canceled' as const}:file)}:item);
       this.autoAcceptRetryAt.delete(transferId);
@@ -1876,7 +1911,7 @@ class GlobalSend {
     if(!this.session || !this.info?.features?.rtcProbes || !this.rtcEnabled || !this.rtcRegisteredAt) {void this.rtcProbes?.setForeground(false);return;}
     if(!this.rtcProbes || this.rtcProbeScope!==this.dockKey) {
       const previous=this.rtcProbes;void previous?.dispose();
-      const monitor=new RtcProbeMonitor({api:new Api(this.baseUrl,this.session),deviceId:this.session.device.deviceId,changed:()=>{if(this.rtcProbes===monitor)this.render();}});
+      const monitor=new RtcProbeMonitor({api:new Api(this.baseUrl,this.session),deviceId:this.session.device.deviceId,reportAddresses:this.info.features.rtcProbeAddresses===true,changed:()=>{if(this.rtcProbes===monitor)this.render();}});
       this.rtcProbes=monitor;this.rtcProbeScope=this.dockKey;
     }
     this.rtcProbes.setOnlinePeers(this.onlinePeers().map(device=>device.deviceId));void this.rtcProbes.setForeground(this.probeForeground());
@@ -1905,7 +1940,7 @@ class GlobalSend {
     // after a library rename/delete/policy update; never inject another group's
     // inventory into the current receive dock.
     for(const entry of entries)if(entry.scope===this.rtcStore?.scope)this.receivedAt[entry.key]=new Date(entry.receivedAt).toISOString();
-    const keys=new Set(entries.map(entry=>entry.key));for(const key of this.knownLibraryKeys)if(!keys.has(key)){this.retainedSources.delete(key);this.previewSources.delete(key);const [transferId,fileId]=key.split(':');this.localHistory.removeFile(transferId,fileId);this.hiddenItems[fileItemKey(transferId,fileId)]=Math.max(Date.parse(this.localTransfer(transferId)?.expiresAt || '') || 0,Date.now()+86400000);}
+    const keys=new Set(entries.flatMap(entry=>[entry.key,...entry.aliases || []]));for(const key of this.knownLibraryKeys)if(!keys.has(key)){this.retainedSources.delete(key);this.previewSources.delete(key);const [transferId,fileId]=key.split(':');this.localHistory.removeFile(transferId,fileId);this.hiddenItems[fileItemKey(transferId,fileId)]=Math.max(Date.parse(this.localTransfer(transferId)?.expiresAt || '') || 0,Date.now()+86400000);}
     this.knownLibraryKeys=keys;
     this.persist();this.rtcCacheRevision++;this.rtcLocalFiles.clear();this.rtcFileExpiry.clear();this.reconcileRtc();
   }
@@ -2186,7 +2221,7 @@ class GlobalSend {
   }
   convenienceHtml() {
     const notifications=this.notifications.state(),noticeReason=notifications.reason==='home-screen'?'添加到主屏幕后可开启':notifications.reason==='denied'?'请在浏览器设置中允许通知':notifications.reason==='insecure'?'需要 HTTPS':notifications.reason?'当前浏览器不支持':'';
-    return `<section class="settings-card"><h3>收发</h3><label class="setting-row"><span>接收通知${noticeReason?`<small class="notification-reason">${noticeReason}</small>`:''}</span><input data-web-notifications type="checkbox" ${notifications.enabled?'checked':''} ${!notifications.available || notifications.permission==='denied'?'disabled':''}></label><label class="setting-row"><span>记住设备</span><input id="remember-device" type="checkbox" ${this.rememberDevice?'checked':''}></label><label class="setting-row"><span>自动接收</span><input data-auto-accept type="checkbox" ${this.autoAccept?'checked':''}></label><label class="limit-field" for="auto-accept-limit">中继确认阈值 <span><input id="auto-accept-limit" type="number" min="0" step="1" value="${e(this.autoAcceptLimitDraft ?? String(this.autoAcceptMaxBytes/1048576))}" inputmode="numeric" aria-label="中继确认阈值 MiB"> MiB / 文件</span></label><label class="setting-row" for="file-route"><span>传输方式</span><select id="file-route" ${this.pendingOffer?'disabled':''}>${(['auto','lan','public','relay'] as const).map((route,index)=>`<option value="${route}" ${this.routePreference===route?'selected':''}>${['自动','仅局域网','仅公网直连','中继'][index]}</option>`).join('')}</select></label><label class="setting-row" for="transfer-concurrency"><span>传输并发</span><select id="transfer-concurrency">${Array.from({length:16},(_,index)=>index+1).map(value=>`<option value="${value}" ${this.transferConcurrency===value?'selected':''}>${value}</option>`).join('')}</select></label><button class="quiet" data-action="library">文件与自动清理</button></section>`;
+    return `<section class="settings-card"><h3>收发</h3><div class="setting-row"><span>显示</span><button class="quiet" data-action="page-fullscreen">${e(this.pageDisplay.label)}</button></div>${this.pageDisplay.hint?`<p class="notification-reason" role="status">${e(this.pageDisplay.hint)}</p>`:''}<label class="setting-row"><span>接收通知${noticeReason?`<small class="notification-reason">${noticeReason}</small>`:''}</span><input data-web-notifications type="checkbox" ${notifications.enabled?'checked':''} ${!notifications.available || notifications.permission==='denied'?'disabled':''}></label><label class="setting-row"><span>记住设备</span><input id="remember-device" type="checkbox" ${this.rememberDevice?'checked':''}></label><label class="setting-row"><span>自动接收</span><input data-auto-accept type="checkbox" ${this.autoAccept?'checked':''}></label><label class="limit-field" for="auto-accept-limit">中继确认阈值 <span><input id="auto-accept-limit" type="number" min="0" step="1" value="${e(this.autoAcceptLimitDraft ?? String(this.autoAcceptMaxBytes/1048576))}" inputmode="numeric" aria-label="中继确认阈值 MiB"> MiB / 文件</span></label><label class="setting-row" for="file-route"><span>传输方式</span><select id="file-route" ${this.pendingOffer?'disabled':''}>${(['auto','lan','public','relay'] as const).map((route,index)=>`<option value="${route}" ${this.routePreference===route?'selected':''}>${['自动','仅局域网','仅公网直连','中继'][index]}</option>`).join('')}</select></label><label class="setting-row" for="transfer-concurrency"><span>传输并发</span><select id="transfer-concurrency">${Array.from({length:16},(_,index)=>index+1).map(value=>`<option value="${value}" ${this.transferConcurrency===value?'selected':''}>${value}</option>`).join('')}</select></label><button class="quiet" data-action="library">文件与自动清理</button></section>`;
   }
   deviceSettingsHtml() {
     const me=this.session!.device;
@@ -2306,6 +2341,7 @@ class GlobalSend {
       if(action==='sent-delete-selected')this.deleteSelectedSent();
       if(action==='receive-select-all')this.toggleAllReceive();
       if(action==='receive-delete-selected')this.deleteSelectedReceive();
+      if (action==='page-fullscreen')void this.pageDisplay.toggle();
       if (action==='select-all-texts') { const texts=this.receivedTexts();this.selected=this.selected.size===texts.length?new Set():new Set(texts.map(item=>item.eventId));this.render(); }
       if (action==='clear-dock') this.clearFinishedDock();
       if (action==='copy-reader') { const view=this.viewedText();if(view)this.copy(view.draft); }
@@ -2355,17 +2391,26 @@ class GlobalSend {
     const dockItems=document.querySelector('.dock-items');
     if(this.receiveSelecting && dockItems){
       const cardFor=(event:Event)=>(event.target as Element).closest<HTMLElement>('[data-receive-key]');
-      dockItems.addEventListener('click',event=>{const card=cardFor(event);if(!card)return;event.preventDefault();event.stopImmediatePropagation();this.toggleReceiveSelection(card.dataset.receiveKey!);},true);
+      dockItems.addEventListener('click',event=>{const card=cardFor(event);if(!card)return;event.preventDefault();event.stopImmediatePropagation();if(this.heldCardKey===card.dataset.receiveKey){this.heldCardKey='';return;}this.toggleReceiveSelection(card.dataset.receiveKey!);},true);
       dockItems.addEventListener('keydown',event=>{const key=event as KeyboardEvent,card=cardFor(event);if(card && event.target===card && ['Enter',' '].includes(key.key)){event.preventDefault();event.stopImmediatePropagation();this.toggleReceiveSelection(card.dataset.receiveKey!);}},true);
-      for(const type of ['dragstart','contextmenu'])dockItems.addEventListener(type,event=>{if(!cardFor(event))return;event.preventDefault();event.stopImmediatePropagation();},true);
+      for(const type of ['contextmenu'])dockItems.addEventListener(type,event=>{if(!cardFor(event))return;event.preventDefault();event.stopImmediatePropagation();},true);
     }
     const sentItems=document.querySelector('.history-items');
     if(this.sentSelecting && sentItems){
       const cardFor=(event:Event)=>(event.target as Element).closest<HTMLElement>('[data-sent-key]');
-      sentItems.addEventListener('click',event=>{const card=cardFor(event);if(!card)return;event.preventDefault();event.stopImmediatePropagation();this.toggleSentSelection(card.dataset.sentKey!);},true);
+      sentItems.addEventListener('click',event=>{const card=cardFor(event);if(!card)return;event.preventDefault();event.stopImmediatePropagation();if(this.heldCardKey===card.dataset.sentKey){this.heldCardKey='';return;}this.toggleSentSelection(card.dataset.sentKey!);},true);
       sentItems.addEventListener('keydown',event=>{const key=event as KeyboardEvent,card=cardFor(event);if(card && event.target===card && ['Enter',' '].includes(key.key)){event.preventDefault();event.stopImmediatePropagation();this.toggleSentSelection(card.dataset.sentKey!);}},true);
-      for(const type of ['dragstart','contextmenu'])sentItems.addEventListener(type,event=>{if(!cardFor(event))return;event.preventDefault();event.stopImmediatePropagation();},true);
+      for(const type of ['contextmenu'])sentItems.addEventListener(type,event=>{if(!cardFor(event))return;event.preventDefault();event.stopImmediatePropagation();},true);
     }
+    on('[data-receive-key],[data-sent-key]','pointerdown',(event,node)=>{
+      const pointer=event as PointerEvent;this.heldCardKey='';clearTimeout(this.cardHoldTimer);if(pointer.pointerType==='mouse' || (event.target as Element).closest('button,a,input,textarea,select'))return;
+      const x=pointer.clientX,y=pointer.clientY,source=node.dataset.receiveKey || node.dataset.sentKey!;
+      this.cardHoldTimer=window.setTimeout(()=>{this.heldCardKey=source;if(node.dataset.sentKey){if(!this.sentSelecting){this.sentSelecting=true;this.sentSelected.add(source);}}else if(!this.receiveSelecting){this.receiveSelecting=true;this.selected.add(source);}},450);
+      const move=(event:PointerEvent)=>{if(Math.hypot(event.clientX-x,event.clientY-y)>12)clearTimeout(this.cardHoldTimer);};
+      const finish=()=>{clearTimeout(this.cardHoldTimer);node.removeEventListener('pointermove',move);if(this.heldCardKey===source)window.setTimeout(()=>{if(!document.body.classList.contains('content-dragging'))this.render();},0);};
+      node.addEventListener('pointermove',move);node.addEventListener('pointerup',finish,{once:true});node.addEventListener('pointercancel',finish,{once:true});
+      node.addEventListener('click',event=>{if(this.heldCardKey===source){event.preventDefault();event.stopImmediatePropagation();this.heldCardKey='';}},{capture:true,once:true});
+    });
     on('[data-copy]','click',(_event,node)=>{this.pruneLocal();const event=this.localEvent(node.dataset.copy!);if(event)this.copy(event.payload.text || '');else{this.toast('文字已过期。');this.render();}});
     on('[data-remove-staged]','click',(_event,node)=>{if(this.queueSending)return;this.stagedTexts.splice(Number(node.dataset.removeStaged),1);this.render();});
     on('[data-edit-staged]','click',(_event,node)=>{if(this.queueSending)return;const index=Number(node.dataset.editStaged),item=this.stagedTexts[index];if(!item || item.target)return;this.text=item.text;this.editingStagedId=item.id;this.toggleEditor(true);});
@@ -2379,8 +2424,8 @@ class GlobalSend {
     on('[data-receipt-menu]','click',(event,node)=>{event.stopPropagation();const rect=node.getBoundingClientRect();this.openCardMenu('receipt',node.dataset.receiptMenu!,rect.right-180,rect.bottom+4);});
     on('[data-drag-all]','dragstart',(event,node)=>this.beginBulkDrag(event,node));
     on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragstart',(event,node)=>this.beginContentDrag(event,node));
-    on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragend',()=>this.endContentDrag());
-    on('.content-card[data-drag-text],.content-card[data-drag-file]','contextmenu',(event,node)=>{if(isTextSelectionTarget(event.target))return;event.preventDefault();const mouse=event as MouseEvent;this.openCardMenu(node.dataset.receiptId?'receipt':node.dataset.dragText?'text':'file',node.dataset.receiptId || node.dataset.dragText || node.dataset.dragFile!,mouse.clientX,mouse.clientY);});
+    on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragend',()=>{this.endContentDrag();this.render();});
+    on('.content-card[data-drag-text],.content-card[data-drag-file]','contextmenu',(event,node)=>{if(isTextSelectionTarget(event.target))return;event.preventDefault();if(node.hasAttribute('data-receive-key') && this.receiveSelecting || node.hasAttribute('data-sent-key') && this.sentSelecting)return;const mouse=event as MouseEvent;this.openCardMenu(node.dataset.receiptId?'receipt':node.dataset.dragText?'text':'file',node.dataset.receiptId || node.dataset.dragText || node.dataset.dragFile!,mouse.clientX,mouse.clientY);});
     on('[data-card-menu]','click',(event,node)=>{event.stopPropagation();const card=node.closest<HTMLElement>('[data-drag-text],[data-drag-file]');if(!card)return;const rect=node.getBoundingClientRect();this.openCardMenu(card.dataset.dragText?'text':'file',card.dataset.dragText || card.dataset.dragFile!,rect.right-180,rect.bottom+4);});
     on('[data-card-command]','click',(_event,node)=>{void this.run(()=>this.cardCommand(node.dataset.cardCommand!));});
     on('[data-hide-text]','click',(_event,node)=>this.hideText(node.dataset.hideText!));

@@ -134,6 +134,58 @@ async function fixture(options = {}) {
   };
 }
 
+test("verified local reuse completes offers without payload, route negotiation or relay bytes", async () => {
+  const f = await fixture({ totalQuota: 6 });
+  try {
+    const a = await f.enroll(), b = await f.pair(a.token);
+    for (const routePreference of ["auto", "lan", "public", "relay"]) {
+      const transferId = "reuse-" + routePreference, path = `/transfers/${transferId}/files/f/`;
+      const offer = { transferId, targetDeviceId: b.id, routePreference,
+        files: [{ fileId: "f", name: "renamed.txt", size: 6, sha256: hash("abcdef") }] };
+      assert.equal((await f.call("POST", "/transfers", offer, a.token)).status, 201);
+      const reused = await f.call("POST", path + "reuse", { sha256: hash("abcdef"), size: 6 }, b.token);
+      assert.equal(reused.status, 200, JSON.stringify(reused.body));
+      assert.equal(reused.body.file.status, "received"); assert.equal(reused.body.file.reused, true);
+      assert.equal(reused.body.file.offset, 0); assert.equal(reused.body.file.transport, "direct");
+      assert.ok(Date.parse(reused.body.file.receivedAt));
+      const replay = await f.call("POST", path + "reuse", { sha256: hash("abcdef"), size: 6 }, b.token);
+      assert.deepEqual(replay.body, reused.body, "lost acknowledgement is idempotent");
+      const accepted = await f.call("POST", `/transfers/${transferId}/accept`, { fileIds: ["f"] }, b.token);
+      assert.equal(accepted.body.transfer.files[0].status, "received", "late accept never restarts a reused file");
+      assert.equal((await f.call("PUT", path + "chunks?offset=0", Buffer.from("abcdef"), a.token)).status, 409);
+      assert.deepEqual(await readdir(join(f.dir, "relay")), []);
+    }
+    // All four receipts release the 6-byte relay reservation. Old history is
+    // not an input: the target inventory is the authority for local bytes.
+    await f.restart();
+    const receipt = (await f.call("GET", "/transfers/reuse-relay", undefined, a.token)).body.transfer.files[0];
+    assert.equal(receipt.reused, true); assert.equal(receipt.status, "received");
+    assert.equal((await f.call("GET", "/info")).body.features.fileReuse, true);
+  } finally { await f.close(); }
+});
+
+test("reuse only confirms matching receiver-local files before payload starts", async () => {
+  const f = await fixture();
+  try {
+    const a = await f.enroll(), b = await f.pair(a.token);
+    const offer = { transferId: "reuse-state", targetDeviceId: b.id,
+      files: [{ fileId: "f", name: "note.txt", size: 6, sha256: hash("abcdef") }] };
+    const path = "/transfers/reuse-state/files/f/", content = { sha256: hash("abcdef"), size: 6 };
+    await f.call("POST", "/transfers", offer, a.token);
+    assert.equal((await f.call("POST", path + "reuse", content, a.token)).status, 403);
+    assert.equal((await f.call("POST", path + "reuse", { ...content, sha256: hash("ABCDEF") }, b.token)).body.error.code, "CONTENT_MISMATCH");
+    assert.equal((await f.call("POST", path + "reuse", { ...content, size: 5 }, b.token)).body.error.code, "CONTENT_MISMATCH");
+    await f.call("POST", "/transfers/reuse-state/accept", { fileIds: ["f"] }, b.token);
+    await f.call("PUT", path + "chunks?offset=0", Buffer.from("abc"), a.token);
+    assert.equal((await f.call("POST", path + "reuse", content, b.token)).body.error.code, "TRANSFER_STARTED");
+    await f.call("PUT", path + "chunks?offset=3", Buffer.from("def"), a.token);
+    assert.equal((await f.call("POST", path + "complete", {}, a.token)).status, 200);
+    assert.equal((await f.call("POST", path + "received", {}, b.token)).status, 200);
+    const ordinary = (await f.call("GET", "/transfers/reuse-state", undefined, b.token)).body.transfer.files[0];
+    assert.equal(ordinary.reused, undefined, "normal receive stays on its existing contract");
+  } finally { await f.close(); }
+});
+
 test("receiver storage failures notify the sender and resume committed relay bytes after restart", async () => {
   const f = await fixture({ totalQuota: 6 });
   try {

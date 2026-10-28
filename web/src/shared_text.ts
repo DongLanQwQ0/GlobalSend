@@ -79,7 +79,6 @@ export class SharedGroupEditor {
         this.paint();this.schedule();this.changed();
       });
       field.addEventListener('blur',()=>window.setTimeout(()=>this.changed(),0));
-      field.addEventListener('focus',()=>window.setTimeout(()=>{if(this.focusedActive)field.scrollIntoView({block:'nearest'});},0));
       this.field=field;
     }
     const field=this.field;field.disabled=host.dataset.enabled!=='true';field.maxLength=Number(host.dataset.max);if(field.value!==this.draft && !this.composing)this.replaceText(this.draft);host.append(field);

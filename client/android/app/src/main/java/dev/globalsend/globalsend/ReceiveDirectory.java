@@ -77,6 +77,10 @@ final class ReceiveDirectory {
                 case "create": submit(result, () -> create(call.argument("destinationLocation"), call.argument("name"))); break;
                 case "directory": submit(result, () -> directory(call.argument("parentLocation"), call.argument("name"), Boolean.TRUE.equals(call.argument("unique")))); break;
                 case "open": submit(result, () -> open(call.argument("location"), Boolean.TRUE.equals(call.argument("writable")))); break;
+                case "openLocalRead": submit(result, () -> openLocalRead(call.argument("path"))); break;
+                case "localExists": submit(result, () -> localExists(call.argument("path"))); break;
+                case "localStat": submit(result, () -> localStat(call.argument("path"))); break;
+                case "readDescriptor": submit(result, () -> readDescriptor(call.argument("handle"), ((Number)call.argument("offset")).longValue(), ((Number)call.argument("length")).intValue())); break;
                 case "close": submit(result, () -> { close(call.argument("handle"), call.argument("error")); return null; }); break;
                 case "isOwned": result.success(isOwned(context, call.argument("location"))); break;
                 case "stat": submit(result, () -> stat(call.argument("location"))); break;
@@ -196,6 +200,85 @@ final class ReceiveDirectory {
         return selected;
     }
 
+    /** Recover a previously selected physical path through its still-held SAF grant. */
+    Uri grantedDocument(String path) throws IOException {
+        return grantedDocument(context, path);
+    }
+    static Uri grantedDocument(Context context, String path) throws IOException {
+        File root = Environment.getExternalStorageDirectory().getCanonicalFile();
+        File selected = new File(path).getCanonicalFile();
+        if (!selected.getPath().startsWith(root.getPath() + File.separator)) return null;
+        String relative = selected.getPath().substring(root.getPath().length() + 1).replace(File.separatorChar, '/');
+        String id = "primary:" + relative;
+        for (android.content.UriPermission grant : context.getContentResolver().getPersistedUriPermissions()) {
+            Uri tree = grant.getUri();
+            if (!grant.isReadPermission() || !"com.android.externalstorage.documents".equals(tree.getAuthority()) || !DocumentsContract.isTreeUri(tree)) continue;
+            String parent = DocumentsContract.getTreeDocumentId(tree);
+            if (id.equals(parent) || id.startsWith(parent.endsWith(":") ? parent : parent + "/"))
+                return DocumentsContract.buildDocumentUriUsingTree(tree, id);
+        }
+        return null;
+    }
+
+    /** Read/share through the user's existing document grant when a raw path is denied. */
+    static String readableLocation(Context context, String location) throws IOException {
+        if (location.startsWith("content://") || new File(location).isDirectory()) return location;
+        try (RandomAccessFile file = new RandomAccessFile(location, "r")) { return location; }
+        catch (FileNotFoundException unavailable) {
+            Uri granted = grantedDocument(context, location);
+            if (granted != null) return granted.toString();
+            throw unavailable;
+        }
+    }
+
+    boolean localExists(String path) throws Exception {
+        return Boolean.TRUE.equals(localStat(path).get("exists"));
+    }
+
+    Map<String, Object> localStat(String path) throws Exception {
+        Map<String, Object> value = new HashMap<>();
+        value.put("location", path); value.put("name", new File(path).getName());
+        value.put("size", 0L); value.put("exists", false);
+        try {
+            android.system.StructStat info = Os.stat(path);
+            value.put("exists", true); value.put("size", OsConstants.S_ISREG(info.st_mode) ? info.st_size : 0L);
+            return value;
+        }
+        catch (android.system.ErrnoException error) {
+            // Scoped storage can hide a raw path as ENOENT even while its
+            // already-authorized document URI is readable.
+            Uri granted = grantedDocument(path);
+            if (granted != null) {
+                value.putAll(stat(granted.toString())); value.put("location", path); return value;
+            }
+            if (error.errno == OsConstants.ENOENT || error.errno == OsConstants.ENOTDIR) return value;
+            throw new IOException("无法读取这个文件；请重新授权所在文件夹", error);
+        }
+    }
+
+    Map<String, Object> openLocalRead(String path) throws Exception {
+        try (RandomAccessFile file = new RandomAccessFile(path, "r")) {
+            Map<String, Object> value = new HashMap<>();
+            value.put("location", path); value.put("ioPath", path); value.put("handle", "");
+            value.put("name", new File(path).getName()); value.put("size", file.length());
+            return value;
+        } catch (FileNotFoundException error) {
+            Uri granted = grantedDocument(path);
+            if (granted != null) return open(granted.toString(), false);
+            if (!localExists(path)) throw new FileNotFoundException("文件已不存在");
+            throw new IOException("无法读取这个文件；请重新授权所在文件夹", error);
+        }
+    }
+
+    byte[] readDescriptor(String token, long offset, int length) throws Exception {
+        if (offset < 0 || length < 0 || length > 1048576) throw new IllegalArgumentException("Invalid read bounds");
+        ParcelFileDescriptor descriptor = leases.get(token);
+        if (descriptor == null) throw new IOException("文件读取已结束，请重新打开");
+        byte[] bytes = new byte[length];
+        int count = Os.pread(descriptor.getFileDescriptor(), bytes, 0, length, offset);
+        return count <= 0 ? new byte[0] : count == length ? bytes : java.util.Arrays.copyOf(bytes, count);
+    }
+
     static void validateLocalDirectory(File folder) throws Exception {
         if (!folder.isDirectory()) throw new IOException("接收文件夹已不存在，请重新选择");
         File probe = File.createTempFile(".globalsend-write-test-", ".tmp", folder);
@@ -292,22 +375,32 @@ final class ReceiveDirectory {
         String token = UUID.randomUUID().toString();
         try {
             String path;
+            boolean descriptorOnly = false;
             try { path = descriptorAccess.checkedPath(descriptor, writable); }
             catch (Exception unsupported) {
                 android.util.Log.w("GlobalSendDestination", "Direct access failed: provider=" + document.getAuthority() +
                     ", writable=" + writable + ", cause=" + unsupported.getClass().getSimpleName() +
                     (unsupported instanceof android.system.ErrnoException ? ", errno=" + ((android.system.ErrnoException) unsupported).errno : ""));
                 File direct = physicalDocument(document);
-                if (direct == null) throw new IOException("此文件夹无法直接读写；可使用默认目录，或开启所有文件访问后重试", unsupported);
-                if (!direct.isFile()) throw new FileNotFoundException("接收文件已不存在，请重新选择目录");
-                try (RandomAccessFile probe = new RandomAccessFile(direct, writable ? "rw" : "r")) {
-                    probe.seek(probe.getFilePointer());
+                if (!writable) {
+                    // The granted descriptor itself can be read even when FUSE
+                    // forbids reopening its /proc path. Keep it; do not copy.
+                    if (descriptor.getStatSize() < 0) throw new IOException("提供文件的应用不支持随机读取，请选择设备本地文件");
+                    path = "";
+                    descriptorOnly = true;
+                } else {
+                    if (direct == null) throw new IOException("此文件夹无法直接读写；可使用默认目录，或开启所有文件访问后重试", unsupported);
+                    if (!direct.isFile()) throw new FileNotFoundException("接收文件已不存在，请重新选择目录");
+                    try (RandomAccessFile probe = new RandomAccessFile(direct, writable ? "rw" : "r")) {
+                        probe.seek(probe.getFilePointer());
+                    }
+                    path = direct.getPath();
                 }
-                path = direct.getPath();
             }
             Map<String, Object> value = stat(location);
             if (!Boolean.TRUE.equals(value.get("exists"))) throw new FileNotFoundException("文件已不存在");
             value.remove("exists"); value.put("ioPath", path); value.put("handle", token);
+            value.put("descriptorOnly", descriptorOnly);
             long size = descriptor.getStatSize(); if (size >= 0) value.put("size", size);
             synchronized (leases) {
                 if (disposed) throw new IOException("目录连接已关闭，请重试");

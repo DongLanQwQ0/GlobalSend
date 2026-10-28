@@ -78,6 +78,12 @@ export class RtcFileStore {
   get scope(){return this.storage.scopeName;}
   expiry(key:string) {return this.expiries.get(key) || 0;}
   receivedAt(key:string){return this.receivedTimes.get(key);}
+  async reuse(key:string,file:TransferFile) {
+    const result=await this.call<{file?:File;receivedAt?:number;expires?:number}>('reuse',{key,name:file.name,mimeType:file.mimeType,size:file.size,sha256:file.sha256,relativePath:file.relativePath,entryKind:file.entryKind,transferId:key.split(':')[0]});
+    if(result.file){this.expiries.set(key,result.expires!);this.receivedTimes.set(key,new Date(result.receivedAt!).toISOString());return new File([result.file],file.name,{type:file.mimeType,lastModified:result.file.lastModified});}
+    return undefined;
+  }
+  async unlinkReuse(key:string){await this.call('unlink-reuse',{key});this.expiries.delete(key);this.receivedTimes.delete(key);}
   async close(key:string) {await this.ready;await this.call('close',{key});}
   async remove(key:string) {await this.ready;await this.call('remove',{key});}
   async cleanup() {await this.ready;await this.call('cleanup',{});}

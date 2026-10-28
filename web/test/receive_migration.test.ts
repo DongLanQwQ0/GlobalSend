@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,readFile,writeFile} from 'node:fs/promises';
 import {existsSync,readFileSync} from 'node:fs';
@@ -91,4 +92,36 @@ test('committed migration retries old-copy deletion after restart without revert
   old.removeEntry=remove;const restarted=f.worker('one');await restarted.ready;
   assert.equal(existsSync(join(old.path,'file.txt')),false);assert.equal(existsSync(journal),false);
   assert.equal(await (await restarted.call('get',{key:'file'})).file.text(),'durable');
+});
+
+
+test('file reuse verifies existing bytes, refreshes one library entry and adds only a durable metadata reference',async()=>{
+  const f=await fixture(),old=f.worker('old-scope'),current=f.worker('new-scope');await old.ready;await current.ready;
+  const text='same content',sha256=createHash('sha256').update(text).digest('hex');
+  await save(old,'old:file','first.txt',text,{sha256});
+  const original=join(f.root.path,'globalsend-received-v1','old-scope','old%3Afile.data'),before=(await old.call('get',{key:'old:file'})).meta.receivedAt;
+  await new Promise(resolve=>setTimeout(resolve,3));
+  const next={key:'new:file',name:'second.txt',size:Buffer.byteLength(text),sha256,transferId:'new'};
+  const reused=await current.call('reuse',next);assert.equal(await reused.file.text(),text);assert.ok(reused.receivedAt>before);
+  assert.equal(existsSync(join(f.root.path,'globalsend-received-v1','new-scope','new%3Afile.data')),false,'no second file body');
+  assert.equal(readFileSync(original,'utf8'),text);const library=(await current.call('library-list')).entries;assert.equal(library.length,1);assert.deepEqual(Array.from(library[0].aliases),['new:file']);
+  assert.equal((await old.call('get',{key:'old:file'})).meta.receivedAt,reused.receivedAt);
+  const restarted=f.worker('new-scope');await restarted.ready;assert.equal(await (await restarted.call('get',{key:'new:file'})).file.text(),text);
+  const refs=await restarted.call('library-references',{keys:['old:file','new:file']});assert.equal(refs.entries.length,2);assert.ok(refs.entries.every((value:any)=>value.entry.receivedAt===reused.receivedAt));
+  const chosen=new DiskDirectory(join(f.path,'chosen'),true),moved=await current.call('destination-set',{id:'chosen',handle:chosen});assert.equal(moved.moved,1);
+  assert.equal(readFileSync(join(chosen.path,'first.txt'),'utf8'),text);assert.equal(await (await restarted.call('get',{key:'new:file'})).file.text(),text);
+  await restarted.call('remove',{key:'new:file'});assert.equal((await current.call('library-list')).entries.length,0);assert.equal(existsSync(join(chosen.path,'first.txt')),false);
+  await assert.rejects(old.call('get',{key:'old:file'}),{name:'NotFoundError'});
+});
+
+test('reuse never trusts a name, stale digest, deleted source, uncommitted prefix or another folder path',async()=>{
+  const f=await fixture(),worker=f.worker('scope');await worker.ready;const sha256=createHash('sha256').update('good').digest('hex');
+  await save(worker,'original','same.txt','good',{sha256});const data={key:'repeat',name:'same.txt',size:4,sha256};
+  await writeFile(join(f.root.path,'globalsend-received-v1','scope','original.data'),'evil');
+  assert.equal((await worker.call('reuse',data)).file,undefined,'same size/name metadata cannot hide changed bytes');
+  await worker.call('remove',{key:'original'});assert.equal((await worker.call('reuse',data)).file,undefined);
+  await save(worker,'folder:file','same.txt','good',{sha256,transferId:'folder',relativePath:'Folder/same.txt'});
+  assert.equal((await worker.call('reuse',data)).file,undefined,'do not discard folder layout by reusing unrelated paths');
+  await worker.call('open',{...data,key:'partial'});await worker.call('write',{key:'partial',offset:0,bytes:new TextEncoder().encode('good').buffer});await worker.call('finish',{key:'partial'});
+  assert.equal((await worker.call('reuse',data)).file,undefined,'unconfirmed full-length prefixes are not saved files');
 });

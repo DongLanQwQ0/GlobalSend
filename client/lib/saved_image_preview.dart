@@ -3,6 +3,7 @@ import 'app_icon.dart';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -202,6 +203,7 @@ class SavedFilePicture extends StatefulWidget {
 
 class _SavedFilePictureState extends State<SavedFilePicture> {
   ReceivedFileAccess? source;
+  Uint8List? descriptorBytes;
   Object? error;
   int version = 0;
   @override
@@ -220,17 +222,28 @@ class _SavedFilePictureState extends State<SavedFilePicture> {
     final current = ++version;
     final previous = source;
     source = null;
+    descriptorBytes = null;
     error = null;
     await previous?.close();
-    if (!ReceivedFileAccess.isContentUri(widget.location)) return;
+    if (!ReceivedFileAccess.isContentUri(widget.location) &&
+        !Platform.isAndroid)
+      return;
+    ReceivedFileAccess? opened;
     try {
-      final opened = await ReceivedFileAccess.open(widget.location);
+      opened = await ReceivedFileAccess.open(widget.location);
+      final bytes = opened.descriptorOnly
+          ? await opened.file.readAsBytes()
+          : null;
       if (!mounted || current != version) {
         await opened.close();
         return;
       }
-      setState(() => source = opened);
+      setState(() {
+        source = opened;
+        descriptorBytes = bytes;
+      });
     } catch (failure) {
+      await opened?.close();
       if (mounted && current == version) setState(() => error = failure);
     }
   }
@@ -246,9 +259,12 @@ class _SavedFilePictureState extends State<SavedFilePicture> {
   @override
   Widget build(BuildContext context) {
     if (error != null) return widget.errorBuilder(context, error!, null);
-    final isUri = ReceivedFileAccess.isContentUri(widget.location);
-    if (isUri && source == null) return const SizedBox.shrink();
-    final ImageProvider image = isUri
+    final leased =
+        ReceivedFileAccess.isContentUri(widget.location) || Platform.isAndroid;
+    if (leased && source == null) return const SizedBox.shrink();
+    final ImageProvider image = descriptorBytes != null
+        ? _UriMemoryImage(descriptorBytes!, widget.location)
+        : leased
         ? _UriFileImage(source!.file, widget.location)
         : FileImage(File(widget.location));
     return Image(
@@ -258,6 +274,16 @@ class _SavedFilePictureState extends State<SavedFilePicture> {
       gaplessPlayback: true,
     );
   }
+}
+
+class _UriMemoryImage extends MemoryImage {
+  const _UriMemoryImage(super.bytes, this.location);
+  final String location;
+  @override
+  bool operator ==(Object other) =>
+      other is _UriMemoryImage && other.location == location;
+  @override
+  int get hashCode => Object.hash(_UriMemoryImage, location);
 }
 
 class _UriFileImage extends FileImage {

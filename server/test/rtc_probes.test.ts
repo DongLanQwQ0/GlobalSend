@@ -78,12 +78,13 @@ test("dedicated RTC probe negotiates between foreground peers without transfer, 
   } finally { await f.close(); }
 });
 
-test("probe admission follows group, foreground, Web participation, unique initiator and single-session contract", async () => {
+test("probe admission supports native peers with the same foreground, initiator and single-session contract", async () => {
   const f = await fixture();
   try {
     const [a, b] = await f.pair(), c = await f.enroll("same-group third"), cross = await f.enroll("cross", "web", "other-probe-password");
     assert.equal((await f.call("POST", `/devices/${cross.id}/rtc-probes`, { attemptId: "cross", scope: "lan" }, a.token)).status, 403);
-    assert.equal((await f.call("POST", `/devices/${a.id}/rtc-probes`, { attemptId: "wrong-init", scope: "lan" }, b.token)).body.error.code, "PROBE_INITIATOR");
+    assert.equal((await f.call("POST", `/devices/${a.id}/rtc-probes`, { attemptId: "manual-init", scope: "lan" }, b.token)).status, 200, "explicit refresh may originate from either participant");
+    await f.call("DELETE", "/rtc-probes/manual-init", undefined, b.token);
     await f.foreground(b, false);
     assert.equal((await f.call("POST", `/devices/${b.id}/rtc-probes`, { attemptId: "background", scope: "lan" }, a.token)).body.error.code, "PROBE_BACKGROUND");
     await f.foreground(b);
@@ -91,7 +92,17 @@ test("probe admission follows group, foreground, Web participation, unique initi
     assert.equal((await f.call("POST", `/devices/${b.id}/rtc-probes`, { attemptId: "scope", scope: "public" }, a.token)).body.error.code, "RTC_UNAVAILABLE");
     const native = [await f.enroll("Windows", "windows"), await f.enroll("Android", "android")].sort((x, y) => x.id < y.id ? -1 : 1);
     for (const d of native) await f.foreground(d);
-    assert.equal((await f.call("POST", `/devices/${native[1].id}/rtc-probes`, { attemptId: "native", scope: "lan" }, native[0].token)).body.error.code, "PROBE_UNAVAILABLE");
+    const nativeSnapshot = (await f.call("GET", "/devices/me/rtc-probes", undefined, native[0].token)).body;
+    assert.ok(nativeSnapshot.peers.some((peer: any) => peer.deviceId === native[1].id));
+    assert.equal((await f.call("POST", `/devices/${native[1].id}/rtc-probes`, { attemptId: "native", scope: "public" }, native[0].token)).status, 200);
+    await f.call("POST", "/rtc-probes/native/description", { type: "offer", sdp }, native[0].token);
+    await f.call("POST", "/rtc-probes/native/description", { type: "answer", sdp }, native[1].token);
+    const endpoints = { initiatorAddress: "[2408:1234:5678:9abc::3]:5432", responderAddress: "[2408:abcd::4]:6543" };
+    const nativeComplete = await f.call("POST", "/rtc-probes/native/complete", { elapsedMs: 4, ...endpoints }, native[0].token);
+    assert.equal(nativeComplete.status, 200); assert.equal(nativeComplete.body.result.success, true);
+    const nativeResult = (await f.call("GET", "/devices/me/rtc-probes", undefined, native[1].token)).body.results[0];
+    assert.equal(nativeResult.initiatorAddress, endpoints.initiatorAddress);
+    assert.equal(nativeResult.responderAddress, endpoints.responderAddress);
     const create = () => f.call("POST", `/devices/${b.id}/rtc-probes`, { attemptId: "bound", scope: "lan" }, a.token);
     assert.equal((await create()).status, 200); assert.equal((await create()).status, 200, "same create retries reuse the session");
     assert.equal((await f.call("POST", `/devices/${b.id}/rtc-probes`, { attemptId: "second", scope: "lan" }, a.token)).body.error.code, "PROBE_BUSY");

@@ -4,7 +4,7 @@ import type { CleanupPreferences } from './cleanup';
 
 export interface LocalFileEntry {
   id:string;scope:string;key:string;name:string;mimeType:string;size:number;
-  sha256?:string;receivedAt:number;expiresAt:number;
+  sha256?:string;receivedAt:number;expiresAt:number;aliases?:string[];
   entryKind?:'file'|'directory';relativePath?:string;storagePath?:string;transferId?:string;
 }
 export type LibrarySort='received'|'oldest'|'name'|'size';
@@ -12,6 +12,7 @@ export type LibrarySort='received'|'oldest'|'name'|'size';
 export class LocalFileLibrary {
   private storage=new OpfsStorage();
   async list():Promise<LocalFileEntry[]> {return (await this.storage.call('library-list',{})).entries;}
+  async references(keys:string[]):Promise<{entry:LocalFileEntry;file:File|null}[]> {return (await this.storage.call('library-references',{keys})).entries;}
   async get(id:string):Promise<File> {const {file,entry}=await this.storage.call('library-get',{id});return new File(file?[file]:[],entry.name,{type:entry.mimeType,lastModified:file?.lastModified || entry.receivedAt});}
   async expand(ids:string[]):Promise<{entry:LocalFileEntry;file:File|null}[]> {return (await this.storage.call('library-expand',{ids})).entries;}
   async rename(id:string,name:string):Promise<LocalFileEntry> {return (await this.storage.call('library-rename',{id,name:validateLocalName(name)})).entry;}

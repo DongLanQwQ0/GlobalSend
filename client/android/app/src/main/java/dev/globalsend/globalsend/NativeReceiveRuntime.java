@@ -258,7 +258,7 @@ final class NativeReceiveRuntime {
                             connection.setRequestProperty("Content-Type", "application/octet-stream");
                             String auth = call.argument("authorization");
                             if (auth != null && !auth.isEmpty()) connection.setRequestProperty("Authorization", auth);
-                            try (RandomAccessFile file = new RandomAccessFile(path, "r")) {
+                            try (AndroidReadSource file = new AndroidReadSource(context, path)) {
                                 if (offset + length > file.length()) throw new IllegalArgumentException("Source file changed");
                                 file.seek(offset);
                                 try (OutputStream output = connection.getOutputStream()) {
@@ -327,12 +327,15 @@ final class NativeReceiveRuntime {
         }
         long started = SystemClock.elapsedRealtime();
         HttpsURLConnection probe = pinned(network, new URL(base, "/probe?nonce=" + java.net.URLEncoder.encode(nonce, "UTF-8")), expected);
+        ObservedTlsSocketFactory observed = new ObservedTlsSocketFactory(probe.getSSLSocketFactory());
+        probe.setSSLSocketFactory(observed);
         probe.setConnectTimeout(2000); probe.setReadTimeout(2000);
         if (operation != null) activeDownloads.put(operation, probe);
         try {
             if (operation != null && canceled.contains(operation)) throw new InterruptedException("Probe canceled");
             int status = probe.getResponseCode();
             if (status != 200) throw new IllegalStateException("HTTP " + status);
+            Map<String, Object> endpoints = observed.endpoints();
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
             try (java.io.InputStream input = probe.getInputStream()) {
                 byte[] buffer = new byte[1024]; int count;
@@ -348,6 +351,7 @@ final class NativeReceiveRuntime {
             }
             Map<String, Object> value = new HashMap<>();
             value.put("reachable", true); value.put("elapsedMs", SystemClock.elapsedRealtime() - started);
+            value.putAll(endpoints);
             return value;
         } finally { if (operation != null) activeDownloads.remove(operation, probe); probe.disconnect(); }
     }
@@ -451,7 +455,7 @@ final class NativeReceiveRuntime {
             if (SystemClock.elapsedRealtime() - activity.get() > 20000) connection.disconnect();
         }, 2, 2, TimeUnit.SECONDS);
         long count = offset, last = 0;
-        try (RandomAccessFile source = new RandomAccessFile((String) call.argument("path"), "r")) {
+        try (AndroidReadSource source = new AndroidReadSource(context, (String) call.argument("path"))) {
             if (source.length() != size) throw new IllegalStateException("Source file changed");
             source.seek(offset);
             try (OutputStream output = connection.getOutputStream()) {

@@ -89,6 +89,66 @@ public class ReceiveDirectoryTest {
         GrantedEnvironment.allowed = allowed;
     }
 
+    @Test public void selectedExternalDocumentCanBeReadAndSharedWithoutCleanupOwnershipOrCopying() throws Exception {
+        byte[] bytes = new byte[]{3, 1, 4, 1, 5, 9};
+        Entry original = provider.add("external-original.bin", bytes);
+        Uri document = DocumentsContract.buildDocumentUriUsingTree(tree, original.id);
+        String location = document.toString();
+        assertFalse(ReceiveDirectory.isOwned(activity, location));
+        assertEquals(location, ReceiveDirectory.readableLocation(activity, location));
+        try (AndroidReadSource source = new AndroidReadSource(activity, location)) {
+            assertEquals(bytes.length, source.length());
+            source.seek(2);
+            byte[] part = new byte[3];
+            assertEquals(3, source.read(part, 0, part.length));
+            assertArrayEquals(new byte[]{4, 1, 5}, part);
+        }
+        try (java.io.InputStream source = AndroidReadSource.openStream(activity, location)) {
+            assertArrayEquals(bytes, source.readAllBytes());
+        }
+        assertEquals(1, provider.documents.size());
+        assertArrayEquals(bytes, Files.readAllBytes(original.file.toPath()));
+    }
+
+    @Test @Config(shadows = {ModernDocumentQueries.class, GrantedEnvironment.class, HiddenPathStat.class})
+    public void hiddenPhysicalPathUsesExistingTreeGrantBeforeBeingTreatedAsDeleted() throws Exception {
+        String name = "hidden-" + UUID.randomUUID() + ".txt";
+        Entry backing = provider.add(name, new byte[]{6, 2, 6});
+        String parent = "primary:Download/GlobalSend", id = parent + "/" + name;
+        FixtureDocuments primary = new FixtureDocuments();
+        primary.folder = provider.folder;
+        provider = primary;
+        provider.documents.put(id, new Entry(id, backing.file, name));
+        provider.rootId = parent;
+        ProviderInfo info = new ProviderInfo(); info.authority = "com.android.externalstorage.documents";
+        info.exported = true; info.grantUriPermissions = true;
+        info.readPermission = Manifest.permission.MANAGE_DOCUMENTS;
+        info.writePermission = Manifest.permission.MANAGE_DOCUMENTS;
+        provider.attachInfo(activity, info);
+        ShadowContentResolver.registerProviderInternal(info.authority, provider);
+        Uri granted = DocumentsContract.buildTreeDocumentUri(info.authority, parent);
+        activity.getContentResolver().takePersistableUriPermission(granted, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        String path = new File(Environment.getExternalStorageDirectory(), "Download/GlobalSend/" + name).getCanonicalPath();
+        assertFalse(new File(path).exists());
+        assertTrue(directory.localExists(path));
+        try (java.io.InputStream input = AndroidReadSource.openStream(activity, path)) {
+            assertArrayEquals(new byte[]{6, 2, 6}, input.readAllBytes());
+        }
+        provider.documents.remove(id);
+        assertFalse("A deleted document is still removed when the provider confirms absence", directory.localExists(path));
+    }
+
+    @Implements(className = "libcore.io.Linux", isInAndroidSdk = false)
+    public static final class HiddenPathStat extends org.robolectric.shadows.ShadowLinux {
+        @Override @Implementation public android.system.StructStat stat(String path) throws android.system.ErrnoException {
+            // Robolectric's default stat fabricates a zero-sized StructStat
+            // even for missing files; model Android's real ENOENT for this path.
+            if (path != null && path.contains("hidden-") && !new File(path).exists())
+                throw new android.system.ErrnoException("stat", android.system.OsConstants.ENOENT);
+            return super.stat(path);
+        }
+    }
+
     @Test @Config(sdk = 34)
     public void allFilesSettingsRequiresExplicitUserGrantBeforeDownloadsSelection() throws Exception {
         allFilesGrant(false);
@@ -219,6 +279,24 @@ public class ReceiveDirectoryTest {
         assertArrayEquals(new byte[]{9}, Files.readAllBytes(original.file.toPath()));
         assertFalse(ReceiveDirectory.isOwned(activity, provider.lastCreated.toString()));
         assertFalse(provider.lastDescriptor.getFileDescriptor().valid());
+    }
+
+    @Test public void readOnlyExternalDocumentKeepsGrantedDescriptorWhenProcReopenIsDenied() throws Exception {
+        Entry original = provider.add("外部图片.png", new byte[]{7, 8, 9});
+        String location = DocumentsContract.buildDocumentUriUsingTree(tree, original.id).toString();
+        directory.dispose();
+        directory = adapter((descriptor, writable) -> { throw new IOException("FUSE denies proc reopen"); });
+        Map<String, Object> opened = directory.open(location, false);
+        assertEquals(true, opened.get("descriptorOnly"));
+        assertEquals("", opened.get("ioPath"));
+        assertEquals(location, opened.get("location"));
+        assertEquals(3L, ((Number)opened.get("size")).longValue());
+        FileDescriptor descriptor = provider.lastDescriptor.getFileDescriptor();
+        assertTrue(descriptor.valid());
+        assertArrayEquals(new byte[]{7, 8, 9}, Files.readAllBytes(original.file.toPath()));
+        assertEquals(1, provider.documents.size());
+        directory.close((String) opened.get("handle"), null);
+        assertFalse(descriptor.valid());
     }
 
     @Test public void activityReplacementKeepsAnOpenReceiveLeaseAlive() throws Exception {
@@ -384,7 +462,11 @@ public class ReceiveDirectoryTest {
                 DocumentsContract.Document.FLAG_SUPPORTS_DELETE | DocumentsContract.Document.FLAG_SUPPORTS_RENAME | DocumentsContract.Document.FLAG_SUPPORTS_WRITE);
             return data;
         }
-        @Override public boolean isChildDocument(String parent, String id) { return parent.equals(rootId) && documents.containsKey(id); }
+        @Override public boolean isChildDocument(String parent, String id) {
+            // Filesystem ancestry does not cease when the leaf is deleted.
+            return parent.equals(rootId) && (documents.containsKey(id) ||
+                rootId.startsWith("primary:") && id.startsWith(rootId + "/"));
+        }
         @Override public String createDocument(String parent, String mimeType, String name) throws FileNotFoundException {
             if (!parent.equals("selected") || documents.values().stream().anyMatch(entry -> entry.name.equalsIgnoreCase(name))) throw new FileNotFoundException("Name already exists");
             try {
