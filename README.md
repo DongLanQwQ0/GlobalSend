@@ -8,9 +8,9 @@
 
 新版入组只需同一中心和**至少 10 位的相同组密码**，设备名称自动获取，也可修改。不需要邀请码、互相配对或首次建组确认。发现只通过中心完成；仅在线组员互换 IPv4/IPv6 地址，地址上传后 30 分钟到期，最后一个连接断开立即撤下。文件仍按局域网 → 公网 → 中继传输，保留手动选择。
 
-Windows 最新为 **1.0.25+34**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。本版新增亮色、暗色、中性灰及六种主题色，设置即时生效并在本机记住。
+Windows 最新为 **1.0.26+35**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。本版修正触屏系统拖放的交接时机与主题底色；外观支持亮色、暗色、中性灰及六种主题色。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.25-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.26-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
 Android 最后确认安装为 **1.0.23+32**：[arm64 APK，16.15 MB](artifacts/releases/GlobalSend-1.0.23-android-arm64-v8a.apk)。按当前要求，本轮只更新源码与主机测试，**没有推送手机新包**；主题功能尚未安装到手机。
 
