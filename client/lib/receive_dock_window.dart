@@ -35,7 +35,8 @@ class ReceiveDockApp extends StatefulWidget {
   State<ReceiveDockApp> createState() => _ReceiveDockAppState();
 }
 
-class _ReceiveDockAppState extends State<ReceiveDockApp> {
+class _ReceiveDockAppState extends State<ReceiveDockApp>
+    with WidgetsBindingObserver {
   Map<String, dynamic> payload = {};
   int revision = 0;
   bool presented = false;
@@ -67,6 +68,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     ReceiveDockApp.channel.setMethodCallHandler((call) async {
       if (call.method == 'content') {
         revision++;
@@ -365,7 +367,13 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
   }
 
   @override
+  void didChangePlatformBrightness() {
+    setState(() {});
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     scroll.dispose();
     ReceiveDockApp.channel.setMethodCallHandler(null);
     super.dispose();
@@ -375,7 +383,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
   Widget build(BuildContext context) {
     final appearance = Appearance.fromJson(
       payload['appearance'] as Map? ?? const {},
-    );
+    ).resolve(WidgetsBinding.instance.platformDispatcher.platformBrightness);
     final theme = Ui.theme(appearance), palette = UiPalette.from(appearance);
     return MaterialApp(
       debugShowCheckedModeBanner: false,

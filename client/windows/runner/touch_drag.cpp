@@ -476,7 +476,9 @@ winrt::fire_and_forget DragPointer(std::shared_ptr<Operation> state,
         image.CopyFromBuffer(writer.DetachBuffer());
         stage = "CoreDragOperation.SetDragUIContentFromSoftwareBitmap";
         drag.SetDragUIContentFromSoftwareBitmap(image,
-            winrt::Windows::Foundation::Point{16, 16});
+            winrt::Windows::Foundation::Point{
+                static_cast<float>(shape.bmWidth) / 2,
+                static_cast<float>(shape.bmHeight) / 2});
       }
     }
     // StartAsync may synchronously transfer capture to the shell. Do not

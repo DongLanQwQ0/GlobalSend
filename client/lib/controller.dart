@@ -2795,7 +2795,17 @@ class SendController extends ChangeNotifier {
     _temporarySources.remove(path);
     _directorySources.remove(path);
     try {
-      await File(path).delete();
+      final exportedApps = root == null
+          ? null
+          : Directory('${root!.path}/exported-apps').absolute.path;
+      if (exportedApps != null &&
+          Directory(path).absolute.path
+              .startsWith('$exportedApps${Platform.pathSeparator}') &&
+          await Directory(path).exists()) {
+        await Directory(path).delete(recursive: true);
+      } else {
+        await File(path).delete();
+      }
     } on PathNotFoundException {
       // A provider or an external cleanup may already have removed the copy.
     }

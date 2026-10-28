@@ -402,7 +402,18 @@ class _GlobalSendAppState extends State<GlobalSendApp>
                 debugShowCheckedModeBanner: false,
                 navigatorObservers: [session.routes],
                 navigatorKey: navigatorKey,
-                theme: Ui.theme(controller.appearance.value),
+                theme: Ui.theme(
+                  controller.appearance.value.resolve(Brightness.light),
+                ),
+                darkTheme: Ui.theme(
+                  controller.appearance.value.resolve(Brightness.dark),
+                ),
+                themeMode:
+                    controller.appearance.value.mode == AppearanceMode.system
+                    ? ThemeMode.system
+                    : controller.appearance.value.mode == AppearanceMode.dark
+                    ? ThemeMode.dark
+                    : ThemeMode.light,
                 builder: (context, navigator) => AnimatedBuilder(
                   animation: controller,
                   child: navigator,

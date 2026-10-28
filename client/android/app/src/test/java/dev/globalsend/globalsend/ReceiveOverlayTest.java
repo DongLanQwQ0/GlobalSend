@@ -15,6 +15,45 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34, manifest=Config.NONE)
 public class ReceiveOverlayTest {
+    @Test public void edgeHandleChangesTheActualWindowAndKeepsShelfSeparateOnForeground() throws Exception {
+        ReceiveOverlay overlay = receiver(); show(overlay, "remote", 1);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        View root = (View)field(overlay, "root"); draw(root);
+        TemporaryShelf shelf = (TemporaryShelf)field(overlay, "shelf");
+        shelf.add(java.util.List.of(), java.util.List.of("仅暂存"), Map.of());
+        overlay.foreground();
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(220));
+        WindowManager.LayoutParams size = (WindowManager.LayoutParams)root.getLayoutParams();
+        float dp = root.getResources().getDisplayMetrics().density;
+        assertEquals(Math.round(36*dp), size.width); assertEquals(Math.round(72*dp), size.height);
+        assertTrue(root.isAttachedToWindow()); assertEquals(1,shelf.items.size());
+        assertEquals(View.GONE,((View)field(overlay,"scroll")).getVisibility());
+        ((View)field(overlay,"handle")).performClick();
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(220));
+        assertEquals(Math.round(244*dp), size.width);
+        ((View)field(overlay,"shelfTab")).performClick();
+        LinearLayout row=(LinearLayout)field(overlay,"row"); assertEquals(1,row.getChildCount());
+        assertEquals("仅暂存",((android.widget.TextView)((LinearLayout)row.getChildAt(0)).getChildAt(0)).getText().toString());
+        ((View)field(overlay,"count")).performClick();
+        assertEquals("remote",((android.widget.TextView)((LinearLayout)row.getChildAt(0)).getChildAt(0)).getText().toString());
+        overlay.hide();
+    }
+
+    @Test public void oneTapOnAnyChildCancelsRemovalWithoutOpeningOrDeletingIt() throws Exception {
+        ReceiveOverlay overlay=receiver(); show(overlay,"remote",1);
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        shelf.add(java.util.List.of(),java.util.List.of("保留我"),Map.of());
+        ((View)field(overlay,"shelfTab")).performClick();
+        View root=(View)field(overlay,"root"); draw(root);
+        View card=((LinearLayout)field(overlay,"row")).getChildAt(0);
+        shelf.exported(new java.util.ArrayList<>(shelf.items.values()),true);
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(0,0,android.view.MotionEvent.ACTION_DOWN,30,65,0));
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(0,10,android.view.MotionEvent.ACTION_UP,30,65,0));
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(4));
+        assertEquals(1,shelf.items.size()); assertEquals(0,shelf.removalSeconds()); assertSame(root,field(overlay,"root"));
+        overlay.hide();
+    }
     private Object field(Object value, String name) throws Exception {
         java.lang.reflect.Field field = value.getClass().getDeclaredField(name);
         field.setAccessible(true); return field.get(value);

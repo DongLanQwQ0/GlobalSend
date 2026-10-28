@@ -42,6 +42,16 @@ class DockPlatform {
   /// [events] / [pending], not returned here, so callers must not stage twice.
   /// Cancellation completes normally without an import event.
   static Future<void> pickMedia() => channel.invokeMethod('pickMedia');
+  static Future<void> showShelf() => channel.invokeMethod('showShelf');
+  static Future<List<Map<String, dynamic>>> installedApps() async =>
+      (await channel.invokeListMethod<Map>('installedApps') ?? [])
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+  static Future<Map<String, dynamic>> exportApp(String package) async =>
+      Map<String, dynamic>.from(
+        await channel.invokeMethod<Map>('exportApp', {'package': package}) ??
+            {},
+      );
 
   static Future<Map<String, String>?> pickDirectory() async {
     final value = await channel.invokeMethod<Map>('pickDirectory');

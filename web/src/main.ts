@@ -1,4 +1,5 @@
 import './style.css';
+import { centeredDragImage } from './drag_image';
 import { digestFile } from './files';
 import { emptyGroupData, publicSession, validateGroupKey } from './group';
 import { Api, ApiError } from './api';
@@ -746,7 +747,7 @@ class GlobalSend {
     const drag=event as DragEvent,files=node.dataset.dragAll==='library'?this.fileLibrary.filesForBulkDrag():this.bulkDragFiles(node.dataset.dragAll==='sent');if(!drag.dataTransfer || !files.length){drag.preventDefault();return;}
     this.internalPayload={files};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');drag.dataTransfer.setData(this.internalDragType,'1');
     for(const file of files)drag.dataTransfer.items.add(file);
-    const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=icon('file')+'<span>'+files.length+' 个文件</span><span class="drag-copy">＋ 复制</span>';document.body.append(ghost);drag.dataTransfer.setDragImage(ghost,24,24);window.setTimeout(()=>ghost.remove(),0);
+    const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=icon('file')+'<span>'+files.length+' 个文件</span><span class="drag-copy">＋ 复制</span>';centeredDragImage(drag,ghost);
     document.body.classList.add('content-dragging');
   }
   beginSelectedDrag(event:Event,node:HTMLElement){
@@ -760,7 +761,7 @@ class GlobalSend {
     const drag=event as DragEvent;if(!drag.dataTransfer || !files.length && !texts.length)return false;
     this.internalPayload={files,text:texts.length?texts.join('\n\n'):undefined};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');drag.dataTransfer.setData(this.internalDragType,'1');
     for(const file of files)drag.dataTransfer.items.add(file);if(texts.length)drag.dataTransfer.setData('text/plain',texts.join('\n\n'));
-    const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=icon(files.length?'file':'text')+'<span>'+ (files.length+texts.length)+' 项</span><span class="drag-copy">＋ 复制</span>';document.body.append(ghost);drag.dataTransfer.setDragImage(ghost,24,24);window.setTimeout(()=>ghost.remove(),0);document.body.classList.add('content-dragging');return true;
+    const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=icon(files.length?'file':'text')+'<span>'+ (files.length+texts.length)+' 项</span><span class="drag-copy">＋ 复制</span>';centeredDragImage(drag,ghost);document.body.classList.add('content-dragging');return true;
   }
   beginContentDrag(event:Event,node:HTMLElement){
     const drag=event as DragEvent;if(!drag.dataTransfer)return;
@@ -780,7 +781,7 @@ class GlobalSend {
     if(file && file.type!=='inode/directory'){drag.dataTransfer.items.add(file);const url=URL.createObjectURL(file);drag.dataTransfer.setData('DownloadURL',(file.type || 'application/octet-stream')+':'+file.name+':'+url);window.setTimeout(()=>URL.revokeObjectURL(url),60000);}
     document.body.classList.add('content-dragging');
     const ghost=document.createElement('div');ghost.className='drag-ghost';ghost.innerHTML=text!==undefined?e(text.slice(0,180)):file && file.type.startsWith('image/')?'<img alt="" src="'+e(node.querySelector('img')?.src || '')+'"><span>'+e(file.name)+'</span>':icon(file?.type==='inode/directory' || file?.name.endsWith('.zip')?'folder':'file')+'<span>'+e(file?.name)+'</span>';
-    ghost.innerHTML+='<span class="drag-copy">＋ 复制</span>';ghost.style.left=Math.max(0,drag.clientX-24)+'px';ghost.style.top=Math.max(0,drag.clientY-24)+'px';document.body.append(ghost);drag.dataTransfer.setDragImage(ghost,24,24);window.setTimeout(()=>ghost.remove(),0);
+    ghost.innerHTML+='<span class="drag-copy">＋ 复制</span>';centeredDragImage(drag,ghost);
   }
   endContentDrag(){this.internalPayload=null;document.body.classList.remove('content-dragging');document.querySelector('[data-queue-drop]')?.classList.remove('queue-drop-active');document.querySelectorAll<HTMLElement>('[data-internal-drag]').forEach(node=>delete node.dataset.internalDrag);}
   isInternalDrag(event:DragEvent){return !!this.internalPayload && Array.from(event.dataTransfer?.types || []).includes(this.internalDragType);}

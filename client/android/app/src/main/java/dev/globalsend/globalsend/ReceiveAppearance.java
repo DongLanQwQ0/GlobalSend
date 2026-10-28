@@ -9,12 +9,13 @@ import org.json.JSONObject;
 
 /** Reads the same installation preference as Flutter, including headless reception. */
 final class ReceiveAppearance {
-    final int surface, field, ink, muted, accent, soft;
+    final int surface, field, ink, muted, accent, soft, border;
     ReceiveAppearance(String mode, String color) {
         boolean dark = "dark".equals(mode), neutral = "neutral".equals(mode);
         surface = dark ? 0xff202124 : neutral ? 0xfff7f7f8 : 0xffffffff;
         ink = dark ? 0xffe9eaed : 0xff25272b;
         muted = dark ? 0xffabb0b8 : 0xff62666d;
+        border = dark ? 0xff3c4046 : neutral ? 0xffd5d7dc : 0xffdedfe3;
         String[] names = {"green", "blue", "purple", "rose", "amber", "slate"};
         int[] colors = dark ? new int[]{0xff81d6b4,0xff9ecaff,0xffc9b6ff,0xfff3aec0,0xffeac17c,0xffb7c9d8}
             : new int[]{0xff176b50,0xff245ea8,0xff7051a8,0xffa34363,0xff815c17,0xff4c6375};
@@ -37,7 +38,13 @@ final class ReceiveAppearance {
             byte[] chunk = new byte[256]; int count;
             while ((count=input.read(chunk)) != -1) bytes.write(chunk,0,count);
             JSONObject value = new JSONObject(bytes.toString(StandardCharsets.UTF_8.name()));
-            return new ReceiveAppearance(value.optString("mode"), value.optString("accent"));
+            String mode = value.optString("mode");
+            if ("system".equals(mode)) {
+                mode = (context.getResources().getConfiguration().uiMode &
+                    android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                    android.content.res.Configuration.UI_MODE_NIGHT_YES ? "dark" : "light";
+            }
+            return new ReceiveAppearance(mode, value.optString("accent"));
         } catch (java.io.IOException | org.json.JSONException unavailable) {
             return new ReceiveAppearance("light", "green");
         }

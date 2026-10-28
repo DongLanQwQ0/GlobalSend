@@ -506,6 +506,7 @@ class AppearancePicker extends StatelessWidget {
     final settings = AppearanceScope.maybeOf(context);
     if (settings == null) return const SizedBox.shrink();
     final value = settings.value;
+    final resolved = value.resolve(Theme.of(context).brightness);
     Future<void> save({AppearanceMode? mode, AccentColor? accent}) async {
       try {
         await settings.set(mode: mode, accent: accent);
@@ -526,6 +527,7 @@ class AppearancePicker extends StatelessWidget {
             ButtonSegment(value: AppearanceMode.light, label: Text('亮色')),
             ButtonSegment(value: AppearanceMode.dark, label: Text('暗色')),
             ButtonSegment(value: AppearanceMode.neutral, label: Text('中性')),
+            ButtonSegment(value: AppearanceMode.system, label: Text('跟随系统')),
           ],
           selected: {value.mode},
           onSelectionChanged: (selected) => save(mode: selected.single),
@@ -562,14 +564,14 @@ class AppearancePicker extends StatelessWidget {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: UiPalette.from(
-                              value.copyWith(accent: accent),
+                              resolved.copyWith(accent: accent),
                             ).green,
                           ),
                           child: value.accent == accent
                               ? AppIcon(
                                   Icons.done,
                                   size: 20,
-                                  color: UiPalette.from(value).onAccent,
+                                  color: UiPalette.from(resolved).onAccent,
                                 )
                               : null,
                         ),

@@ -125,6 +125,25 @@ public class AndroidDragTest {
         assertEquals(3, NativeDragView.states.size());
     }
 
+    @Test @Config(sdk=34,shadows=NativeDragView.class)
+    public void shelfExportOutcomeUsesNativeAcceptanceAndKeepsReturnedContent() throws Exception {
+        NativeDragView.resetFixture();View source=new View(activity);activity.setContentView(source);
+        List<Boolean> completed=new ArrayList<>();
+        assertTrue(DockCoordinator.startDrag(source,List.of(),List.of("第一项","第二项"),"2 项",completed::add));
+        assertEquals(2,NativeDragView.clips.get(0).getItemCount());
+        DockCoordinator.LocalDrag first=(DockCoordinator.LocalDrag)NativeDragView.states.get(0);
+        DragEvent ended=localEvent(DragEvent.ACTION_DRAG_ENDED,first,0,0);
+        ReflectionHelpers.setField(ended,"mDragResult",true);coordinator.acceptDrag(ended);
+        assertEquals(List.of(true),completed);
+        assertTrue(DockCoordinator.startDrag(source,List.of(),List.of("回投"),"1 项",completed::add));
+        DockCoordinator.LocalDrag second=(DockCoordinator.LocalDrag)NativeDragView.states.get(1);
+        List<Map<String,Object>> returned=new ArrayList<>();
+        assertTrue(DockCoordinator.importToShelf(localEvent(DragEvent.ACTION_DROP,second,0,0),returned::add));
+        ended=localEvent(DragEvent.ACTION_DRAG_ENDED,second,0,0);ReflectionHelpers.setField(ended,"mDragResult",true);
+        coordinator.acceptDrag(ended);
+        assertEquals(List.of(true,false),completed);assertEquals(List.of("回投"),returned.get(0).get("texts"));assertEquals(0,dropCount());
+    }
+
     @Test @Config(shadows = NativeDragView.class)
     public void bulkSystemDragIncludesEveryFileAndTextAndReturnsThemToQueueWithoutImportCopies() throws Exception {
         NativeDragView.resetFixture();View source=new View(activity);activity.setContentView(source);queueBounds();

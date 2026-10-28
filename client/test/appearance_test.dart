@@ -30,6 +30,40 @@ void main() {
     () => messenger.setMockMethodCallHandler(SystemBridge.channel, null),
   );
 
+  testWidgets('follow-system changes live without replacing local editors', (
+    tester,
+  ) async {
+    final c = fixture.signedIn();
+    c.stagedTexts.add('保留输入');
+    await c.appearance.set(
+      mode: AppearanceMode.system,
+      accent: AccentColor.purple,
+    );
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    await tester.pumpWidget(GlobalSendApp(controller: c));
+    await tester.pumpAndSettle();
+    expect(
+      Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+      Brightness.light,
+    );
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    await tester.pumpAndSettle();
+    expect(
+      Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+      Brightness.dark,
+    );
+    expect(c.appearance.value.mode, AppearanceMode.system);
+    expect(c.stagedTexts, ['保留输入']);
+    await c.appearance.set(mode: AppearanceMode.neutral);
+    await tester.pumpAndSettle();
+    expect(
+      Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+      Brightness.light,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test('appearance persists separately from group and all palette text is readable', () async {
     final file = File('../artifacts/tmp/appearance-test/settings.json');
     await file.parent.create(recursive: true);

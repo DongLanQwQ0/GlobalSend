@@ -65,6 +65,18 @@ for name in sorted(names):
         else:
             raise ValueError(command)
     output.append(f'  0x{code:x}: [{",".join(values)}], // {name}')
+    if name == 'drag_indicator':
+        # Reuse the same licensed glyph for the Android shelf's bulk drag grip.
+        commands = []
+        for command, points in pen.value:
+            if command == 'closePath': commands.append('Z')
+            else:
+                commands.append({'moveTo':'M','lineTo':'L','curveTo':'C'}[command] +
+                    ' '.join(f'{n:.4f}'.rstrip('0').rstrip('.') or '0' for point in points for n in point))
+        native = root / 'client/android/app/src/main/res/drawable/ic_drag_all.xml'
+        native.write_text('<!-- Generated Material icon; license: client/assets/licenses/material-icons.txt. -->\n'
+            '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">\n'
+            '<path android:fillColor="#FF000000" android:pathData="' + ' '.join(commands) + '"/>\n</vector>\n', encoding='utf-8')
 output.append('};')
 target = root / 'client/lib/app_icon_paths.dart'
 target.write_text('\n'.join(output) + '\n', encoding='utf-8')

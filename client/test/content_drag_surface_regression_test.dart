@@ -94,6 +94,11 @@ void main() {
         find.byKey(const ValueKey('drag-feedback-desktop')),
         findsOneWidget,
       );
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('drag-feedback-desktop'))),
+        tester.getCenter(find.byKey(const ValueKey('source'))) +
+            const Offset(35, 10),
+      );
       await gesture.moveTo(const Offset(820, 250));
       await pumpNativeDrag(tester);
       expect(exports, ['mouse']);

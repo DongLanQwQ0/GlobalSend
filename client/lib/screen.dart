@@ -41,6 +41,7 @@ import 'local_ip_menu.dart';
 import 'received_order.dart';
 import 'recent_photos.dart';
 import 'recent_photos_view.dart';
+import 'installed_apps_picker.dart';
 
 const defaultCenterAddress = String.fromEnvironment(
   'GLOBALSEND_DEFAULT_CENTER',
@@ -1727,6 +1728,23 @@ class _SendScreenState extends State<SendScreen>
                 : pickFiles(type: FileType.media),
             key: 'add-media',
           ),
+          if (Theme.of(context).platform == TargetPlatform.android) ...[
+            const SizedBox(width: 6),
+            actionTile('应用', Icons.apps, () async {
+              final package = await pickInstalledApp(context);
+              if (package == null || !mounted) return;
+              await perform(() async {
+                final exported = await DockPlatform.exportApp(package);
+                final path = exported['path'] as String;
+                await c.stageSharedInputs(
+                  'app-${DateTime.now().microsecondsSinceEpoch}',
+                  [path],
+                  [],
+                  [path],
+                );
+              });
+            }, key: 'add-app'),
+          ],
         ],
       );
       if (desktop) {
@@ -4439,6 +4457,20 @@ class _SendScreenState extends State<SendScreen>
                 onChanged: working
                     ? null
                     : (value) => perform(() => c.setReceivePopupEnabled(value)),
+              ),
+            if (Platform.isAndroid)
+              ListTile(
+                key: const ValueKey('temporary-shelf'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('文件暂存坞'),
+                trailing: const AppIcon(Icons.chevron_right, size: 20),
+                onTap: working
+                    ? null
+                    : () => perform(
+                        c.receivePopupAllowed
+                            ? DockPlatform.showShelf
+                            : c.openReceivePopupSettings,
+                      ),
               ),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,

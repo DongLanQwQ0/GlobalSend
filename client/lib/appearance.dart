@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-enum AppearanceMode { light, dark, neutral }
+enum AppearanceMode { light, dark, neutral, system }
 
 enum AccentColor { green, blue, purple, rose, amber, slate }
 
@@ -15,6 +15,14 @@ class Appearance {
   });
   final AppearanceMode mode;
   final AccentColor accent;
+  Appearance resolve(Brightness systemBrightness) =>
+      mode == AppearanceMode.system
+      ? copyWith(
+          mode: systemBrightness == Brightness.dark
+              ? AppearanceMode.dark
+              : AppearanceMode.light,
+        )
+      : this;
   Map<String, String> toJson() => {'mode': mode.name, 'accent': accent.name};
   factory Appearance.fromJson(Map value) => Appearance(
     mode:

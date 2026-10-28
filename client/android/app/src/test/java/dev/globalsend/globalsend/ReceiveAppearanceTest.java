@@ -20,6 +20,34 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34, manifest=Config.NONE)
 public class ReceiveAppearanceTest {
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void nativeDragArtworkUsesSelectedPaletteAndResolvesSystemNightMode() throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        File file = new File(context.getFilesDir(), "appearance.json");
+        String directory = System.getenv("GLOBALSEND_TEST_ARTIFACTS");
+        for (String mode : new String[]{"light", "dark", "neutral"}) {
+            java.nio.file.Files.write(file.toPath(), ("{\"mode\":\"" + mode + "\",\"accent\":\"purple\"}").getBytes(StandardCharsets.UTF_8));
+            ReceiveAppearance palette = ReceiveAppearance.load(context);
+            View preview = new DockCoordinator.DragPreview(new View(context), null, "https://joinflow.koala-studio.org.cn", "1 项");
+            float dp = context.getResources().getDisplayMetrics().density;
+            int width = Math.round(232 * dp), height = Math.round(104 * dp);
+            preview.layout(0, 0, width, height);
+            android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888);
+            preview.draw(new android.graphics.Canvas(image));
+            assertEquals(palette.surface, image.getPixel(Math.round(110 * dp), Math.round(80 * dp)));
+            assertEquals(palette.soft, image.getPixel(Math.round(20 * dp), Math.round(50 * dp)));
+            assertEquals(palette.accent, image.getPixel(Math.round(35 * dp), Math.round(50 * dp)));
+            if (directory != null) try (FileOutputStream output = new FileOutputStream(new File(directory, "android-drag-" + mode + ".png"))) {
+                image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output);
+            }
+        }
+        java.nio.file.Files.write(file.toPath(), "{\"mode\":\"system\",\"accent\":\"purple\"}".getBytes(StandardCharsets.UTF_8));
+        org.robolectric.RuntimeEnvironment.setQualifiers("night");
+        assertEquals(0xffc9b6ff, ReceiveAppearance.load(context).accent);
+        org.robolectric.RuntimeEnvironment.setQualifiers("notnight");
+        assertEquals(0xff7051a8, ReceiveAppearance.load(context).accent);
+        assertTrue(file.delete());
+    }
     @Test public void readsFlutterPreferenceAndKeepsNeutralDistinctFromDark() throws Exception {
         Context context = RuntimeEnvironment.getApplication();
         File file = new File(context.getFilesDir(),"appearance.json");

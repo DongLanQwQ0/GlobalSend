@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.DragEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewTreeObserver;
@@ -21,9 +22,12 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 /** A small independent OS overlay. No Activity, backdrop, or full-display touch surface. */
 final class ReceiveOverlay implements ReceiveNotifications.Presenter {
+    private static java.lang.ref.WeakReference<ReceiveOverlay> current = new java.lang.ref.WeakReference<>(null);
     interface Actions {
         void open(String id);
         void copy(String id);
@@ -44,6 +48,25 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private float downX, downY;
     private int startX, startY, startWidth, startHeight;
     private ReceiveAppearance appearance;
+    private final TemporaryShelf shelf;
+    private LinearLayout header;
+    private TextView shelfTab, collapseButton, handle, resize;
+    private boolean collapsed, shelfVisible, edgeRight = true;
+    private int expandedWidth, expandedHeight;
+    private android.animation.ValueAnimator geometry;
+    private Runnable dragExpand;
+    private int importing;
+    private android.os.FileObserver appearanceChanges;
+    private final android.content.ComponentCallbacks configurationChanges = new android.content.ComponentCallbacks() {
+        @Override public void onConfigurationChanged(android.content.res.Configuration next) { main.post(() -> shelfChanged()); }
+        @Override public void onLowMemory() { }
+    };
+    private final Runnable countdown = new Runnable() {
+        @Override public void run() {
+            if (root == null || shelf.removalSeconds() == 0) return;
+            updateLabels(); main.postDelayed(this, 100);
+        }
+    };
     private static final java.util.concurrent.ExecutorService thumbnails =
         java.util.concurrent.Executors.newSingleThreadExecutor();
 
@@ -51,6 +74,39 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         this.context = context;
         this.actions = actions;
         windows = context.getSystemService(WindowManager.class);
+        shelf = new TemporaryShelf(context, this::shelfChanged);
+        current = new java.lang.ref.WeakReference<>(this);
+    }
+
+    static void openShelf() {
+        ReceiveOverlay overlay = current.get();
+        if (overlay == null) throw new IllegalStateException("暂存坞尚未就绪");
+        if (!android.provider.Settings.canDrawOverlays(overlay.context)) throw new IllegalStateException("请先允许悬浮窗权限");
+        overlay.shelfVisible = true;
+        if (overlay.root == null) {
+            overlay.create(); overlay.render();
+            View appearing = overlay.root;
+            appearing.post(() -> {
+                if (overlay.root == appearing) appearing.animate().translationX(0).alpha(1).scaleX(1).scaleY(1)
+                    .setDuration(180).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            });
+        } else { overlay.setCollapsed(false); overlay.render(); }
+    }
+
+    @Override public void foreground() {
+        // A persistent shelf stays reachable while the user moves between apps.
+        // Received records are still shown in the main app, not duplicated there.
+        if (root != null) setCollapsed(true);
+    }
+
+    private Map<String, ReceiveNotifications.Receipt> displayed() { return shelfVisible ? shelf.items : items; }
+
+    private void shelfChanged() {
+        if (root == null) return;
+        if (DockCoordinator.afterExportFrom(root, this::shelfChanged)) return;
+        render();
+        main.removeCallbacks(countdown);
+        if (shelf.removalSeconds() > 0) main.post(countdown);
     }
 
     @Override public void show(ReceiveNotifications.Receipt item, long arrival, java.util.function.Consumer<Boolean> shown) {
@@ -74,6 +130,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         boolean newWindow = root == null;
         try {
             if (newWindow) create();
+            if (newItem && !collapsed) shelfVisible = false;
             int previousScroll = scroll.getScrollX();
             render();
             if (!newItem) {
@@ -116,7 +173,23 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void create() {
         appearance = ReceiveAppearance.load(context);
         rootAdded = false;
-        root = new LinearLayout(context);
+        root = new LinearLayout(context) {
+            private boolean cancelTap;
+            @Override public boolean dispatchTouchEvent(MotionEvent event) {
+                if (cancelTap) {
+                    if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) cancelTap = false;
+                    return true;
+                }
+                if (event.getActionMasked() == MotionEvent.ACTION_DOWN && shelf.cancelRemoval()) {
+                    main.removeCallbacks(countdown); updateLabels();
+                    cancelTap = true;
+                    // The cancel tap has one meaning; it must not also open a
+                    // file, close the dock or start a second action underneath.
+                    return true;
+                }
+                return super.dispatchTouchEvent(event);
+            }
+        };
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(6), dp(2), dp(6), dp(4));
         root.setBackground(shape((appearance.surface & 0x00ffffff) | 0xf5000000, 18));
@@ -124,12 +197,23 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         root.setElevation(dp(8));
         root.setAlpha(0); root.setTranslationX(dp(20));
         root.setScaleX(.96f); root.setScaleY(.96f);
-        LinearLayout header = new LinearLayout(context);
+        header = new LinearLayout(context);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        count = label("", 12, appearance.muted);
+        count = control("", "接收", () -> { shelfVisible = false; render(); });
         count.setSingleLine(true);
         header.addView(count, new LinearLayout.LayoutParams(0, dp(30), 1));
-        TextView open = control("↗", "打开 GlobalSend", () -> actions.open(items.keySet().iterator().next()));
+        shelfTab = control("", "暂存", () -> { shelfVisible = true; render(); });
+        header.addView(shelfTab, new LinearLayout.LayoutParams(0, dp(30), 1));
+        installMove(count, false); installMove(shelfTab, false);
+        View all = icon(R.drawable.ic_drag_all, "全部拖出");
+        all.setOnLongClickListener(view -> export(view, new ArrayList<>(displayed().values())));
+        header.addView(all, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        collapseButton = control("›", "收起到屏幕边缘", () -> setCollapsed(true));
+        header.addView(collapseButton, new LinearLayout.LayoutParams(dp(26), dp(30)));
+        TextView open = control("↗", "打开 GlobalSend", () -> {
+            if (!items.isEmpty()) actions.open(items.keySet().iterator().next());
+            else context.startActivity(context.getPackageManager().getLaunchIntentForPackage(context.getPackageName()).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        });
         TextView close = control("×", "关闭", this::dismiss);
         header.addView(open, new LinearLayout.LayoutParams(dp(32), dp(30)));
         header.addView(close, new LinearLayout.LayoutParams(dp(32), dp(30)));
@@ -142,11 +226,18 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         scroll.addView(row, new HorizontalScrollView.LayoutParams(-2, -1));
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         // A small bottom grip changes the actual OS window, not a full-screen wrapper.
-        TextView resize = label("⌟", 12, appearance.muted);
+        resize = label("⌟", 12, appearance.muted);
         resize.setGravity(Gravity.RIGHT);
         resize.setContentDescription("拖动调整大小");
         installMove(resize, true);
         root.addView(resize, new LinearLayout.LayoutParams(-1, dp(12)));
+        handle = label("", 12, appearance.accent);
+        handle.setGravity(Gravity.CENTER); handle.setContentDescription("展开文件暂存坞");
+        handle.setOnClickListener(view -> setCollapsed(false));
+        installEdgeMove(handle);
+        handle.setVisibility(View.GONE);
+        root.addView(handle, new LinearLayout.LayoutParams(-1, -1));
+        root.setOnDragListener((view, event) -> receiveDrop(event));
         layout = new WindowManager.LayoutParams(dp(244), dp(156),
             Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
@@ -159,15 +250,36 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         layout.height = Math.min(layout.height, bounds.height() - dp(16));
         layout.x = bounds.right - layout.width - dp(8);
         layout.y = bounds.bottom - layout.height - dp(12);
+        expandedWidth = layout.width; expandedHeight = layout.height; collapsed = false;
         windows.addView(root, layout);
         rootAdded = true;
+        context.registerComponentCallbacks(configurationChanges);
+        appearanceChanges = new android.os.FileObserver(context.getFilesDir().getPath(), android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
+            @Override public void onEvent(int event, String path) {
+                if ("appearance.json".equals(path)) main.post(() -> shelfChanged());
+            }
+        };
+        appearanceChanges.startWatching();
     }
 
     private void render() {
+        appearance = ReceiveAppearance.load(context);
+        root.setBackground(shape((appearance.surface & 0x00ffffff) | 0xf5000000, 18));
+        for (int i=0;i<header.getChildCount();i++) {
+            View child = header.getChildAt(i);
+            if (child instanceof TextView) ((TextView)child).setTextColor(appearance.accent);
+            if (child instanceof ImageView) ((ImageView)child).setColorFilter(appearance.accent);
+        }
+        resize.setTextColor(appearance.muted);
         row.removeAllViews();
-        count.setText("收到 " + items.size() + " 项");
-        int side = Math.max(1, layout.height - dp(48));
-        for (ReceiveNotifications.Receipt receipt : items.values()) {
+        updateLabels();
+        int side = Math.max(1, (collapsed ? expandedHeight : layout.height) - dp(48));
+        if (displayed().isEmpty()) {
+            TextView empty = label(shelfVisible ? "拖入文件、图片或文字" : "暂无接收内容", 13, appearance.muted);
+            empty.setGravity(Gravity.CENTER);
+            row.addView(empty, new LinearLayout.LayoutParams(expandedWidth - dp(12), side));
+        }
+        for (ReceiveNotifications.Receipt receipt : displayed().values()) {
             LinearLayout card = new LinearLayout(context);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setPadding(dp(8), dp(6), dp(8), dp(4));
@@ -196,22 +308,112 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             TextView source = label(receipt.source, 10, appearance.muted);
             source.setSingleLine(true); source.setEllipsize(android.text.TextUtils.TruncateAt.END);
             footer.addView(source, new LinearLayout.LayoutParams(0, dp(24), 1));
-            if (receipt.text != null) footer.addView(control("复制", "复制", () -> actions.copy(receipt.id)),
+            if (receipt.text != null) footer.addView(control("复制", "复制", () -> copy(receipt)),
                 new LinearLayout.LayoutParams(dp(40), dp(24)));
             card.addView(footer);
-            card.setOnClickListener(view -> actions.open(receipt.id));
+            card.setOnClickListener(view -> open(receipt));
             card.setOnLongClickListener(view -> {
-                if (receipt.text == null && receipt.localPath.isEmpty()) return false;
-                try {
-                    return DockCoordinator.startDrag(view, receipt.text == null ? receipt.localPath : null,
-                        receipt.text, receipt.fileName.isEmpty() ? "GlobalSend" : receipt.fileName);
-                } catch (Exception unavailable) { return false; }
+                return export(view, java.util.Collections.singletonList(receipt));
             });
+            if (shelfVisible) {
+                android.widget.PopupMenu menu = new android.widget.PopupMenu(context, card);
+                menu.getMenu().add("移出暂存坞").setOnMenuItemClickListener(item -> { shelf.remove(receipt.id); return true; });
+                TextView remove = control("×", "移出暂存坞", () -> menu.show());
+                footer.addView(remove, new LinearLayout.LayoutParams(dp(24), dp(24)));
+            }
             LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(side, side);
             size.rightMargin = dp(6);
             row.addView(card, size);
         }
         scroll.scrollTo(0, 0);
+    }
+
+    private void updateLabels() {
+        if (root == null) return;
+        int remaining = shelf.removalSeconds();
+        count.setText("接收 " + items.size()); shelfTab.setText("暂存 " + shelf.items.size());
+        count.setTextColor(shelfVisible ? appearance.muted : appearance.accent);
+        shelfTab.setTextColor(shelfVisible ? appearance.accent : appearance.muted);
+        count.setTypeface(null, shelfVisible ? 0 : 1); shelfTab.setTypeface(null, shelfVisible ? 1 : 0);
+        handle.setText((edgeRight ? "‹" : "›") + "\n" + (remaining > 0 ? remaining + "s" : String.valueOf(items.size() + shelf.items.size())));
+        handle.setTextColor(appearance.accent);
+        collapseButton.setText(edgeRight ? "›" : "‹");
+        if (remaining > 0) shelfTab.setText("暂存 · " + remaining + "s");
+        else if (importing > 0) shelfTab.setText("暂存 · …");
+    }
+
+    private boolean export(View source, List<ReceiveNotifications.Receipt> selection) {
+        List<String> paths = new ArrayList<>(), texts = new ArrayList<>();
+        List<ReceiveNotifications.Receipt> staged = new ArrayList<>();
+        for (ReceiveNotifications.Receipt item : selection) {
+            if (item.text != null) texts.add(item.text);
+            else if (!item.localPath.isEmpty()) paths.add(item.localPath);
+            if (shelf.items.get(item.id) == item) staged.add(item);
+        }
+        if (paths.isEmpty() && texts.isEmpty()) return false;
+        shelf.cancelRemoval();
+        try {
+            return DockCoordinator.startDrag(source, paths, texts, (paths.size() + texts.size()) + " 项", accepted -> {
+                if (root != null) shelf.exported(staged, accepted);
+            });
+        } catch (Exception unavailable) {
+            android.widget.Toast.makeText(context, "无法拖出，请重试", android.widget.Toast.LENGTH_SHORT).show(); return false;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean receiveDrop(DragEvent event) {
+        switch (event.getAction()) {
+            case DragEvent.ACTION_DRAG_STARTED: return event.getClipDescription() != null;
+            case DragEvent.ACTION_DRAG_ENTERED:
+                if (collapsed) {
+                    dragExpand = () -> { dragExpand = null; setCollapsed(false); };
+                    main.postDelayed(dragExpand, 250);
+                }
+                root.setBackground(shape(appearance.soft, 18)); return true;
+            case DragEvent.ACTION_DRAG_EXITED:
+            case DragEvent.ACTION_DRAG_ENDED:
+                if (dragExpand != null) main.removeCallbacks(dragExpand);
+                dragExpand = null;
+                if (root != null) root.setBackground(shape((appearance.surface & 0x00ffffff) | 0xf5000000, 18));
+                return true;
+            case DragEvent.ACTION_DROP:
+                if (dragExpand != null) main.removeCallbacks(dragExpand);
+                dragExpand = null;
+                importing++; shelfVisible = true; updateLabels();
+                boolean accepted;
+                try { accepted = DockCoordinator.importToShelf(event, content -> {
+                    importing--;
+                    shelfVisible = true;
+                    shelf.add((List<String>)content.get("paths"), (List<String>)content.get("texts"),
+                        (Map<String, String>)content.getOrDefault("directoryNames", java.util.Collections.emptyMap()));
+                    if (root != null) setCollapsed(false);
+                    if (content.containsKey("error")) android.widget.Toast.makeText(context, "部分内容无法读取，请重新拖入", android.widget.Toast.LENGTH_LONG).show();
+                }); } catch (RuntimeException unavailable) {
+                    accepted = false;
+                    android.widget.Toast.makeText(context, "无法读取拖入内容，请重试", android.widget.Toast.LENGTH_SHORT).show();
+                }
+                if (!accepted) { importing--; updateLabels(); }
+                return accepted;
+            default: return true;
+        }
+    }
+
+    private void copy(ReceiveNotifications.Receipt receipt) {
+        if (!receipt.id.startsWith("shelf:")) { actions.copy(receipt.id); return; }
+        context.getSystemService(android.content.ClipboardManager.class)
+            .setPrimaryClip(android.content.ClipData.newPlainText("GlobalSend", receipt.text));
+    }
+    private void open(ReceiveNotifications.Receipt receipt) {
+        if (!receipt.id.startsWith("shelf:")) { actions.open(receipt.id); return; }
+        if (receipt.text != null) { copy(receipt); return; }
+        try {
+            android.net.Uri uri = receipt.localPath.startsWith("content://") ? android.net.Uri.parse(receipt.localPath) :
+                DockShareProvider.register(context, new java.io.File(receipt.localPath), receipt.fileName);
+            String type = context.getContentResolver().getType(uri);
+            context.startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, type == null ? "application/octet-stream" : type)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        } catch (Exception unavailable) { android.widget.Toast.makeText(context, "无法打开文件", android.widget.Toast.LENGTH_SHORT).show(); }
     }
 
     private void installMove(View handle, boolean resize) {
@@ -220,6 +422,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 downX = event.getRawX(); downY = event.getRawY();
                 startX = layout.x; startY = layout.y;
                 startWidth = layout.width; startHeight = layout.height;
+                if (geometry != null) geometry.cancel();
                 return true;
             }
             if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
@@ -232,11 +435,76 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 layout.x = clamp(layout.x, bounds.left, bounds.right - layout.width);
                 layout.y = clamp(layout.y, bounds.top, bounds.bottom - layout.height);
                 windows.updateViewLayout(root, layout);
-                if (resize) render();
+                if (resize) { expandedWidth = layout.width; expandedHeight = layout.height; render(); }
                 return true;
+            }
+            if (!resize && event.getActionMasked() == MotionEvent.ACTION_UP) {
+                if (Math.abs(event.getRawX() - downX) < dp(6) && Math.abs(event.getRawY() - downY) < dp(6)) {
+                    view.performClick(); return true;
+                }
+                Rect bounds = availableBounds();
+                if (layout.x <= bounds.left + dp(16) || layout.x + layout.width >= bounds.right - dp(16)) setCollapsed(true);
             }
             return true;
         });
+    }
+
+    private void installEdgeMove(View view) {
+        view.setOnTouchListener((handle, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                if (geometry != null) geometry.cancel();
+                downX = event.getRawX(); downY = event.getRawY(); startY = layout.y;
+                return true;
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                int dx = Math.round(event.getRawX() - downX), dy = Math.round(event.getRawY() - downY);
+                if ((edgeRight ? -dx : dx) > dp(28)) { setCollapsed(false); return true; }
+                Rect bounds = availableBounds();
+                layout.y = clamp(startY + dy, bounds.top, bounds.bottom - layout.height);
+                windows.updateViewLayout(root, layout); return true;
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_UP &&
+                    Math.abs(event.getRawY() - downY) < dp(6) && Math.abs(event.getRawX() - downX) < dp(6)) handle.performClick();
+            return true;
+        });
+    }
+
+    void setCollapsed(boolean value) {
+        if (root == null || collapsed == value) return;
+        if (DockCoordinator.afterExportFrom(root, () -> setCollapsed(value))) return;
+        if (geometry != null) geometry.cancel();
+        Rect bounds = availableBounds();
+        if (value) {
+            expandedWidth = layout.width; expandedHeight = layout.height;
+            edgeRight = layout.x + layout.width / 2 >= bounds.centerX();
+        }
+        collapsed = value;
+        header.setVisibility(value ? View.GONE : View.VISIBLE);
+        scroll.setVisibility(value ? View.GONE : View.VISIBLE);
+        resize.setVisibility(value ? View.GONE : View.VISIBLE);
+        handle.setVisibility(value ? View.VISIBLE : View.GONE);
+        int width = value ? dp(36) : expandedWidth, height = value ? dp(72) : expandedHeight;
+        int x = edgeRight ? bounds.right - width : bounds.left;
+        int y = clamp(layout.y, bounds.top, bounds.bottom - height);
+        int initialX = layout.x, initialY = layout.y, initialWidth = layout.width, initialHeight = layout.height;
+        View owner = root;
+        geometry = android.animation.ValueAnimator.ofFloat(0, 1);
+        geometry.setDuration(180); geometry.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        geometry.addUpdateListener(animation -> {
+            if (root != owner) return;
+            float t = (Float)animation.getAnimatedValue();
+            layout.x = Math.round(initialX + (x - initialX) * t); layout.y = Math.round(initialY + (y - initialY) * t);
+            layout.width = Math.round(initialWidth + (width - initialWidth) * t); layout.height = Math.round(initialHeight + (height - initialHeight) * t);
+            windows.updateViewLayout(root, layout);
+        });
+        updateLabels(); geometry.start();
+    }
+
+    private View icon(int drawable, String description) {
+        ImageView image = new ImageView(context);
+        image.setImageResource(drawable); image.setColorFilter(appearance.accent);
+        image.setPadding(dp(6), dp(6), dp(6), dp(6)); image.setContentDescription(description);
+        return image;
     }
 
     private void dismiss() {
@@ -258,10 +526,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             hideWhenReady(request);
         })) return;
         if (root != null) {
+            context.unregisterComponentCallbacks(configurationChanges);
+            if (appearanceChanges != null) { appearanceChanges.stopWatching(); appearanceChanges = null; }
+            if (geometry != null) geometry.cancel();
+            main.removeCallbacks(countdown); shelf.cancelRemoval();
+            if (dragExpand != null) main.removeCallbacks(dragExpand);
+            dragExpand = null;
             final View leaving = root;
             final WindowManager.LayoutParams leavingLayout = layout;
             final boolean registered = rootAdded;
             root = null; row = null; scroll = null; count = null; layout = null;
+            header = null; handle = null; resize = null; shelfTab = null; collapseButton = null;
             rootAdded = false;
             leaving.animate().cancel();
             if (registered && leaving.isAttachedToWindow()) {

@@ -16,6 +16,7 @@ import 'ui_tokens.dart';
 /// Desktop uses an in-window preview before native export. Android hands the
 /// original long press directly to the system, preserving its drag shadow.
 class ContentDragSurface extends StatefulWidget {
+  static const previewSize = Size(184, 140);
   const ContentDragSurface({
     super.key,
     required this.entry,
@@ -153,8 +154,8 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
           borderRadius: Ui.cardRadius,
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
-            width: 184,
-            height: 140,
+            width: ContentDragSurface.previewSize.width,
+            height: ContentDragSurface.previewSize.height,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -234,8 +235,11 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
       },
       data: widget.entry,
       feedback: feedback(),
-      dragAnchorStrategy: pointerDragAnchorStrategy,
-      feedbackOffset: const Offset(12, 12),
+      dragAnchorStrategy: (_, _, _) => Offset(
+        ContentDragSurface.previewSize.width / 2,
+        ContentDragSurface.previewSize.height / 2,
+      ),
+      feedbackOffset: Offset.zero,
       onDragStarted: preparePreview,
       onDragUpdate: update,
       onDragEnd: (_) {

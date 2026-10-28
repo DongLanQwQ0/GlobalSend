@@ -65,6 +65,9 @@ final class DockCoordinator {
         final List<String> paths,texts;
         final WeakReference<View> source;
         boolean dropped;
+        boolean accepted;
+        boolean returnedToShelf;
+        java.util.function.Consumer<Boolean> completed;
         boolean navigationSelected;
         View.OnAttachStateChangeListener detachListener;
         final List<Runnable> afterEnd = new ArrayList<>();
@@ -101,6 +104,18 @@ final class DockCoordinator {
             try {
                 switch (call.method) {
                     case "status": result.success(status()); break;
+                    case "showShelf": ReceiveOverlay.openShelf(); result.success(null); break;
+                    case "installedApps":
+                        importer.execute(() -> {
+                            try { List<Map<String,Object>> apps = InstalledApps.list(this.context); main.post(() -> result.success(apps)); }
+                            catch (Exception error) { main.post(() -> result.error("APP_LIST", "无法读取应用列表", null)); }
+                        }); break;
+                    case "exportApp":
+                        String packageId = call.argument("package");
+                        importer.execute(() -> {
+                            try { Map<String,Object> app = InstalledApps.export(this.context, packageId); main.post(() -> result.success(app)); }
+                            catch (Exception error) { main.post(() -> result.error("APP_EXPORT", "无法导出该应用的安装包", null)); }
+                        }); break;
                     case "notificationPermission": if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) host().requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 781); result.success(null); break;
                     case "configure":
                         Number size = call.argument("maxFileSize"); if (size != null) maxFileSize = Math.min(2147483648L, Math.max(0, size.longValue()));
@@ -366,11 +381,13 @@ final class DockCoordinator {
             case DragEvent.ACTION_DRAG_EXITED:
                 hoveredLocal = null; cancelNavigationHover(); localHover(false, "exited"); return true;
             case DragEvent.ACTION_DRAG_ENDED:
-                hoveredLocal = null; receivingLocal = null; cancelNavigationHover(); localHover(false, "ended"); finishExport(local); return true;
+                hoveredLocal = null; receivingLocal = null; cancelNavigationHover(); localHover(false, "ended");
+                local.accepted |= event.getResult(); finishExport(local); return true;
             case DragEvent.ACTION_DROP:
                 hoveredLocal = null; cancelNavigationHover(); localHover(false, "ended");
                 if (local.dropped || !insideQueue(event.getX(), event.getY())) return false;
                 local.dropped = true;
+                local.accepted = true;
                 Map<String, Object> drop = new HashMap<>();
                 drop.put("dropId", UUID.randomUUID().toString()); drop.put("local", true);
                 drop.put("paths", new ArrayList<>(local.paths));
@@ -428,13 +445,43 @@ final class DockCoordinator {
     }
     private final List<DragAndDropPermissions> folderReadGrants = java.util.Collections.synchronizedList(new ArrayList<>());
     private void consume(ClipData clip, DragAndDropPermissions permission) {
+        consume(clip, permission, null);
+    }
+
+    /** The shelf owns its imports; they must not become received records or queued sends. */
+    static boolean importToShelf(DragEvent event, java.util.function.Consumer<Map<String, Object>> completed) {
+        DockCoordinator coordinator = current.get();
+        if (coordinator == null || coordinator.disposed) return false;
+        LocalDrag local = coordinator.localSession(event);
+        if (local != null) {
+            if (local.dropped) return false;
+            local.dropped = true; local.accepted = true;
+            local.returnedToShelf = true;
+            Map<String, Object> content = new HashMap<>();
+            content.put("paths", new ArrayList<>(local.paths));
+            content.put("texts", new ArrayList<>(local.texts));
+            completed.accept(content);
+            return true;
+        }
+        ClipData clip = event.getClipData();
+        if (clip == null || clip.getItemCount() == 0) return false;
+        Activity activity = coordinator.attached.get();
+        DragAndDropPermissions permission = activity == null ? null : activity.requestDragAndDropPermissions(event);
+        coordinator.consume(clip, permission, completed);
+        return true;
+    }
+
+    private void consume(ClipData clip, DragAndDropPermissions permission,
+            java.util.function.Consumer<Map<String, Object>> shelf) {
         importCount++; publishDrag("importing");
         importer.execute(() -> {
             List<String> paths = new ArrayList<>(), texts = new ArrayList<>();
             Map<String, String> directoryNames = new HashMap<>(); String error = null;
             Map<String, String> directorySources = new HashMap<>();
+            long sizeLimit = shelf == null ? maxFileSize : Long.MAX_VALUE;
             try {
-                File folder = new File(context.getFilesDir(), "incoming-drops"); if (!folder.isDirectory() && !folder.mkdirs()) throw new IllegalStateException("Drop storage unavailable");
+                File folder = shelf == null ? new File(context.getFilesDir(), "incoming-drops") : new File(context.getCacheDir(), "shelf-imports");
+                if (!folder.isDirectory() && !folder.mkdirs()) throw new IllegalStateException("Drop storage unavailable");
                 for (int i = 0; i < clip.getItemCount(); i++) {
                     ClipData.Item item = clip.getItemAt(i); Uri uri = item.getUri();
                     if (uri == null) { CharSequence value = item.getText(); if (value != null && value.length() <= 100000) texts.add(value.toString()); continue; }
@@ -445,7 +492,7 @@ final class DockCoordinator {
                     }
                     String name = "shared-file";
                     try (Cursor cursor = context.getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
-                        if (cursor != null && cursor.moveToFirst()) { String display = cursor.getString(0); if (display != null) name = display; if (!cursor.isNull(1) && cursor.getLong(1) > maxFileSize) throw new IllegalStateException("Dropped file exceeds center limit"); }
+                        if (cursor != null && cursor.moveToFirst()) { String display = cursor.getString(0); if (display != null) name = display; if (!cursor.isNull(1) && cursor.getLong(1) > sizeLimit) throw new IllegalStateException("Dropped file exceeds center limit"); }
                     }
                     StringBuilder safe = new StringBuilder();
                     for (int j = 0; j < name.length(); j++) { char c = name.charAt(j); safe.append(c < 32 || c == 47 || c == 92 || c == 34 || c == 60 || c == 62 || c == 58 || c == 124 || c == 63 || c == 42 ? '_' : c); }
@@ -461,7 +508,7 @@ final class DockCoordinator {
                             byte[] bytes = new byte[65536]; int count;
                             while ((count = input.read(bytes)) != -1) {
                                 if (disposed || Thread.currentThread().isInterrupted()) throw new InterruptedException();
-                                copied += count; if (copied > maxFileSize || folder.getUsableSpace() < 67108864L + count) throw new IllegalStateException("File limit or storage reserve reached");
+                                copied += count; if (copied > sizeLimit || folder.getUsableSpace() < 67108864L + count) throw new IllegalStateException("File limit or storage reserve reached");
                                 output.write(bytes, 0, count);
                             }
                             output.getFD().sync();
@@ -477,10 +524,14 @@ final class DockCoordinator {
                 }
             }
             Map<String, Object> event = new HashMap<>(); event.put("dropId", UUID.randomUUID().toString()); event.put("paths", paths); event.put("temporaryPaths", new ArrayList<>(paths.stream().filter(path -> !path.startsWith("content://")).collect(java.util.stream.Collectors.toList()))); event.put("directoryNames", directoryNames); event.put("directorySources", directorySources); event.put("texts", texts); if (error != null) event.put("error", error);
-            synchronized (pending) { pending.add(event); }
+            if (shelf == null) synchronized (pending) { pending.add(event); }
             main.post(() -> {
                 importCount--;
-                if (!disposed) { channel.invokeMethod("nativeDrop", event); publishDrag("imported"); }
+                if (!disposed) {
+                    if (shelf == null) channel.invokeMethod("nativeDrop", event);
+                    else shelf.accept(event);
+                    publishDrag("imported");
+                }
             });
         });
     }
@@ -502,6 +553,7 @@ final class DockCoordinator {
         }
         for (Runnable completed : new ArrayList<>(session.afterEnd)) completed.run();
         session.afterEnd.clear();
+        if (session.completed != null) session.completed.accept(session.accepted && !session.returnedToShelf);
     }
     static boolean afterExportFrom(View root, Runnable completed) {
         LocalDrag session = activeExport;
@@ -516,8 +568,13 @@ final class DockCoordinator {
         return startDrag(view,path==null?java.util.Collections.emptyList():java.util.Collections.singletonList(path),path==null&&text!=null?java.util.Collections.singletonList(text):java.util.Collections.emptyList(),label);
     }
     static boolean startDrag(View view,List<String> paths,List<String> texts,String label) throws Exception {
+        return startDrag(view, paths, texts, label, null);
+    }
+    static boolean startDrag(View view,List<String> paths,List<String> texts,String label,
+            java.util.function.Consumer<Boolean> completed) throws Exception {
         if (activeExport != null) return false; // A second long press must not re-enter a live system drag.
         LocalDrag session = new LocalDrag(view, paths,texts);
+        session.completed = completed;
         List<ClipData.Item> items=new ArrayList<>();java.util.LinkedHashSet<String> types=new java.util.LinkedHashSet<>();
         int flags = View.DRAG_FLAG_GLOBAL;
         for(String path:paths) {
@@ -550,7 +607,9 @@ final class DockCoordinator {
         };
         view.addOnAttachStateChangeListener(session.detachListener);
         if (!(view instanceof FlutterView)) view.setOnDragListener((source, event) -> {
-            if (event.getAction() == DragEvent.ACTION_DRAG_ENDED) finishExport(session);
+            if (event.getAction() == DragEvent.ACTION_DRAG_ENDED) {
+                session.accepted |= event.getResult(); finishExport(session);
+            }
             return event.getAction() == DragEvent.ACTION_DRAG_STARTED || event.getAction() == DragEvent.ACTION_DRAG_ENDED;
         });
         activeExport = session;
@@ -565,13 +624,15 @@ final class DockCoordinator {
         } catch (Exception error) { finishExport(session); throw error; }
     }
 
-    private static final class DragPreview extends View {
+    static final class DragPreview extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final float dp;
         private final String label, text;
+        private final ReceiveAppearance appearance;
         private Bitmap bitmap;
         DragPreview(View source, String path, String text, String label) {
             super(source.getContext()); dp = getResources().getDisplayMetrics().density;
+            appearance = ReceiveAppearance.load(source.getContext());
             this.label = label; this.text = text;
             if (path != null) {
                 try {
@@ -590,22 +651,22 @@ final class DockCoordinator {
         @Override protected void onDraw(Canvas canvas) {
             canvas.scale(dp, dp);
             RectF card = new RectF(2, 2, 230, 100);
-            paint.setStyle(Paint.Style.FILL); paint.setColor(0xfff9fbf8); canvas.drawRoundRect(card, 18, 18, paint);
-            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1); paint.setColor(0xffd3dfd8); canvas.drawRoundRect(card, 18, 18, paint); paint.setStyle(Paint.Style.FILL);
+            paint.setStyle(Paint.Style.FILL); paint.setColor(appearance.surface); canvas.drawRoundRect(card, 18, 18, paint);
+            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1); paint.setColor(appearance.border); canvas.drawRoundRect(card, 18, 18, paint); paint.setStyle(Paint.Style.FILL);
             RectF artwork = new RectF(14, 16, 82, 84);
-            paint.setColor(0xffe4efe9); canvas.drawRoundRect(artwork, 11, 11, paint);
+            paint.setColor(appearance.soft); canvas.drawRoundRect(artwork, 11, 11, paint);
             if (bitmap != null) {
                 int checkpoint = canvas.save(); Path clip = new Path(); clip.addRoundRect(artwork, 11, 11, Path.Direction.CW); canvas.clipPath(clip);
                 float scale = Math.max(artwork.width() / bitmap.getWidth(), artwork.height() / bitmap.getHeight());
                 float width = bitmap.getWidth() * scale, height = bitmap.getHeight() * scale;
                 canvas.drawBitmap(bitmap, null, new RectF(artwork.centerX() - width / 2, artwork.centerY() - height / 2, artwork.centerX() + width / 2, artwork.centerY() + height / 2), paint); canvas.restoreToCount(checkpoint);
             } else {
-                paint.setColor(0xff39705b); paint.setStrokeWidth(2); paint.setStyle(Paint.Style.STROKE); canvas.drawRoundRect(new RectF(35, 31, 61, 69), 4, 4, paint);
+                paint.setColor(appearance.accent); paint.setStrokeWidth(2); paint.setStyle(Paint.Style.STROKE); canvas.drawRoundRect(new RectF(35, 31, 61, 69), 4, 4, paint);
                 canvas.drawLine(41, 42, 55, 42, paint); canvas.drawLine(41, 49, 55, 49, paint); canvas.drawLine(41, 56, 51, 56, paint); paint.setStyle(Paint.Style.FILL);
             }
-            paint.setTextSize(14); paint.setColor(0xff233b31); paint.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+            paint.setTextSize(14); paint.setColor(appearance.ink); paint.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
             canvas.drawText(TextUtils.ellipsize(label.replace('\n', ' '), new android.text.TextPaint(paint), 125, TextUtils.TruncateAt.END).toString(), 94, 42, paint);
-            paint.setTextSize(12); paint.setColor(0xff75847b); paint.setTypeface(android.graphics.Typeface.DEFAULT);
+            paint.setTextSize(12); paint.setColor(appearance.muted); paint.setTypeface(android.graphics.Typeface.DEFAULT);
             String subtitle = text == null ? (bitmap == null ? "文件" : "图片") : text.replace('\n', ' ');
             canvas.drawText(TextUtils.ellipsize(subtitle, new android.text.TextPaint(paint), 125, TextUtils.TruncateAt.END).toString(), 94, 66, paint);
         }

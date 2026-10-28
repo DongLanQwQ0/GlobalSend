@@ -3,6 +3,26 @@ import assert from 'node:assert/strict';
 import {parseHTML} from 'linkedom';
 import {AppearancePreferences,appearancePalette,parseAppearance,accentColors} from '../src/appearance.ts';
 
+test('follow-system responds to OS changes without changing stored preference or drafts',()=>{
+ const {document}=parseHTML('<html><body><textarea>保留输入</textarea><div id="settings"></div></body></html>');
+ const callbacks=new Set<()=>void>();
+ const media={matches:false,addEventListener:(_type:string,callback:()=>void)=>callbacks.add(callback),removeEventListener:(_type:string,callback:()=>void)=>callbacks.delete(callback)};
+ let saved:string|null='{"mode":"system","accent":"purple"}';
+ const preferences=new AppearancePreferences(document as any,()=>saved,raw=>saved=raw,media as any);
+ document.querySelector('#settings')!.innerHTML=preferences.html();
+ const editor=document.querySelector('textarea');
+ assert.equal(document.documentElement.dataset.theme,'light');
+ media.matches=true;callbacks.forEach(callback=>callback());
+ assert.equal(document.documentElement.dataset.theme,'dark');
+ assert.equal(document.documentElement.style.getPropertyValue('--green'),'#c9b6ff');
+ assert.equal(document.documentElement.dataset.themePreference,'system');
+ assert.equal(document.querySelector('textarea'),editor);
+ assert.equal(document.querySelector('[data-appearance-mode=system]')!.getAttribute('aria-pressed'),'true');
+ preferences.set({mode:'neutral'});media.matches=false;callbacks.forEach(callback=>callback());
+ assert.equal(document.documentElement.dataset.theme,'neutral');
+ preferences.dispose();assert.equal(callbacks.size,0);
+});
+
 test('light green default and persisted mode/accent restore independently',()=>{
  assert.deepEqual(parseAppearance(null),{mode:'light',accent:'green'});
  assert.deepEqual(parseAppearance('{"mode":"dark","accent":"blue"}'),{mode:'dark',accent:'blue'});

@@ -224,7 +224,7 @@ bool InitializeGlobalSendDragPreviewFromBitmap(IDataObject* data, HWND source,
     GetObjectW(bitmap, sizeof(shape), &shape);
     SHDRAGIMAGE image{};
     image.sizeDragImage = {shape.bmWidth, shape.bmHeight};
-    image.ptOffset = {16, 16};
+    image.ptOffset = {shape.bmWidth / 2, shape.bmHeight / 2};
     image.hbmpDragImage = bitmap;
     image.crColorKey = CLR_NONE;
     result = helper->InitializeFromBitmap(&image, data);
