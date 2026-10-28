@@ -10,8 +10,14 @@ function reject(code: string, message: string, statusCode = 400): never {
 
 /** A separate, durable command queue. Ordinary text/events never enter it. */
 export class UrlIntents {
-  constructor(private db: DatabaseSync, private now: () => number,
-      private changed: (source: string, target: string) => void) {
+  private db: DatabaseSync;
+  private now: () => number;
+  private changed: (source: string, target: string) => void;
+  constructor(db: DatabaseSync, now: () => number,
+      changed: (source: string, target: string) => void) {
+    this.db = db;
+    this.now = now;
+    this.changed = changed;
     db.exec(`CREATE TABLE IF NOT EXISTS url_intents(
       source_device_id TEXT NOT NULL,request_id TEXT NOT NULL,target_device_id TEXT NOT NULL,
       group_id TEXT NOT NULL,caller_app_id TEXT NOT NULL,url TEXT,payload_digest TEXT NOT NULL,
