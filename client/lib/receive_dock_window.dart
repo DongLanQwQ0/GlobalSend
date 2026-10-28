@@ -393,6 +393,9 @@ class _ReceiveDockAppState extends State<ReceiveDockApp> {
           key: const ValueKey('dock-pane'),
           backgroundColor: const Color(0xFFEDF4EF),
           body: Listener(
+            // Translucent gesture hits in the pane's gaps must also reach this
+            // listener; otherwise window movement reuses an older down point.
+            behavior: HitTestBehavior.opaque,
             onPointerDown: (event) {
               heldPointer ??= event.pointer;
               pointerOrigin = event.position;

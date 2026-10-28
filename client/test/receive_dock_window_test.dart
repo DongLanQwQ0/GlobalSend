@@ -309,6 +309,49 @@ void main() {
   );
 
   testWidgets(
+    'dock movable header and blank regions preserve their pointer kind at multiple display scales',
+    (tester) async {
+      final moves = <Map<String, dynamic>>[];
+      messenger.setMockMethodCallHandler(ReceiveDockApp.channel, (call) async {
+        if (call.method == 'ready') return payload(1, ['one']);
+        if (call.method == 'move')
+          moves.add(Map<String, dynamic>.from(call.arguments));
+        return null;
+      });
+      await mount(tester);
+      for (final scale in [1.0, 1.5, 2.0]) {
+        tester.view.physicalSize = Size(480 * scale, 184 * scale);
+        tester.view.devicePixelRatio = scale;
+        await tester.pumpAndSettle();
+        for (final down in [
+          const Offset(24, 18),
+          const Offset(240, 18),
+          const Offset(450, 170),
+        ]) {
+          final before = moves.length;
+          final gesture = await tester.startGesture(
+            down,
+            kind: PointerDeviceKind.mouse,
+          );
+          await gesture.moveBy(const Offset(35, 0));
+          await pumpNativeDrag(tester);
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(
+            moves.length,
+            before + 1,
+            reason: 'move from $down at scale $scale',
+          );
+          expect(moves.last['touch'], false);
+          expect(moves.last['x'], (down.dx * scale).round());
+          expect(moves.last['y'], (down.dy * scale).round());
+        }
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'dock movement sends the original client down point and retires the Flutter gesture',
     (tester) async {
       final moves = <Map<String, dynamic>>[];

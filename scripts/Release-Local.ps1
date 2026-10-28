@@ -1,6 +1,6 @@
 <# Builds and publishes the native clients to the user's local test devices. #>
 [CmdletBinding()]
-param([string]$Serial = $env:GLOBALSEND_ADB_SERIAL, [switch]$PublishOnly, [switch]$KeepRunning, [switch]$PushOnlyPhone)
+param([string]$Serial = $env:GLOBALSEND_ADB_SERIAL, [switch]$PublishOnly, [switch]$KeepRunning, [switch]$PushOnlyPhone, [switch]$WindowsOnly)
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $client = Join-Path $root 'client'
@@ -95,14 +95,22 @@ try {
     Push-Location $client
     try {
         Invoke-Checked $dart @($snapshot,'build','windows','--release','--no-pub') *> (Join-Path $logs "release-local-$version-windows.log")
-        Invoke-Checked $dart @($snapshot,'build','apk','--release','--no-pub','--target-platform=android-arm64','--android-project-arg=globalsendCompressNative=true','--android-project-arg=globalsendAbi=arm64-v8a','--android-project-arg=disable-abi-filtering=true') *> (Join-Path $logs "release-local-$version-android.log")
+        if (-not $WindowsOnly) {
+            Invoke-Checked $dart @($snapshot,'build','apk','--release','--no-pub','--target-platform=android-arm64','--android-project-arg=globalsendCompressNative=true','--android-project-arg=globalsendAbi=arm64-v8a','--android-project-arg=disable-abi-filtering=true') *> (Join-Path $logs "release-local-$version-android.log")
+        }
     } finally { Pop-Location }
     }
     $windows = Join-Path $client "build\local-release\$version\windows\x64\runner\Release"
-    $apk = Join-Path $releases "GlobalSend-$version-android-arm64-v8a.apk"
-    Copy-Item -LiteralPath (Join-Path $client 'build\app\outputs\flutter-apk\app-release.apk') -Destination $apk -Force
-    Invoke-Checked 'F:\Android\Sdk\build-tools\36.0.0\apksigner.bat' @('verify',$apk)
-    Invoke-Checked 'D:\Python\python.exe' @((Join-Path $PSScriptRoot 'verify-no-fonts.py'),$windows,$apk)
+    $apk = $null; $apkBytes = 0
+    if ($WindowsOnly) {
+        Invoke-Checked 'D:\Python\python.exe' @((Join-Path $PSScriptRoot 'verify-no-fonts.py'),$windows)
+    } else {
+        $apk = Join-Path $releases "GlobalSend-$version-android-arm64-v8a.apk"
+        Copy-Item -LiteralPath (Join-Path $client 'build\app\outputs\flutter-apk\app-release.apk') -Destination $apk -Force
+        Invoke-Checked 'F:\Android\Sdk\build-tools\36.0.0\apksigner.bat' @('verify',$apk)
+        Invoke-Checked 'D:\Python\python.exe' @((Join-Path $PSScriptRoot 'verify-no-fonts.py'),$windows,$apk)
+        $apkBytes = (Get-Item -LiteralPath $apk).Length
+    }
     Compress-Archive -Path "$windows\*" -DestinationPath (Join-Path $releases "GlobalSend-$version-windows-x64.zip") -Force
 
     # Stop only GlobalSend, never other Flutter/Node/Java applications.
@@ -140,8 +148,16 @@ try {
         (New-Object Text.UTF8Encoding($false)))
     $process = Start-Process -FilePath (Join-Path $target 'globalsend.exe') -WorkingDirectory $target -WindowStyle Normal -PassThru
     # Persist Windows publication even when the phone disconnects during build.
-    $report = @{ version=$version; buildNumber=$buildNumber; windowsVersion=$version; windows=$target; windowsPid=$process.Id; stateBackup=$stateBackup; apk=$apk; apkBytes=(Get-Item -LiteralPath $apk).Length; serial=$Serial; androidInstalled=$false; phonePending=$true; lastConfirmedPhoneVersion=$previousRelease.lastConfirmedPhoneVersion; lastConfirmedPhoneBuildNumber=$previousRelease.lastConfirmedPhoneBuildNumber; publishedAt=(Get-Date).ToString('o') }
+    $report = @{ version=$version; buildNumber=$buildNumber; windowsVersion=$version; windows=$target; windowsPid=$process.Id; stateBackup=$stateBackup; apk=$apk; apkBytes=$apkBytes; apkBuilt=(!$WindowsOnly); serial=$Serial; androidInstalled=$false; phonePending=$true; lastConfirmedPhoneVersion=$previousRelease.lastConfirmedPhoneVersion; lastConfirmedPhoneBuildNumber=$previousRelease.lastConfirmedPhoneBuildNumber; publishedAt=(Get-Date).ToString('o') }
     $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releases 'latest-local.json') -Encoding UTF8
+
+    if ($WindowsOnly) {
+        $report.phoneDeferred = $true
+        $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releases 'latest-local.json') -Encoding UTF8
+        $report | ConvertTo-Json
+        if ($KeepRunning) { Wait-Process -Id $process.Id }
+        return
+    }
 
     try {
         for ($attempt = 0; $attempt -lt 3; $attempt++) {

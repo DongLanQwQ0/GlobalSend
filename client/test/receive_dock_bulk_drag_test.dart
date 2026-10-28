@@ -66,6 +66,7 @@ void main() {
           kind: 'file',
           title: 'remote.bin',
           source: 'phone',
+          status: 'received',
         ).toJson(),
       ],
       DockEntry(
