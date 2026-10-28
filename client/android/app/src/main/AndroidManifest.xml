@@ -52,6 +52,10 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+        <service android:name=".IntegrationService" android:exported="true" />
+        <activity android:name=".IntegrationAssociationActivity" android:exported="false" android:theme="@style/IntegrationTheme" />
+        <activity android:name=".IntegrationAssociationsActivity" android:exported="false" android:theme="@style/IntegrationTheme" />
+        <activity android:name=".IntegrationUrlActivity" android:exported="false" android:excludeFromRecents="true" android:taskAffinity="" android:theme="@style/IntegrationUrlTheme" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -73,6 +77,7 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <package android:name="com.donglan.chrona" />
         <intent>
             <action android:name="android.intent.action.MAIN"/>
             <category android:name="android.intent.category.LAUNCHER"/>

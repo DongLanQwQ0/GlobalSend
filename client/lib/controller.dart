@@ -39,6 +39,7 @@ import 'local_ip_addresses.dart';
 import 'candidate_routes.dart';
 import 'transfer_operation.dart';
 import 'transfer_route_selection.dart';
+import 'url_intents.dart';
 
 String newId() {
   final r = Random.secure();
@@ -104,6 +105,22 @@ typedef _PreparedRoutes = ({
 });
 
 class SendController extends ChangeNotifier {
+  late final UrlIntentIntegration urlIntents = UrlIntentIntegration(
+    session: () {
+      final p = profile, a = api;
+      if (disposed || !connected || p == null || a == null || a.token.isEmpty)
+        return null;
+      return UrlIntentSession(
+        api: a,
+        scope: '${p.baseUrl}\n${p.instanceId}\n${p.groupId}\n${p.deviceId}',
+        deviceId: p.deviceId,
+        supported: info['features']?['openUrlIntents'] == true,
+      );
+    },
+    devices: () => sendablePeers,
+    refreshDevices: refreshGroupDevices,
+    changed: changed,
+  );
   final appearance = AppearanceSettings();
   final AppUpdates updates;
   String get _platformName => Platform.isWindows
@@ -1039,6 +1056,7 @@ class SendController extends ChangeNotifier {
   void setAppForeground(bool value) {
     _appForeground = value;
     if (value) {
+      unawaited(urlIntents.synchronize());
       updateDiscoveredDevices(devices);
       changed();
     }
@@ -1125,6 +1143,7 @@ class SendController extends ChangeNotifier {
     try {
       await backgroundReceive.initialize();
       root = await stateDirectory();
+      await urlIntents.initialize(File('${root!.path}/url-intents.json'));
       await appearance.load(File('${root!.path}/appearance.json'));
       unawaited(updates.initialize(File('${root!.path}/updates.json')));
       await _loadStagedOutbox(restoreQueue: true);
@@ -1617,9 +1636,12 @@ class SendController extends ChangeNotifier {
 
   Future<void> startPeer() async {
     final a = api!, p = profile!, epoch = generation;
-    if (info['features']?['folderTransfer'] == true) {
+    if (info['features']?['folderTransfer'] == true ||
+        info['features']?['openUrlIntents'] == true) {
       await a.call('POST', '/devices/me/capabilities', {
-        'folderTransfer': true,
+        'folderTransfer': info['features']?['folderTransfer'] == true,
+        if (info['features']?['openUrlIntents'] == true)
+          'openUrlIntentV1': urlIntents.supported,
       });
       _requireSession(epoch, a, p);
     }
@@ -1854,6 +1876,7 @@ class SendController extends ChangeNotifier {
       await hello.future.timeout(const Duration(seconds: 15));
       if (epoch != generation || disposed || attempt != _socketAttempt) return;
       connected = true;
+      unawaited(urlIntents.synchronize());
       unawaited(refreshReceiveNotifications(request: true));
       sharedDocument.connect(a, enabled: sharedTextSupported);
       unawaited(sharedDocument.refresh());
@@ -1910,6 +1933,10 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> handleServerMessage(Map<String, dynamic> message) async {
+    if (message['type'] == 'url_intents.changed') {
+      await urlIntents.synchronize();
+      return;
+    }
     if (message['type'] == 'https.probe' ||
         message['type'] == 'https.probe.cancel') {
       await reverseHttpsProbes?.handle(message);
@@ -1981,6 +2008,7 @@ class SendController extends ChangeNotifier {
     final epoch = generation, a = api;
     try {
       await reconcile();
+      unawaited(urlIntents.synchronize());
     } catch (e) {
       if (disposed || epoch != generation || !identical(a, api)) return;
       message = '$e';
@@ -5710,6 +5738,7 @@ class SendController extends ChangeNotifier {
     reachability.dispose();
     appearance.dispose();
     updates.dispose();
+    urlIntents.dispose();
     super.dispose();
   }
 }

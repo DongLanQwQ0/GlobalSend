@@ -4460,6 +4460,16 @@ class _SendScreenState extends State<SendScreen>
               ),
             if (Platform.isAndroid)
               ListTile(
+                key: const ValueKey('integration-associations'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('本机应用联动'),
+                trailing: const AppIcon(Icons.chevron_right, size: 20),
+                onTap: working
+                    ? null
+                    : () => perform(c.urlIntents.native.manageAssociations),
+              ),
+            if (Platform.isAndroid)
+              ListTile(
                 key: const ValueKey('temporary-shelf'),
                 contentPadding: EdgeInsets.zero,
                 title: const Text('文件暂存坞'),

@@ -16,6 +16,7 @@ import 'app_update_ui.dart';
 import 'receive_dock_window.dart';
 import 'ios_back_swipe.dart';
 import 'file_share.dart';
+import 'url_intent_notice.dart';
 
 void main(List<String> args) {
   if (Platform.isWindows && args.contains('--receive-dock')) {
@@ -422,7 +423,10 @@ class _GlobalSendAppState extends State<GlobalSendApp>
                     child: NativeDropFeedback(
                       active: controller.nativeDragActive,
                       importing: controller.nativeImporting,
-                      child: AppUpdateNotice(child: child!),
+                      child: UrlIntentNotice(
+                        integration: controller.urlIntents,
+                        child: AppUpdateNotice(child: child!),
+                      ),
                     ),
                   ),
                 ),

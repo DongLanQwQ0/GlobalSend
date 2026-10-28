@@ -21,6 +21,7 @@ class CenterApi {
     Object? body,
     bool authenticated = true,
   ]) async {
+    final authenticationToken = token;
     final window = ConnectionWindow.current;
     window?.check();
     final operation = TransferOperation.current;
@@ -45,8 +46,8 @@ class CenterApi {
     window?.onCancel(() => request.abort());
     window?.check();
     request.followRedirects = false;
-    if (authenticated && token.isNotEmpty) {
-      request.headers.set('Authorization', 'Bearer $token');
+    if (authenticated && authenticationToken.isNotEmpty) {
+      request.headers.set('Authorization', 'Bearer $authenticationToken');
     }
     if (body != null) {
       request.headers.contentType = ContentType.json;

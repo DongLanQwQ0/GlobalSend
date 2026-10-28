@@ -92,6 +92,7 @@ final class NativeReceiveRuntime {
     private ReceiveDirectory receiveDirectory;
     private RtcDataBridge rtcDataBridge;
     private ReceiveNotificationBridge receivedNotifications;
+    IntegrationBridge integration;
     private final ExecutorService transfers = Executors.newFixedThreadPool(16);
     private final ExecutorService connectionChecks = peerProbeExecutor();
     static ExecutorService peerProbeExecutor() {
@@ -105,6 +106,7 @@ final class NativeReceiveRuntime {
     private final java.util.Set<String> canceled = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final java.util.concurrent.ConcurrentHashMap<String, Runnable> activeProbeCancellations = new java.util.concurrent.ConcurrentHashMap<>();
     private void installChannels() {
+        integration = new IntegrationBridge(context, engine.getDartExecutor().getBinaryMessenger(), () -> attachedActivity.get());
         dockCoordinator = new DockCoordinator(context, new MethodChannel(engine.getDartExecutor().getBinaryMessenger(), "dev.globalsend/dock"));
         fileShare = new FileShareBridge(context,new MethodChannel(engine.getDartExecutor().getBinaryMessenger(),"dev.globalsend/share"),()->attachedActivity.get());
         receiveDirectory = new ReceiveDirectory(context, engine);
