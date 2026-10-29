@@ -11,15 +11,15 @@
 int APIENTRY wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE,
                       _In_ wchar_t *, _In_ int) {
   GlobalSendSingleInstance instance;
-  const auto launch_paths = GlobalSendPathsFromCommandLine();
-  const auto start = instance.AcquireOrActivate(30000, launch_paths);
+  const auto launch = GlobalSendLaunchFromCommandLine();
+  const auto start = instance.AcquireOrActivate(30000, launch.paths, !launch.background);
   if (start == GlobalSendSingleInstance::Start::activated) return EXIT_SUCCESS;
   if (start == GlobalSendSingleInstance::Start::failed) {
-    MessageBoxW(nullptr, L"GlobalSend 正在启动或暂时没有响应，请稍后再打开。",
+    if (!launch.background) MessageBoxW(nullptr, L"GlobalSend 正在启动或暂时没有响应，请稍后再打开。",
                 L"GlobalSend", MB_OK | MB_ICONINFORMATION);
     return EXIT_FAILURE;
   }
-  QueueGlobalSendLaunchPaths(launch_paths);
+  QueueGlobalSendLaunchPaths(launch.paths);
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
@@ -40,7 +40,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE,
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
-  FlutterWindow window(project);
+  FlutterWindow window(project, !launch.background);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(950, 650);
   const bool created = startup_window

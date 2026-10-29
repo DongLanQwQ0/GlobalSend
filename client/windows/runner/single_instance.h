@@ -6,6 +6,12 @@
 #include <vector>
 
 UINT GlobalSendActivateMessage();
+struct GlobalSendLaunchOptions {
+  bool background = false;
+  std::vector<std::wstring> paths;
+};
+GlobalSendLaunchOptions ParseGlobalSendLaunchOptions(int count, const wchar_t* const* arguments);
+GlobalSendLaunchOptions GlobalSendLaunchFromCommandLine();
 std::vector<std::wstring> GlobalSendPathsFromCommandLine();
 void QueueGlobalSendLaunchPaths(std::vector<std::wstring> paths);
 void SetGlobalSendLaunchConsumer(
@@ -23,7 +29,7 @@ class GlobalSendSingleInstance {
   GlobalSendSingleInstance(const GlobalSendSingleInstance&) = delete;
   GlobalSendSingleInstance& operator=(const GlobalSendSingleInstance&) = delete;
   Start AcquireOrActivate(DWORD timeout_ms = 30000,
-      const std::vector<std::wstring>& paths = {});
+      const std::vector<std::wstring>& paths = {}, bool activate = true);
   bool AttachWindow(HWND window);
  private:
   HANDLE mutex_ = nullptr;

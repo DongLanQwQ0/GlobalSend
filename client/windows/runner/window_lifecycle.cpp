@@ -47,9 +47,9 @@ GlobalSendWindowState FitGlobalSendWindow(GlobalSendWindowState state,
 }
 
 GlobalSendWindowLifecycle::GlobalSendWindowLifecycle(
-    HWND window, Visibility visibility, Save save)
+    HWND window, Visibility visibility, Save save, bool initially_visible)
     : window_(window), visibility_(std::move(visibility)), save_(std::move(save)),
-      taskbar_created_(RegisterWindowMessageW(L"TaskbarCreated")) {
+      taskbar_created_(RegisterWindowMessageW(L"TaskbarCreated")), ui_visible_(initially_visible) {
   maximized_ = IsZoomed(window_) != FALSE;
   AddTray();
 }
@@ -153,7 +153,7 @@ void GlobalSendWindowLifecycle::Restore(const GlobalSendWindowState& requested) 
   restoring_ = true;
   WINDOWPLACEMENT placement{};
   placement.length = sizeof(placement);
-  placement.showCmd = state.maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+  placement.showCmd = !ui_visible_ ? SW_HIDE : state.maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
   const int dx = monitor.rcWork.left - monitor.rcMonitor.left;
   const int dy = monitor.rcWork.top - monitor.rcMonitor.top;
   placement.rcNormalPosition = {state.left - dx, state.top - dy,
@@ -206,7 +206,7 @@ bool GlobalSendWindowLifecycle::Handle(UINT message, WPARAM wparam,
       SaveState();
       return false;
     case WM_SIZE:
-      if (wparam != SIZE_MINIMIZED) maximized_ = wparam == SIZE_MAXIMIZED;
+      if (!restoring_ && wparam != SIZE_MINIMIZED) maximized_ = wparam == SIZE_MAXIMIZED;
       if (!restoring_ && wparam != SIZE_MINIMIZED) SetTimer(window_, kSaveTimer, 250, nullptr);
       return false;
     case WM_TIMER:

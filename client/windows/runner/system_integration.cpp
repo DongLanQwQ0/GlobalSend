@@ -5,6 +5,8 @@
 #include "clipboard_content.h"
 #include "shell_file.h"
 #include "window_lifecycle.h"
+#include "autostart.h"
+#include <system_error>
 #include "single_instance.h"
 #include "drag_preview.h"
 #include "receive_dock.h"
@@ -349,7 +351,7 @@ bool PrepareReceiveDock(Map payload) {
 }
 }  // namespace
 
-void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, HWND flutter_view) {
+void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, HWND flutter_view, bool initially_visible) {
   ++system_generation;
   owner = window; ole_initialized = SUCCEEDED(OleInitialize(nullptr));
   import_view = flutter_view;
@@ -367,11 +369,24 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
             {Value("width"), Value(state.width)}, {Value("height"), Value(state.height)},
             {Value("maximized"), Value(state.maximized)}};
         channel->InvokeMethod("windowStateChanged", std::make_unique<Value>(value));
-      });
+      }, initially_visible);
   SetGlobalSendLaunchConsumer([](std::vector<std::wstring> paths) {
     PublishDrop(GlobalSendDroppedContent{std::move(paths), {}, {}});
   });
   channel->SetMethodCallHandler([](const auto& call, auto result) {
+    if (call.method_name() == "autoStartEnabled" || call.method_name() == "setAutoStart") {
+      try {
+        if (call.method_name() == "setAutoStart") {
+          const auto* enabled = call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;
+          if (!enabled) { result->Error("BAD_ARGUMENT", "Expected startup toggle"); return; }
+          SetGlobalSendAutoStart(*enabled);
+        }
+        result->Success(Value(GlobalSendAutoStartEnabled()));
+      } catch (const std::system_error& error) {
+        result->Error("AUTOSTART", "无法更新开机启动设置", Value(error.code().value()));
+      }
+      return;
+    }
     if (call.method_name() == "localIpInterfaces") {
       try {
         flutter::EncodableList interfaces;

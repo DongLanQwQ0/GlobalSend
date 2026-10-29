@@ -27,22 +27,34 @@ std::wstring CurrentUserSid() {
 }
 }  // namespace
 
-std::vector<std::wstring> GlobalSendPathsFromCommandLine() {
-  int count = 0;
-  auto** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
-  std::vector<std::wstring> paths;
-  if (!arguments) return paths;
+GlobalSendLaunchOptions ParseGlobalSendLaunchOptions(int count, const wchar_t* const* arguments) {
+  GlobalSendLaunchOptions options;
+  bool flags = true;
   for (int i = 1; i < count; ++i) {
+    if (flags && std::wstring(arguments[i]) == L"--") { flags = false; continue; }
+    if (flags && std::wstring(arguments[i]) == L"--background") { options.background = true; continue; }
     if (GetFileAttributesW(arguments[i]) == INVALID_FILE_ATTRIBUTES) continue;
     const DWORD length = GetFullPathNameW(arguments[i], 0, nullptr, nullptr);
     std::wstring path(length, L'\0');
     if (length && GetFullPathNameW(arguments[i], length, path.data(), nullptr)) {
       path.resize(wcslen(path.c_str()));
-      paths.push_back(std::move(path));
+      options.paths.push_back(std::move(path));
     }
   }
-  LocalFree(arguments);
-  return paths;
+  // Explicit files retain the existing open/import workflow, even when a
+  // launcher appends the background-only startup flag.
+  if (!options.paths.empty()) options.background = false;
+  return options;
+}
+GlobalSendLaunchOptions GlobalSendLaunchFromCommandLine() {
+  int count = 0;
+  auto** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+  auto options = arguments ? ParseGlobalSendLaunchOptions(count, arguments) : GlobalSendLaunchOptions{};
+  if (arguments) LocalFree(arguments);
+  return options;
+}
+std::vector<std::wstring> GlobalSendPathsFromCommandLine() {
+  return GlobalSendLaunchFromCommandLine().paths;
 }
 
 void QueueGlobalSendLaunchPaths(std::vector<std::wstring> paths) {
@@ -121,7 +133,7 @@ GlobalSendSingleInstance::~GlobalSendSingleInstance() {
 }
 
 GlobalSendSingleInstance::Start GlobalSendSingleInstance::AcquireOrActivate(
-    DWORD timeout_ms, const std::vector<std::wstring>& paths) {
+    DWORD timeout_ms, const std::vector<std::wstring>& paths, bool activate) {
   if (!mutex_) return Start::failed;
   const ULONGLONG deadline = GetTickCount64() + timeout_ms;
   while (true) {
@@ -136,7 +148,7 @@ GlobalSendSingleInstance::Start GlobalSendSingleInstance::AcquireOrActivate(
     if (search.found) {
       DWORD process = 0;
       GetWindowThreadProcessId(search.found, &process);
-      AllowSetForegroundWindow(process);
+      if (activate) AllowSetForegroundWindow(process);
       DWORD_PTR acknowledged = 0;
       if (!paths.empty()) {
         std::wstring packed;
@@ -148,6 +160,7 @@ GlobalSendSingleInstance::Start GlobalSendSingleInstance::AcquireOrActivate(
               reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG, 5000,
               &acknowledged) || acknowledged != 1) return Start::failed;
       }
+      if (!activate) return Start::activated;
       if (SendMessageTimeoutW(search.found, GlobalSendActivateMessage(), 0, 0,
               SMTO_ABORTIFHUNG, 5000, &acknowledged) && acknowledged == 1) {
         return Start::activated;

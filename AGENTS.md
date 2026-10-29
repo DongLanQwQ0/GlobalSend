@@ -1,5 +1,6 @@
 # GlobalSend local releases
 
+- The public project/product name is exactly `GlobalSend`, with this capitalization.
 - Native release workflow: `npm run release:local`. After each successful native build, update the complete Windows bundle in `E:\Programs\GlobalSend` and restart GlobalSend; push the APK to the connected physical Android phone, install with `adb install -r`, and launch it. Preserve application data. Do not host installers on the server.
 - When Android builds or updates are explicitly on hold, use `npm run release:local -- -WindowsOnly` for Windows. It builds/replaces/restarts the complete Windows bundle without building an APK, accessing ADB or changing the phone; keep its last confirmed version in the release record.
 - Stabilize and accept Windows and Android first; build the IPA last. The iPad workflow is manual-only (`workflow_dispatch`), not triggered by source pushes. Do not start an IPA build during ongoing Windows/Android fixes.

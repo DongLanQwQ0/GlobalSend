@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "window_lifecycle.cpp"
   "window_startup.cpp"
+  "autostart.cpp"
   "single_instance.cpp"
   "system_integration.cpp"
   "local_ip_interfaces.cpp"

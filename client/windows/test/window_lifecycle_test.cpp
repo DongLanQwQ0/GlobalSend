@@ -87,6 +87,18 @@ int main() {
   assert(IsZoomed(window));
   lifecycle.reset();
   DestroyWindow(window);
+  window = CreateWindowW(cls.lpszClassName, L"GlobalSend background fixture",
+      WS_OVERLAPPEDWINDOW, 10, 10, 950, 650, nullptr, nullptr, cls.hInstance, nullptr);
+  assert(window);
+  lifecycle = std::make_unique<GlobalSendWindowLifecycle>(window,
+      [&](bool value) { visible = value; }, [](const auto&) {}, false);
+  assert(!lifecycle->Visible() && !IsWindowVisible(window));
+  lifecycle->ShowOnFirstFrame();
+  assert(!lifecycle->Visible() && !IsWindowVisible(window));
+  lifecycle->Restore({20, 20, 950, 650, true});
+  assert(!lifecycle->Visible() && !IsWindowVisible(window) && lifecycle->State().maximized);
+  lifecycle.reset();
+  DestroyWindow(window);
   UnregisterClassW(cls.lpszClassName, cls.hInstance);
   std::cout << "PASS receipt generation and no main-window presentation mutation, startup-hidden UI intent, first-frame show, delayed-frame tray hide, bounds, restore, retained HWND, tray/maximize restore, cleanup\n";
 }

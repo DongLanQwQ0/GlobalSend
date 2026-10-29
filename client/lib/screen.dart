@@ -42,6 +42,7 @@ import 'received_order.dart';
 import 'recent_photos.dart';
 import 'recent_photos_view.dart';
 import 'installed_apps_picker.dart';
+import 'windows_startup_control.dart';
 
 const defaultCenterAddress = String.fromEnvironment(
   'GLOBALSEND_DEFAULT_CENTER',
@@ -4316,6 +4317,8 @@ class _SendScreenState extends State<SendScreen>
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
         children: [
           settingsSection('外观', [const AppearancePicker()]),
+          if (Platform.isWindows)
+            settingsSection('启动', [const WindowsStartupControl()]),
           settingsSection('更新', [const UpdateCheckControl()]),
           settingsSection('本机', [
             ValueListenableBuilder<TextEditingValue>(

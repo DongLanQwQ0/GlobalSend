@@ -10,8 +10,8 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : project_(project) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project, bool initially_visible)
+    : project_(project), initially_visible_(initially_visible) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -32,7 +32,7 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   RegisterGlobalSendSystem(flutter_controller_->engine()->messenger(), GetHandle(),
-                          flutter_controller_->view()->GetNativeWindow());
+                          flutter_controller_->view()->GetNativeWindow(), initially_visible_);
   flutter::MethodChannel<flutter::EncodableValue> vault(
       flutter_controller_->engine()->messenger(), "dev.globalsend/vault",
       &flutter::StandardMethodCodec::GetInstance());

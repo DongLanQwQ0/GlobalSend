@@ -205,6 +205,15 @@ class SystemBridge {
         true;
   }
 
+  static Future<bool> autoStartEnabled() async =>
+      Platform.isWindows &&
+      await channel.invokeMethod<bool>('autoStartEnabled') == true;
+
+  static Future<bool> setAutoStart(bool enabled) async {
+    if (!Platform.isWindows) throw UnsupportedError('仅 Windows 支持此开机启动设置');
+    return await channel.invokeMethod<bool>('setAutoStart', enabled) == true;
+  }
+
   static Future<void> configureWindowPersistence(
     String path, {
     bool restore = true,

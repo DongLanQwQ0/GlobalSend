@@ -48,6 +48,10 @@ int wmain(int argc, wchar_t** argv) {
     const auto start = instance.AcquireOrActivate(5000);
     return start == GlobalSendSingleInstance::Start::activated ? 0 : 40;
   }
+  if (argc >= 3 && std::wstring(argv[1]) == L"--background-duplicate") {
+    GlobalSendSingleInstance instance(argv[2]);
+    return instance.AcquireOrActivate(5000, {}, false) == GlobalSendSingleInstance::Start::activated ? 0 : 44;
+  }
   if (argc >= 4 && std::wstring(argv[1]) == L"--hold") {
     GlobalSendSingleInstance instance(argv[2]);
     if (instance.AcquireOrActivate() != GlobalSendSingleInstance::Start::primary) return 41;
@@ -84,6 +88,9 @@ int wmain(int argc, wchar_t** argv) {
 
     SendMessageW(window, WM_CLOSE, 0, 0);
     assert(IsWindow(window) && !IsWindowVisible(window) && !visible);
+    auto quiet = Spawn(L"--background-duplicate " + id);
+    assert(WaitWithMessages(quiet.hProcess) == 0);
+    assert(!IsWindowVisible(window) && !visible && restores == 1);
     auto tray = Spawn(L"--activate " + id);
     assert(WaitWithMessages(tray.hProcess) == 0);
     assert(IsWindowVisible(window) && visible && restores == 2);

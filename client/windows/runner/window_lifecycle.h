@@ -25,7 +25,7 @@ class GlobalSendWindowLifecycle {
  public:
   using Visibility = std::function<void(bool)>;
   using Save = std::function<void(const GlobalSendWindowState&)>;
-  GlobalSendWindowLifecycle(HWND window, Visibility visibility, Save save);
+  GlobalSendWindowLifecycle(HWND window, Visibility visibility, Save save, bool initially_visible = true);
   ~GlobalSendWindowLifecycle();
   bool Handle(UINT message, WPARAM wparam, LPARAM lparam, LRESULT* result);
   void Restore(const GlobalSendWindowState& state);
