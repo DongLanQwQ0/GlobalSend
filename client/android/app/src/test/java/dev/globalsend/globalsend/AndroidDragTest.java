@@ -108,6 +108,34 @@ public class AndroidDragTest {
         static void resetFixture() { allowed = true; clips.clear(); states.clear(); }
     }
 
+    @Test @Config(sdk=34,shadows=NativeDragView.class)
+    public void vivoImageClassificationMatchesGalleryWithoutChangingUrisOrMixedPayloads() throws Exception {
+        String manufacturer=android.os.Build.MANUFACTURER;
+        ReflectionHelpers.setStaticField(android.os.Build.class,"MANUFACTURER","vivo");
+        try {
+            NativeDragView.resetFixture();View source=new View(activity);activity.setContentView(source);
+            DockShareProvider provider=new DockShareProvider();ProviderInfo info=new ProviderInfo();
+            info.authority=activity.getPackageName()+".dock-files";provider.attachInfo(activity,info);
+            ShadowContentResolver.registerProviderInternal(info.authority,provider);
+            List<String> paths=new ArrayList<>();
+            for(String name:List.of("one.png","two.jpg")) {
+                File file=new File(activity.getFilesDir(),name);Files.write(file.toPath(),new byte[]{1,2,3});paths.add(file.getPath());
+            }
+            assertTrue(DockCoordinator.startDrag(source,paths,List.of(),"2 项"));
+            ClipData images=NativeDragView.clips.get(0);
+            assertArrayEquals(new int[]{0,0},images.getDescription().getExtras().getIntArray("photo_type_flags"));
+            assertEquals(info.authority,images.getItemAt(0).getUri().getAuthority());
+            assertEquals(2,images.getItemCount());
+            coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,(DockCoordinator.LocalDrag)NativeDragView.states.get(0),0,0));
+            assertTrue(DockCoordinator.startDrag(source,paths,List.of("说明"),"混合"));
+            assertFalse(NativeDragView.clips.get(1).getDescription().getExtras().containsKey("photo_type_flags"));
+            coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,(DockCoordinator.LocalDrag)NativeDragView.states.get(1),0,0));
+            ReflectionHelpers.setStaticField(android.os.Build.class,"MANUFACTURER","other");
+            assertTrue(DockCoordinator.startDrag(source,paths,List.of(),"2 项"));
+            assertFalse(NativeDragView.clips.get(2).getDescription().getExtras().containsKey("photo_type_flags"));
+        } finally {ReflectionHelpers.setStaticField(android.os.Build.class,"MANUFACTURER",manufacturer);}
+    }
+
     @Test @Config(shadows = NativeDragView.class)
     public void nativeSessionsReleaseAfterEndAndDeclineOnlyLiveReentry() throws Exception {
         NativeDragView.resetFixture();

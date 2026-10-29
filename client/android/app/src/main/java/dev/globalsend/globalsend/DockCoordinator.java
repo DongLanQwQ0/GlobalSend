@@ -578,15 +578,22 @@ final class DockCoordinator {
         session.completed = completed;
         List<ClipData.Item> items=new ArrayList<>();java.util.LinkedHashSet<String> types=new java.util.LinkedHashSet<>();
         int flags = View.DRAG_FLAG_GLOBAL;
+        boolean imagesOnly=!paths.isEmpty() && texts.isEmpty();
         for(String path:paths) {
             Uri uri=DockShareProvider.registerReadSource(view.getContext(),path);
             items.add(new ClipData.Item(uri));String type=view.getContext().getContentResolver().getType(uri);types.add(type==null?"application/octet-stream":type);flags |= View.DRAG_FLAG_GLOBAL_URI_READ;
+            imagesOnly &= type!=null && type.startsWith("image/");
         }
         for(String text:texts){if(text==null||text.length()>100000)throw new IllegalArgumentException("Invalid drag text");items.add(new ClipData.Item(text));types.add("text/plain");}
         if(items.isEmpty())throw new IllegalArgumentException("没有可拖动的内容");
         ClipData clip=new ClipData(label,types.toArray(new String[0]),items.get(0));for(int i=1;i<items.size();i++)clip.addItem(items.get(i));
         PersistableBundle metadata = new PersistableBundle();
         metadata.putString(LOCAL_DRAG_SESSION, session.id);
+        // Same-phone Gallery comparison supplies one zero flag per ordinary
+        // image. Keep its Vivo image classification without changing the URI,
+        // the native drag, or the source file's ownership.
+        if(imagesOnly && "vivo".equalsIgnoreCase(Build.MANUFACTURER))
+            metadata.putIntArray("photo_type_flags",new int[paths.size()]);
         clip.getDescription().setExtras(metadata);
         View shadow = new DragPreview(view, session.path, session.text, label);
         int width = (int) (232 * view.getResources().getDisplayMetrics().density), height = (int) (104 * view.getResources().getDisplayMetrics().density);
