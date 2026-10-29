@@ -2,12 +2,12 @@
 
 ## 先确认版本
 
-截至 2026-10-28，发布记录确认：
+截至 2026-10-29，发布记录确认：
 
-- Windows 已更新、启动 **1.0.30+39**，位于 `E:\Programs\GlobalSend`，进程响应。
-- [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.30-android-arm64-v8a.apk)：16,261,512 字节，约 15.51 MiB。**尚未安装到真实手机**；手机最后确认版本仍为 **1.0.28+37**，原数据保留。Chrona 独占共享模拟器进行本机集成联调，x86_64验证包与正式arm64包分开。
-- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.30-windows-x64.zip)。不要只替换 EXE。
-- 中心与 [网页版](https://123.207.180.163/globalsend/app/) 已上线 `globalsend:url-integration-20261028-224537`，新增独立网页意图队列；Web资源沿用已验收的跟随系统及居中拖影版本，原有数据和中继卷保留。
+- Windows **1.0.35+44** 已完整更新并启动于 `E:\Programs\GlobalSend`，进程响应。
+- [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.35-android-arm64-v8a.apk)：16,263,292字节。手机最后确认 **1.0.32+41**；USB断开、无线地址超时，35尚未安装，数据未清除。
+- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.35-windows-x64.zip)：22,354,750字节，不要只复制EXE。[GitHub分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.35-build44)四个资产已上传；中心不托管包。
+- 中心及[网页版](https://123.207.180.163/globalsend/app/)没有本轮适用源码变化，健康复查通过，保留镜像 `globalsend:url-integration-20261028-224537`。
 
 版本以 [本机发布记录](../artifacts/releases/latest-local.json) 和 [中心部署记录](../artifacts/deploy/current-workspace-deployment.json) 为准。新版手机重点为 [独立暂存坞](TEMPORARY_SHELF.md)、系统拖影主题及应用安装包选择；不能把框架测试当作手机更新或物理跨应用拖放验收。步骤见 [UI 验收](UI_ACCEPTANCE.md)。
 

@@ -1,6 +1,6 @@
 # Chrona → GlobalSend：定向打开局域网页面（协商草案）
 
-状态：双方已按此方案分工实现。中心已部署独立 URL 意图队列，Windows 1.0.30+39已更新运行，Android同版正式包已交付并等待独占设备联调。准确消息格式以 [ABI v1](INTEGRATION_ABI_V1.md) 为准。Chrona 拥有 LAN 服务、入口 UI 和独占的设备联调，GlobalSend 拥有本机集成桥、组内发现、定向投递及接收端行为。
+本机集成ABI已实现；真实跨进程绑定、首次关联、通知点击与系统浏览器页面在原共享AVD的1.0.31包上完成记录。该ABI在本轮暂存坞调整中未改变。当前Windows/手机安装版本分开记录于 [快速测试](QUICK_TEST.md)，不把构建完成等同于手机安装。Chrona负责调用端和LAN页面，GlobalSend负责本机桥与组内定向投递。
 
 已收敛范围：Chrona 发送端仅 Android（`com.donglan.chrona`，minSdk 26 / targetSdk 36）；GlobalSend 接收端先覆盖 Windows / Android。不开发 Chrona Windows 客户端，不新增 Windows 本机 IPC，不宣布 Web / iOS 支持自动打开。Chrona 代理已读取并采用本草案，以下纳入其确认的身份和平台边界。
 

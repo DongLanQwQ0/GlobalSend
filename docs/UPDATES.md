@@ -15,9 +15,9 @@
 ```powershell
 # 在项目根目录执行；版本、构建号和源码提交应来自这次构建。
 .\scripts\Publish-GitHubRelease.ps1 -Platform windows `
-  -Package .\artifacts\releases\GlobalSend-1.0.29-windows-x64.zip `
-  -Version 1.0.29 -BuildNumber 38 `
-  -SourceCommit 48c65ed83c7003a1b0279ac60b49d9d458d98b16
+  -Package .\artifacts\releases\GlobalSend-1.0.35-windows-x64.zip `
+  -Version 1.0.35 -BuildNumber 44 `
+  -SourceCommit ddff6aed46feba7de65a2443e9e5734a3d35e2af
 ```
 
 核对输出后，用相同参数加 `-Publish` 发布。Android 用 `-Platform android` 和 APK；iOS 用 `-Platform ios` 和 IPA。脚本读取 Windows EXE 产品版本、Android APK 元数据或 IPA 主应用 plist，版本不匹配就停止。Android 入口适用于本项目显式 ABI 构建、不追加 split-APK 版本码偏移的包。
@@ -28,8 +28,8 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows **1.0.29+38** 已安装运行；Android 同版 APK 已构建，当前 ADB 无在线设备，手机最后确认仍为 **1.0.28+37**。设置中的实际更新检查此前在 Windows 1.0.27 验证。当前[公开 Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.29-build38)含 Windows ZIP、Android arm64 APK 及各自清单；无新 IPA。
+Windows已安装启动 **1.0.35+44**；真实vivo仍 **1.0.32+41**，ADB断开，新包待推送。[公开Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.35-build44)含Windows ZIP、Android arm64 APK和各自清单，四资产已上传，无新IPA。
 
-GitHub API 已确认 1.0.29 四个资产均上传完成，证据 `artifacts/reports/github-release-1.0.29.json`。当前版本实际“设置 → 检查更新”和手机通知仍需界面验收。此前 1.0.28 的公开客户端检查遇到 GitHub 网络超时，保留为历史未通过结果，不用资产上传成功冒充整条客户端更新检查通过。
+GitHub API 已确认 1.0.35 四个资产均上传完成，证据 `artifacts/reports/github-release-1.0.35.json`。当前版本实际“设置 → 检查更新”和手机通知仍需界面验收。此前 1.0.28 的公开客户端检查遇到 GitHub 网络超时，保留为历史未通过结果，不用资产上传成功冒充整条客户端更新检查通过。
 
 客户端选包、重复通知、检查时机及通知按钮分别有自动检查；Android 通知在主机框架中验证。iOS 原生通知代码需在原生端稳定后下一次 IPA 构建和真机安装时验收，不因为发布其他平台包就触发 IPA 构建。
