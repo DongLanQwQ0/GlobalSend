@@ -285,9 +285,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             @Override public boolean dispatchTouchEvent(MotionEvent event) {
                 if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
                     doubleTapGesture=false;
-                    sizingEdges=collapsed || geometry!=null?0:
-                        (event.getX()<dp(4)?1:0)|(event.getX()>getWidth()-dp(4)?2:0)|
-                        (event.getY()<dp(4)?4:0)|(event.getY()>getHeight()-dp(4)?8:0);
+                    sizingEdges=collapsed || geometry!=null || hitsAction(surface,event)?0:
+                        resizeEdges(event.getX(),event.getY(),getWidth(),getHeight());
                     backgroundMove=sizingEdges==0 && !collapsed && geometry==null && !hitsInteraction(surface,event);
                     backgroundMoved=false;
                     if(backgroundMove || sizingEdges!=0) {downX=event.getRawX();downY=event.getRawY();startX=layout.x;startY=layout.y;startWidth=layout.width;startHeight=layout.height;}
@@ -362,7 +361,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         root.setScaleX(.96f); root.setScaleY(.96f);
         expanded = new LinearLayout(context);
         expanded.setOrientation(LinearLayout.HORIZONTAL);
-        expanded.setPadding(dp(4), dp(4), dp(1), dp(4));
+        // The scroll viewport reaches the outer rounded surface. Its inset is
+        // scrollable padding, not a second rectangular clipping boundary.
+        expanded.setPadding(0, dp(4), dp(1), dp(4));
         surface.addView(expanded);
         header = new MoveHeader(context);
         header.setOrientation(LinearLayout.VERTICAL);
@@ -381,6 +382,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         header.addView(all, new LinearLayout.LayoutParams(-1, dp(28)));
         scroll = new HorizontalScrollView(context);
         scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setPadding(dp(4),0,0,0);
+        scroll.setClipToPadding(false);
         row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         scroll.addView(row, new HorizontalScrollView.LayoutParams(-2, -1));
@@ -604,8 +607,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         return bounds.contains((int)event.getX(),(int)event.getY());
     }
     private boolean hitsAction(View view,MotionEvent event) {
-        if(!hits(view,event))return false;
-        if((view instanceof TextView && view.isClickable()) || "清空当前列表".contentEquals(view.getContentDescription()==null?"":view.getContentDescription()))return true;
+        if(view.getVisibility()!=View.VISIBLE || !hits(view,event))return false;
+        if(((view instanceof TextView || view instanceof ImageView) && view.isClickable()) ||
+            view==countGroup || view==shelfGroup ||
+            "清空当前列表".contentEquals(view.getContentDescription()==null?"":view.getContentDescription()))return true;
         if(view instanceof android.view.ViewGroup) {
             android.view.ViewGroup group=(android.view.ViewGroup)view;
             for(int i=0;i<group.getChildCount();i++)if(hitsAction(group.getChildAt(i),event))return true;
@@ -840,6 +845,14 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
     }
 
+    private int resizeEdges(float x,float y,int width,int height) {
+        int edge=dp(12),corner=dp(20);
+        boolean nearSide=x<corner || x>width-corner;
+        boolean nearEnd=y<corner || y>height-corner;
+        int horizontal=nearEnd?corner:edge,vertical=nearSide?corner:edge;
+        return (x<horizontal?1:0)|(x>width-horizontal?2:0)|
+            (y<vertical?4:0)|(y>height-vertical?8:0);
+    }
     private void resizeFromEdges(int edges,int dx,int dy) {
         Rect bounds=availableBounds();int left=startX,right=startX+startWidth,top=startY,bottom=startY+startHeight;
         int minW=dp(152),maxW=Math.min(dp(400),bounds.width()-dp(16));
@@ -966,7 +979,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private void styleSurface() {
         surface.setBackground(shape(glass(appearance.surface,Math.round(0x99*expansion)),Math.round(6+12*expansion)));
-        surface.setElevation(dp(4)+dp(4)*expansion);
+        // Overlay-window elevation casts a second translucent slab outside the
+        // glass surface on OEM compositors. Keep only the rounded glass itself.
+        surface.setElevation(0);
     }
     private void finishGeometry(boolean small) {
         expansion=small?0:1;

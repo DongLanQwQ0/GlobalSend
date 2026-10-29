@@ -301,6 +301,54 @@ public class ReceiveOverlayHeaderDragTest {
         LinearLayout header=(LinearLayout)field(overlay,"header");assertEquals(3,header.getChildCount());
         assertEquals(1,((View)field(overlay,"expanded")).getPaddingRight());overlay.hide();
     }
+    @Test public void generousInvisibleResizeBandsLeaveButtonsAndCardCenterUsable() throws Exception {
+        int[] actions=new int[3];ReceiveOverlay overlay=create(actions);View root=(View)field(overlay,"root");
+        java.lang.reflect.Method edges=ReceiveOverlay.class.getDeclaredMethod("resizeEdges",float.class,float.class,int.class,int.class);
+        edges.setAccessible(true);
+        assertEquals(1,edges.invoke(overlay,10f,50f,232,116));
+        assertEquals(5,edges.invoke(overlay,18f,18f,232,116));
+        assertEquals(10,edges.invoke(overlay,214f,98f,232,116));
+        assertEquals(0,edges.invoke(overlay,30f,50f,232,116));
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        int width=window.width,x=window.x;
+        touch(root,0,MotionEvent.ACTION_DOWN,10,50);touch(root,30,MotionEvent.ACTION_MOVE,-10,50);touch(root,60,MotionEvent.ACTION_UP,-10,50);
+        assertEquals(width+20,window.width);assertEquals(x-20,window.x);draw(root);
+        root.getViewTreeObserver().dispatchOnPreDraw();draw(root);
+        View card=((LinearLayout)field(overlay,"row")).getChildAt(0);
+        View remove=card.findViewWithTag("remove-item");
+        android.graphics.Rect button=new android.graphics.Rect();remove.getDrawingRect(button);
+        ((android.view.ViewGroup)root).offsetDescendantRectToMyCoords(remove,button);
+        // The top of the delete target overlaps the enlarged top resize band.
+        float bx=button.centerX(),by=button.top+1;
+        java.lang.reflect.Method hitAction=ReceiveOverlay.class.getDeclaredMethod("hitsAction",View.class,MotionEvent.class);
+        hitAction.setAccessible(true);
+        MotionEvent point=MotionEvent.obtain(0,0,MotionEvent.ACTION_DOWN,bx,by,0);
+        assertTrue("delete button must win over resize at "+button,(Boolean)hitAction.invoke(overlay,field(overlay,"surface"),point));point.recycle();
+        touch(root,0,MotionEvent.ACTION_DOWN,bx,by);touch(root,10,MotionEvent.ACTION_UP,bx,by);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(0,((Map<?,?>)field(overlay,"items")).size());
+        assertEquals(width+20,window.width);assertEquals(x-20,window.x);
+        assertEquals(0f,((View)field(overlay,"surface")).getElevation(),0f);
+        android.widget.HorizontalScrollView viewport=(android.widget.HorizontalScrollView)field(overlay,"scroll");
+        assertEquals(0,((View)field(overlay,"expanded")).getPaddingLeft());
+        assertFalse(viewport.getClipToPadding());assertEquals(4,viewport.getPaddingLeft());
+        overlay.hide();
+    }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    @Config(qualifiers="w393dp-h851dp-xxhdpi")
+    public void scrolledCardsReachTheOuterGlassInsteadOfAnInsetRectangle() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
+        LinearLayout row=(LinearLayout)field(overlay,"row");
+        View first=row.getChildAt(0);first.setBackgroundColor(0xff208fc6);
+        ((android.widget.FrameLayout)first).getChildAt(0).setVisibility(View.INVISIBLE);
+        android.widget.HorizontalScrollView viewport=(android.widget.HorizontalScrollView)field(overlay,"scroll");
+        viewport.scrollTo(Math.round(24*root.getResources().getDisplayMetrics().density),0);
+        android.graphics.Bitmap pixels=android.graphics.Bitmap.createBitmap(root.getWidth(),root.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);
+        root.draw(new android.graphics.Canvas(pixels));
+        assertEquals("image continues to the outer left edge while scrolling",0xff208fc6,pixels.getPixel(1,root.getHeight()/2));
+        assertEquals(0f,((View)field(overlay,"surface")).getElevation(),0f);
+        capture(overlay,"scrolled-outer-edge");pixels.recycle();overlay.hide();
+    }
     @Test public void receiptOpensCollapsedShelfAndCardsEnterAndExitIndependently() throws Exception {
         ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
         LinearLayout header=(LinearLayout)field(overlay,"header");assertEquals(LinearLayout.VERTICAL,header.getOrientation());

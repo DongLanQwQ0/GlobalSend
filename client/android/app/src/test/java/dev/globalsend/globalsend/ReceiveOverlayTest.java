@@ -32,7 +32,7 @@ public class ReceiveOverlayTest {
         ((View)field(overlay,"handle")).performClick();
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(280));
         assertEquals(Math.round(232*dp), size.width);
-        assertEquals(Math.round(4*dp), ((View)field(overlay,"expanded")).getPaddingLeft());
+        assertEquals(0, ((View)field(overlay,"expanded")).getPaddingLeft());
         assertEquals(Math.round(1*dp), ((View)field(overlay,"expanded")).getPaddingRight());
         ((View)field(overlay,"shelfTab")).performClick();
         LinearLayout row=(LinearLayout)field(overlay,"row"); assertEquals(2,row.getChildCount());
