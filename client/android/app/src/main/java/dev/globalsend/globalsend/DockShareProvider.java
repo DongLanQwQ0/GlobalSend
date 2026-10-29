@@ -105,9 +105,40 @@ public final class DockShareProvider extends ContentProvider {
             finally {android.os.Binder.restoreCallingIdentity(identity);}
             if(descriptor==null)throw new FileNotFoundException("无法读取共享文件");
         }
+        markRead(entry,caller);
+        trace("open-readable");return descriptor;
+    }
+    private static void markRead(Entry entry,int caller) {
         if(caller!=android.os.Process.myUid() && caller>=android.os.Process.FIRST_APPLICATION_UID)
             entry.externalRead=android.os.SystemClock.uptimeMillis();
-        trace("open-readable");return descriptor;
+    }
+    @Override public android.content.res.AssetFileDescriptor openAssetFile(Uri uri,String mode) throws FileNotFoundException {
+        if(!"r".equals(mode))throw new FileNotFoundException("Read-only drag capability");
+        Entry entry=lookup(uri);if(entry.source==null)return super.openAssetFile(uri,mode);
+        int caller=android.os.Binder.getCallingUid();long identity=android.os.Binder.clearCallingIdentity();
+        android.content.res.AssetFileDescriptor result;
+        try {result=getContext().getContentResolver().openAssetFileDescriptor(entry.source,mode);}
+        finally {android.os.Binder.restoreCallingIdentity(identity);}
+        if(result==null)throw new FileNotFoundException("无法读取共享文件");
+        markRead(entry,caller);trace("open-asset-readable");return result;
+    }
+    @Override public android.content.res.AssetFileDescriptor openTypedAssetFile(Uri uri,String type,android.os.Bundle options) throws FileNotFoundException {
+        Entry entry=lookup(uri);if(entry.source==null)return super.openTypedAssetFile(uri,type,options);
+        int caller=android.os.Binder.getCallingUid();long identity=android.os.Binder.clearCallingIdentity();
+        android.content.res.AssetFileDescriptor result;
+        try {result=getContext().getContentResolver().openTypedAssetFileDescriptor(entry.source,type,options);}
+        finally {android.os.Binder.restoreCallingIdentity(identity);}
+        if(result==null)throw new FileNotFoundException("无法读取共享文件");
+        markRead(entry,caller);trace("open-typed-readable");return result;
+    }
+    @Override public String[] getStreamTypes(Uri uri,String filter) {
+        try {
+            Entry entry=lookup(uri);
+            if(entry.source==null)return android.content.ClipDescription.compareMimeTypes(entry.mimeType,filter)?new String[]{entry.mimeType}:null;
+            long identity=android.os.Binder.clearCallingIdentity();
+            try {return getContext().getContentResolver().getStreamTypes(entry.source,filter);}
+            finally {android.os.Binder.restoreCallingIdentity(identity);}
+        } catch(FileNotFoundException missing){return null;}
     }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] arguments, String order) {
         trace("query data="+(projection!=null && java.util.Arrays.asList(projection).contains("_data")));

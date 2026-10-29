@@ -62,4 +62,27 @@ public class DockShareProviderTest {
         Uri original=Uri.parse("content://directory-source/folder");
         assertEquals(original,DockShareProvider.registerReadSource(context,original.toString()));
     }
+    @Test public void assetOnlyDocumentPreservesOffsetsAndTypedStreamsWithoutCopying() throws Exception {
+        Context context=RuntimeEnvironment.getApplication();
+        AndroidDragTest.FixtureProvider source=new AndroidDragTest.FixtureProvider() {
+            @Override public String getType(Uri uri){return "image/png";}
+            @Override public String[] getStreamTypes(Uri uri,String filter){return new String[]{"image/png"};}
+            @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws java.io.FileNotFoundException {throw new java.io.FileNotFoundException("asset-only source");}
+            @Override public android.content.res.AssetFileDescriptor openAssetFile(Uri uri,String mode) throws java.io.FileNotFoundException {
+                return new android.content.res.AssetFileDescriptor(ParcelFileDescriptor.open(new File(directory,uri.getLastPathSegment()),ParcelFileDescriptor.MODE_READ_ONLY),2,3);
+            }
+            @Override public android.content.res.AssetFileDescriptor openTypedAssetFile(Uri uri,String type,android.os.Bundle options) throws java.io.FileNotFoundException {return openAssetFile(uri,"r");}
+        };
+        source.directory=new File(context.getFilesDir(),"asset-source");assertTrue(source.directory.mkdirs());
+        File original=new File(source.directory,"slice.png");Files.write(original.toPath(),new byte[]{9,9,3,1,4,8});
+        ProviderInfo info=new ProviderInfo();info.authority="asset-source";source.attachInfo(context,info);ShadowContentResolver.registerProviderInternal(info.authority,source);
+        DockShareProvider proxy=published(context);Uri exported=DockShareProvider.registerReadSource(context,"content://asset-source/slice.png");
+        try(android.content.res.AssetFileDescriptor asset=proxy.openAssetFile(exported,"r")) {
+            assertEquals(2,asset.getStartOffset());assertEquals(3,asset.getDeclaredLength());assertArrayEquals(new byte[]{3,1,4},asset.createInputStream().readAllBytes());
+        }
+        try(android.content.res.AssetFileDescriptor asset=proxy.openTypedAssetFile(exported,"image/png",null)) {
+            assertArrayEquals(new byte[]{3,1,4},asset.createInputStream().readAllBytes());
+        }
+        assertArrayEquals(new String[]{"image/png"},proxy.getStreamTypes(exported,"image/*"));
+    }
 }
