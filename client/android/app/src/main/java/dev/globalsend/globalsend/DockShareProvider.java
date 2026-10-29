@@ -21,8 +21,12 @@ public final class DockShareProvider extends ContentProvider {
             android.util.Log.d("GlobalSendDrag",event+" caller="+android.os.Binder.getCallingUid());
     }
     private static final class Entry {
-        final File file; final String name; final String mimeType; final long expires = System.currentTimeMillis() + 600000;
-        Entry(File file, String name) { this.file = file; this.name = name; this.mimeType = mimeType(file.getName()); }
+        final File file; final Uri source; final String original,name,mimeType;final Long size;
+        final long expires = System.currentTimeMillis() + 600000;
+        volatile long externalRead=-1;
+        Entry(File file,Uri source,String original,String name,String type,Long size) {
+            this.file=file;this.source=source;this.original=original;this.name=name;this.mimeType=type;this.size=size;
+        }
     }
     private static final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
     static Uri register(android.content.Context context, File file, String label) throws Exception {
@@ -32,15 +36,49 @@ public final class DockShareProvider extends ContentProvider {
         // valid original for this same read-only URI capability.
         if (!canonical.isFile() || !canonical.canRead()) throw new SecurityException("文件不存在或无法读取");
         entries.entrySet().removeIf(e -> e.getValue().expires < System.currentTimeMillis());
-        String id = UUID.randomUUID().toString(); entries.put(id, new Entry(canonical, label));
-        return new Uri.Builder().scheme("content").authority(context.getPackageName() + ".dock-files").appendPath("share").appendPath(id).build();
+        return register(context,new Entry(canonical,null,file.getPath(),label,mimeType(file.getName()),canonical.length()));
+    }
+    private static Uri register(android.content.Context context,Entry entry) {
+        entries.entrySet().removeIf(e -> e.getValue().expires < System.currentTimeMillis());
+        String id=UUID.randomUUID().toString();entries.put(id,entry);
+        // A real display-name segment also supports targets that classify a
+        // shared item by its URI extension rather than querying OpenableColumns.
+        return new Uri.Builder().scheme("content").authority(context.getPackageName()+".dock-files")
+            .appendPath("share").appendPath(id).appendPath(entry.name).build();
+    }
+    static Uri registerReadSource(android.content.Context context,String original) throws Exception {
+        String readable=ReceiveDirectory.readableLocation(context,original);
+        if(!readable.startsWith("content://")) {
+            File file=new File(readable).getCanonicalFile();
+            if(!file.isFile() || !file.canRead())throw new FileNotFoundException("文件不存在或无法读取");
+            return register(context,new Entry(file,null,original,file.getName(),mimeType(file.getName()),file.length()));
+        }
+        Uri source=Uri.parse(readable);String type=context.getContentResolver().getType(source);
+        if(android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(type))return source;
+        String name=source.getLastPathSegment();Long size=null;
+        try(Cursor cursor=context.getContentResolver().query(source,new String[]{OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE},null,null,null)) {
+            if(cursor!=null && cursor.moveToFirst()) {
+                if(!cursor.isNull(0))name=cursor.getString(0);
+                if(!cursor.isNull(1))size=cursor.getLong(1);
+            }
+        }
+        if(name==null || name.isEmpty())name="shared-file";
+        return register(context,new Entry(null,source,original,name,type==null?mimeType(name):type,size));
+    }
+    static boolean canObserveRead(String original) {
+        for(Entry entry:entries.values())if(entry.original.equals(original))return true;
+        return false;
+    }
+    static boolean wasReadSince(String original,long since) {
+        for(Entry entry:entries.values())if(entry.original.equals(original) && entry.externalRead>=since)return true;
+        return false;
     }
     static Uri registerForShare(android.content.Context context,File file,String label) throws Exception {
         return register(context,file,label);
     }
     private Entry lookup(Uri uri) throws FileNotFoundException {
-        if (uri.getPathSegments().size() != 2 || !uri.getPathSegments().get(0).equals("share")) throw new FileNotFoundException();
-        Entry entry = entries.get(uri.getLastPathSegment());
+        if (uri.getPathSegments().size() < 2 || uri.getPathSegments().size()>3 || !uri.getPathSegments().get(0).equals("share")) throw new FileNotFoundException();
+        Entry entry = entries.get(uri.getPathSegments().get(1));
         if (entry == null || entry.expires < System.currentTimeMillis()) throw new FileNotFoundException("Drag authorization expired; drag again");
         return entry;
     }
@@ -56,7 +94,19 @@ public final class DockShareProvider extends ContentProvider {
     }
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         if (!mode.equals("r")) throw new FileNotFoundException("Read-only drag capability");
-        ParcelFileDescriptor descriptor=ParcelFileDescriptor.open(lookup(uri).file, ParcelFileDescriptor.MODE_READ_ONLY);
+        Entry entry=lookup(uri);int caller=android.os.Binder.getCallingUid();
+        ParcelFileDescriptor descriptor;
+        if(entry.file!=null)descriptor=ParcelFileDescriptor.open(entry.file,ParcelFileDescriptor.MODE_READ_ONLY);
+        else {
+            // Forward the app's already-authorized document as a descriptor;
+            // no byte copy and no requirement for the target to understand SAF.
+            long identity=android.os.Binder.clearCallingIdentity();
+            try {descriptor=getContext().getContentResolver().openFileDescriptor(entry.source,"r");}
+            finally {android.os.Binder.restoreCallingIdentity(identity);}
+            if(descriptor==null)throw new FileNotFoundException("无法读取共享文件");
+        }
+        if(caller!=android.os.Process.myUid() && caller>=android.os.Process.FIRST_APPLICATION_UID)
+            entry.externalRead=android.os.SystemClock.uptimeMillis();
         trace("open-readable");return descriptor;
     }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] arguments, String order) {
@@ -64,7 +114,7 @@ public final class DockShareProvider extends ContentProvider {
         try {
             Entry e = lookup(uri); String[] columns = projection == null ? new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE} : projection;
             MatrixCursor cursor = new MatrixCursor(columns); Object[] values = new Object[columns.length];
-            for (int i = 0; i < columns.length; i++) values[i] = columns[i].equals(OpenableColumns.DISPLAY_NAME) ? e.name : columns[i].equals(OpenableColumns.SIZE) ? e.file.length() : null;
+            for (int i = 0; i < columns.length; i++) values[i] = columns[i].equals(OpenableColumns.DISPLAY_NAME) ? e.name : columns[i].equals(OpenableColumns.SIZE) ? (e.file!=null?Long.valueOf(e.file.length()):e.size) : null;
             cursor.addRow(values); return cursor;
         } catch (FileNotFoundException e) { return null; }
     }

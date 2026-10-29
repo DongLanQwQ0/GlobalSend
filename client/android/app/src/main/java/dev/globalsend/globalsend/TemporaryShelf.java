@@ -24,6 +24,7 @@ final class TemporaryShelf {
     private final File file;
     private final Runnable changed;
     private final Map<String, ReceiveNotifications.Receipt> pendingRemoval = new LinkedHashMap<>();
+    private final Map<String,java.util.function.Predicate<ReceiveNotifications.Receipt>> pendingConsumed=new LinkedHashMap<>();
     private long removalDeadline;
     private boolean loaded;
 
@@ -79,9 +80,12 @@ final class TemporaryShelf {
     }
 
     void exported(List<ReceiveNotifications.Receipt> exported, boolean accepted) {
+        exported(exported,accepted,item -> true);
+    }
+    void exported(List<ReceiveNotifications.Receipt> exported,boolean accepted,java.util.function.Predicate<ReceiveNotifications.Receipt> consumed) {
         if (!accepted) return;
         for (ReceiveNotifications.Receipt item : exported)
-            if (items.get(item.id) == item) pendingRemoval.put(item.id, item);
+            if (items.get(item.id) == item) {pendingRemoval.put(item.id, item);pendingConsumed.put(item.id,consumed);}
         if (pendingRemoval.isEmpty()) return;
         removalDeadline = android.os.SystemClock.uptimeMillis() + 3000;
         main.removeCallbacks(removeExported); main.postDelayed(removeExported, 3000);
@@ -91,8 +95,8 @@ final class TemporaryShelf {
     private final Runnable removeExported = this::removeExported;
     private void removeExported() {
         for (Map.Entry<String, ReceiveNotifications.Receipt> entry : pendingRemoval.entrySet())
-            items.remove(entry.getKey(), entry.getValue());
-        pendingRemoval.clear(); removalDeadline = 0;
+            if(pendingConsumed.get(entry.getKey()).test(entry.getValue()))items.remove(entry.getKey(), entry.getValue());
+        pendingRemoval.clear();pendingConsumed.clear(); removalDeadline = 0;
         // Only references disappear. Original files and a target's in-progress
         // read of a copied drop must survive the three-second UI grace period.
         save(); changed.run();
@@ -100,7 +104,7 @@ final class TemporaryShelf {
 
     boolean cancelRemoval() {
         if (pendingRemoval.isEmpty()) return false;
-        main.removeCallbacks(removeExported); pendingRemoval.clear(); removalDeadline = 0;
+        main.removeCallbacks(removeExported); pendingRemoval.clear();pendingConsumed.clear(); removalDeadline = 0;
         return true;
     }
     int removalSeconds() {
@@ -111,7 +115,7 @@ final class TemporaryShelf {
         cancelRemoval(); items.clear(); save(); changed.run();
     }
     void remove(String id) {
-        pendingRemoval.remove(id); items.remove(id); save(); changed.run();
+        pendingRemoval.remove(id);pendingConsumed.remove(id); items.remove(id); save(); changed.run();
     }
     private void save() {
         if (!loaded) return; // Loading merges any drops received during startup before the first write.

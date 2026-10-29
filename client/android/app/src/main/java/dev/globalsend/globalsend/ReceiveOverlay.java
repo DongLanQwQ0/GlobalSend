@@ -662,9 +662,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         shelf.cancelRemoval();
         cancelPendingOpen();
         main.removeCallbacks(countdown); refreshPendingStyles(); updateLabels();
+        long started=android.os.SystemClock.uptimeMillis();
         try {
             return DockCoordinator.startDrag(source, paths, texts, (paths.size() + texts.size()) + " 项", accepted -> {
-                shelf.exported(staged, accepted);
+                boolean[] warned={false};
+                shelf.exported(staged, accepted, item -> {
+                    // Directory document drags retain their original system
+                    // result contract; ordinary exported files are observable.
+                    boolean consumed=item.text!=null || !DockShareProvider.canObserveRead(item.localPath) || DockShareProvider.wasReadSince(item.localPath,started);
+                    if(!consumed && !warned[0]) {warned[0]=true;android.widget.Toast.makeText(context,"目标未读取，已保留暂存项",android.widget.Toast.LENGTH_SHORT).show();}
+                    return consumed;
+                });
             });
         } catch (Exception unavailable) {
             android.util.Log.w("GlobalSend", "Cannot export temporary shelf drag", unavailable);

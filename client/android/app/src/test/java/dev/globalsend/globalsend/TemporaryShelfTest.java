@@ -20,6 +20,16 @@ import org.robolectric.annotation.Config;
 @Config(sdk=34, manifest=Config.NONE)
 public class TemporaryShelfTest {
     private void advance(long millis) { Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(millis)); }
+    @Test public void nativeAcceptanceDoesNotRemoveAFileThatTheTargetNeverRead() {
+        TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
+        shelf.add(List.of("/unread.png","/read.png"),List.of("text"),Map.of());
+        List<ReceiveNotifications.Receipt> batch=new ArrayList<>(shelf.items.values());
+        java.util.Set<String> read=new java.util.HashSet<>();
+        shelf.exported(batch,true,item -> item.text!=null || read.contains(item.localPath));
+        advance(2999);assertEquals(3,shelf.items.size());read.add("/read.png");advance(1);
+        assertEquals(1,shelf.items.size());assertEquals("/unread.png",shelf.items.values().iterator().next().localPath);
+        assertEquals(0,shelf.removalSeconds());assertFalse(shelf.pendingRemoval(shelf.items.keySet().iterator().next()));
+    }
     @Test public void multipleBatchesStayDistinctFromReceiptsAndOnlyAcceptedExportsExpire() throws Exception {
         Context context = RuntimeEnvironment.getApplication();
         File original = new File(context.getFilesDir(), "original.jpg");

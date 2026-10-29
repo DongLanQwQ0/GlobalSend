@@ -555,7 +555,7 @@ public class AndroidDragTest {
         assertNull(intent.getAction());
     }
 
-    @Test public void dragExportAdvertisesRealImageMimeAndReadOnlyBytes() throws Exception {
+    @Test @Config(sdk=34) public void dragExportAdvertisesRealImageMimeAndReadOnlyBytes() throws Exception {
         File image = new File(activity.getFilesDir(), "照片.PNG"); byte[] bytes = {1, 2, 3}; Files.write(image.toPath(), bytes);
         Uri uri = DockShareProvider.register(activity, image, image.getName());
         DockShareProvider provider = new DockShareProvider();
@@ -569,7 +569,7 @@ public class AndroidDragTest {
         catch (java.io.FileNotFoundException expected) {}
     }
 
-    @Test @Config(shadows = NativeDragView.class)
+    @Test @Config(sdk=34,shadows = NativeDragView.class)
     public void savedPublicDownloadCanStartSystemDragAndReturnOriginalWithoutCopy() throws Exception {
         NativeDragView.resetFixture();
         File directory = new File(android.os.Environment.getExternalStoragePublicDirectory(
@@ -601,7 +601,7 @@ public class AndroidDragTest {
         catch (java.io.FileNotFoundException expected) { }
     }
 
-    @Test @Config(shadows = NativeDragView.class)
+    @Test @Config(sdk=34,shadows = NativeDragView.class)
     public void bulkPublicFileDragKeepsEachOriginalNameForOtherApps() throws Exception {
         NativeDragView.resetFixture();
         DockShareProvider provider = new DockShareProvider();
