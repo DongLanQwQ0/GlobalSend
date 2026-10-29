@@ -4,11 +4,13 @@
 
 工作流仅手动触发，推送源码不构建 IPA。Actions 产物保留 14 天；成功后另发布 IPA 与 iOS 更新清单到 GitHub Release。签名证书、Apple 账号、描述文件和 TestFlight 都不参与这条流水线。安装包不放到 GlobalSend 中心服务器。
 
-若当前版本/构建号已有Windows或Android Release，应选择它的源码Tag运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。Windows与真实手机均已更新1.0.50+59。本轮iOS专属修复不替换两端运行版本；[1.0.51（60）IPA构建](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/40885596381)已成功，源码`6727591`，包括iloader重签后的共享组识别修复。
+若当前版本/构建号已有Windows或Android Release，应选择它的源码Tag运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。Windows与真实手机仍为1.0.50+59。本轮只交付iOS：[1.0.52（61）IPA构建](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/40892729580)已成功，源码`63eeef9`，包含分享后唤起、默认分享目标和按唯一设备ID定向发送接口。
 
-本地文件：`artifacts/releases/ios-1.0.51-build60/GlobalSend-iPad-unsigned.ipa`，14,723,485字节。主应用与分享扩展均为1.0.51（60），App Group模板一致且已展开，没有内置字体。也可从[GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.51-build60)下载。macOS已编译并运行共享组选择回归检查；iPhoneOS主应用与扩展编译通过。用户选择使用iloader手动覆盖安装，尚未确认本版iPad分享结果。
+本地文件：`artifacts/releases/ios-1.0.52-build61/GlobalSend-iPad-unsigned.ipa`，14,749,200字节。主应用与分享扩展均为1.0.52（61），App Group模板匹配，没有内置字体，`globalsend`URL入口已注册，通用Flutter页面路由关闭以免抢占原生分享入口。也可从[GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.52-build61)下载。Swift共享组、URL调用和持久化回归检查通过；iPhoneOS主应用与扩展编译通过。51版分享已获用户确认，52版由用户手动安装，实际前台切换与定向发送待验。
 
-iloader会按当前账号改写共享组名称。51版保留原组优先，原组不可用时识别重签后的宿主组；不要重新生成密钥或卸载旧应用。使用原账号覆盖安装，并保留分享扩展，详见[iloader兼容说明](MOBILE_SHARING.md#iloader-重签)。
+安装后先分享一张图片，确认自动打开GlobalSend并显示在待发送。需要免点设备发送时，在 **设置 → 系统分享 → 分享后发送到** 选择目标，之后再分享一批；应只发送本批，不包含原有草稿。默认“仅加入待发送”，不会自行选择收件人。接口见[定向分享调用](MOBILE_SHARING.md#定向调用接口)。
+
+iloader会按当前账号改写共享组名称。51版起保留原组优先，原组不可用时识别重签后的宿主组；不要重新生成密钥或卸载旧应用。使用原账号覆盖安装，并保留分享扩展，详见[iloader兼容说明](MOBILE_SHARING.md#iloader-重签)。
 
 ## 当前构建
 

@@ -28,7 +28,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows与真实vivo均已更新 **1.0.50+59**，手机USB安装成功并读回版本。50新增Windows开机自启动与`--background`参数；按用户要求未进行Windows交互测试，未替用户启用启动项。49的APK安装功能用户已确认可用。[50版Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)提供Windows ZIP、Android APK与对应清单。[iOS 1.0.51（60）](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.51-build60)修复iloader共享组识别，IPA与iOS清单已发布，用户手动安装与分享验收待完成。51没有Windows/Android文件，不应向这两个平台通知更新；各平台按自己的包和版本判断。
+Windows与真实vivo均已更新 **1.0.50+59**，手机USB安装成功并读回版本。50新增Windows开机自启动与`--background`参数；按用户要求未进行Windows交互测试，未替用户启用启动项。49的APK安装功能用户已确认可用。[50版Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)提供Windows ZIP、Android APK与对应清单。[iOS 1.0.52（61）](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.52-build61)新增分享后唤起、默认分享目标和唯一ID定向发送接口，IPA与iOS清单已发布，由用户手动安装。51版分享已获用户确认，52版唤起与定向发送待实机验收。52没有Windows/Android文件，不应向这两个平台通知更新；各平台按自己的包和版本判断。
 
 2026-10-29通过GitHub API确认仓库为public，1.0.48三平台包及三份更新清单均为uploaded。当前版本实际“设置 → 检查更新”和手机通知仍需界面验收。此前1.0.28的公开客户端检查遇到GitHub网络超时，保留为历史未通过结果，不用资产上传成功冒充整条客户端更新检查通过。
 
