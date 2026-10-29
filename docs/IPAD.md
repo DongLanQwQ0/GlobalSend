@@ -4,7 +4,9 @@
 
 工作流仅手动触发，推送源码不构建 IPA。Actions 产物保留 14 天；成功后另发布 IPA 与 iOS 更新清单到 GitHub Release。签名证书、Apple 账号、描述文件和 TestFlight 都不参与这条流水线。安装包不放到 GlobalSend 中心服务器。
 
-若当前版本/构建号已有 Windows 或 Android Release，应选择它的源码 Tag 运行（例如已公开的 `v1.0.35-build44`），让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；若要构建更新后的源码，先增加构建号再手动触发。当前 Windows 与真实手机均已更新1.0.48+57；微信文件拖放及完整贴边往返仍待实机验收，因此暂不触发新IPA。
+若当前版本/构建号已有Windows或Android Release，应选择它的源码Tag运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。Windows与真实手机均已更新1.0.48+57，手机贴边往返和微信图片投放实测通过，用户确认窗口及重启位置记忆正常；最后从`v1.0.48-build57`手动触发的[IPA构建](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/40867884454)已成功，耗时4分36秒。
+
+本地文件：`artifacts/releases/ios-1.0.48-build57/GlobalSend-iPad-unsigned.ipa`，14,722,230字节。主应用与分享扩展均为1.0.48（57），App Group模板一致且已展开，没有内置字体。也可从[GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.48-build57)下载。重签时保留分享扩展并为两者签入匹配的组权限；安装及交互还需iPad实机验收。
 
 ## 当前构建
 

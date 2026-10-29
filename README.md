@@ -14,9 +14,9 @@ Windows 最新本地版为 **1.0.48+57**，完整客户端已更新并运行于 
 
 Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.48-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.48+57 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.48-android-arm64-v8a.apk)已验签、不打包字体，并经 USB 覆盖安装到 vivo，实际版本读回为 **1.0.48+57**。47补齐公共文件/媒体原件的路径读取授权；48修复贴边按钮位置。后续 USB 断开，完整左右往返和微信真实聊天插入仍待同台手机验收，见 [兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
+Android [1.0.48+57 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.48-android-arm64-v8a.apk)已验签、不打包字体，并经USB覆盖安装到vivo，实际版本读回为 **1.0.48+57**。左右贴边往返、横竖屏恢复及微信文件传输助手图片投放已通过；用户确认重启位置记忆正常，见[兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
 
-iPad / iPhone 最后交付的未签名 IPA 为 **1.0.24 (33)**，需要自行签名安装，不含本轮主题功能。构建入口仍仅支持手动触发，见 [iPad 构建说明](docs/IPAD.md)。**中心服务器不托管安装包；当前已公开的 [GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.35-build44) 为1.0.35，包含Windows、Android及平台更新清单。**
+iPad / iPhone 的[**1.0.48 (57) 未签名IPA，约14.7 MB**](artifacts/releases/ios-1.0.48-build57/GlobalSend-iPad-unsigned.ipa)已构建，含系统分享扩展、不打包字体，需要自行签名安装，见[iPad构建说明](docs/IPAD.md)。**中心服务器不托管安装包；[GitHub Release 1.0.48](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.48-build57)已提供三平台包及各自更新清单。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 
