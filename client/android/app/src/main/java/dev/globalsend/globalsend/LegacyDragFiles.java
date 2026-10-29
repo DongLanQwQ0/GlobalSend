@@ -22,20 +22,25 @@ import java.util.concurrent.TimeUnit;
 final class LegacyDragFiles {
     interface Source { InputStream open() throws IOException; }
     static final long LIFETIME_MS=600000;
-    private static final String JOURNAL="drag-path-exports";
+    private static final String JOURNAL="drag-path-exports",READ_GRANTS="drag-path-read-grants";
     private static final ScheduledExecutorService cleanup=Executors.newSingleThreadScheduledExecutor(job -> {
         Thread thread=new Thread(job,"GlobalSend-drag-cache");thread.setDaemon(true);return thread;
     });
 
     static final class Export {
-        final Uri uri,readUri;final String path;
-        Export(Uri uri,Uri readUri,String path){this.uri=uri;this.readUri=readUri;this.path=path;}
+        final Uri uri,readUri;final String path;final boolean owned;
+        Export(Uri uri,Uri readUri,String path){this(uri,readUri,path,true);}
+        Export(Uri uri,Uri readUri,String path,boolean owned){this.uri=uri;this.readUri=readUri;this.path=path;this.owned=owned;}
         void grant(Context context,String[] packages) {
             if(packages!=null)for(String name:packages) {
                 context.grantUriPermission(name,uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 // FUSE checks the typed media/file URI, not the Downloads URI
                 // used to insert the same row. Both grants cover one file only.
                 if(!uri.equals(readUri))context.grantUriPermission(name,readUri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+            if(!owned && packages!=null && packages.length>0) {
+                rememberReadGrant(context,uri);
+                if(!uri.equals(readUri))rememberReadGrant(context,readUri);
             }
         }
     }
@@ -45,6 +50,8 @@ final class LegacyDragFiles {
         cleanup.execute(() -> {
             for(Map.Entry<String,?> entry:app.getSharedPreferences(JOURNAL,0).getAll().entrySet())
                 schedule(app,Uri.parse(entry.getKey()),(Long)entry.getValue());
+            for(Map.Entry<String,?> entry:app.getSharedPreferences(READ_GRANTS,0).getAll().entrySet())
+                scheduleReadGrant(app,Uri.parse(entry.getKey()),(Long)entry.getValue());
         });
     }
 
@@ -92,6 +99,45 @@ final class LegacyDragFiles {
         String root=Environment.getExternalStorageDirectory().getCanonicalPath()+File.separator;
         String actual=file.getPath();
         return actual.startsWith(root) && !actual.startsWith(root+"Android"+File.separator)?actual:null;
+    }
+
+    /** Reuse a real media row without copying or taking ownership of the file. */
+    static Export existing(Context context,String path,Uri source) throws IOException {
+        Uri collection;String selection=null;String[] args=null;
+        try {
+            if(source!=null && "media".equals(source.getAuthority()))collection=fileAccessUri(source,0);
+            else {
+                if(path==null)return null;
+                collection=MediaStore.Files.getContentUri("external");selection=MediaStore.MediaColumns.DATA+"=?";args=new String[]{path};
+            }
+            try(Cursor cursor=context.getContentResolver().query(collection,new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.DATA,MediaStore.Files.FileColumns.MEDIA_TYPE},selection,args,null)) {
+                if(cursor==null || !cursor.moveToFirst() || cursor.isNull(1))return null;
+                String actual=publicPath(cursor.getString(1));
+                if(actual==null || path!=null && !path.equals(actual))return null;
+                Uri row=ContentUris.withAppendedId(MediaStore.Files.getContentUri(MediaStore.getVolumeName(collection)),cursor.getLong(0));
+                return new Export(row,fileAccessUri(row,cursor.getInt(2)),actual,false);
+            }
+        } catch(IllegalArgumentException | SecurityException virtualSource) { return null; }
+    }
+
+    private static void rememberReadGrant(Context context,Uri uri) {
+        long expires=System.currentTimeMillis()+LIFETIME_MS;
+        var journal=context.getSharedPreferences(READ_GRANTS,0);
+        long previous=journal.getLong(uri.toString(),0);
+        journal.edit().putLong(uri.toString(),expires).apply();
+        if(previous==0)scheduleReadGrant(context.getApplicationContext(),uri,expires);
+    }
+    private static void scheduleReadGrant(Context context,Uri uri,long expires) {
+        cleanup.schedule(() -> expireReadGrant(context,uri),Math.max(0,expires-System.currentTimeMillis()),TimeUnit.MILLISECONDS);
+    }
+    static void expireReadGrant(Context context,Uri uri) {
+        var journal=context.getSharedPreferences(READ_GRANTS,0);
+        if(!journal.contains(uri.toString()))return;
+        long current=journal.getLong(uri.toString(),0);
+        if(current>System.currentTimeMillis()){scheduleReadGrant(context,uri,current);return;}
+        context.revokeUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        journal.edit().remove(uri.toString()).apply();
+        // This row belongs to the original source: never delete it.
     }
 
     private static void schedule(Context context,Uri uri,long expires) {

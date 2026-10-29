@@ -163,22 +163,11 @@ public final class DockShareProvider extends ContentProvider {
                 if(external && legacy) {
                     long identity=android.os.Binder.clearCallingIdentity();
                     try {
-                        if(path==null) {
-                            synchronized(e) {
-                                if(e.legacyExport==null && e.source!=null && "media".equals(e.source.getAuthority())) {
-                                    try(Cursor original=getContext().getContentResolver().query(e.source,new String[]{"_data"},null,null,null)) {
-                                        if(original!=null && original.moveToFirst()) {
-                                            int column=original.getColumnIndex("_data");
-                                            if(column>=0 && !original.isNull(column))path=LegacyDragFiles.publicPath(original.getString(column));
-                                        }
-                                    } catch(IllegalArgumentException virtualImage) { /* Photo Picker sources may expose only streams. */ }
-                                }
-                                if(path==null) {
-                                    if(e.legacyExport==null)e.legacyExport=LegacyDragFiles.publish(getContext(),e.name,e.mimeType,
-                                        () -> e.file!=null?new java.io.FileInputStream(e.file):getContext().getContentResolver().openInputStream(e.source));
-                                    e.legacyExport.grant(getContext(),packages);path=e.legacyExport.path;
-                                }
-                            }
+                        synchronized(e) {
+                            if(e.legacyExport==null)e.legacyExport=LegacyDragFiles.existing(getContext(),path,e.source);
+                            if(e.legacyExport==null)e.legacyExport=LegacyDragFiles.publish(getContext(),e.name,e.mimeType,
+                                () -> e.file!=null?new java.io.FileInputStream(e.file):getContext().getContentResolver().openInputStream(e.source));
+                            e.legacyExport.grant(getContext(),packages);path=e.legacyExport.path;
                         }
                     } finally {android.os.Binder.restoreCallingIdentity(identity);}
                     // A legacy reader consumes a path, not our descriptor.

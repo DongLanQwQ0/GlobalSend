@@ -70,6 +70,7 @@ public class LegacyDragFilesTest {
     @Test public void publicOriginalUsesItsExistingPathWithoutCreatingAnotherFile() throws Exception {
         setup();File original=new File(android.os.Environment.getExternalStorageDirectory(),"Download/existing.jpg");
         assertTrue(original.getParentFile().mkdirs() || original.getParentFile().isDirectory());Files.write(original.toPath(),new byte[]{1,2,3});
+        media.files.put(Uri.parse("content://media/external/images/media/71"),original);
         Uri uri=DockShareProvider.registerReadSource(context,original.getPath());
         try(Cursor cursor=externalQuery(uri,null)){assertTrue(cursor.moveToFirst());assertEquals(original.getCanonicalPath(),cursor.getString(cursor.getColumnIndexOrThrow("_data")));}
         assertEquals(0,media.inserted);assertTrue(original.exists());
@@ -133,6 +134,27 @@ public class LegacyDragFilesTest {
         assertEquals(java.util.List.of(document.uri,Uri.parse("content://media/external/file/2")),granted);
         LegacyDragFiles.remove(captures,document.uri);assertTrue(revoked.contains(document.readUri));
     }
+    @Test public void borrowedMediaGrantsExpireWithoutDeletingOrCopyingTheOriginal() throws Exception {
+        setup();File original=new File(android.os.Environment.getExternalStorageDirectory(),"Download/borrowed.png");
+        assertTrue(original.getParentFile().mkdirs() || original.getParentFile().isDirectory());Files.write(original.toPath(),new byte[]{1,2});
+        Uri mediaUri=Uri.parse("content://media/external/images/media/91");media.files.put(mediaUri,original);
+        LegacyDragFiles.Export borrowed=LegacyDragFiles.existing(context,original.getCanonicalPath(),null);
+        assertNotNull(borrowed);assertFalse(borrowed.owned);assertEquals(original.getCanonicalPath(),borrowed.path);
+        assertEquals(0,media.inserted);
+        java.util.List<Uri> revoked=new java.util.ArrayList<>();
+        Context captures=new android.content.ContextWrapper(context) {
+            @Override public void grantUriPermission(String target,Uri uri,int flags){}
+            @Override public void revokeUriPermission(Uri uri,int flags){revoked.add(uri);}
+        };
+        borrowed.grant(captures,new String[]{"com.target"});
+        var journal=context.getSharedPreferences("drag-path-read-grants",0);
+        assertTrue(journal.contains(borrowed.uri.toString()));assertTrue(journal.contains(borrowed.readUri.toString()));
+        for(Uri alias:java.util.List.of(borrowed.uri,borrowed.readUri)) {
+            journal.edit().putLong(alias.toString(),0).commit();LegacyDragFiles.expireReadGrant(captures,alias);
+        }
+        assertEquals(java.util.List.of(borrowed.uri,borrowed.readUri),revoked);
+        assertEquals(0,media.deleted);assertTrue(original.exists());
+    }
     public static final class Media extends ContentProvider {
         final Map<Uri,File> files=new LinkedHashMap<>();final Map<Uri,Integer> types=new LinkedHashMap<>();int inserted,deleted;Uri last;boolean failOutput;String copyThread="";
         @Override public boolean onCreate(){return true;}
@@ -144,10 +166,14 @@ public class LegacyDragFilesTest {
         @Override public String getType(Uri uri){return "image/png";}
         @Override public Cursor query(Uri uri,String[] projection,String selection,String[] args,String sort) {
             String[] columns=projection==null?new String[]{"_data",OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE}:projection;
-            if(!files.containsKey(uri) && uri.getPathSegments().contains("file"))
-                uri=Uri.parse("content://media/external/downloads/"+uri.getLastPathSegment());
-            MatrixCursor cursor=new MatrixCursor(columns);Object[] row=new Object[columns.length];File file=files.get(uri);
-            for(int i=0;i<columns.length;i++)row[i]="_data".equals(columns[i])?file.getPath():"media_type".equals(columns[i])?types.getOrDefault(uri,1):OpenableColumns.DISPLAY_NAME.equals(columns[i])?file.getName():OpenableColumns.SIZE.equals(columns[i])?file.length():null;
+            MatrixCursor cursor=new MatrixCursor(columns);
+            if(selection!=null && args!=null) {
+                uri=files.entrySet().stream().filter(entry->entry.getValue().getPath().equals(args[0])).map(Map.Entry::getKey).findFirst().orElse(null);
+            }else if(!files.containsKey(uri)) {
+                String id=uri.getLastPathSegment();uri=files.keySet().stream().filter(key->key.getLastPathSegment().equals(id)).findFirst().orElse(null);
+            }
+            File file=files.get(uri);if(file==null)return cursor;Object[] row=new Object[columns.length];
+            for(int i=0;i<columns.length;i++)row[i]="_id".equals(columns[i])?Long.valueOf(uri.getLastPathSegment()):"_data".equals(columns[i])?file.getPath():"media_type".equals(columns[i])?types.getOrDefault(uri,1):OpenableColumns.DISPLAY_NAME.equals(columns[i])?file.getName():OpenableColumns.SIZE.equals(columns[i])?file.length():null;
             cursor.addRow(row);return cursor;
         }
         @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws FileNotFoundException {
