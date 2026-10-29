@@ -32,8 +32,8 @@ public class ReceiveOverlayTest {
         ((View)field(overlay,"handle")).performClick();
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(280));
         assertEquals(Math.round(244*dp), size.width);
-        assertEquals(Math.round(6*dp), ((View)field(overlay,"expanded")).getPaddingLeft());
-        assertEquals(Math.round(6*dp), ((View)field(overlay,"expanded")).getPaddingRight());
+        assertEquals(Math.round(4*dp), ((View)field(overlay,"expanded")).getPaddingLeft());
+        assertEquals(Math.round(4*dp), ((View)field(overlay,"expanded")).getPaddingRight());
         ((View)field(overlay,"shelfTab")).performClick();
         LinearLayout row=(LinearLayout)field(overlay,"row"); assertEquals(2,row.getChildCount());
         assertEquals("仅暂存",((android.widget.TextView)((android.widget.FrameLayout)row.getChildAt(0)).getChildAt(0)).getText().toString());

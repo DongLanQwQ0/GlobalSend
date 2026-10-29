@@ -48,6 +48,11 @@ public final class ShelfAcceptanceActivity extends Activity {
         next.setText("下一条测试文本");
         next.setOnClickListener(view -> { sequence++; source.setText(marker()); });
         page.addView(next, new LinearLayout.LayoutParams(-1, dp(56)));
+        Button image=new Button(this);image.setText("长按拖出测试图片");image.setContentDescription("fixture-image-source");
+        image.setOnLongClickListener(view -> view.startDragAndDrop(ClipData.newUri(getContentResolver(),"GS synthetic image",
+            android.net.Uri.parse("content://dev.globalsend.shelfacceptance.probe/probe.png")),new View.DragShadowBuilder(view),null,
+            View.DRAG_FLAG_GLOBAL | View.DRAG_FLAG_GLOBAL_URI_READ));
+        page.addView(image,new LinearLayout.LayoutParams(-1,dp(72)));
         destination = label("将暂存项拖到这里\n接受测试文本或 GlobalSend 文件，仅检查读取授权", 18);
         destination.setContentDescription("fixture-target");
         destination.setGravity(Gravity.CENTER);
@@ -63,7 +68,8 @@ public final class ShelfAcceptanceActivity extends Activity {
                 for (int i = 0; i < clip.getItemCount(); i++) {
                     android.net.Uri uri=clip.getItemAt(i).getUri();
                     if(uri!=null) {
-                        if(!"dev.globalsend.globalsend.dock-files".equals(uri.getAuthority()))return false;
+                        if(!"dev.globalsend.globalsend.dock-files".equals(uri.getAuthority()) &&
+                            !"dev.globalsend.shelfacceptance.probe".equals(uri.getAuthority()))return false;
                         // Exercise the target-side grant and actual provider FD,
                         // without saving the URI, filename, or user file content.
                         try(java.io.InputStream input=getContentResolver().openInputStream(uri)) {
@@ -119,5 +125,30 @@ public final class ShelfAcceptanceActivity extends Activity {
         TextView view = new TextView(this);
         view.setText(text); view.setTextSize(size); view.setTextColor(Color.rgb(35, 42, 39));
         return view;
+    }
+    public static final class ImageProvider extends android.content.ContentProvider {
+        private File file;
+        @Override public boolean onCreate() {
+            file=new File(getContext().getFilesDir(),"shelf-probe.png");
+            android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(240,240,android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas canvas=new android.graphics.Canvas(bitmap);canvas.drawColor(0xff468fc5);
+            android.graphics.Paint paint=new android.graphics.Paint(3);paint.setColor(0xffffde79);canvas.drawCircle(120,120,75,paint);
+            paint.setColor(0xff202124);paint.setTextSize(28);canvas.drawText("GS probe",60,130,paint);
+            try(java.io.FileOutputStream out=new java.io.FileOutputStream(file)){bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}
+            catch(java.io.IOException error){throw new IllegalStateException(error);}finally{bitmap.recycle();}
+            return true;
+        }
+        @Override public String getType(android.net.Uri uri){return "image/png";}
+        @Override public android.os.ParcelFileDescriptor openFile(android.net.Uri uri,String mode) throws java.io.FileNotFoundException {
+            if(!"r".equals(mode))throw new java.io.FileNotFoundException();
+            return android.os.ParcelFileDescriptor.open(file,android.os.ParcelFileDescriptor.MODE_READ_ONLY);
+        }
+        @Override public android.database.Cursor query(android.net.Uri uri,String[] columns,String selection,String[] args,String order) {
+            android.database.MatrixCursor result=new android.database.MatrixCursor(new String[]{"_display_name","_size"});
+            result.addRow(new Object[]{"GS-shelf-probe.png",file.length()});return result;
+        }
+        @Override public android.net.Uri insert(android.net.Uri uri,android.content.ContentValues values){throw new UnsupportedOperationException();}
+        @Override public int update(android.net.Uri uri,android.content.ContentValues values,String s,String[] a){throw new UnsupportedOperationException();}
+        @Override public int delete(android.net.Uri uri,String s,String[] a){throw new UnsupportedOperationException();}
     }
 }

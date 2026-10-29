@@ -63,7 +63,7 @@ public class ReceiveOverlayHeaderDragTest {
         assertTrue("header height", header.getHeight() > 0);
         for (int i=0; i<header.getChildCount(); i++) {
             View control = header.getChildAt(i);
-            float x = (control.getLeft() + control.getRight()) / 2f, y = header.getHeight() / 2f;
+            float x = (control.getLeft() + control.getRight()) / 2f, y = (control.getTop()+control.getBottom())/2f;
             int beforeX = window.x, beforeY = window.y;
             assertTrue("DOWN " + header.getClass().getName() + " at " + x + "," + y, touch(header, 0, MotionEvent.ACTION_DOWN, x, y));
             assertTrue("tracking after DOWN", (Boolean)field(header, "tracking"));
@@ -90,14 +90,14 @@ public class ReceiveOverlayHeaderDragTest {
         int gap=Math.round(4*header.getResources().getDisplayMetrics().density);
         assertEquals(gap,receivedIcon.getLeft()-received.getRight());
         assertEquals(gap,stagedIcon.getLeft()-staged.getRight());
-        float x = (shelf.getLeft()+shelf.getRight())/2f, y=header.getHeight()/2f;
+        float x = (shelf.getLeft()+shelf.getRight())/2f, y=(shelf.getTop()+shelf.getBottom())/2f;
         touch(header, 0, MotionEvent.ACTION_DOWN, x, y);
         touch(header, 10, MotionEvent.ACTION_UP, x, y);
         Shadows.shadowOf(Looper.getMainLooper()).idle();
         assertTrue((Boolean)field(overlay,"shelfVisible"));
         int[] held = {0};
         bulk.setOnLongClickListener(view -> { held[0]++; return true; });
-        x=(bulk.getLeft()+bulk.getRight())/2f;
+        x=(bulk.getLeft()+bulk.getRight())/2f;y=(bulk.getTop()+bulk.getBottom())/2f;
         touch(header, 0, MotionEvent.ACTION_DOWN, x, y);
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout()+100));
         assertEquals(1,held[0]);
@@ -246,6 +246,7 @@ public class ReceiveOverlayHeaderDragTest {
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         View root=(View)field(overlay,"root");
         WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        assertFalse("system must not append another position animation",window.canPlayMoveAnimation());
         android.graphics.Rect bounds=(android.graphics.Rect)field(overlay,"lastBounds");
         for(boolean right:new boolean[]{false,true}) {
             window.x=right?bounds.right-window.width-8:bounds.left+8;
@@ -272,6 +273,37 @@ public class ReceiveOverlayHeaderDragTest {
             advanceGeometry(overlay,240);
         }
         overlay.hide();
+    }
+    @Test public void backgroundFollowsPressedOffsetButControlsAndFileDragKeepTheirGestures() throws Exception {
+        int[] actions=new int[3];ReceiveOverlay overlay=create(actions);View root=(View)field(overlay,"root");
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();int x=window.x,y=window.y;
+        touch(root,0,MotionEvent.ACTION_DOWN,1,50);touch(root,30,MotionEvent.ACTION_MOVE,-29,30);touch(root,60,MotionEvent.ACTION_UP,-29,30);
+        assertEquals(x-30,window.x);assertEquals(y-20,window.y);assertArrayEquals(new int[3],actions);
+        draw(root);View card=((LinearLayout)field(overlay,"row")).getChildAt(0);int[] dragged={0};
+        card.setOnLongClickListener(view -> {dragged[0]++;return true;});
+        touch(root,0,MotionEvent.ACTION_DOWN,20,40);
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout()+100));
+        touch(root,800,MotionEvent.ACTION_UP,20,40);
+        assertEquals(1,dragged[0]);assertEquals(x-30,window.x);assertEquals(y-20,window.y);
+        overlay.hide();
+    }
+    @Test public void receiptOpensCollapsedShelfAndCardsEnterAndExitIndependently() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
+        LinearLayout header=(LinearLayout)field(overlay,"header");assertEquals(LinearLayout.VERTICAL,header.getOrientation());
+        android.graphics.Rect rail=new android.graphics.Rect();header.getDrawingRect(rail);((android.view.ViewGroup)root).offsetDescendantRectToMyCoords(header,rail);
+        assertTrue("controls are at the right edge",rail.left>root.getWidth()/2);
+        overlay.show(new ReceiveNotifications.Receipt("new","1","probe","new card",null,null,0),2,ignored -> {});
+        LinearLayout row=(LinearLayout)field(overlay,"row");View incoming=row.getChildAt(0);
+        assertEquals(0,incoming.getAlpha(),.001f);assertTrue(incoming.getTranslationY()<0);
+        draw(root);root.getViewTreeObserver().dispatchOnPreDraw();
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(220));assertEquals(1,incoming.getAlpha(),.001f);
+        incoming.findViewWithTag("remove-item").performClick();
+        assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(160));assertEquals(0,incoming.getAlpha(),.001f);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);overlay.setCollapsed(true);advanceGeometry(overlay,240);
+        overlay.show(new ReceiveNotifications.Receipt("file","1","probe",null,"photo.png","/not-read.png",0),3,ignored -> {});
+        assertFalse("arrival expands immediately without waiting for completion",(Boolean)field(overlay,"collapsed"));
+        assertNotNull(field(overlay,"geometry"));advanceGeometry(overlay,240);overlay.hide();
     }
     @Test public void enabledShelfRestoresCollapsedOnNewRuntimeAndDisabledShelfStaysClosed() throws Exception {
         android.content.Context context=RuntimeEnvironment.getApplication();
