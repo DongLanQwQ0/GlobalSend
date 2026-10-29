@@ -29,6 +29,11 @@ jobs:
         run: |
           flutter --version
           xcodebuild -version
+      - name: Share container regression
+        run: |
+          mkdir -p artifacts/tmp/ios-share-tests
+          swiftc client/ios/Runner/SharedInboxStore.swift client/ios/Tests/SharedInboxGroupTests.swift -o artifacts/tmp/ios-share-tests/SharedInboxGroupTests
+          artifacts/tmp/ios-share-tests/SharedInboxGroupTests
       - name: Resolve dependencies
         working-directory: client
         run: flutter pub get --enforce-lockfile

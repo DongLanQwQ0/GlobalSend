@@ -33,7 +33,15 @@ GLOBALSEND_APP_BUNDLE_ID=dev.globalsend.globalsend
 GLOBALSEND_APP_GROUP_ID=group.dev.globalsend.globalsend
 ```
 
-若扩展提示 App Group 未授权，应修正重签后的两份权限/配置文件；不能据此断定必须付费。主应用的“用其他应用打开/Open In”独立支持普通文件导入，主应用未取得组容器时会使用自己的接收队列。
+### iloader 重签
+
+iloader 2.4.0 使用 isideload 0.5.0，将主应用标识改为`原Bundle ID.团队ID`，并为主应用及扩展分配`group.重签后主应用Bundle ID`。它不会同步改写GlobalSend自定义的`GLOBALSEND_APP_GROUP_ID`配置。因此，旧版仅查固定组名，会把“正在查找错误的组”误报为“未授权”。这是GlobalSend的兼容缺陷，不需要重新生成密钥。签名行为见[上游实现](https://github.com/nab138/isideload/blob/main/isideload/src/sideload/sideloader.rs)。
+
+51版源码保留原组优先；原组不可用时，再使用重签后的主应用标识查找对应共享组。扩展从宿主应用读取同一个标识，不使用扩展自己的标识。容器仍由iPadOS检查实际授权；不会以应用私有目录冒充扩展共享目录。若两种组均不可用，才提示检查主应用与扩展的签名。
+
+在iloader中使用原账号覆盖安装修复版IPA，并保留`ShareExtension`。不要卸载旧应用或更换账号、Bundle ID；本次适配不需要提供Apple ID密码、证书或私钥。签名器未保留重签IPA时，可查签名日志，不要求用户提供不存在的文件。
+
+主应用的“用其他应用打开/Open In”独立支持普通文件导入，主应用未取得组容器时仍使用自己的接收队列。未修复的48版IPA仍需原签名组名与运行配置完全匹配。
 
 本项目不收集 Apple 账号、私钥或签名材料。实际重签和 iPad 安装验收由设备上的签名结果决定。
 

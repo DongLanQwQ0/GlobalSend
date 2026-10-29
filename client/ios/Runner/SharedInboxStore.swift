@@ -1,5 +1,26 @@
 import Foundation
 
+enum SharedInboxGroup {
+  static func hostBundleURL(for bundleURL: URL) -> URL {
+    bundleURL.pathExtension == "appex"
+      ? bundleURL.deletingLastPathComponent().deletingLastPathComponent()
+      : bundleURL
+  }
+
+  static func container(configuredGroup: String, hostBundleIdentifier: String?,
+                        locate: (String) -> URL?) -> URL? {
+    // iloader signs the host and all extensions into group.<resigned host ID>.
+    // Its rewritten entitlement does not update our custom Info.plist key.
+    // Keep existing installations on their configured group when available.
+    if let container = locate(configuredGroup) { return container }
+    if let host = hostBundleIdentifier {
+      let resignedGroup = "group." + host
+      if resignedGroup != configuredGroup { return locate(resignedGroup) }
+    }
+    return nil
+  }
+}
+
 struct SharedPayload: Codable {
   let batchId: String
   var paths: [String]
@@ -15,12 +36,15 @@ final class SharedInboxStore {
   init(extensionOnly: Bool = false) throws {
     let manager = FileManager.default
     let group = Bundle.main.object(forInfoDictionaryKey: "GLOBALSEND_APP_GROUP_ID") as? String ?? "group.dev.globalsend.globalsend"
-    if let container = manager.containerURL(forSecurityApplicationGroupIdentifier: group) {
+    let host = Bundle(url: SharedInboxGroup.hostBundleURL(for: Bundle.main.bundleURL))
+    if let container = SharedInboxGroup.container(configuredGroup: group,
+        hostBundleIdentifier: host?.bundleIdentifier,
+        locate: { manager.containerURL(forSecurityApplicationGroupIdentifier: $0) }) {
       root = container.appendingPathComponent("ShareInbox", isDirectory: true)
     } else if !extensionOnly {
       root = try manager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("ShareInbox", isDirectory: true)
     } else {
-      throw NSError(domain: "GlobalSend.Share", code: 1, userInfo: [NSLocalizedDescriptionKey: "分享扩展尚未取得 App Group 授权，请用一致的组权限重新签名。"])
+      throw NSError(domain: "GlobalSend.Share", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法打开分享空间，请用同一账号一起签名主应用和分享扩展，并保留扩展。"])
     }
     try manager.createDirectory(at: root, withIntermediateDirectories: true)
   }
