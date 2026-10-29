@@ -10,6 +10,9 @@ class GroupSharedText {
   final void Function() onChanged;
   final void Function(Map<String, dynamic>)? onRemoteApplied;
   CenterApi? _api;
+  String _groupId = '';
+  String get _path =>
+      '/group/shared-text${_groupId.isEmpty ? '' : '?groupId=${Uri.encodeQueryComponent(_groupId)}'}';
   bool supported = false, online = false;
   String text = '', remoteText = '', status = '';
   int revision = 0;
@@ -18,10 +21,11 @@ class GroupSharedText {
   Timer? _debounce;
   int _epoch = 0;
 
-  void connect(CenterApi api, {required bool enabled}) {
-    if (!identical(_api, api)) {
+  void connect(CenterApi api, {required bool enabled, String groupId = ''}) {
+    if (!identical(_api, api) || _groupId != groupId) {
       reset();
       _api = api;
+      _groupId = groupId;
     }
     supported = enabled;
     online = true;
@@ -46,7 +50,7 @@ class GroupSharedText {
     final api = _api, epoch = _epoch;
     if (!supported || !online || api == null) return;
     try {
-      final document = await api.call('GET', '/group/shared-text');
+      final document = await api.call('GET', _path);
       if (epoch != _epoch) return;
       applyRemote(document);
       if (dirty && !conflict && !_saving) _schedule();
@@ -122,7 +126,7 @@ class GroupSharedText {
     _ownMutation = mutation;
     onChanged();
     try {
-      final document = await api.call('PUT', '/group/shared-text', {
+      final document = await api.call('PUT', _path, {
         'text': snapshot,
         'baseRevision': revision,
         'mutationId': mutation,

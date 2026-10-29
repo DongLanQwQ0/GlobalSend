@@ -2965,6 +2965,35 @@ class _SendScreenState extends State<SendScreen>
                   '组内共享',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
+                if (c.joinedGroups.length > 1) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        key: const ValueKey('shared-group-selector'),
+                        icon: const AppIcon(Icons.arrow_drop_down,size:18),
+                        value: c.profile!.groupId,
+                        isDense: true,
+                        items: c.joinedGroups
+                            .map(
+                              (g) => DropdownMenuItem<String>(
+                                value: g['groupId'] as String,
+                                child: Text(
+                                  g['name'] as String,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null)
+                            perform(() => c.selectSharedGroup(value));
+                        },
+                      ),
+                    ),
+                  ),
+                ],
                 const Spacer(),
                 IconButton(
                   key: const ValueKey('shared-undo'),
@@ -4745,9 +4774,64 @@ class _SendScreenState extends State<SendScreen>
             cleanupFilterFields(),
           ]),
           settingsSection('分组', [
+            if (c.multiGroupSupported) ...[
+              for (final group in c.joinedGroups)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(group['name'] as String),
+                  leading: Container(
+                    width: 20,
+                    height: 20,
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: group['groupId'] == c.profile!.groupId
+                            ? Theme.of(context).colorScheme.primary
+                            : Ui.colors(context).muted,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: group['groupId'] == c.profile!.groupId
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.transparent,
+                      ),
+                    ),
+                  ),
+                  onTap: working
+                      ? null
+                      : () => perform(
+                          () => c.selectSharedGroup(group['groupId'] as String),
+                        ),
+                  trailing: IconButton(
+                    tooltip: '退出此组',
+                    icon: const AppIcon(Icons.logout_rounded, size: 20),
+                    onPressed: working
+                        ? null
+                        : () async {
+                            if (await confirm(
+                              '退出 ${group['name']}？',
+                              '本地文件和历史记录保留。',
+                              '退出',
+                            ))
+                              await perform(
+                                () => c.leaveGroup(group['groupId'] as String),
+                              );
+                          },
+                  ),
+                ),
+              TextButton.icon(
+                onPressed: working ? null : joinAnotherGroup,
+                icon: const AppIcon(Icons.add, size: 18),
+                label: const Text('加入分组'),
+              ),
+            ],
             ListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('退出当前组'),
+              title: Text(c.multiGroupSupported ? '断开服务器' : '退出当前组'),
               trailing: const AppIcon(Icons.logout_rounded, size: 20),
               onTap: working ? null : signOut,
             ),
@@ -4953,6 +5037,55 @@ class _SendScreenState extends State<SendScreen>
         settingsOpen = false;
       });
     }
+  }
+
+  Future<void> joinAnotherGroup() async {
+    final password = TextEditingController(), label = TextEditingController();
+    final submit = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('加入分组'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              UiField(
+                label: '名称（可选）',
+                child: TextField(controller: label, autofocus: true),
+              ),
+              const SizedBox(height: 16),
+              UiField(
+                label: '组密码',
+                child: TextField(
+                  controller: password,
+                  obscureText: true,
+                  onSubmitted: (_) => Navigator.pop(dialog, true),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('加入'),
+          ),
+        ],
+      ),
+    );
+    final key = password.text, name = label.text;
+    // Dialog route may retain its text fields during the exit transition.
+    Future<void>.delayed(const Duration(milliseconds: 350), () {
+      password.dispose();
+      label.dispose();
+    });
+    if (submit == true && mounted)
+      await perform(() => c.joinAdditionalGroup(key, name: name), done: '已加入');
   }
 }
 

@@ -11,6 +11,47 @@ import WebSocket from "ws";
 import { buildApp } from "../src/server.js";
 
 const bootstrapSecret = "test-bootstrap-32-characters-secret";
+
+test('one identity joins multiple groups: union discovery is unique, notes isolated and membership survives restart', async()=>{
+  const f=await fixture();
+  try{
+    const a=await f.enroll('Same name','multi-group-first-password');
+    const b=await f.enroll('Same name','multi-group-second-password');
+    const c=await f.enroll('Same name','multi-group-first-password');
+    const outsider=await f.enroll('Same name','multi-group-outsider-password');
+    const first=(await f.call('GET','/groups',undefined,a.token)).body.groups[0].groupId;
+    const joined=await f.call('POST','/groups/join',{groupKey:'multi-group-second-password',name:'朋友'},a.token);
+    assert.equal(joined.status,200);assert.equal(joined.body.groups.length,2);
+    const second=joined.body.groupId;
+    assert.equal((await f.call('POST','/texts',{eventId:'non-primary-group-text',targetDeviceId:b.id,text:'第二组互传'},a.token)).status,201);
+    const offer=await f.call('POST','/transfers',{transferId:'multi-group-file',targetDeviceId:b.id,files:[{fileId:'multi-group-file-entry',name:'test.txt',size:1,mimeType:'text/plain',sha256:hash('x')}]},a.token);
+    assert.equal(offer.status,201,JSON.stringify(offer.body));
+    assert.equal((await f.call('GET','/transfers',undefined,b.token)).body.transfers.some((t:any)=>t.transferId==='multi-group-file'),true);
+    await f.call('POST','/groups/join',{groupKey:'multi-group-first-password'},b.token);
+    await f.call('POST','/groups/join',{groupKey:'multi-group-second-password'},a.token);
+    assert.equal((await f.call('GET','/groups',undefined,a.token)).body.groups.length,2,'join is idempotent');
+    const peers=(await f.call('GET','/devices',undefined,a.token)).body.devices;
+    assert.deepEqual(new Set(peers.map((p:any)=>p.deviceId)),new Set([a.id,b.id,c.id]));
+    assert.equal(peers.length,3,'same peer in two groups appears once; same names are separate identities');
+    const firstNote=await f.call('PUT',`/group/shared-text?groupId=${first}`,{text:'第一组',baseRevision:0,mutationId:'first-note'},a.token);
+    const secondNote=await f.call('PUT',`/group/shared-text?groupId=${second}`,{text:'第二组',baseRevision:0,mutationId:'second-note'},a.token);
+    assert.equal(firstNote.status,200);assert.equal(secondNote.status,200);
+    assert.equal((await f.call('GET',`/group/shared-text?groupId=${first}`,undefined,b.token)).body.text,'第一组');
+    assert.equal((await f.call('GET',`/group/shared-text?groupId=${second}`,undefined,b.token)).body.text,'第二组');
+    assert.equal((await f.call('GET',`/group/shared-text?groupId=${second}`,undefined,c.token)).status,403);
+    assert.equal((await f.call('POST','/texts',{eventId:'union-text',targetDeviceId:b.id,text:'跨第二组发送'},a.token)).status,201);
+    assert.equal((await f.call('POST','/texts',{eventId:'not-a-peer',targetDeviceId:outsider.id,text:'不可见'},a.token)).status,403);
+    await f.restart();
+    assert.equal((await f.call('GET','/groups',undefined,a.token)).body.groups.length,2);
+    await f.call('DELETE',`/groups/${first}`,undefined,a.token);
+    let remaining=(await f.call('GET','/devices',undefined,a.token)).body.devices;
+    assert.deepEqual(new Set(remaining.map((p:any)=>p.deviceId)),new Set([a.id,b.id]));
+    assert.equal((await f.call('GET','/events?after=0',undefined,a.token)).body.events.some((e:any)=>e.eventId==='union-text'),true);
+    await f.restart();
+    assert.equal((await f.call('GET','/groups',undefined,a.token)).body.groups.length,1,'left membership is not resurrected');
+    assert.equal((await f.call('GET','/devices',undefined,a.token)).body.devices.find((p:any)=>p.deviceId===a.id).deviceId,a.id);
+  }finally{await f.close();}
+});
 const hash = (b: string | Buffer) =>
   createHash("sha256").update(b).digest("hex");
 const testTempRoot = fileURLToPath(
@@ -133,6 +174,57 @@ async function fixture(options = {}) {
     },
   };
 }
+
+test("live relay forwards committed bytes before upload completes and holds EOF for verification", {timeout:10000},async(context)=>{
+  const f=await fixture(),abort=new AbortController();
+  let phase='setup';context.signal.addEventListener('abort',()=>{if(phase!=='closed')console.error('Live relay interrupted at '+phase);},{once:true});
+  try {
+    const a=await f.enroll(),b=await f.pair(a.token),path='/transfers/live/files/f/';
+    assert.equal((await f.call('POST','/transfers',{transferId:'live',targetDeviceId:b.id,routePreference:'relay',files:[{fileId:'f',name:'live.bin',size:6,sha256:hash('abcdef')}]},a.token)).status,201);
+    await f.call('POST','/transfers/live/accept',{fileIds:['f']},b.token);
+    await f.call('POST',path+'relay',{},b.token);
+    assert.equal((await f.call('POST',path+'download-ticket',{},b.token)).status,409);
+    const ticket=await f.call('POST',path+'download-ticket',{live:true},b.token);assert.equal(ticket.status,200);
+    const origin=await f.app.listen({port:0,host:'127.0.0.1'});
+    phase='listen';
+    const responsePromise=fetch(origin+ticket.body.downloadPath,{signal:AbortSignal.any([abort.signal,context.signal]),headers:{Connection:'close'}});
+    await f.call('PUT',path+'chunks?offset=0',Buffer.from('abc'),a.token);
+    phase='first-committed';
+    const response=await responsePromise,reader=response.body!.getReader();
+    const first=await reader.read();assert.equal(Buffer.from(first.value!).toString(),'abc');
+    phase='first-read';
+    assert.equal((await f.call('GET','/transfers/live',undefined,b.token)).body.transfer.files[0].status,'uploading');
+    await f.call('PUT',path+'chunks?offset=3',Buffer.from('def'),a.token);
+    phase='rest-committed';
+    const next=await reader.read();assert.equal(Buffer.from(next.value!).toString(),'de');
+    phase='middle-read';
+    let ended=false;const last=reader.read().then(value=>{ended=true;return value;});
+    await new Promise(resolve=>setTimeout(resolve,30));assert.equal(ended,false);
+    assert.equal((await f.call('POST',path+'complete',{},a.token)).status,200);
+    phase='verified';
+    assert.equal(Buffer.from((await last).value!).toString(),'f');phase='last-byte';
+    assert.equal((await reader.read()).done,true);phase='eof';
+    assert.equal((await f.call('POST',path+'received',{},b.token)).status,200);
+    phase='acknowledged';
+  } finally {abort.abort();phase='closing';await f.close();phase='closed';}
+});
+
+test("live relay resumes committed ranges and cancellation closes a waiting body",{timeout:10000},async(context)=>{
+  const f=await fixture(),abort=new AbortController();
+  try {
+    const a=await f.enroll(),b=await f.pair(a.token),path='/transfers/live-resume/files/f/';
+    await f.call('POST','/transfers',{transferId:'live-resume',targetDeviceId:b.id,routePreference:'relay',files:[{fileId:'f',name:'resume.bin',size:6,sha256:hash('abcdef')}]},a.token);
+    await f.call('POST','/transfers/live-resume/accept',{fileIds:['f']},b.token);await f.call('POST',path+'relay',{},b.token);
+    await f.call('PUT',path+'chunks?offset=0',Buffer.from('abcde'),a.token);
+    const ticket=await f.call('POST',path+'download-ticket',{live:true},b.token);
+    const origin=await f.app.listen({port:0,host:'127.0.0.1'});
+    const response=await fetch(origin+ticket.body.downloadPath,{signal:AbortSignal.any([abort.signal,context.signal]),headers:{Range:'bytes=3-',Connection:'close'}});
+    assert.equal(response.status,206);assert.equal(response.headers.get('content-range'),'bytes 3-5/6');
+    const reader=response.body!.getReader();assert.equal(Buffer.from((await reader.read()).value!).toString(),'de');
+    const waiting=reader.read();const rejected=assert.rejects(waiting);
+    assert.equal((await f.call('POST',path+'cancel',{},b.token)).status,200);await rejected;
+  } finally {abort.abort();await f.close();}
+});
 
 test("verified local reuse completes offers without payload, route negotiation or relay bytes", async () => {
   const f = await fixture({ totalQuota: 6 });

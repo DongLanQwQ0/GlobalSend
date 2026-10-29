@@ -13,11 +13,14 @@ export class UrlIntents {
   private db: DatabaseSync;
   private now: () => number;
   private changed: (source: string, target: string) => void;
+  private commonGroup?: (source:string,target:string,preferred?:string)=>string|undefined;
   constructor(db: DatabaseSync, now: () => number,
-      changed: (source: string, target: string) => void) {
+      changed: (source: string, target: string) => void,
+      commonGroup?: (source: string,target: string,preferred?:string)=>string|undefined) {
     this.db = db;
     this.now = now;
     this.changed = changed;
+    this.commonGroup = commonGroup;
     db.exec(`CREATE TABLE IF NOT EXISTS url_intents(
       source_device_id TEXT NOT NULL,request_id TEXT NOT NULL,target_device_id TEXT NOT NULL,
       group_id TEXT NOT NULL,caller_app_id TEXT NOT NULL,url TEXT,payload_digest TEXT NOT NULL,
@@ -61,13 +64,14 @@ export class UrlIntents {
       if (previous.payload_digest !== fingerprint) reject("conflict", "此请求编号已用于不同的网页发送", 409);
       return this.view(previous);
     }
-    const target = this.get("SELECT * FROM devices WHERE id=? AND group_id=? AND revoked=0", body.targetDeviceId, source.group_id);
-    if (!target || target.id === source.id) reject("target_unavailable", "目标设备不在当前分组中", 404);
+    const target = this.get("SELECT * FROM devices WHERE id=? AND revoked=0", body.targetDeviceId);
+    const groupId=this.commonGroup ? this.commonGroup(source.id,body.targetDeviceId,source.group_id) : target?.group_id===source.group_id ? source.group_id : undefined;
+    if (!target || !groupId || target.id === source.id) reject("target_unavailable", "目标设备不在共同分组中", 404);
     if (!["windows", "android"].includes(target.platform) || !this.get("SELECT open_url_intent FROM device_capabilities WHERE device_id=?", target.id)?.open_url_intent)
       reject("unsupported_target", "目标设备尚不支持打开网页，请先更新 GlobalSend", 409);
     const now = this.now();
     this.run(`INSERT INTO url_intents(source_device_id,request_id,target_device_id,group_id,caller_app_id,url,payload_digest,state,created,expires,updated)
-      VALUES(?,?,?,?,?,?,?,'queued',?,?,?)`, source.id, body.requestId, target.id, source.group_id, body.callerAppId, url, fingerprint, now, now + lifetime, now);
+      VALUES(?,?,?,?,?,?,?,'queued',?,?,?)`, source.id, body.requestId, target.id, groupId, body.callerAppId, url, fingerprint, now, now + lifetime, now);
     this.changed(source.id, target.id);
     return this.view(this.find(source.id, body.requestId)!);
   }
@@ -101,7 +105,7 @@ export class UrlIntents {
     for (const row of this.all("SELECT * FROM url_intents WHERE state IN ('queued','delivered','needs_tap')")) {
       const source = this.get("SELECT group_id,revoked FROM devices WHERE id=?", row.source_device_id);
       const target = this.get("SELECT group_id,revoked FROM devices WHERE id=?", row.target_device_id);
-      const unavailable = !source || !target || source.revoked || target.revoked || source.group_id !== row.group_id || target.group_id !== row.group_id;
+      const unavailable = !source || !target || source.revoked || target.revoked || (this.commonGroup ? !this.commonGroup(row.source_device_id,row.target_device_id) : source.group_id !== row.group_id || target.group_id !== row.group_id);
       if (row.expires > now && !unavailable) continue;
       const state = row.expires <= now ? "expired" : "failed";
       this.run("UPDATE url_intents SET state=?,url=NULL,updated=?,error_code=?,error_message=? WHERE source_device_id=? AND request_id=?",

@@ -42,6 +42,7 @@ class ServerProfile {
     this.name = '',
     this.cursor = 0,
     this.groupId = '',
+    List<Map<String, dynamic>>? groups,
     this.autoReceive = true,
     this.sendRoutePreference = 'auto',
     this.receiveRoutePreference = 'auto',
@@ -50,11 +51,12 @@ class ServerProfile {
     this.transferConcurrency = 4,
     this.storageId = '',
     this.legacyPeerIdentity = true,
-  });
+  }) : groups = groups ?? [];
   final String baseUrl, instanceId;
   final String storageId;
   bool legacyPeerIdentity;
   String deviceId, name, groupId;
+  List<Map<String, dynamic>> groups;
   int cursor;
   bool autoReceive;
   bool cellularAllowed;
@@ -77,6 +79,7 @@ class ServerProfile {
     'name': name,
     'cursor': cursor,
     'groupId': groupId,
+    'groups': groups,
     'autoReceive': autoReceive,
     'sendRoutePreference': sendRoutePreference,
     'receiveRoutePreference': receiveRoutePreference,
@@ -93,6 +96,9 @@ class ServerProfile {
     name: j['name'] ?? '',
     cursor: j['cursor'] ?? 0,
     groupId: j['groupId'] ?? '',
+    groups: (j['groups'] as List? ?? [])
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(),
     autoReceive: j['autoReceive'] ?? true,
     sendRoutePreference: j['sendRoutePreference'] ?? 'auto',
     receiveRoutePreference: j['receiveRoutePreference'] ?? 'auto',

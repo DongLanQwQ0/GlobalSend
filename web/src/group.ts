@@ -1,6 +1,6 @@
-export function publicSession<T extends {deviceToken:string;device:unknown;groupId?:string}>(response: T): {deviceToken:string;device:T['device'];groupId?:string} {
+export function publicSession<T extends {deviceToken:string;device:unknown;groupId?:string;groups?:import('../../packages/protocol/src/index.ts').GroupMembership[];historyGroupId?:string}>(response: T): {deviceToken:string;device:T['device'];groupId?:string;groups?:import('../../packages/protocol/src/index.ts').GroupMembership[];historyGroupId?:string} {
   // Explicit projection prevents an enrollment response from persisting a group key or other join secrets.
-  return {deviceToken:response.deviceToken,device:response.device,...(response.groupId ? {groupId:response.groupId} : {})};
+  return {deviceToken:response.deviceToken,device:response.device,...(response.groupId ? {groupId:response.groupId} : {}),...(response.groups?{groups:response.groups}:{}),...(response.historyGroupId!==undefined?{historyGroupId:response.historyGroupId}:{})};
 }
 
 export function validateGroupKey(value: string): string {

@@ -2,7 +2,7 @@ import { normalizeBaseUrl as normalizeProtocolBase } from '../../packages/protoc
 import type { Device, Event as ProtocolEvent } from '../../packages/protocol/src/index.ts';
 export type { ServerInfo, Device, FileStatus, TransferFile, Transfer } from '../../packages/protocol/src/index.ts';
 import type { FileStatus } from '../../packages/protocol/src/index.ts';
-export interface Session { deviceToken: string; device: Device; groupId?: string }
+export interface Session { deviceToken: string; device: Device; groupId?: string; groups?:import('../../packages/protocol/src/index.ts').GroupMembership[]; historyGroupId?:string }
 export interface WireEvent extends ProtocolEvent {
   payload: { text?: string; sourceEventId?: string; sourceEventIds?:string[]; contentId?:string; revision?:number; editedAt?: string; transferId?: string; deviceId?: string; clipboard?:{originDeviceId:string;sourceEventId:string} };
 }

@@ -20,6 +20,7 @@ import 'received_order.dart';
 import 'incoming_receipt_state.dart';
 
 final _batchDragMarker = Object();
+final _dockContentMarker = Object();
 
 /// The native dock launches this UI-only app before main creates a controller.
 /// Content and user actions go through the primary engine; no session is opened.
@@ -298,66 +299,74 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
       const PopupMenuItem(value: 'delete', height: 32, child: Text('删除')),
       const PopupMenuItem(value: 'details', height: 32, child: Text('详情')),
     ];
-    return ContentDragSurface(
-      entry: entry,
-      enabled: state.canExport,
-      onExport: (kind) => export(entry, kind),
-      child: Builder(
-        builder: (context) => GestureDetector(
-          onSecondaryTapDown: (details) async {
-            if (!ContentDragSurface.allowsContextMenu(context, details.kind)) {
-              return;
-            }
-            final overlay =
-                Navigator.of(context).overlay!.context.findRenderObject()!
-                    as RenderBox;
-            final selected = await showMenu<String>(
-              context: context,
-              position: RelativeRect.fromRect(
-                Rect.fromLTWH(
-                  details.globalPosition.dx,
-                  details.globalPosition.dy,
-                  0,
-                  0,
+    return MetaData(
+      metaData: _dockContentMarker,
+      behavior: HitTestBehavior.translucent,
+      child: ContentDragSurface(
+        entry: entry,
+        enabled: state.canExport,
+        onExport: (kind) => export(entry, kind),
+        child: Builder(
+          builder: (context) => GestureDetector(
+            onSecondaryTapDown: (details) async {
+              if (!ContentDragSurface.allowsContextMenu(
+                context,
+                details.kind,
+              )) {
+                return;
+              }
+              final overlay =
+                  Navigator.of(context).overlay!.context.findRenderObject()!
+                      as RenderBox;
+              final selected = await showMenu<String>(
+                context: context,
+                position: RelativeRect.fromRect(
+                  Rect.fromLTWH(
+                    details.globalPosition.dx,
+                    details.globalPosition.dy,
+                    0,
+                    0,
+                  ),
+                  Offset.zero & overlay.size,
                 ),
-                Offset.zero & overlay.size,
-              ),
-              items: menuItems(context),
-            );
-            if (selected != null && mounted) await action(selected, entry.id);
-          },
-          child: CompactContentCard(
-            previewOnly: true,
-            surfaceColor: Colors.transparent,
-            previewColor: Colors.transparent,
-            metadataColor: Colors.transparent,
-            menuColor: Colors.transparent,
-            entry: entry,
-            sender: value['sender'] as String? ?? entry.sourceLabel,
-            timestamp: compactTime(DateTime.fromMillisecondsSinceEpoch(time)),
-            status: state.label,
-            action: needsAction
-                ? TextButton(
-                    onPressed: () => action(state.primaryAction, entry.id),
-                    child: Text(state.primaryLabel),
-                  )
-                : null,
-            speed: active && (value['transferBytesPerSecond'] as num? ?? 0) > 0
-                ? '${bytesLabel((value['transferBytesPerSecond'] as num).round())}/s'
-                : '',
-            onOpen: () => action('open', entry.id),
-            onCopy: entry.kind == 'text'
-                ? () => action('copy', entry.id)
-                : null,
-            menu: Semantics(
-              label: '更多',
-              child: PopupMenuButton<String>(
-                tooltip: '更多',
-                onSelected: (value) {
-                  action(value, entry.id);
-                },
-                itemBuilder: menuItems,
-                icon: const AppIcon(Icons.more_horiz, size: 20),
+                items: menuItems(context),
+              );
+              if (selected != null && mounted) await action(selected, entry.id);
+            },
+            child: CompactContentCard(
+              previewOnly: true,
+              surfaceColor: Colors.transparent,
+              previewColor: Colors.transparent,
+              metadataColor: Colors.transparent,
+              menuColor: Colors.transparent,
+              entry: entry,
+              sender: value['sender'] as String? ?? entry.sourceLabel,
+              timestamp: compactTime(DateTime.fromMillisecondsSinceEpoch(time)),
+              status: state.label,
+              action: needsAction
+                  ? TextButton(
+                      onPressed: () => action(state.primaryAction, entry.id),
+                      child: Text(state.primaryLabel),
+                    )
+                  : null,
+              speed:
+                  active && (value['transferBytesPerSecond'] as num? ?? 0) > 0
+                  ? '${bytesLabel((value['transferBytesPerSecond'] as num).round())}/s'
+                  : '',
+              onOpen: () => action('open', entry.id),
+              onCopy: entry.kind == 'text'
+                  ? () => action('copy', entry.id)
+                  : null,
+              menu: Semantics(
+                label: '更多',
+                child: PopupMenuButton<String>(
+                  tooltip: '更多',
+                  onSelected: (value) {
+                    action(value, entry.id);
+                  },
+                  itemBuilder: menuItems,
+                  icon: const AppIcon(Icons.more_horiz, size: 20),
+                ),
               ),
             ),
           ),
@@ -434,6 +443,11 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
               child: RawGestureDetector(
                 behavior: HitTestBehavior.translucent,
                 gestures: {
+                  _DockBlankTap:
+                      GestureRecognizerFactoryWithHandlers<_DockBlankTap>(
+                        _DockBlankTap.new,
+                        (recognizer) => recognizer.onTap = () => action('open'),
+                      ),
                   _DockMovePan:
                       GestureRecognizerFactoryWithHandlers<_DockMovePan>(
                         _DockMovePan.new,
@@ -672,6 +686,29 @@ class _DockMovePan extends PanGestureRecognizer {
           (entry.target as RenderMetaData).metaData == _batchDragMarker,
     );
     return !bulkHandle &&
+        !isContentDragControlPosition(event.position, event.viewId) &&
+        super.isPointerAllowed(event);
+  }
+}
+
+class _DockBlankTap extends TapGestureRecognizer {
+  @override
+  bool isPointerAllowed(PointerDownEvent event) {
+    final result = HitTestResult();
+    RendererBinding.instance.hitTestInView(
+      result,
+      event.position,
+      event.viewId,
+    );
+    final content = result.path.any(
+      (entry) =>
+          entry.target is RenderMetaData &&
+          [
+            _dockContentMarker,
+            _batchDragMarker,
+          ].contains((entry.target as RenderMetaData).metaData),
+    );
+    return !content &&
         !isContentDragControlPosition(event.position, event.viewId) &&
         super.isPointerAllowed(event);
   }

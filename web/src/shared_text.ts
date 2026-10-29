@@ -20,11 +20,12 @@ export class SharedGroupEditor {
   private compositionBefore:EditSnapshot|null=null;
   private compositionTail:EditSnapshot|null=null;
   private compositionRecorded=false;
-  constructor(private api:()=>Api,private changed:()=>void){}
+  constructor(private api:()=>Api,private changed:()=>void,private groupId=''){}
+  private get path(){return '/group/shared-text'+(this.groupId?'?groupId='+encodeURIComponent(this.groupId):'');}
   get composingActive(){return this.composing && !!this.field?.isConnected;}
   get focusedActive(){return !!this.field?.isConnected && document.activeElement===this.field;}
   reset(){this.epoch++;clearTimeout(this.timer);this.field=null;this.composing=false;this.document={text:'',revision:0,updatedAt:'',updatedBy:''};this.draft='';this.dirty=false;this.conflict=false;this.saving=false;this.error='';this.loaded=false;this.busyMutation='';this.history.clear();this.replaceText('');}
-  html(enabled:boolean,maxLength:number){return `<section class="shared-note"><div class="section-label"><h3>共享文本</h3><span id="shared-status" role="status">${e(enabled?this.status():'中心升级后可用')}</span><div class="shared-edit-tools"><button class="icon-button quiet" type="button" data-shared-action="undo" aria-label="撤销" title="撤销（Ctrl / ⌘ + Z）" aria-keyshortcuts="Control+z Meta+z" ${enabled && this.canUndo?'':'disabled'}>${icon('undo')}</button><button class="icon-button quiet" type="button" data-shared-action="redo" aria-label="重做" title="重做（Ctrl / ⌘ + Y 或 Shift + Z）" aria-keyshortcuts="Control+y Meta+y Control+Shift+z Meta+Shift+z" ${enabled && this.canRedo?'':'disabled'}>${icon('redo')}</button></div></div><div data-shared-host data-drag-shared="true" draggable="true" data-enabled="${enabled}" data-max="${maxLength}"></div><div id="shared-conflict" class="shared-conflict" ${this.conflict?'':'hidden'}><span>另一设备已更新</span><button class="secondary" data-shared-action="remote">使用最新内容</button><button class="secondary" data-shared-action="mine">保留我的内容</button></div><button id="shared-retry" class="quiet" data-shared-action="retry" ${this.error && !this.conflict?'':'hidden'}>重试同步</button></section>`;}
+  html(enabled:boolean,maxLength:number,groupPicker=''){return `<section class="shared-note"><div class="section-label">${groupPicker || '<h3>共享文本</h3>'}<span id="shared-status" role="status">${e(enabled?this.status():'中心升级后可用')}</span><div class="shared-edit-tools"><button class="icon-button quiet" type="button" data-shared-action="undo" aria-label="撤销" title="撤销（Ctrl / ⌘ + Z）" aria-keyshortcuts="Control+z Meta+z" ${enabled && this.canUndo?'':'disabled'}>${icon('undo')}</button><button class="icon-button quiet" type="button" data-shared-action="redo" aria-label="重做" title="重做（Ctrl / ⌘ + Y 或 Shift + Z）" aria-keyshortcuts="Control+y Meta+y Control+Shift+z Meta+Shift+z" ${enabled && this.canRedo?'':'disabled'}>${icon('redo')}</button></div></div><div data-shared-host data-drag-shared="true" draggable="true" data-enabled="${enabled}" data-max="${maxLength}"></div><div id="shared-conflict" class="shared-conflict" ${this.conflict?'':'hidden'}><span>另一设备已更新</span><button class="secondary" data-shared-action="remote">使用最新内容</button><button class="secondary" data-shared-action="mine">保留我的内容</button></div><button id="shared-retry" class="quiet" data-shared-action="retry" ${this.error && !this.conflict?'':'hidden'}>重试同步</button></section>`;}
   status(){return this.conflict?'未同步 · 内容冲突':this.error?'未同步':'';}
   get canUndo(){return this.history.canUndo && !this.composing && !this.field?.disabled;}
   get canRedo(){return this.history.canRedo && !this.composing && !this.field?.disabled;}
@@ -89,7 +90,7 @@ export class SharedGroupEditor {
       else {this.conflict=false;this.error='';void this.save();}
     };});this.paint();
   }
-  private paint(){for(const [action,enabled] of [['undo',this.canUndo],['redo',this.canRedo]] as const){const button=document.querySelector<HTMLButtonElement>('[data-shared-action="'+action+'"]');if(button)button.disabled=!enabled;}const status=document.querySelector('#shared-status');if(status && !this.field?.disabled)status.textContent=this.status();document.querySelector<HTMLElement>('#shared-conflict')?.toggleAttribute('hidden',!this.conflict);document.querySelector<HTMLElement>('#shared-retry')?.toggleAttribute('hidden',!this.error || this.conflict);}
+  private paint(){if(!this.field?.isConnected)return;for(const [action,enabled] of [['undo',this.canUndo],['redo',this.canRedo]] as const){const button=document.querySelector<HTMLButtonElement>('[data-shared-action="'+action+'"]');if(button)button.disabled=!enabled;}const status=document.querySelector('#shared-status');if(status && !this.field?.disabled)status.textContent=this.status();document.querySelector<HTMLElement>('#shared-conflict')?.toggleAttribute('hidden',!this.conflict);document.querySelector<HTMLElement>('#shared-retry')?.toggleAttribute('hidden',!this.error || this.conflict);}
   private schedule(){clearTimeout(this.timer);if(this.dirty && !this.conflict && !this.composing)this.timer=window.setTimeout(()=>void this.save(),400);}
   receive(value:SharedDocument){
     if(value.revision<this.document.revision)return;
@@ -100,12 +101,12 @@ export class SharedGroupEditor {
     else if(this.draft!==value.text)this.replaceText(value.text,hadDocument);
     this.paint();
   }
-  async refresh(){const epoch=this.epoch;try {const value=await this.api().request<SharedDocument>('/group/shared-text');if(epoch===this.epoch){this.receive(value);this.error='';this.paint();}}catch(error){if(epoch===this.epoch){this.error=error instanceof Error?error.message:'同步失败';this.paint();}}}
+  async refresh(){const epoch=this.epoch;try {const value=await this.api().request<SharedDocument>(this.path);if(epoch===this.epoch){this.receive(value);this.error='';this.paint();}}catch(error){if(epoch===this.epoch){this.error=error instanceof Error?error.message:'同步失败';this.paint();}}}
   async save(){
     if(!this.dirty || this.saving || this.conflict || this.composing || this.field?.disabled)return;
     const epoch=this.epoch,text=this.draft,baseRevision=this.document.revision,mutationId=crypto.randomUUID();this.saving=true;this.busyMutation=mutationId;this.paint();
     try {
-      const value=await this.api().request<SharedDocument>('/group/shared-text',{text,baseRevision,mutationId},'PUT');if(epoch!==this.epoch)return;
+      const value=await this.api().request<SharedDocument>(this.path,{text,baseRevision,mutationId},'PUT');if(epoch!==this.epoch)return;
       if(value.revision>=this.document.revision)this.document=value;
       this.loaded=true;this.dirty=this.draft!==this.document.text;this.error='';
       if(this.document.revision>value.revision && this.dirty)this.conflict=true;

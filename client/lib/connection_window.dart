@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'transfer_operation.dart';
 
-/// One connection-decision deadline, shared by all routes of a file. Once a
-/// route has really connected its data stream is no longer timed by this gate.
+/// Shared read-only route-decision deadline. Proven routes receive their own
+/// bounded handshake window; connected streams are not timed by this gate.
 class RouteDeadline {
   RouteDeadline({this.limit = const Duration(seconds: 1)}) {
     watch.start();
@@ -21,7 +21,7 @@ class RouteDeadline {
     bool verified = false,
     bool nextVerified = false,
   }) {
-    if (last) return remaining;
+    if (last || verified) return remaining;
     final fraction = !verified && nextVerified ? .35 : .6;
     return Duration(
       microseconds: (remaining.inMicroseconds * fraction).floor(),

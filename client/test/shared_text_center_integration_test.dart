@@ -92,6 +92,37 @@ void main() {
         expect(a.dock, isEmpty);
         expect(b.dock, isEmpty);
         expect((await a.api!.call('GET', '/transfers'))['transfers'], isEmpty);
+        final originalId = a.profile!.deviceId,
+            token = a.api!.token,
+            originalGroup = a.profile!.groupId;
+        a.stagedTexts.add('本地待发送');
+        await a.joinAdditionalGroup(
+          'second-shared-controller-password',
+          name: '第二组',
+        );
+        final secondGroup = a.profile!.groupId;
+        expect(secondGroup, isNot(originalGroup));
+        expect(a.joinedGroups.length, 2);
+        expect(a.profile!.deviceId, originalId);
+        expect(a.api!.token, token);
+        expect(a.stagedTexts, ['本地待发送']);
+        expect(a.sharedText, '');
+        a.setSharedTextDraft('第二组独立编辑');
+        await a.sharedDocument.save();
+        b.setSharedTextDraft('第一组新版本');
+        await b.sharedDocument.save();
+        await waitFor(() => a.sharedText == '第二组独立编辑' && !a.syncing);
+        await a.selectSharedGroup(originalGroup);
+        await waitFor(() => a.sharedText == '第一组新版本');
+        await a.selectSharedGroup(secondGroup);
+        expect(a.sharedText, '第二组独立编辑');
+        await a.joinAdditionalGroup('second-shared-controller-password');
+        expect(a.joinedGroups.length, 2);
+        await a.leaveGroup(secondGroup);
+        expect(a.profile!.groupId, originalGroup);
+        expect(a.joinedGroups.length, 1);
+        expect(a.stagedTexts, ['本地待发送']);
+        expect(a.profile!.deviceId, originalId);
         stdout.writeln(
           'Shared text real-center evidence: ${work.absolute.path}',
         );

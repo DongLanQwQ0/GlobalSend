@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ConnectAttempt, DirectConnectionBudget, preferredScopes } from '../src/rtc_route.ts';
+import { ConnectAttempt, DirectConnectionBudget, preferredScopes, verifiedScopeLatency } from '../src/rtc_route.ts';
 
 test('automatic decision shares one second across LAN and public instead of spending it twice',()=>{
   let now=1000;const budget=new DirectConnectionBudget(true,()=>now);
@@ -8,6 +8,14 @@ test('automatic decision shares one second across LAN and public instead of spen
 });
 test('forced direct route keeps its direct-only connection window and a later disconnection gets a fresh decision',()=>{
   let now=1000;const forced=new DirectConnectionBudget(false,()=>now);assert.equal(forced.window(1),15000);now+=16000;assert.equal(forced.remaining(),0);forced.resumeAfterDisconnect();assert.equal(forced.remaining(),15000);
+});
+test('a proven path receives a complete bounded handshake, even after another scope expires',()=>{
+  let now=1000;const budget=new DirectConnectionBudget(true,()=>now);
+  assert.equal(budget.window(2,true,151),1000);now+=1100;
+  assert.equal(budget.window(1,true,500),2100);
+  const result={scope:'lan' as const,success:true,expiresAt:new Date(now+1000).toISOString(),initiatorDeviceId:'self',responderDeviceId:'peer',elapsedMs:151};
+  assert.equal(verifiedScopeLatency([result],'self','peer','lan',now),151);
+  assert.equal(verifiedScopeLatency([result],'self','other','lan',now),undefined);
 });
 test('only current successful probe evidence can prioritize public over known-failed LAN',()=>{
   const now=Date.now(),result=(scope:'lan'|'public',success:boolean,expiresAt=new Date(now+1000).toISOString())=>({scope,success,expiresAt,initiatorDeviceId:'self',responderDeviceId:'peer'});

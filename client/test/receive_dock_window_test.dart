@@ -68,6 +68,47 @@ void main() {
   });
 
   testWidgets(
+    'blank dock clicks open main, but moving or clicking card controls does not',
+    (tester) async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(ReceiveDockApp.channel, (call) async {
+        if (call.method == 'ready') return payload(1, ['one']);
+        calls.add(call);
+        return null;
+      });
+      await mount(tester);
+      await tester.tapAt(const Offset(310, 80));
+      await tester.pumpAndSettle();
+      expect(
+        calls
+            .where((c) => c.method == 'action')
+            .map((c) => (c.arguments as Map)['action']),
+        ['open'],
+      );
+      calls.clear();
+      final drag = await tester.startGesture(
+        const Offset(310, 80),
+        kind: PointerDeviceKind.mouse,
+      );
+      await drag.moveBy(const Offset(40, 25));
+      await tester.pump();
+      await drag.up();
+      await tester.pumpAndSettle();
+      expect(calls.where((c) => c.method == 'move'), hasLength(1));
+      expect(calls.where((c) => c.method == 'action'), isEmpty);
+      calls.clear();
+      await tester.tap(find.text('复制').first);
+      await tester.pumpAndSettle();
+      expect(
+        calls
+            .where((c) => c.method == 'action')
+            .map((c) => (c.arguments as Map)['action']),
+        ['copy'],
+      );
+    },
+  );
+
+  testWidgets(
     'dock URL click uses its system channel instead of a missing plugin',
     (tester) async {
       const text = 'https://example.com/中文?q=1';

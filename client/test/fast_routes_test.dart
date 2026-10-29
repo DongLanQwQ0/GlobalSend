@@ -19,9 +19,14 @@ import 'package:globalsend/candidate_routes.dart';
 import 'rtc_android_bridge_test.dart' show PendingPeer;
 
 class FastApi extends CenterApi {
-  FastApi(this.hash, {this.candidate = '', this.fingerprint = ''})
-    : super('https://fixture.invalid', token: 'fixture');
+  FastApi(
+    this.hash, {
+    this.candidate = '',
+    this.fingerprint = '',
+    this.candidates,
+  }) : super('https://fixture.invalid', token: 'fixture');
   final String hash, candidate, fingerprint;
+  final List<String>? candidates;
   final calls = <String>[];
   @override
   Future<Map<String, dynamic>> call(
@@ -46,7 +51,7 @@ class FastApi extends CenterApi {
       };
     if (path.endsWith('/direct-ticket'))
       return {
-        'candidates': [candidate],
+        'candidates': candidates ?? [candidate],
         'certificateSha256': fingerprint,
         'ticket': 'fixture-ticket',
       };
@@ -250,6 +255,99 @@ void main() {
     await server.close(force: true);
   });
 
+  test('live relay begins receiving while the sender is still uploading', () async {
+    final content = utf8.encode('abcdef'),
+        hash = sha256.convert(utf8.encode('abcdef')).toString();
+    final uploaded = Completer<void>(), firstBytes = Completer<void>();
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    var liveRequested = false, downloadStarted = false, firstFlushed = false;
+    server.listen((request) async {
+      if (request.uri.path == '/api/v1/downloads/live-fixture') {
+        downloadStarted = true;
+        request.response.bufferOutput = false;
+        request.response.contentLength = content.length;
+        request.response.add(content.sublist(0, 3));
+        await request.response.flush();
+        firstFlushed = true;
+        await uploaded.future;
+        request.response.add(content.sublist(3));
+      } else {
+        request.response.headers.contentType = ContentType.json;
+        if (request.uri.path.endsWith('/download-ticket')) {
+          final body =
+              jsonDecode(await utf8.decoder.bind(request).join()) as Map;
+          liveRequested = body['live'] == true;
+          request.response.write(
+            jsonEncode({'downloadPath': '/api/v1/downloads/live-fixture'}),
+          );
+        } else if (request.uri.path == '/api/v1/transfers/t') {
+          request.response.write(
+            jsonEncode({
+              'transfer': {
+                'files': [
+                  {
+                    'fileId': 'f',
+                    'status': 'uploading',
+                    'transport': 'relay',
+                    'sha256': hash,
+                  },
+                ],
+              },
+            }),
+          );
+        } else
+          request.response.write('{}');
+      }
+      await request.response.close();
+    });
+    final api = CenterApi('http://127.0.0.1:${server.port}');
+    final controller = FastController(directory)
+      ..api = api
+      ..profile = ServerProfile(
+        baseUrl: api.baseUrl,
+        instanceId: 'fixture',
+        deviceId: 'self',
+      )
+      ..info = {
+        'features': {'direct': false, 'relayStreaming': true},
+      };
+    final entry = DockEntry(
+      id: 'f',
+      kind: 'file',
+      title: 'live.bin',
+      source: 'sender',
+      transferId: 't',
+      fileId: 'f',
+      size: 6,
+      status: 'accepted',
+    );
+    controller.dock = [entry];
+    controller.addListener(() {
+      if (entry.receivedBytes >= 3 && !firstBytes.isCompleted)
+        firstBytes.complete();
+    });
+    try {
+      final receiving = controller.receive(entry, routeOverride: 'relay');
+      await firstBytes.future.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => throw StateError(
+          'status=${entry.status}, error=${entry.error}, route=${entry.routeDetail}, liveRequested=$liveRequested, downloadStarted=$downloadStarted, firstFlushed=$firstFlushed, received=${entry.receivedBytes}',
+        ),
+      );
+      expect(uploaded.isCompleted, false);
+      expect(liveRequested, true);
+      expect(entry.status, 'downloading');
+      uploaded.complete();
+      await receiving;
+      expect(entry.status, 'received');
+      expect(await File(entry.localPath).readAsBytes(), content);
+    } finally {
+      if (!uploaded.isCompleted) uploaded.complete();
+      controller.dispose();
+      await server.close(force: true);
+    }
+  });
+
   test('all candidate probes begin together instead of 200ms-per-address staggering', () async {
     final api = FastApi('');
     final peer = PeerTransport(api, (_) => null);
@@ -310,7 +408,9 @@ void main() {
                   500; // Reprobing this cached path is a regression.
             } else {
               // More than the old 1/N slice; a warm path must still get a chance.
-              await Future<void>.delayed(const Duration(milliseconds: 220));
+              await Future<void>.delayed(
+                Duration(milliseconds: preferLan && prepareMs == 0 ? 700 : 220),
+              );
               request.response.contentLength = bytes.length;
               request.response.add(bytes);
             }
@@ -349,6 +449,20 @@ void main() {
           cellular: false,
         );
         await monitor.refresh();
+        if (preferLan && prepareMs == 0)
+          monitor.setRtcResults('self', [
+            {
+              'initiatorDeviceId': 'self',
+              'responderDeviceId': 'sender',
+              'scope': 'lan',
+              'success': true,
+              'elapsedMs': 200,
+              'checkedAt': DateTime.now().toIso8601String(),
+              'expiresAt': DateTime.now()
+                  .add(const Duration(seconds: 30))
+                  .toIso8601String(),
+            },
+          ]);
         final controller =
             FastController(
                 directory,
@@ -414,106 +528,121 @@ void main() {
     );
   }
 
-  test('a stale cached source falls through to another measured pair without relay', () async {
-    final bytes = utf8.encode('another source still works');
-    final pin = certificateFingerprint(identity['certificate']!);
-    final context = SecurityContext()
-      ..useCertificateChainBytes(utf8.encode(identity['certificate']!))
-      ..usePrivateKeyBytes(utf8.encode(identity['privateKey']!));
-    final server = await HttpServer.bindSecure(
-      InternetAddress.loopbackIPv4,
-      0,
-      context,
-    );
-    var probes = 0;
-    server.listen((request) async {
-      if (request.uri.path == '/probe') {
-        probes++;
-        request.response.statusCode = 500;
-      } else {
-        request.response.contentLength = bytes.length;
-        request.response.add(bytes);
-      }
-      await request.response.close();
-    });
-    final endpoint = 'https://127.0.0.1:${server.port}';
-    final missing = CandidateRoute(
-      address: endpoint,
-      lan: true,
-      sourceAddress: '192.0.2.123',
-    );
-    final fallback = CandidateRoute(address: endpoint, lan: true);
-    final monitor = SourcePairMonitor([missing, fallback]);
-    final api = FastApi(
-      sha256.convert(bytes).toString(),
-      candidate: endpoint,
-      fingerprint: pin,
-    );
-    final device = <String, dynamic>{
-      'deviceId': 'sender',
-      'online': true,
-      'peer': {
-        'candidates': [endpoint],
-        'certificateSha256': pin,
+  for (final stalledFirst in [false, true]) {
+    test(
+      'a stale cached ${stalledFirst ? 'timed-out endpoint' : 'source'} falls through to another measured pair without relay',
+      () async {
+        final bytes = utf8.encode('another source still works');
+        final pin = certificateFingerprint(identity['certificate']!);
+        final context = SecurityContext()
+          ..useCertificateChainBytes(utf8.encode(identity['certificate']!))
+          ..usePrivateKeyBytes(utf8.encode(identity['privateKey']!));
+        final server = await HttpServer.bindSecure(
+          InternetAddress.loopbackIPv4,
+          0,
+          context,
+        );
+        var probes = 0;
+        server.listen((request) async {
+          if (request.uri.path == '/probe') {
+            probes++;
+            request.response.statusCode = 500;
+          } else {
+            request.response.contentLength = bytes.length;
+            request.response.add(bytes);
+          }
+          await request.response.close();
+        });
+        final endpoint = 'https://127.0.0.1:${server.port}';
+        final stalled = stalledFirst
+            ? await ServerSocket.bind(InternetAddress.loopbackIPv4, 0)
+            : null;
+        final sockets = <Socket>[];
+        stalled?.listen(sockets.add);
+        final missing = CandidateRoute(
+          address: stalledFirst
+              ? 'https://127.0.0.1:${stalled!.port}'
+              : endpoint,
+          lan: true,
+          sourceAddress: stalledFirst ? '' : '192.0.2.123',
+        );
+        final fallback = CandidateRoute(address: endpoint, lan: true);
+        final monitor = SourcePairMonitor([missing, fallback]);
+        final api = FastApi(
+          sha256.convert(bytes).toString(),
+          candidate: endpoint,
+          fingerprint: pin,
+          candidates: [missing.address, endpoint],
+        );
+        final device = <String, dynamic>{
+          'deviceId': 'sender',
+          'online': true,
+          'peer': {
+            'candidates': [missing.address, endpoint],
+            'certificateSha256': pin,
+          },
+        };
+        monitor.update(
+          onlineDevices: [device],
+          centerUrl: api.baseUrl,
+          online: true,
+          cellular: false,
+        );
+        await monitor.refresh();
+        final report = monitor.captureReporter('sender');
+        report(missing, (reachable: true, elapsedMs: 1, error: ''));
+        report(fallback, (reachable: true, elapsedMs: 2, error: ''));
+        final controller = FastController(directory, monitor: monitor)
+          ..api = api
+          ..profile = ServerProfile(
+            baseUrl: api.baseUrl,
+            instanceId: 'fixture',
+            deviceId: 'self',
+          )
+          ..info = {
+            'features': {'direct': true},
+          }
+          ..devices = [device];
+        final entry = DockEntry(
+          id: 'f',
+          kind: 'file',
+          title: 'fallback.bin',
+          source: 'sender',
+          transferId: 't',
+          fileId: 'f',
+          size: bytes.length,
+          status: 'accepted',
+        );
+        controller.dock = [entry];
+        try {
+          await controller.receive(entry);
+          expect(
+            entry.status,
+            'received',
+            reason: '${entry.error} ${entry.routeDetail}',
+          );
+          expect(probes, 0);
+          expect(
+            api.calls.where((call) => call.endsWith('/direct-ticket')),
+            hasLength(2),
+          );
+          expect(api.calls.where((call) => call.endsWith('/relay')), isEmpty);
+          expect(
+            monitor
+                .verifiedRoutes('sender', [missing.address, endpoint], pin)
+                .any((r) => r.key == missing.key),
+            false,
+          );
+          expect(await File(entry.localPath).readAsBytes(), bytes);
+        } finally {
+          controller.dispose();
+          for (final socket in sockets) socket.destroy();
+          await stalled?.close();
+          await server.close(force: true);
+        }
       },
-    };
-    monitor.update(
-      onlineDevices: [device],
-      centerUrl: api.baseUrl,
-      online: true,
-      cellular: false,
     );
-    await monitor.refresh();
-    final report = monitor.captureReporter('sender');
-    report(missing, (reachable: true, elapsedMs: 1, error: ''));
-    report(fallback, (reachable: true, elapsedMs: 2, error: ''));
-    final controller = FastController(directory, monitor: monitor)
-      ..api = api
-      ..profile = ServerProfile(
-        baseUrl: api.baseUrl,
-        instanceId: 'fixture',
-        deviceId: 'self',
-      )
-      ..info = {
-        'features': {'direct': true},
-      }
-      ..devices = [device];
-    final entry = DockEntry(
-      id: 'f',
-      kind: 'file',
-      title: 'fallback.bin',
-      source: 'sender',
-      transferId: 't',
-      fileId: 'f',
-      size: bytes.length,
-      status: 'accepted',
-    );
-    controller.dock = [entry];
-    try {
-      await controller.receive(entry);
-      expect(
-        entry.status,
-        'received',
-        reason: '${entry.error} ${entry.routeDetail}',
-      );
-      expect(probes, 0);
-      expect(
-        api.calls.where((call) => call.endsWith('/direct-ticket')),
-        hasLength(2),
-      );
-      expect(api.calls.where((call) => call.endsWith('/relay')), isEmpty);
-      expect(
-        monitor
-            .verifiedRoutes('sender', [endpoint], pin)
-            .any((r) => r.sourceAddress == missing.sourceAddress),
-        false,
-      );
-      expect(await File(entry.localPath).readAsBytes(), bytes);
-    } finally {
-      controller.dispose();
-      await server.close(force: true);
-    }
-  });
+  }
 
   for (final mode in ['auto', 'lan']) {
     test(

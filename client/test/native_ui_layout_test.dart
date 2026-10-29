@@ -1,4 +1,5 @@
 import 'system_font_fixture.dart';
+
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -67,6 +68,47 @@ void main() {
           .writeAsBytes(data!.buffer.asUint8List());
       image.dispose();
     });
+  }
+
+  for (final size in [const Size(934, 611), const Size(390, 844)]) {
+    testWidgets(
+      'multiple groups use one compact shared selector ${size.width}',
+      (tester) async {
+        final c = fixture.signedIn();
+        c.info = {
+          'features': {'multiGroup': true, 'groupSharedText': true},
+        };
+        c.profile!.groupId = 'first';
+        c.profile!.groups = [
+          {'groupId': 'first', 'name': '我的设备'},
+          {'groupId': 'second', 'name': '朋友'},
+        ];
+        final key = await show(tester, GlobalSendApp(controller: c), size);
+        expect(
+          find.byKey(const ValueKey('shared-group-selector')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+        await capture(tester, key, 'multi-groups-${size.width.toInt()}');
+        await tester.tap(find.byTooltip('设置'));
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(find.text('加入分组'),400,scrollable:find.byType(Scrollable).first);
+        await tester.pumpAndSettle();
+        expect(find.text('退出此组'), findsNothing);
+        expect(find.byTooltip('退出此组'), findsNWidgets(2));
+        expect(tester.takeException(), isNull);
+        await capture(
+          tester,
+          key,
+          'multi-group-settings-${size.width.toInt()}',
+        );
+        await tester.tap(find.text('加入分组'));
+        await tester.pumpAndSettle();
+        expect(find.text('名称（可选）'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await capture(tester, key, 'multi-group-join-${size.width.toInt()}');
+      },
+    );
   }
 
   for (final size in [const Size(934, 611), const Size(390, 844)]) {

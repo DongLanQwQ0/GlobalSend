@@ -89,16 +89,14 @@ class TransferRouteSelection {
 
   Duration attemptBudget(TransferRouteChoice choice, Duration remaining) {
     if (choice.ready == true) {
-      final anotherProven = choices.any(
-        (value) =>
-            !identical(value, choice) &&
-            value.phase == choice.phase &&
-            !value.attempted &&
-            value.ready == true,
+      // The one-second decision races read-only probes. A selected, proven
+      // path still needs a center grant and a fresh TLS/file handshake; slicing
+      // those round trips between alternatives creates false relay fallbacks.
+      final handshakeMs = ((choice.latency?.call() ?? 0) * 4 + 100).clamp(
+        1000,
+        3000,
       );
-      return anotherProven
-          ? Duration(microseconds: (remaining.inMicroseconds * .65).floor())
-          : remaining;
+      return Duration(milliseconds: handshakeMs);
     }
     final alternatives = choices
         .where(

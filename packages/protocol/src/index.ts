@@ -125,6 +125,7 @@ export interface Device {
   folderTransfer?: boolean;
   openUrlIntentV1?: boolean;
 }
+export interface GroupMembership { groupId: string; name: string; joinedAt: string }
 export interface TransferFile {
   fileId: string;
   name: string;
@@ -183,7 +184,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean; openUrlIntents?: boolean };
+  features: { relay: true; relayStreaming?: boolean; multiGroup?: boolean; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean; openUrlIntents?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";
@@ -222,7 +223,7 @@ export type ServerMessage =
   | { type: "url_intents.changed" }
   | { type: "rtc.changed"; transferId: string; fileId: string; attemptId: string }
   | { type: "rtc.probes.changed" }
-  | ({ type: "sharedText.updated" } & GroupSharedText)
+  | ({ type: "sharedText.updated"; groupId?: string } & GroupSharedText)
   | { type: "event"; event: Event }
   | { type: "pong" };
 export type OpenUrlIntentState = "queued" | "delivered" | "launch_accepted" | "needs_tap" | "failed" | "expired";

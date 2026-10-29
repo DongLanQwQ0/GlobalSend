@@ -31,7 +31,7 @@ import { RecentDevices } from './recent_devices';
 import { linkifyHtml, webLinkActions } from './web_links';
 import { enableTextSelection, isTextSelectionTarget, isTextSelectionPoint, textSelectionActive } from './text_selection';
 import { LocalHistory } from './local_history';
-import { DirectConnectionBudget, ConnectAttempt, preferredScopes } from './rtc_route';
+import { DirectConnectionBudget, ConnectAttempt, preferredScopes, verifiedScopeLatency } from './rtc_route';
 import { groupIpSources, browserHostCandidates, literalIp, IP_GROUPS } from './ip_addresses';
 import type { IpSource } from './ip_addresses';
 import { applyTextDocuments } from './model';
@@ -212,7 +212,9 @@ class GlobalSend {
   private windowDropVisible=false;
   private readonly internalDragType='application/x-globalsend-source-'+id();
   private folderPickerGeneration:number|null=null;
-  shared=new SharedGroupEditor(()=>this.api,()=>this.render());
+  private groupEditors=new Map<string,SharedGroupEditor>();
+  get shared(){return this.sharedForGroup(this.session?.groupId || '');}
+  private sharedForGroup(groupId:string){const key=this.key+':'+this.session?.device.deviceId+':'+(this.info?.features?.multiGroup?'multi:':'single:')+groupId;let editor=this.groupEditors.get(key);if(!editor){editor=new SharedGroupEditor(()=>this.api,()=>this.render(),this.info?.features?.multiGroup?groupId:'');this.groupEditors.set(key,editor);}return editor;}
   fileSources = new Map<string,File>();
   uploads = new Map<string,AbortController>();
   hashes = new Set<AbortController>();
@@ -395,7 +397,7 @@ class GlobalSend {
     this.discoveryRefresh=refresh;
     return refresh.finally(()=>{if(this.discoveryRefresh===refresh)this.discoveryRefresh=null;});
   }
-  get dockKey() { return dockScopeKey(this.key,this.session?.device.deviceId || 'none',this.session?.groupId); }
+  get dockKey() { return dockScopeKey(this.key,this.session?.device.deviceId || 'none',this.session?.historyGroupId ?? this.session?.groupId); }
   saveSession() {
     const value = this.session ? JSON.stringify(publicSession(this.session)) : '';
     localSet(this.key + ':session',value);
@@ -403,7 +405,7 @@ class GlobalSend {
     rememberedSet(this.key + ':session',this.rememberDevice ? value : '');
   }
   loadPreferences() {
-    this.shared.reset();
+    for(const editor of this.groupEditors.values())editor.reset();this.groupEditors.clear();
     this.receivedAt={};
     this.autoAcceptLimitDraft=null;this.autoAcceptLimitElement=null;
     const route=this.session?rememberedGet(this.dockKey+':route'):null;
@@ -1269,6 +1271,45 @@ class GlobalSend {
     document.querySelector('#toasts')!.replaceChildren(node); setTimeout(() => node.remove(),3500);
   }
   async run(action: () => Promise<unknown>) { const generation=this.generation;try { await action(); } catch (error) { if(generation===this.generation)this.toast(errorText(error),true); } }
+  groupJoinName='';groupJoinPassword='';groupJoining=false;
+  adoptGroups(groups:NonNullable<Session['groups']>) {
+    if(!this.session)return;
+    this.session.historyGroupId ??= this.session.groupId || 'legacy';
+    this.session.groups=groups;
+    if(!groups.some(group=>group.groupId===this.session!.groupId))this.session.groupId=groups[0]?.groupId || '';
+    this.saveSession();
+  }
+  selectSharedGroup(groupId:string){
+    if(!this.session?.groups?.some(group=>group.groupId===groupId))return;
+    this.session.historyGroupId ??= this.session.groupId || 'legacy';
+    this.session.groupId=groupId;this.saveSession();this.render();void this.shared.refresh();
+  }
+  async joinAdditionalGroup(){
+    if(this.groupJoining)return;
+    const password=validateGroupKey(this.groupJoinPassword),generation=this.generation;
+    this.groupJoining=true;this.render();
+    try{
+      const result=await this.api.request<{groupId:string;groups:NonNullable<Session['groups']>}>('/groups/join',{groupKey:password,...(this.groupJoinName.trim()?{name:this.groupJoinName.trim()}:{})});
+      if(generation!==this.generation)return;
+      this.deviceSnapshotRevision++;this.adoptGroups(result.groups);this.selectSharedGroup(result.groupId);
+      this.groupJoinName=this.groupJoinPassword='';await this.refresh();this.toast('已加入');
+    }finally{if(generation===this.generation){this.groupJoining=false;this.render();}}
+  }
+  async leaveGroup(groupId:string){
+    if(!confirm('退出此组？本地文件和历史记录保留。'))return;
+    const generation=this.generation,result=await this.api.request<{groups:NonNullable<Session['groups']>}>('/groups/'+encodeURIComponent(groupId),undefined,'DELETE');
+    if(generation!==this.generation)return;
+    this.deviceSnapshotRevision++;this.adoptGroups(result.groups);this.recentDevices.clear();this.devices=[];
+    await this.refresh();this.render();if(this.session?.groupId)void this.shared.refresh();
+  }
+  sharedGroupPickerHtml(){
+    const groups=this.session?.groups || [];
+    return groups.length>1?`<label class="shared-group-picker">组内共享<select data-shared-group aria-label="共享文本分组">${groups.map(group=>`<option value="${e(group.groupId)}" ${group.groupId===this.session?.groupId?'selected':''}>${e(group.name)}</option>`).join('')}</select></label>`:'';
+  }
+  groupsHtml(){
+    if(!this.info?.features?.multiGroup || !this.session)return '';
+    return `<section class="settings-card group-settings"><h3>分组</h3>${(this.session.groups || []).map(group=>`<div class="group-membership"><label><input type="radio" name="shared-group" data-shared-group value="${e(group.groupId)}" ${group.groupId===this.session?.groupId?'checked':''}>${e(group.name)}</label><button class="icon-button quiet" data-leave-group="${e(group.groupId)}" aria-label="退出 ${e(group.name)}">${icon('logout')}</button></div>`).join('')}<form id="group-join-form"><label class="field">名称（可选）<input id="group-join-name" maxlength="80" value="${e(this.groupJoinName)}"></label><label class="field">组密码<input id="group-join-password" type="password" minlength="10" maxlength="256" required value="${e(this.groupJoinPassword)}" autocomplete="off"></label><button class="secondary" ${this.groupJoining?'disabled':''}>加入分组</button></form></section>`;
+  }
   async enroll() {
     if (this.pairBusy) return;
     const generation=this.generation;
@@ -1301,7 +1342,7 @@ class GlobalSend {
     this.editorElement=null;this.editorComposing=false;this.editorRenderPending=false;
     this.clearTextViews();
     this.receivedAt={};
-    this.shared.reset();this.clearPreviews();this.stagedTexts=[];this.queueSending=false;this.folderBusy=false;this.openedFile=null;
+    for(const editor of this.groupEditors.values())editor.reset();this.groupEditors.clear();this.clearPreviews();this.stagedTexts=[];this.queueSending=false;this.folderBusy=false;this.openedFile=null;
     this.sendBatch=null;this.multiSend=false;this.receiveSelecting=false;this.sentSelecting=false;this.sentSelected.clear();this.selected.clear();this.selectedTargets.clear();this.receipt=null;this.pendingReceipt=null;this.receiptBatch.clear();this.receiptFocusId='';this.receiptVersions.clear();this.receiptsInitialized=false;this.contextMenu=null;
     for (const controller of this.uploads.values()) controller.abort();
     for (const controller of this.hashes) controller.abort();
@@ -1327,12 +1368,13 @@ class GlobalSend {
     const generation = this.generation,deviceRevision=this.deviceSnapshotRevision,knownEvents=new Set(this.events.map(event=>event.eventId));
     try {
       const [devices,transfers] = await Promise.all([
-        this.api.request<{devices:Device[]}>('/devices'),this.api.request<{transfers:Transfer[]}>('/transfers'),
+        this.api.request<{devices:Device[];groups?:import('../../packages/protocol/src/index.ts').GroupMembership[]}>('/devices'),this.api.request<{transfers:Transfer[]}>('/transfers'),
       ]);
       if (generation !== this.generation || !this.session) return;
+      if(deviceRevision===this.deviceSnapshotRevision && devices.groups)this.adoptGroups(devices.groups);
       if(deviceRevision===this.deviceSnapshotRevision)this.updateDevices(devices.devices);else this.syncAgain=true;
       const ownGroupId = (this.device(this.session.device.deviceId) as (Device & {groupId?:string})|undefined)?.groupId;
-      if (ownGroupId && this.session.groupId !== ownGroupId) { const previousDockKey=this.dockKey;this.archiveLocalContent();this.events=[];this.transfers=[];this.cursor=0;this.stopRtc();this.recentDevices.clear();clearTimeout(this.deviceGraceTimer);this.devices=[];this.updateDevices(devices.devices);this.clearTextViews();if(this.modal==='reader')this.modal=null;this.session.groupId = ownGroupId; this.saveSession();this.loadPreferences();this.persist();localSet(previousDockKey,''); }
+      if (!this.info?.features?.multiGroup && ownGroupId && this.session.groupId !== ownGroupId) { const previousDockKey=this.dockKey;this.archiveLocalContent();this.events=[];this.transfers=[];this.cursor=0;this.stopRtc();this.recentDevices.clear();clearTimeout(this.deviceGraceTimer);this.devices=[];this.updateDevices(devices.devices);this.clearTextViews();if(this.modal==='reader')this.modal=null;this.session.groupId = ownGroupId; this.saveSession();this.loadPreferences();this.persist();localSet(previousDockKey,''); }
       if (this.device(this.session.device.deviceId)?.revoked) { this.signOut(); this.toast('此设备已断开，请重新加入。',true); return; }
       const ownDevice=this.device(this.session.device.deviceId);
       if(ownDevice && ownDevice.name!==this.session.device.name){this.session.device={...this.session.device,...ownDevice};this.saveSession();}
@@ -1412,7 +1454,7 @@ class GlobalSend {
               else {if(device){this.recentDevices.deadlines.delete(device.deviceId);device.online=true;this.scheduleDeviceExpiry();this.render();}void this.refresh();}
             }
             else if (data.type === 'devices.changed') {this.deviceSnapshotRevision++;void this.refresh();}
-            else if(data.type==='sharedText.updated')this.shared.receive(data as SharedDocument);
+            else if(data.type==='sharedText.updated'){const groupId=data.groupId || this.session?.groupId;if(!this.info?.features?.multiGroup || this.session?.groups?.some(group=>group.groupId===groupId))this.sharedForGroup(groupId || '').receive(data as SharedDocument);}
             else if(data.type==='rtc.probes.changed')void this.rtcProbes?.changed();
             else if (data.type === 'rtc.changed') {
               const channel=this.rtcChannels.get(fileKey(data.transferId,data.fileId));
@@ -1905,7 +1947,7 @@ class GlobalSend {
       if(!local){
         let offset=await receiveStorage(()=>store!.open(key,file,Date.now()+86400000));if(!this.fileActive(key,controller,generation))return;
         if(offset<file.size){
-          const {downloadPath}=await this.api.request<{downloadPath:string}>(`/transfers/${transfer.transferId}/files/${file.fileId}/download-ticket`,{},'POST',controller.signal);
+          const {downloadPath}=await this.api.request<{downloadPath:string}>(`/transfers/${transfer.transferId}/files/${file.fileId}/download-ticket`,this.info?.features?.relayStreaming?{live:true}:{},'POST',controller.signal);
           if(!this.fileActive(key,controller,generation))return;
           const response=await fetch(safeDownloadUrl(this.baseUrl,downloadPath),{signal:controller.signal,credentials:'omit',cache:'no-store',headers:offset?{Range:`bytes=${offset}-`}:undefined});
           if(!response.ok || offset && response.status!==206)throw new Error('文件下载无法从已接收位置继续');
@@ -2034,9 +2076,10 @@ class GlobalSend {
       const decision=new DirectConnectionBudget(automatic);
       let lastError:unknown=new Error('对方暂不支持直连');
       for(let index=0;index<scopes.length;index++) {
-        const scope=scopes[index];if(complete || decision.remaining()<=0)break;
+        const scope=scopes[index],latency=verifiedScopeLatency(this.rtcProbes?.results || [],this.session.device.deviceId,transfer.sourceDeviceId,scope);
+        if(complete)break;if(decision.remaining()<=0 && latency===undefined)continue;
         if(generation!==this.generation || controller.signal.aborted)return;
-        const duration=decision.window(scopes.length-index),deadline=Date.now()+duration,attempt=new ConnectAttempt(controller.signal,duration);
+        const duration=decision.window(scopes.length-index,latency!==undefined,latency),deadline=Date.now()+duration,attempt=new ConnectAttempt(controller.signal,duration);
         try {
           const {rtc}=await attempt.wait(api.request<{rtc:RtcView}>(`/transfers/${transfer.transferId}/files/${file.fileId}/rtc`,{attemptId:id(),scope,offset},'POST',attempt.signal));
           if(generation!==this.generation || controller.signal.aborted)return;
@@ -2115,7 +2158,12 @@ class GlobalSend {
         const key=fileKey(transfer.transferId,file.fileId);
         if(this.paused.has(key) || this.canceled.has(key) || this.fileRequests.has(key))continue;
         if(file.entryKind==='directory'){if(this.activeFileTransfers<this.transferConcurrency && file.status==='accepted' && !this.rtcLocalFiles.has(key) && !this.uploadErrors.has(key))void this.receiveDirectory(transfer,file);continue;}
-        if(file.relativePath && file.status==='ready'){if(this.activeFileTransfers<this.transferConcurrency && !this.uploadErrors.has(key))void this.receiveStructuredRelay(transfer,file);continue;}
+        const liveRelay=this.info?.features?.relayStreaming && file.transport==='relay' &&
+          (file.status==='ready' || file.size>0 && ['accepted','uploading'].includes(file.status));
+        if(file.relativePath && file.status==='ready' || liveRelay){
+          if(file.size>this.autoAcceptMaxBytes && !this.relayConfirmed.has(key)){this.uploadErrors.set(key,'使用中继需确认');continue;}
+          if(this.activeFileTransfers<this.transferConcurrency && !this.uploadErrors.has(key) && !this.rtcLocalFiles.has(key))void this.receiveStructuredRelay(transfer,file);continue;
+        }
         if(this.requiresNative(transfer) || !this.isOnlinePeer(transfer.sourceDeviceId))continue;
         if(!['accepted','uploading'].includes(file.status) || file.transport==='relay' || this.selectingRelays.has(key) || this.rtcReceives.has(key) || this.uploadErrors.has(key) || (this.relayRetryAt.get(key) || 0)>Date.now())continue;
         if(this.rtcPeer(transfer)) {if(this.activeFileTransfers<this.transferConcurrency)void this.receiveRtc(transfer,file);continue;}
@@ -2345,7 +2393,7 @@ class GlobalSend {
       return `<div class="modal-backdrop"><section class="modal reader-modal" draggable="true" data-drag-text="${e(event.eventId)}" role="dialog" aria-modal="true" aria-labelledby="reader-title"><div class="modal-header"><div><h2 id="reader-title">${editable?'编辑已发送文字':'收到的文字'}</h2><p class="reader-meta">${editable?'发给 ':''}${e(this.deviceLabel(editable?event.targetDeviceId:event.sourceDeviceId))} · ${time(event.createdAt)}${event.payload.editedAt?' · 已修改':''}</p></div><button class="icon-button quiet" data-action="close-modal" aria-label="关闭文字">${icon('close')}</button></div><div class="editor-sheet"><div class="editor-host" data-reader-host></div><div class="web-link-list" data-reader-links></div><div class="editor-tools"><span id="reader-count">${characterCount(view.draft)} 字符</span><span>${editable?'Ctrl / ⌘ + Enter 保存':'只读'}</span></div></div><div class="reader-footer"><div class="item-actions"><button class="copy-button" data-action="copy-reader">${icon('copy')} 复制</button></div>${editable?'<button class="primary" data-action="save-reader" aria-keyshortcuts="Control+Enter Meta+Enter">保存</button>':''}</div>${editable?'<p id="reader-status" class="reader-status" role="status" aria-live="polite"></p>':''}</section></div>`;
     }
     return `<div class="modal-backdrop"><section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-header"><h2 id="modal-title">设置</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭设置">${icon('close')}</button></div>
-      ${this.appearance.html()}${this.session?this.deviceSettingsHtml():''}<section class="settings-card server-settings" data-server-settings><label class="settings-field-label" for="server-url">服务器地址</label><form id="server-form" class="server-change"><input id="server-url" type="url" aria-label="服务器地址" placeholder="https://send.example.com" value="${e(this.serverDraft)}"><button class="secondary" type="submit">前往</button></form></section>${this.session?`<div class="settings-footer"><button class="quiet" data-action="signout">切换分组</button></div>`:''}</section></div>`;
+      ${this.appearance.html()}${this.session?this.deviceSettingsHtml()+this.groupsHtml():''}<section class="settings-card server-settings" data-server-settings><label class="settings-field-label" for="server-url">服务器地址</label><form id="server-form" class="server-change"><input id="server-url" type="url" aria-label="服务器地址" placeholder="https://send.example.com" value="${e(this.serverDraft)}"><button class="secondary" type="submit">前往</button></form></section>${this.session?`<div class="settings-footer"><button class="quiet" data-action="signout">断开服务器</button></div>`:''}</section></div>`;
   }
   bind() {
     const on = (selector: string,event: string,handler: (event: Event,node: HTMLElement)=>void) => document.querySelectorAll<HTMLElement>(selector).forEach(node=>{if(node.closest('.receipt-backdrop')){const key=selector+':'+event,bound=this.receiptBindings.get(node) || new Set<string>();if(bound.has(key))return;bound.add(key);this.receiptBindings.set(node,bound);}node.addEventListener(event,event=>handler(event,node));});
@@ -2406,6 +2454,11 @@ class GlobalSend {
     });
     on('#device-name-form','submit',event=>{event.preventDefault();void this.saveDeviceName();});
     on('#device-display-name','input',(_event,node)=>{this.deviceNameDraft=(node as HTMLInputElement).value;});
+    on('#group-join-name','input',(_event,node)=>{this.groupJoinName=(node as HTMLInputElement).value;});
+    on('#group-join-password','input',(_event,node)=>{this.groupJoinPassword=(node as HTMLInputElement).value;});
+    on('#group-join-form','submit',event=>{event.preventDefault();void this.run(()=>this.joinAdditionalGroup());});
+    on('[data-leave-group]','click',(_event,node)=>{void this.run(()=>this.leaveGroup(node.dataset.leaveGroup!));});
+    on('[data-shared-group]','change',(_event,node)=>this.selectSharedGroup((node as HTMLSelectElement).value));
     on('#enroll-form','submit',event=>{event.preventDefault(); void this.enroll();});
     on('#remember-device','change',(_event,node)=>{this.rememberDevice=(node as HTMLInputElement).checked;this.saveSession();});
     on('[data-auto-accept]','change',(_event,node)=>this.setAutoAccept((node as HTMLInputElement).checked));
@@ -2481,7 +2534,7 @@ class GlobalSend {
     on('[data-drag-all]','dragstart',(event,node)=>this.beginBulkDrag(event,node));
     on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragstart',(event,node)=>this.beginContentDrag(event,node));
     on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragend',()=>{this.endContentDrag();this.render();});
-    on('.content-card[data-drag-text],.content-card[data-drag-file]','contextmenu',(event,node)=>{if(isTextSelectionTarget(event.target))return;event.preventDefault();if(node.hasAttribute('data-receive-key') && this.receiveSelecting || node.hasAttribute('data-sent-key') && this.sentSelecting)return;const mouse=event as MouseEvent;this.openCardMenu(node.dataset.receiptId?'receipt':node.dataset.dragText?'text':'file',node.dataset.receiptId || node.dataset.dragText || node.dataset.dragFile!,mouse.clientX,mouse.clientY);});
+    on('.content-card[data-drag-text],.content-card[data-drag-file]','contextmenu',(event,node)=>{if(isTextSelectionTarget(event.target))return;event.preventDefault();if(this.heldCardKey===(node.dataset.receiveKey || node.dataset.sentKey) || node.hasAttribute('data-receive-key') && this.receiveSelecting || node.hasAttribute('data-sent-key') && this.sentSelecting)return;const mouse=event as MouseEvent;this.openCardMenu(node.dataset.receiptId?'receipt':node.dataset.dragText?'text':'file',node.dataset.receiptId || node.dataset.dragText || node.dataset.dragFile!,mouse.clientX,mouse.clientY);});
     on('[data-card-menu]','click',(event,node)=>{event.stopPropagation();const card=node.closest<HTMLElement>('[data-drag-text],[data-drag-file]');if(!card)return;const rect=node.getBoundingClientRect();this.openCardMenu(card.dataset.dragText?'text':'file',card.dataset.dragText || card.dataset.dragFile!,rect.right-180,rect.bottom+4);});
     on('[data-card-command]','click',(_event,node)=>{void this.run(()=>this.cardCommand(node.dataset.cardCommand!));});
     on('[data-hide-text]','click',(_event,node)=>this.hideText(node.dataset.hideText!));

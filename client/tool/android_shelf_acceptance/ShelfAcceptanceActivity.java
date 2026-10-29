@@ -201,6 +201,42 @@ public final class ShelfAcceptanceActivity extends Activity {
         view.setText(text); view.setTextSize(size); view.setTextColor(Color.rgb(35, 42, 39));
         return view;
     }
+    /** Cross-UID real-path check only; does not assert OS-drop/WeChat acceptance. */
+    public static final class LegacyPathReader extends Activity {
+        @Override public void onCreate(Bundle state) {
+            super.onCreate(state);JSONObject report=new JSONObject();
+            TextView status=new TextView(this);status.setTextSize(20);setContentView(status);
+            try {
+                android.net.Uri uri=getIntent().getData();
+                report.put("scope","Cross-UID production-provider path read with explicit intent grant; not an OS drag or target-app insertion");
+                report.put("sourceUid",getIntent().getIntExtra("sourceUid",-1));report.put("targetUid",android.os.Process.myUid());
+                report.put("sdk",android.os.Build.VERSION.SDK_INT);
+                report.put("receivedAtMillis",System.currentTimeMillis());
+                String mime=getIntent().getType();report.put("mime",mime);
+                report.put("imageReadPermission",checkSelfPermission("android.permission.READ_MEDIA_IMAGES")==android.content.pm.PackageManager.PERMISSION_GRANTED);
+                report.put("originalUriGranted",checkUriPermission(uri,android.os.Process.myPid(),android.os.Process.myUid(),android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)==android.content.pm.PackageManager.PERMISSION_GRANTED);
+                report.put("phase","query");
+                try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{"_data"},null,null,null)) {
+                    if(cursor==null || !cursor.moveToFirst() || cursor.isNull(0))throw new java.io.FileNotFoundException("No legacy path");
+                    report.put("phase","path-open");report.put("pathExists",new File(cursor.getString(0)).exists());
+                    report.put("pathReadable",new File(cursor.getString(0)).canRead());
+                    try(java.io.InputStream input=new java.io.FileInputStream(cursor.getString(0))) {
+                        byte[] expected="image/png".equals(mime)?new byte[]{(byte)137,80,78,71,13,10,26,10}:"GS-legacy-private".getBytes(StandardCharsets.UTF_8);
+                        byte[] bytes=new byte[expected.length];new java.io.DataInputStream(input).readFully(bytes);
+                        if(!java.util.Arrays.equals(bytes,expected))throw new java.io.IOException("Not synthetic payload");
+                    }
+                }
+                report.put("readable",true);
+            } catch(Exception error) {
+                try{report.put("readable",false);report.put("errorType",error.getClass().getSimpleName());
+                    Throwable cause=error.getCause();if(cause instanceof android.system.ErrnoException)report.put("errno",((android.system.ErrnoException)cause).errno);
+                }catch(Exception ignored){}
+            }
+            try{Files.write(new File(getFilesDir(),"legacy-intent-outcome.json").toPath(),report.toString(2).getBytes(StandardCharsets.UTF_8));}
+            catch(Exception error){throw new IllegalStateException(error);}
+            status.setText(report.toString());
+        }
+    }
     public static final class ImageProvider extends android.content.ContentProvider {
         private File file;
         @Override public boolean onCreate() {

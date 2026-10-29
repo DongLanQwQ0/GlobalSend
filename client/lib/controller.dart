@@ -283,14 +283,21 @@ class SendController extends ChangeNotifier {
   final Set<String> _temporarySources = {}, _hiddenDockIds = {};
   bool _checkingSentReferences = false;
   Future<void>? _folderRelease;
-  late final GroupSharedText sharedDocument = GroupSharedText(
-    onChanged: changed,
+  final Map<String, GroupSharedText> _groupDocuments = {};
+  GroupSharedText get sharedDocument => _groupDocument(profile?.groupId ?? '');
+  GroupSharedText _groupDocument(String groupId) => _groupDocuments.putIfAbsent(
+    '${profile?.storageKey}:$groupId',
+    () => GroupSharedText(onChanged: changed),
   );
+  bool get multiGroupSupported => info['features']?['multiGroup'] == true;
+  List<Map<String, dynamic>> get joinedGroups => profile?.groups ?? [];
   String get sharedText => sharedDocument.text;
   String get sharedTextRemote => sharedDocument.remoteText;
   String get sharedTextStatus => sharedDocument.status;
   int get sharedTextRevision => sharedDocument.revision;
-  bool get sharedTextSupported => info['features']?['groupSharedText'] == true;
+  bool get sharedTextSupported =>
+      info['features']?['groupSharedText'] == true &&
+      (!multiGroupSupported || profile?.groupId.isNotEmpty == true);
   bool get sharedTextDirty => sharedDocument.dirty;
   bool get sharedTextConflict => sharedDocument.conflict;
   void setSharedTextDraft(String value) => sharedDocument.setDraft(value);
@@ -1416,6 +1423,67 @@ class SendController extends ChangeNotifier {
     await adoptEnrollment(j, name);
   }
 
+  Future<void> joinAdditionalGroup(String password, {String name = ''}) async {
+    final a = api!, p = profile!, epoch = generation;
+    final result = await a.call('POST', '/groups/join', {
+      'groupKey': password,
+      if (name.trim().isNotEmpty) 'name': name.trim(),
+    });
+    _requireSession(epoch, a, p);
+    _deviceRevision++;
+    p.groups = (result['groups'] as List)
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    await selectSharedGroup(result['groupId'] as String);
+    await safeReconcile();
+  }
+
+  Future<void> selectSharedGroup(String groupId) async {
+    final p = profile!, a = api!;
+    if (!p.groups.any((g) => g['groupId'] == groupId))
+      throw StateError('分组已退出');
+    p.groupId = groupId;
+    sharedDocument.connect(
+      a,
+      enabled: sharedTextSupported,
+      groupId: multiGroupSupported ? groupId : '',
+    );
+    changed();
+    await save();
+    await sharedDocument.refresh();
+  }
+
+  Future<void> leaveGroup(String groupId) async {
+    final a = api!, p = profile!, epoch = generation;
+    final result = await a.call(
+      'DELETE',
+      '/groups/${Uri.encodeComponent(groupId)}',
+    );
+    _requireSession(epoch, a, p);
+    _deviceRevision++;
+    _adoptGroups(result['groups'] as List);
+    // Retained local files/history and active transfer identities do not change.
+    devices = [];
+    recentDevices.clear();
+    _groupDocuments.remove('${p.storageKey}:$groupId')?.reset();
+    await save();
+    await safeReconcile();
+    await sharedDocument.refresh();
+    changed();
+  }
+
+  void _adoptGroups(List values) {
+    final p = profile!;
+    p.groups = values.map((e) => Map<String, dynamic>.from(e)).toList();
+    if (!p.groups.any((g) => g['groupId'] == p.groupId))
+      p.groupId = p.groups.firstOrNull?['groupId'] as String? ?? '';
+    sharedDocument.connect(
+      api!,
+      enabled: sharedTextSupported,
+      groupId: multiGroupSupported ? p.groupId : '',
+    );
+  }
+
   Future<void> refreshCredentialRecoveries() async {
     final directory = root;
     final selected = profile;
@@ -1618,6 +1686,10 @@ class SendController extends ChangeNotifier {
     _hasStoredSession = a.token.isNotEmpty;
     p.deviceId = j['device']['deviceId'];
     p.groupId = groupId;
+    if (j['groups'] is List)
+      p.groups = (j['groups'] as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     p.name = name;
     _requireSession(epoch, a, p);
     await save();
@@ -1878,7 +1950,11 @@ class SendController extends ChangeNotifier {
       connected = true;
       unawaited(urlIntents.synchronize());
       unawaited(refreshReceiveNotifications(request: true));
-      sharedDocument.connect(a, enabled: sharedTextSupported);
+      sharedDocument.connect(
+        a,
+        enabled: sharedTextSupported,
+        groupId: multiGroupSupported ? profile!.groupId : '',
+      );
       unawaited(sharedDocument.refresh());
       connection = '已连接';
       failures = 0;
@@ -1917,7 +1993,7 @@ class SendController extends ChangeNotifier {
     unawaited(previous?.close());
     poll?.cancel();
     connected = false;
-    sharedDocument.disconnected();
+    for (final document in _groupDocuments.values) document.disconnected();
     _deviceRevision++;
     updateDiscoveredDevices(
       devices.map((device) => {...device, 'online': false}).toList(),
@@ -1943,7 +2019,17 @@ class SendController extends ChangeNotifier {
       return;
     }
     if (message['type'] == 'sharedText.updated' && sharedTextSupported) {
-      sharedDocument.applyRemote(message);
+      final groupId = message['groupId'] as String? ?? profile?.groupId ?? '';
+      if (!multiGroupSupported ||
+          joinedGroups.any((g) => g['groupId'] == groupId)) {
+        final document = _groupDocument(groupId);
+        document.connect(
+          api!,
+          enabled: true,
+          groupId: multiGroupSupported ? groupId : '',
+        );
+        document.applyRemote(message);
+      }
       return;
     }
     if (message['type'] == 'rtc.probes.changed') {
@@ -2036,6 +2122,7 @@ class SendController extends ChangeNotifier {
       final ds = await a.call('GET', '/devices');
       if (epoch != generation) return;
       if (revision == _deviceRevision) {
+        if (ds['groups'] is List) _adoptGroups(ds['groups'] as List);
         updateDiscoveredDevices(
           (ds['devices'] as List)
               .map((e) => Map<String, dynamic>.from(e))
@@ -5065,6 +5152,7 @@ class SendController extends ChangeNotifier {
     }
 
     final choices = <TransferRouteChoice>[];
+    final forwardPairs = <TransferRouteChoice, CandidateRoute? Function()>{};
     for (final phase in phases) {
       final scopeLabel = phase == 'lan' ? '局域网' : '公网';
       final preferRtc = reachability.preferRtc(
@@ -5146,19 +5234,24 @@ class SendController extends ChangeNotifier {
       if (preferRtc && hasRtc) choices.add(rtcChoice());
       if ((phase == 'lan' ? advertisedStages.lan : advertisedStages.public)
               .isNotEmpty ||
-          !peerLive && info['features']?['direct'] == true)
-        choices.add(
-          TransferRouteChoice(
-            phase: phase,
-            label: '$scopeLabel直连',
-            run: () => attempt(phase),
-            ready: forward != null ? true : null,
-            // With no advertised peer, only the legacy file grant knows its
-            // candidates. Keep that entry point usable without preflight.
-            readiness: advertised.isEmpty ? null : forwardReady(),
-            latency: () => measuredLatency('https'),
-          ),
+          !peerLive && info['features']?['direct'] == true) {
+        final choice = TransferRouteChoice(
+          phase: phase,
+          label: '$scopeLabel直连',
+          run: () => attempt(phase),
+          ready: forward != null ? true : null,
+          // With no advertised peer, only the legacy file grant knows its
+          // candidates. Keep that entry point usable without preflight.
+          readiness: advertised.isEmpty ? null : forwardReady(),
+          latency: () => measuredLatency('https'),
         );
+        choices.add(choice);
+        forwardPairs[choice] = () => probes.readyRoute(
+          addresses,
+          cellular: phase == 'lan' ? false : null,
+          lan: phase == 'lan' ? true : null,
+        );
+      }
       if (hasReverse) choices.add(reverseChoice(false));
       if (!preferRtc && hasRtc) choices.add(rtcChoice());
       // Cellular HTTPS is already raced with ordinary public source pairs.
@@ -5168,18 +5261,20 @@ class SendController extends ChangeNotifier {
     final selection = TransferRouteSelection(choices);
     try {
       for (final phase in phases) {
-        if (deadline.expired) break;
+        if (deadline.expired && !selection.readyIn(phase)) continue;
         final phaseWatch = Stopwatch()..start();
         final phaseLimit = deadline.scopeBudget(
           last: phase == 'public' || !choices.any((c) => c.phase == 'public'),
           verified: selection.readyIn(phase),
           nextVerified: selection.readyIn('public'),
         );
-        while (!deadline.expired) {
+        while (!deadline.expired || selection.readyIn(phase)) {
           final remaining = phaseLimit - phaseWatch.elapsed;
-          if (remaining <= Duration.zero) break;
+          if (remaining <= Duration.zero && !selection.readyIn(phase)) break;
           final wait = Duration(
-            microseconds: (remaining.inMicroseconds * .35).floor(),
+            microseconds: remaining > Duration.zero
+                ? (remaining.inMicroseconds * .35).floor()
+                : 0,
           );
           final choice = await selection.next(
             phase,
@@ -5194,14 +5289,36 @@ class SendController extends ChangeNotifier {
           );
           choice.attempted = true;
           if (budget <= Duration.zero) break;
+          final selectedPair = forwardPairs[choice]?.call();
+          final window = ConnectionWindow(budget);
           try {
             // Exactly one file writer; cancellation/teardown completes before
             // any other ready transport is allowed to acquire its file grant.
-            if (await ConnectionWindow(budget).run(choice.run)) return;
+            if (await window.run(choice.run)) return;
           } catch (error) {
             _requireSession(epoch, a, p);
             if (item.locallyCanceled) rethrow;
+            if (error is TransferStopped) rethrow;
             failures.add('${choice.label}不可用：$error');
+            if (window.canceled && selectedPair != null) {
+              probes.discard(selectedPair);
+              reachability.markFailed(
+                item.source,
+                selectedPair.address,
+                cellular: selectedPair.cellular,
+                sourceAddress: selectedPair.sourceAddress,
+              );
+            }
+          }
+          final nextPair = forwardPairs[choice]?.call();
+          if (selectedPair != null &&
+              nextPair != null &&
+              nextPair.key != selectedPair.key) {
+            // Every measured NIC/IP pair remains eligible, even when an
+            // earlier pair spent its handshake window. Never relay while an
+            // untried, proven source pair is still available.
+            choice.attempted = false;
+            choice.ready = true;
           }
         }
       }
@@ -5274,6 +5391,8 @@ class SendController extends ChangeNotifier {
     item.receiveRoutePreference = mode;
     final supportsDirect = info['features']?['direct'] == true || rtc != null;
     final allowCellular = cellularUploads;
+    final liveRelay =
+        info['features']?['relayStreaming'] == true && item.size > 0;
     File? temporary;
     ReceiveFileHandle? destinationHandle;
     String managedTemporaryLocation = '';
@@ -5485,14 +5604,18 @@ class SendController extends ChangeNotifier {
         }
         if (remote['transport'] != 'relay') {
           await a.call('POST', '${fileRoute(item)}/relay', {});
+          remote['transport'] = 'relay';
         }
         _requireSession(epoch, a, p);
         item.route = 'relay';
         item.routeDetail = mode == 'relay' ? '手动选择中继，等待发送方上传' : '直连不可用，使用中继';
-        item.status = 'accepted';
-        return;
+        if (!liveRelay) {
+          item.status = 'accepted';
+          return;
+        }
       }
-      if (mode != 'relay' &&
+      if (supportsDirect &&
+          mode != 'relay' &&
           (preferDirect || remote['transport'] != 'relay') &&
           ['accepted', 'uploading'].contains(remote['status'])) {
         directAttempt = true;
@@ -5524,11 +5647,14 @@ class SendController extends ChangeNotifier {
         if (mode == 'relay' || item.routeDetail.isEmpty) {
           item.routeDetail = mode == 'relay' ? '手动选择中继' : '当前使用中继';
         }
-        final j = await a.call(
-          'POST',
-          '${fileRoute(item)}/download-ticket',
-          {},
-        );
+        if (!liveRelay &&
+            ['accepted', 'uploading'].contains(remote['status'])) {
+          item.status = 'accepted';
+          return;
+        }
+        final j = await a.call('POST', '${fileRoute(item)}/download-ticket', {
+          if (liveRelay) 'live': true,
+        });
         await a.download(
           j['downloadPath'],
           temporary,
@@ -5667,7 +5793,8 @@ class SendController extends ChangeNotifier {
     recentDevices.clear();
     _deviceRevision++;
     devices = [];
-    sharedDocument.reset();
+    for (final document in _groupDocuments.values) document.reset();
+    _groupDocuments.clear();
     latestReceipt = null;
     pendingReceipts.clear();
     nativeDismissedReceiptIds.clear();

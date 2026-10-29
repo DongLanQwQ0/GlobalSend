@@ -18,7 +18,7 @@ TransferRouteChoice choice(
 
 void main() {
   test(
-    'measured RTT ranks proven transports and reserves a proven fallback',
+    'measured RTT ranks proven transports without slicing their handshakes',
     () async {
       final forward = TransferRouteChoice(
         phase: 'lan',
@@ -39,13 +39,13 @@ void main() {
       expect(await selection.next('lan', Duration.zero), same(reverse));
       expect(
         selection.attemptBudget(reverse, const Duration(milliseconds: 600)),
-        const Duration(milliseconds: 390),
+        const Duration(seconds: 1),
       );
       reverse.attempted = true;
       expect(await selection.next('lan', Duration.zero), same(forward));
       expect(
         selection.attemptBudget(forward, const Duration(milliseconds: 210)),
-        const Duration(milliseconds: 210),
+        const Duration(seconds: 1),
       );
     },
   );
@@ -65,7 +65,7 @@ void main() {
       );
       expect(
         selection.attemptBudget(reverse, const Duration(milliseconds: 600)),
-        const Duration(milliseconds: 600),
+        const Duration(seconds: 1),
       );
     },
   );
@@ -119,6 +119,32 @@ void main() {
     expect(
       selection.attemptBudget(reverse, const Duration(milliseconds: 300)),
       const Duration(milliseconds: 300),
+    );
+  });
+  test('proven paths retain a bounded handshake after the probe deadline', () {
+    final verified = TransferRouteChoice(
+      phase: 'lan',
+      label: 'LAN',
+      run: () async => true,
+      ready: true,
+      latency: () => 151,
+    );
+    final selection = TransferRouteSelection([verified]);
+    addTearDown(selection.close);
+    expect(
+      selection.attemptBudget(verified, const Duration(milliseconds: -20)),
+      const Duration(seconds: 1),
+    );
+    final slow = TransferRouteChoice(
+      phase: 'public',
+      label: 'public',
+      run: () async => true,
+      ready: true,
+      latency: () => 500,
+    );
+    expect(
+      selection.attemptBudget(slow, Duration.zero),
+      const Duration(milliseconds: 2100),
     );
   });
 

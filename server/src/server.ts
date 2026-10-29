@@ -24,6 +24,9 @@ import {
   constants,
 } from "node:fs";
 import { createReadStream } from "node:fs";
+import { EventEmitter } from "node:events";
+import { type Readable } from "node:stream";
+import { liveRelayStream } from "./relay_stream.ts";
 import { statfs, open } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +35,7 @@ import { RtcRegistry, type RtcAttempt, type RtcScope } from "./rtc.ts";
 import { RtcProbeRegistry } from "./rtc_probes.ts";
 import { TextContents } from "./text_content.ts";
 import { UrlIntents } from "./url_intents.ts";
+import { DeviceGroups } from "./groups.ts";
 import {
   PROTOCOL_VERSION,
   DEFAULT_CHUNK_SIZE,
@@ -272,13 +276,14 @@ export async function buildApp(options: Options = {}) {
       throw e;
     }
   };
+  const groups = new DeviceGroups(db);
   const textContents = new TextContents(db);
   const capabilityColumns = (db.prepare("PRAGMA table_info(device_capabilities)").all() as Row[]).map(column => column.name);
   if (!capabilityColumns.includes("open_url_intent")) db.exec("ALTER TABLE device_capabilities ADD COLUMN open_url_intent INTEGER NOT NULL DEFAULT 0");
   const urlIntents = new UrlIntents(db, options.urlIntentNow ?? Date.now, (source, target) => {
     send(source, { type: "url_intents.changed" });
     if (target !== source) send(target, { type: "url_intents.changed" });
-  });
+  }, (a, b, preferred) => groups.common(a, b, preferred));
   run(
     "INSERT OR IGNORE INTO groups(id,created) SELECT group_id,MIN(created) FROM devices GROUP BY group_id",
   );
@@ -300,7 +305,7 @@ export async function buildApp(options: Options = {}) {
   const tickets = new Map<string, { deviceId: string; expires: number }>();
   const downloads = new Map<
     string,
-    { deviceId: string; transferId: string; fileId: string; expires: number }
+    { deviceId: string; transferId: string; fileId: string; expires: number; live?: boolean }
   >();
   const directTickets = new Map<
     string,
@@ -373,11 +378,10 @@ export async function buildApp(options: Options = {}) {
   }
   function target(source: Row, targetId: string) {
     const d = get(
-      "SELECT * FROM devices WHERE id=? AND group_id=? AND revoked=0",
+      "SELECT * FROM devices WHERE id=? AND revoked=0",
       targetId,
-      source.group_id,
     );
-    if (!d) fail("FORBIDDEN", "Target device unavailable", 403);
+    if (!d || !groups.common(source.id, targetId)) fail("FORBIDDEN", "Target device unavailable", 403);
     return d;
   }
   function send(deviceId: string, value: unknown) {
@@ -387,15 +391,20 @@ export async function buildApp(options: Options = {}) {
   let closing = false;
   function presence(d: Row, active: boolean) {
     if (closing) return;
-    for (const peer of all(
-      "SELECT id FROM devices WHERE group_id=? AND revoked=0",
-      d.group_id,
-    ))
+    for (const peer of groups.peers(d.id))
       send(peer.id, { type: "presence", deviceId: d.id, online: active });
   }
   function devicesChanged(groupId: string) {
-    for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", groupId))
+    for (const peer of groups.members(groupId))
       send(peer.id, { type: "devices.changed" });
+  }
+  function deviceGroupsChanged(deviceId: string) {
+    for (const peer of groups.peers(deviceId)) send(peer.id,{type:'devices.changed'});
+  }
+  function selectedGroup(req: FastifyRequest, d: Row): string {
+    const groupId = (req.query as {groupId?:string}).groupId ?? d.group_id;
+    if (!groups.has(d.id,groupId)) fail("GROUP_UNAVAILABLE", "请选择已加入的分组", 403);
+    return groupId;
   }
   function clearPeerAddresses(deviceId: string) {
     peerAnnouncements.delete(deviceId);
@@ -412,13 +421,11 @@ export async function buildApp(options: Options = {}) {
   }
   function probesChanged(deviceIds: string[], groupWide = false) {
     if (!groupWide) { for (const deviceId of new Set(deviceIds)) send(deviceId, { type: "rtc.probes.changed" }); return; }
-    const groups = new Set<string>();
+    const affectedPeers = new Set<string>();
     for (const deviceId of deviceIds) {
-      const d = get("SELECT group_id FROM devices WHERE id=?", deviceId);
-      if (d) groups.add(d.group_id);
+      for (const peer of groups.peers(deviceId)) affectedPeers.add(peer.id);
     }
-    for (const groupId of groups) for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", groupId))
-      send(peer.id, { type: "rtc.probes.changed" });
+    for (const peer of affectedPeers) send(peer, { type: "rtc.probes.changed" });
   }
   function cleanupProbes() {
     const changed = rtcProbes.cleanup((deviceId, scope) => online(deviceId) && Boolean(rtc.capability(deviceId)?.scopes.includes(scope)));
@@ -429,12 +436,12 @@ export async function buildApp(options: Options = {}) {
     for (const [deviceId, peer] of peerAnnouncements) if (peer.expires <= discoveryNow()) {
       clearPeerAddresses(deviceId);
       const d = get("SELECT group_id FROM devices WHERE id=?", deviceId);
-      if (d) changedGroups.add(d.group_id);
+      if (d) for (const membership of groups.list(deviceId)) changedGroups.add(membership.groupId);
     }
     const expired = rtc.cleanup();
     for (const deviceId of expired.devices) {
       const d = get("SELECT group_id FROM devices WHERE id=?", deviceId);
-      if (d) changedGroups.add(d.group_id);
+      if (d) for (const membership of groups.list(deviceId)) changedGroups.add(membership.groupId);
     }
     for (const attempt of expired.attempts) rtcChanged(attempt);
     for (const groupId of changedGroups) devicesChanged(groupId);
@@ -552,7 +559,8 @@ export async function buildApp(options: Options = {}) {
   }
   const changed = (t: Row) =>
     emit("transfer.updated", t.source, t.target, { transferId: t.id, routePreference: transferRoute(t) });
-  const streams = new Map<string, Set<ReturnType<typeof createReadStream>>>();
+  const streams = new Map<string, Set<Readable>>();
+  const relayCommits=new EventEmitter();relayCommits.setMaxListeners(0);
   const pendingDeletes = new Set<string>(
     all("SELECT path FROM pending_deletes").map((r) => r.path),
   );
@@ -669,7 +677,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true, openUrlIntents: true },
+    features: { relay: true, relayStreaming: true, multiGroup: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true, openUrlIntents: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -722,8 +730,10 @@ export async function buildApp(options: Options = {}) {
           iso(),
         );
       });
+      groups.join(deviceId, groupId!);
       reply.code(201);
       return {
+        groups: groups.list(deviceId),
         deviceToken: token,
         groupId: groupId!,
         createdGroup,
@@ -731,6 +741,34 @@ export async function buildApp(options: Options = {}) {
       };
     },
   );
+  app.get(`${api}/groups`, async req => ({groups:groups.list(device(req).id)}));
+  app.post(`${api}/groups/join`, {schema:{body:{type:'object',additionalProperties:false,required:['groupKey'],properties:{
+    groupKey:{type:'string',minLength:MIN_GROUP_PASSWORD_LENGTH,maxLength:256},name:{type:'string',minLength:1,maxLength:80},
+  }}}}, async req => {
+    const d=device(req), body=req.body as {groupKey:string;name?:string};
+    const password=validateGroupKey(body.groupKey);
+    const groupId=tx(()=>{
+      const index=groupKeyHash(password),existing=get('SELECT * FROM group_keys WHERE key_hash=?',index);
+      if(existing?.state==='retired') fail('GROUP_KEY_RETIRED','此组密码已更换',403);
+      const id=existing?.group_id ?? randomUUID();
+      if(!existing){run('INSERT INTO groups VALUES(?,?)',id,iso());run('INSERT INTO group_keys VALUES(?,?,?,?,NULL)',index,id,'active',iso());}
+      groups.join(d.id,id,body.name);
+      return id;
+    });
+    deviceGroupsChanged(d.id);
+    return {groupId,groups:groups.list(d.id)};
+  });
+  app.delete(`${api}/groups/:groupId`, async req => {
+    const d=device(req),{groupId}=req.params as {groupId:string};
+    const previous=groups.peers(d.id);
+    tx(()=>groups.leave(d.id,groupId));
+    // Only former peers that lost their final common group lose pending probes.
+    for(const probe of [...httpsProbes.values()]) if ((probe.requester===d.id || probe.responder===d.id) && !groups.common(probe.requester,probe.responder))
+      probe.finish({reachable:false,tested:false,elapsedMs:0,error:'设备已离开共同分组'},true);
+    for(const peer of previous) send(peer.id,{type:'devices.changed'});
+    send(d.id,{type:'devices.changed'});
+    return {groups:groups.list(d.id)};
+  });
   const rotations = new Map<string, { count: number; reset: number }>();
   app.post(
     `${api}/groups/key`,
@@ -746,7 +784,7 @@ export async function buildApp(options: Options = {}) {
       },
     },
     async (req) => {
-      const d = device(req),
+      const identity = device(req), d = {...identity, group_id: selectedGroup(req,identity)},
         groupKey = validateGroupKey((req.body as any)?.newGroupKey ?? secret()),
         index = groupKeyHash(groupKey);
       let rotatedAt = iso();
@@ -797,7 +835,7 @@ export async function buildApp(options: Options = {}) {
       updatedBy: row.updated_by, mutationId: row.mutation_id,
     } : { text: "", revision: 0, updatedAt: "", updatedBy: "", mutationId: "" };
   }
-  app.get(`${api}/group/shared-text`, async req => sharedText(device(req).group_id));
+  app.get(`${api}/group/shared-text`, async req => sharedText(selectedGroup(req,device(req))));
   app.put(`${api}/group/shared-text`, {
     schema: { body: {
       type: "object", additionalProperties: false,
@@ -809,7 +847,7 @@ export async function buildApp(options: Options = {}) {
       },
     } },
   }, async (req, reply) => {
-    const d = device(req), body = req.body as { text: string; baseRevision: number; mutationId: string };
+    const identity = device(req), d: Row = {...identity, group_id: selectedGroup(req,identity)}, body = req.body as { text: string; baseRevision: number; mutationId: string };
     const result = tx(() => {
       const current = sharedText(d.group_id);
       // A lost HTTP response can be retried without making another revision.
@@ -830,18 +868,16 @@ export async function buildApp(options: Options = {}) {
     if (result.conflict) return reply.code(409).send({
       error: { code: "SHARED_TEXT_CONFLICT", message: "共享内容已更新" }, current: result.current,
     });
-    if (result.changed) for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", d.group_id))
-      send(peer.id, { type: "sharedText.updated", ...result.current });
+    if (result.changed) for (const peer of groups.members(d.group_id))
+      send(peer.id, { type: "sharedText.updated", groupId: d.group_id, ...result.current });
     return result.current;
   });
   app.get(`${api}/devices`, async (req) => {
     const d = device(req);
     cleanupDiscovery();
     return {
-      devices: all(
-        "SELECT * FROM devices WHERE group_id=? AND revoked=0 ORDER BY created",
-        d.group_id,
-      ).filter(row => row.id === d.id || online(row.id)).map(deviceView),
+      groups: groups.list(d.id),
+      devices: groups.peers(d.id).filter(row => row.id === d.id || online(row.id)).map(deviceView),
     };
   });
   app.post(`${api}/devices/me/capabilities`, {
@@ -852,7 +888,7 @@ export async function buildApp(options: Options = {}) {
     const openUrl = body.openUrlIntentV1 ?? Boolean(previous?.open_url_intent);
     if (openUrl && !["windows", "android"].includes(d.platform)) fail("unsupported_target", "当前平台不支持自动打开网页");
     run("INSERT INTO device_capabilities(device_id,folder_transfer,open_url_intent) VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET folder_transfer=excluded.folder_transfer,open_url_intent=excluded.open_url_intent", d.id, enabled ? 1 : 0, openUrl ? 1 : 0);
-    if (Boolean(previous?.folder_transfer) !== enabled || Boolean(previous?.open_url_intent) !== openUrl) for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", d.group_id)) send(peer.id, {type:"devices.changed"});
+    if (Boolean(previous?.folder_transfer) !== enabled || Boolean(previous?.open_url_intent) !== openUrl) for (const peer of groups.peers(d.id)) send(peer.id, {type:"devices.changed"});
     return {device:deviceView(d)};
   });
   const urlRequestId = { type: "string", pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" };
@@ -882,7 +918,7 @@ export async function buildApp(options: Options = {}) {
     const d = device(req), name = (req.body as { name: string }).name.trim();
     if (!name) fail("INVALID_DEVICE_NAME", "Device name must not be blank");
     run("UPDATE devices SET name=? WHERE id=?", name, d.id);
-    for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", d.group_id)) {
+    for (const peer of groups.peers(d.id)) {
       send(peer.id, { type: "devices.changed" });
     }
     return { device: deviceView(get("SELECT * FROM devices WHERE id=?", d.id)!) };
@@ -894,7 +930,7 @@ export async function buildApp(options: Options = {}) {
     const d = device(req), body = req.body as { scopes: RtcScope[]; refresh?: boolean; parallelProbes?: boolean }, scopes = body.scopes;
     requireOnline(d.id);
     if (rtc.register(d.id, scopes, body.parallelProbes === true) || body.refresh === true) {
-      for (const peer of all("SELECT id FROM devices WHERE group_id=? AND revoked=0", d.group_id))
+      for (const peer of groups.peers(d.id))
         send(peer.id, { type: "devices.changed" });
     }
     cleanupProbes();
@@ -910,7 +946,7 @@ export async function buildApp(options: Options = {}) {
   app.get(`${api}/devices/me/rtc-probes`, async (req) => {
     const d = device(req); cleanupProbes();
     const ownScopes = rtc.capability(d.id)?.scopes ?? [];
-    const peers = !online(d.id) || !rtcProbes.presence(d.id).foreground ? [] : all("SELECT id,platform FROM devices WHERE group_id=? AND revoked=0 AND id<>?", d.group_id, d.id)
+    const peers = !online(d.id) || !rtcProbes.presence(d.id).foreground ? [] : groups.peers(d.id).filter(peer=>peer.id!==d.id)
       .filter(peer => online(peer.id) && rtcProbes.presence(peer.id).foreground)
       .map(peer => ({ deviceId: peer.id, scopes: (rtc.capability(peer.id)?.scopes ?? []).filter(scope => ownScopes.includes(scope)), foregroundExpiresAt: rtcProbes.presence(peer.id).expiresAt!, ...(rtc.capability(peer.id)?.parallelProbes ? {parallelProbes:true} : {}) }))
       .filter(peer => peer.scopes.length > 0);
@@ -1028,12 +1064,12 @@ export async function buildApp(options: Options = {}) {
         fail("INVALID_CERTIFICATE", "Peer certificate is not currently valid");
         if (b.candidates.length === 0) {
           peerAnnouncements.delete(d.id);
-          devicesChanged(d.group_id);
+          deviceGroupsChanged(d.id);
           return { peer: null };
         }
       const expires = discoveryNow() + PEER_TTL_SECONDS * 1000;
       peerAnnouncements.set(d.id, { data: b, expires });
-      devicesChanged(d.group_id);
+      deviceGroupsChanged(d.id);
       return { peer: peerView(d.id) };
     },
   );
@@ -1107,10 +1143,7 @@ export async function buildApp(options: Options = {}) {
         cancelFile(f);
       changed(t);
     }
-    for (const peer of all(
-      "SELECT id FROM devices WHERE group_id=? AND revoked=0",
-      d.group_id,
-    ))
+    for (const peer of groups.peers(d.id))
       emit("device.revoked", d.id, peer.id, { deviceId: victim.id });
     return { ok: true };
   });
@@ -1187,7 +1220,7 @@ export async function buildApp(options: Options = {}) {
           b.clipboard !== undefined ? 300 : limits.ttlSeconds,
         );
         if (b.clipboard === undefined) {
-          const document = textContents.attach(get('SELECT * FROM events WHERE id=?', b.eventId)!, b.text, d.group_id);
+          const document = textContents.attach(get('SELECT * FROM events WHERE id=?', b.eventId)!, b.text, groups.common(d.id,b.targetDeviceId,d.group_id)!);
           event.payload = {...event.payload as object,...document};
           run('UPDATE events SET payload=? WHERE id=?', JSON.stringify(event.payload), b.eventId);
         }
@@ -1213,7 +1246,7 @@ export async function buildApp(options: Options = {}) {
     const editedAt = iso();
     const event = tx(() => {
       if (!payload.clipboard) {
-        textContents.attach(original, payload.text, d.group_id);
+        textContents.attach(original, payload.text, groups.common(d.id,original.target,d.group_id)!);
         const result = textContents.edit(original.id, text);
         let response: Event | undefined;
         for (const delivery of result.deliveries) {
@@ -1334,7 +1367,7 @@ export async function buildApp(options: Options = {}) {
       socket.send(
         JSON.stringify({ type: "hello", deviceId: d.id, protocolVersion: 1 }),
       );
-      if (!wasOnline) { presence(d, true); devicesChanged(d.group_id); }
+      if (!wasOnline) { presence(d, true); deviceGroupsChanged(d.id); }
       let alive = true;
       const heartbeat = setInterval(() => {
         if (!alive) return socket.terminate();
@@ -1362,7 +1395,7 @@ export async function buildApp(options: Options = {}) {
           if (!closing) {
             clearDeviceDiscovery(d.id);
             presence(d, false);
-            devicesChanged(d.group_id);
+            deviceGroupsChanged(d.id);
           }
         }
       });
@@ -1958,6 +1991,7 @@ export async function buildApp(options: Options = {}) {
         t.id,
         f.id,
       );
+      relayCommits.emit(f.path);
       return { file: fileView(file(t, f.id)) };
     });
   });
@@ -1994,6 +2028,7 @@ export async function buildApp(options: Options = {}) {
         t.id,
         f.id,
       );
+      relayCommits.emit(f.path);
       changed(t);
       return { file: fileView(file(t, f.id)) };
     });
@@ -2224,7 +2259,9 @@ export async function buildApp(options: Options = {}) {
     role(d, t, "target");
     allowTransport(t, "relay");
     const f = file(t, p.fileId);
-    if (!["ready", "received"].includes(f.status) || f.transport === "direct")
+    const live=(req.body as {live?:boolean}|undefined)?.live===true;
+    if (!(live && f.size>0 && f.transport==='relay'
+        ? ["accepted","uploading","ready","received"] : ["ready","received"]).includes(f.status) || f.transport === "direct")
       fail("NOT_READY", "Relay file is not ready", 409);
     const ticket = secret(),
       expires = Date.now() + 60000;
@@ -2233,6 +2270,7 @@ export async function buildApp(options: Options = {}) {
       transferId: t.id,
       fileId: f.id,
       expires,
+      live,
     });
     return {
       ticket,
@@ -2256,7 +2294,8 @@ export async function buildApp(options: Options = {}) {
       f = file(t, ticket.fileId);
     role(d, t, "target");
     allowTransport(t, "relay");
-    if (!["ready", "received"].includes(f.status) || f.transport === "direct")
+    if (!(ticket.live && f.size>0 && f.transport==='relay'
+        ? ["accepted","uploading","ready","received"] : ["ready","received"]).includes(f.status) || f.transport === "direct")
       fail("NOT_READY", "File is not ready", 409);
     const etag = `"sha256-${f.sha}"`;
     reply.header("Accept-Ranges", "bytes").header("ETag", etag);
@@ -2278,14 +2317,26 @@ export async function buildApp(options: Options = {}) {
       .header("Cache-Control", "no-store")
       .header("X-Content-Type-Options", "nosniff")
       .type("application/octet-stream");
-    const stream = createReadStream(f.path, range ?? undefined);
+    const stream = ticket.live && f.size>0 ? liveRelayStream({
+      path:f.path,size:f.size,start:range?.start??0,end:range?.end??f.size-1,
+      state:()=>{
+        const current=file(transfer(d,t.id),f.id);
+        return {active:current.path===f.path && current.attempt===f.attempt &&
+          current.transport==='relay' && ['accepted','uploading','ready','received'].includes(current.status),
+          ready:['ready','received'].includes(current.status),committed:current.offset};
+      },
+      subscribe:wake=>{relayCommits.on(f.path,wake);return ()=>relayCommits.off(f.path,wake);},
+    }) : createReadStream(f.path, range ?? undefined);
     let active = streams.get(f.path);
     if (!active) {
       active = new Set();
       streams.set(f.path, active);
     }
     active.add(stream);
+    const disconnected=()=>stream.destroy();
+    reply.raw.once('close',disconnected);
     stream.on("close", () => {
+      reply.raw.off('close',disconnected);
       active!.delete(stream);
       if (!active!.size) streams.delete(f.path);
     });

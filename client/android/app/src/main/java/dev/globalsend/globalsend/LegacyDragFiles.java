@@ -1,6 +1,7 @@
 package dev.globalsend.globalsend;
 
 import android.content.ContentValues;
+import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
@@ -27,11 +28,15 @@ final class LegacyDragFiles {
     });
 
     static final class Export {
-        final Uri uri;final String path;
-        Export(Uri uri,String path){this.uri=uri;this.path=path;}
+        final Uri uri,readUri;final String path;
+        Export(Uri uri,Uri readUri,String path){this.uri=uri;this.readUri=readUri;this.path=path;}
         void grant(Context context,String[] packages) {
-            if(packages!=null)for(String name:packages)
+            if(packages!=null)for(String name:packages) {
                 context.grantUriPermission(name,uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                // FUSE checks the typed media/file URI, not the Downloads URI
+                // used to insert the same row. Both grants cover one file only.
+                if(!uri.equals(readUri))context.grantUriPermission(name,readUri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
         }
     }
 
@@ -67,12 +72,12 @@ final class LegacyDragFiles {
             }
             values.clear();values.put(MediaStore.MediaColumns.IS_PENDING,0);
             context.getContentResolver().update(uri,values,null,null);
-            String path;
-            try(Cursor cursor=context.getContentResolver().query(uri,new String[]{MediaStore.MediaColumns.DATA},null,null,null)) {
+            String path;int mediaType;
+            try(Cursor cursor=context.getContentResolver().query(fileAccessUri(uri,0),new String[]{MediaStore.MediaColumns.DATA,MediaStore.Files.FileColumns.MEDIA_TYPE},null,null,null)) {
                 if(cursor==null || !cursor.moveToFirst() || cursor.isNull(0))throw new IOException("No exported file path");
-                path=cursor.getString(0);
+                path=cursor.getString(0);mediaType=cursor.getInt(1);
             }
-            published=true;return new Export(uri,path);
+            published=true;return new Export(uri,fileAccessUri(uri,mediaType),path);
         } finally {
             if(!published) {
                 context.getContentResolver().delete(uri,null,null);
@@ -93,11 +98,26 @@ final class LegacyDragFiles {
         Context app=context.getApplicationContext();
         cleanup.schedule(() -> remove(app,uri),Math.max(0,expires-System.currentTimeMillis()),TimeUnit.MILLISECONDS);
     }
+    private static Uri fileAccessUri(Uri uri,int type) {
+        String volume=MediaStore.getVolumeName(uri);Uri collection;
+        switch(type) {
+            case MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE: collection=MediaStore.Images.Media.getContentUri(volume);break;
+            case MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO: collection=MediaStore.Video.Media.getContentUri(volume);break;
+            case MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO: collection=MediaStore.Audio.Media.getContentUri(volume);break;
+            case MediaStore.Files.FileColumns.MEDIA_TYPE_PLAYLIST: collection=MediaStore.Audio.Playlists.getContentUri(volume);break;
+            default: collection=MediaStore.Files.getContentUri(volume);
+        }
+        return ContentUris.withAppendedId(collection,ContentUris.parseId(uri));
+    }
     static void remove(Context context,Uri uri) {
         // Only URIs returned by our own MediaStore insert enter this journal.
         if(!context.getSharedPreferences(JOURNAL,0).contains(uri.toString()))return;
         try {
             context.revokeUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            // Reconstruct exact-row aliases from the existing journal after a
+            // restart; never sweep directories or revoke a collection grant.
+            for(int type:new int[]{0,1,2,3,4})
+                context.revokeUriPermission(fileAccessUri(uri,type),Intent.FLAG_GRANT_READ_URI_PERMISSION);
             context.getContentResolver().delete(uri,null,null);
             context.getSharedPreferences(JOURNAL,0).edit().remove(uri.toString()).commit();
         } catch(RuntimeException unavailable) {

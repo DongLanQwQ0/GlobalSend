@@ -363,3 +363,11 @@ details[open]>summary::after{transform:rotate(225deg);top:23px}
 .appearance-accents button{width:44px;height:44px;padding:6px;border-radius:50%;position:relative}
 .appearance-accents button>span{width:32px;height:32px;border-radius:50%;background:var(--swatch)}
 .appearance-accents button[aria-pressed=true]::after{content:'';position:absolute;width:10px;height:6px;border-left:2px solid var(--on-accent);border-bottom:2px solid var(--on-accent);transform:translateY(-1px) rotate(-45deg)}
+
+/* Multi-group membership controls share the existing compact form language. */
+.group-membership{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px}
+.group-membership label,.shared-group-picker{display:flex;align-items:center;gap:8px}
+.group-membership input{width:auto;min-height:0;margin:0;accent-color:var(--green)}
+#group-join-form{display:grid;gap:12px;margin-top:16px}
+.shared-group-picker{font-size:13px;font-weight:600;min-width:0}
+.shared-group-picker select{min-height:32px;padding:3px 24px 3px 8px;max-width:150px;background:transparent;font-size:12px}

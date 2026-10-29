@@ -12,9 +12,13 @@ if (!['server', 'web'].includes(project) || !args.length) {
 }
 if (!process.env.npm_execpath) throw new Error('Run through the root npm scripts.');
 const logs = resolve(root, 'artifacts', 'logs', `npm-${project}`);
+const env=localEnvironment(root);
+// Test fixtures allocate their own project-local roots. Development-server
+// deployment paths must not redirect isolated fixture bytes into live state.
+if(args[0]==='test'){delete env.DATA_DIR;delete env.RELAY_DIR;}
 const child = spawn(process.execPath, [process.env.npm_execpath, `--logs-dir=${logs}`, ...args], {
   cwd: resolve(root, project),
-  env: { ...localEnvironment(root), npm_config_logs_dir: logs },
+  env: { ...env, npm_config_logs_dir: logs },
   stdio: 'inherit', windowsHide: true,
 });
 child.once('error', error => { console.error(error.message); process.exitCode = 1; });

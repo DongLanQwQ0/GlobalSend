@@ -144,6 +144,29 @@ function transfer(id: string,status='offered',routePreference: Transfer['routePr
     createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),
     files:[{fileId:`file-${id}`,name:'sample.txt',size:4,sha256:'a'.repeat(64),offset:0,status,transport}]};
 }
+
+test('adding groups retains one browser identity, its files and history; shared editors stay separate',async()=>{
+  const {c,document,render,persistent}=fixture();
+  c.info.features={multiGroup:true,groupSharedText:true};
+  const first={groupId:'group-one',name:'我的设备',joinedAt:'2026-10-01T00:00:00Z'},second={groupId:'group-two',name:'朋友',joinedAt:'2026-10-02T00:00:00Z'};
+  c.adoptGroups([first]);const oldKey=c.dockKey,oldToken=c.session.deviceToken,oldDevice=c.session.device.deviceId;
+  c.stagedTexts=[{id:'draft',text:'保留草稿'}];c.events=[{eventId:'history',type:'text.created',payload:{text:'保留历史'}}];
+  const retained=new File(['local'],'keep.txt');c.fileSources.set('retained',retained);
+  const calls:any[]=[];
+  c.api.request=async(path:string,body:any)=>{calls.push({path,body});if(path==='/groups/join')return {groupId:'group-two',groups:[first,second]};if(path.includes('shared-text'))return {text:path.includes('group-two')?'第二组':'第一组',revision:1,updatedAt:'',updatedBy:'other'};throw new Error('Unexpected '+path);};
+  c.groupJoinPassword='second-group-password';c.groupJoinName='朋友';
+  await c.joinAdditionalGroup();
+  assert.equal(c.session.deviceToken,oldToken);assert.equal(c.session.device.deviceId,oldDevice);assert.equal(c.dockKey,oldKey);
+  assert.equal(c.stagedTexts[0].text,'保留草稿');assert.equal(c.events[0].eventId,'history');assert.equal(c.fileSources.get('retained'),retained);
+  assert.equal(c.session.groupId,'group-two');assert.equal(c.session.groups.length,2);assert.equal(c.shared.draft,'第二组');
+  const editor=c.shared;c.selectSharedGroup('group-one');await c.shared.refresh();assert.notEqual(c.shared,editor);assert.equal(c.shared.draft,'第一组');
+  c.selectSharedGroup('group-two');assert.equal(c.shared,editor);assert.equal(c.groupJoinPassword,'');
+  const stored=JSON.parse(persistent.get(c.key+':session')!);assert.equal(stored.groups.length,2);assert.equal(stored.historyGroupId,'group-one');assert.equal(stored.groupKey,undefined);
+  c.modal='settings';c.render=render;c.render();
+  assert.equal(document.querySelectorAll('.group-membership').length,2);assert.ok(document.querySelector('#group-join-form'));
+  assert.equal(document.querySelectorAll('[data-target="sender"]').length,1);
+  assert.equal(calls.some(call=>call.path==='/devices/enroll'),false);
+});
 test('hosted Web opens its own center automatically and enrolls with a device name without either form field',async()=>{
   const {context,document}=fixture();
   (context as any).location={origin:'https://123.207.180.163',pathname:'/globalsend/app/',protocol:'https:'};
@@ -1507,12 +1530,18 @@ test('receive confirmation network failures and relay confirmation prompts are n
   await c.receiveRtc(t,t.files[0]);assert.match(c.uploadErrors.get('ack:file-ack'),/中继需确认/);assert.equal(calls.length,1);
 });
 
+test('streaming relay starts ordinary accepted files without waiting for ready',async()=>{
+  const {c}=fixture(),t=transfer('early-relay','uploading','auto','relay');c.transfers=[t];c.info.features={relayStreaming:true};
+  const started:string[]=[];c.receiveStructuredRelay=async(value:any,file:any)=>{started.push(value.transferId+':'+file.fileId);};
+  await c.selectIncomingRelays();assert.deepEqual(started,['early-relay:file-early-relay']);
+});
+
 test('structured relay disk writes report receiver failure while retaining received bytes for retry',async()=>{
-  const {c,context}=fixture(),t=transfer('write','ready','auto','relay');t.files[0].relativePath='资料/sample.txt';c.transfers=[t];c.info.features={receiveErrorReporting:true};
+  const {c,context}=fixture(),t=transfer('write','uploading','auto','relay');t.files[0].relativePath='资料/sample.txt';c.transfers=[t];c.info.features={receiveErrorReporting:true,relayStreaming:true};
   c.ensureFileStore=async()=>({get:async()=>undefined,open:async()=>2,write:async()=>{throw new DOMException('空间不足','QuotaExceededError');},close:async()=>{}});
   const calls:any[]=[];c.api.request=async(path:string,body:any)=>{calls.push({path,body});return path.endsWith('/download-ticket')?{downloadPath:'/api/v1/downloads/test-token'}:{file:{...t.files[0],status:'failed',receiveFailure:true}};};
   (context as any).fetch=async(_url:string,options:any)=>{assert.equal(options.headers.Range,'bytes=2-');return {ok:true,status:206,body:{getReader:()=>({read:async()=>({done:false,value:new Uint8Array([1])}),cancel:async()=>{},releaseLock:()=>{}})}};};
-  await c.receiveStructuredRelay(t,t.files[0]);assert.equal(calls.length,2);assert.match(calls[1].path,/\/receive-error$/);assert.equal(calls[1].body.message,'空间不足');
+  await c.receiveStructuredRelay(t,t.files[0]);assert.equal(calls.length,2);assert.equal(calls[0].body.live,true);assert.match(calls[1].path,/\/receive-error$/);assert.equal(calls[1].body.message,'空间不足');
 });
 
 test('RTC storage setup failure does not try public or relay and reports the actual receiver error',async()=>{
@@ -1678,13 +1707,15 @@ test('selected cards keep native HTML drag enabled on Receive, History and Files
   assert.equal(drag.defaultPrevented,false);assert.equal(added.length,2);assert.deepEqual(added,files.slice(0,2));assert.deepEqual(Array.from(view==='library'?c.fileLibrary.selected:view==='sent'?c.sentSelected:c.selected),before);assert.equal(values.get('application/x-globalsend-card'),'1');
  }
 });
-test('a touch hold enters selection without detaching the source and a later hold never changes existing picks',()=>{
+test('a touch hold preserves the source without entering selection or changing existing picks',()=>{
  for(const view of ['receive','sent','library']){
   const {c,document,render,Event,context}=fixture();c.render=render;c.contentView=view;c.fileLibrary.opened=true;const timers:(()=>void)[]=[];context.window.setTimeout=(fn:()=>void,ms:number)=>{if(ms===450)timers.push(fn);return 1;};
   if(view==='library'){c.fileLibrary.entries=[0,1].map(index=>({id:'scope/'+index,key:String(index),scope:'scope',name:'item.bin',mimeType:'application/octet-stream',size:4,receivedAt:Date.now(),expiresAt:Date.now()+60000}));}
   else c.events=[textEvent('hold-a',view==='sent'),textEvent('hold-b',view==='sent','second')];
   render();const selector=view==='library'?'[data-library-id="scope/0"]':'[data-drag-text="hold-a"]',card=document.querySelector(selector)!,down=new Event('pointerdown',{bubbles:true,cancelable:true});Object.assign(down,{pointerType:'touch',clientX:30,clientY:40});card.dispatchEvent(down);timers.pop()!();
-  const menu=new Event('contextmenu',{bubbles:true,cancelable:true});card.dispatchEvent(menu);assert.equal(c.contextMenu,null);assert.equal(card.isConnected,true);assert.equal(view==='library'?c.fileLibrary.editing:view==='sent'?c.sentSelecting:c.receiveSelecting,true);const selection=view==='library'?c.fileLibrary.selected:view==='sent'?c.sentSelected:c.selected;assert.deepEqual(Array.from(selection),[view==='library'?'scope/0':'hold-a']);
+  const menu=new Event('contextmenu',{bubbles:true,cancelable:true});card.dispatchEvent(menu);assert.equal(c.contextMenu,null);assert.equal(card.isConnected,true);assert.equal(view==='library'?c.fileLibrary.editing:view==='sent'?c.sentSelecting:c.receiveSelecting,false);const selection=view==='library'?c.fileLibrary.selected:view==='sent'?c.sentSelected:c.selected;assert.deepEqual(Array.from(selection),[]);
+  if(view==='library')c.fileLibrary.editing=true;else if(view==='sent')c.sentSelecting=true;else c.receiveSelecting=true;
+  selection.add(view==='library'?'scope/0':'hold-a');
   render();const second=document.querySelector(view==='library'?'[data-library-id="scope/1"]':'[data-drag-text="hold-b"]')!,again=new Event('pointerdown',{bubbles:true,cancelable:true});Object.assign(again,{pointerType:'touch',clientX:30,clientY:40});second.dispatchEvent(again);timers.pop()!();assert.deepEqual(Array.from(selection),[view==='library'?'scope/0':'hold-a']);
  }
 });

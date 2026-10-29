@@ -117,18 +117,37 @@ public class LegacyDragFilesTest {
         assertArrayEquals(new byte[]{9,9,3,1,4,8},Files.readAllBytes(original.toPath()));
         LegacyDragFiles.remove(context,media.last);
     }
+    @Test public void realPathGrantIncludesOnlyTheSameRowsTypedUriAndCleanupRevokesIt() throws Exception {
+        setup();java.util.List<Uri> granted=new java.util.ArrayList<>(),revoked=new java.util.ArrayList<>();
+        Context captures=new android.content.ContextWrapper(context) {
+            @Override public void grantUriPermission(String target,Uri uri,int flags){assertEquals(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,flags);granted.add(uri);}
+            @Override public void revokeUriPermission(Uri uri,int flags){revoked.add(uri);}
+        };
+        LegacyDragFiles.Export image=LegacyDragFiles.publish(context,"private.png","image/png",()->new java.io.ByteArrayInputStream(new byte[]{1}));
+        image.grant(captures,new String[]{"com.target"});
+        assertEquals(java.util.List.of(image.uri,Uri.parse("content://media/external/images/media/1")),granted);
+        LegacyDragFiles.remove(captures,image.uri);assertTrue(revoked.contains(image.readUri));
+        granted.clear();
+        LegacyDragFiles.Export document=LegacyDragFiles.publish(context,"private.pdf","application/pdf",()->new java.io.ByteArrayInputStream(new byte[]{2}));
+        document.grant(captures,new String[]{"com.target"});
+        assertEquals(java.util.List.of(document.uri,Uri.parse("content://media/external/file/2")),granted);
+        LegacyDragFiles.remove(captures,document.uri);assertTrue(revoked.contains(document.readUri));
+    }
     public static final class Media extends ContentProvider {
-        final Map<Uri,File> files=new LinkedHashMap<>();int inserted,deleted;Uri last;boolean failOutput;String copyThread="";
+        final Map<Uri,File> files=new LinkedHashMap<>();final Map<Uri,Integer> types=new LinkedHashMap<>();int inserted,deleted;Uri last;boolean failOutput;String copyThread="";
         @Override public boolean onCreate(){return true;}
         @Override public Uri insert(Uri collection,ContentValues values) {
             last=collection.buildUpon().appendPath(Integer.toString(++inserted)).build();
+            String type=values.getAsString("mime_type");types.put(last,type.startsWith("image/")?1:0);
             files.put(last,new File(getContext().getCacheDir(),"public-export-"+inserted));return last;
         }
         @Override public String getType(Uri uri){return "image/png";}
         @Override public Cursor query(Uri uri,String[] projection,String selection,String[] args,String sort) {
             String[] columns=projection==null?new String[]{"_data",OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE}:projection;
+            if(!files.containsKey(uri) && uri.getPathSegments().contains("file"))
+                uri=Uri.parse("content://media/external/downloads/"+uri.getLastPathSegment());
             MatrixCursor cursor=new MatrixCursor(columns);Object[] row=new Object[columns.length];File file=files.get(uri);
-            for(int i=0;i<columns.length;i++)row[i]="_data".equals(columns[i])?file.getPath():OpenableColumns.DISPLAY_NAME.equals(columns[i])?file.getName():OpenableColumns.SIZE.equals(columns[i])?file.length():null;
+            for(int i=0;i<columns.length;i++)row[i]="_data".equals(columns[i])?file.getPath():"media_type".equals(columns[i])?types.getOrDefault(uri,1):OpenableColumns.DISPLAY_NAME.equals(columns[i])?file.getName():OpenableColumns.SIZE.equals(columns[i])?file.length():null;
             cursor.addRow(row);return cursor;
         }
         @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws FileNotFoundException {

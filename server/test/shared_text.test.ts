@@ -53,7 +53,8 @@ test('group text broadcasts both directions, survives reconnect/restart and does
     assert.equal(first.status, 200); assert.equal(first.body.revision, 1); assert.equal(first.body.updatedBy, a.id);
     for (let i = 0; i < 50 && !ws.messages.some(x => x.type === 'sharedText.updated'); i++)
       await new Promise(resolve => setTimeout(resolve, 10));
-    assert.deepEqual(ws.messages.find(x => x.type === 'sharedText.updated'), { type: 'sharedText.updated', ...first.body });
+    const groupId=(await f.call('GET','/groups',undefined,a.token)).body.groups[0].groupId;
+    assert.deepEqual(ws.messages.find(x => x.type === 'sharedText.updated'), { type: 'sharedText.updated', groupId, ...first.body });
     const second = await f.call('PUT', '/group/shared-text', { text: '手机修改', baseRevision: 1, mutationId: 'second' }, b.token);
     assert.equal(second.body.revision, 2);
     assert.deepEqual((await f.call('GET', '/group/shared-text', undefined, a.token)).body, second.body);

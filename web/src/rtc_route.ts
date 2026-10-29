@@ -7,7 +7,7 @@ export class DirectConnectionBudget {
   private clock:()=>number;
   constructor(automatic:boolean,clock=Date.now){this.automatic=automatic;this.clock=clock;this.deadline=clock()+(automatic?1000:15000);}
   remaining(){return Math.max(0,this.deadline-this.clock());}
-  window(scopesLeft:number,preferred=false){const remaining=this.remaining();return !this.automatic?remaining:scopesLeft<=1?remaining:Math.max(1,Math.floor(remaining*(preferred ? .75 : .5)));}
+  window(scopesLeft:number,preferred=false,latencyMs=0){const remaining=this.remaining();return !this.automatic?remaining:preferred?Math.min(3000,Math.max(1000,latencyMs*4+100)):scopesLeft<=1?remaining:Math.max(1,Math.floor(remaining*.5));}
   resumeAfterDisconnect(){this.deadline=this.clock()+(this.automatic?1000:15000);}
 }
 
@@ -41,4 +41,10 @@ export function preferredScopes(scopes:RtcScope[],results:{scope:RtcScope;succes
   // failed LAN probe, but an untested LAN still receives its own attempt.
   if(!lan && publicPath && valid.some(result=>result.scope==='lan' && !result.success))return [...scopes].sort((a,b)=>Number(b==='public')-Number(a==='public'));
   return scopes;
+}
+
+export function verifiedScopeLatency(results:{scope:RtcScope;success:boolean;expiresAt:string;initiatorDeviceId:string;responderDeviceId:string;elapsedMs?:number|null}[],self:string,peer:string,scope:RtcScope,now=Date.now()):number|undefined {
+  const values=results.filter(result=>result.scope===scope && result.success && Date.parse(result.expiresAt)>now &&
+    [result.initiatorDeviceId,result.responderDeviceId].includes(self) && [result.initiatorDeviceId,result.responderDeviceId].includes(peer));
+  return values.length?Math.min(...values.map(value=>value.elapsedMs??0)):undefined;
 }

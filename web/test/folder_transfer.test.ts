@@ -62,6 +62,9 @@ test('real Web controller + production OPFS worker + real center transfer a 70-f
     assert.equal(transfer.files.length,74);assert.equal(transfer.files.some((file:any)=>file.name.endsWith('.zip')),false);
     await sender.stageReceivedFile(`${transfer.transferId}:${transfer.files.find((file:any)=>file.relativePath==='资料').fileId}`);
     assert.equal(sender.folderParts.get(sender.picked[0]).length,74,'sent directory cards retain source references for another send');sender.picked=[];
+    // Deliberately hold leaf receives for the restart checkpoint below. Live
+    // relay would otherwise open them immediately and wait for this producer.
+    for(const file of transfer.files.filter((file:any)=>file.entryKind!=='directory'))receiver.paused.add(`${transfer.transferId}:${file.fileId}`);
     receiver.transfers=[transfer];await receiver.acceptFiles(transfer,transfer.files.map((file:any)=>file.fileId),true);transfer=receiver.transfers[0];
     for(const file of transfer.files.filter((file:any)=>file.entryKind==='directory'))await receiver.receiveDirectory(transfer,file);
     await drained(receiver);
@@ -122,7 +125,7 @@ test('real Web controller + production OPFS worker + real center transfer a 70-f
     assert.equal(readFileSync(join(received,'资料','keep-user.txt'),'utf8'),'user');assert.equal(existsSync(join(received,'资料','sub','resume.txt')),false);
     await mkdir(join(dir,'proof'),{recursive:true});writeFileSync(join(dir,'proof','summary.json'),JSON.stringify({entries:74,realFiles:71,emptyDirectory:true,resumedRange:'bytes=3-',reforwardedEntries:forwarded.files.length,keptUserFile:true},null,2));
     console.log('folder proof:',dir);
-  }finally{for(const c of workers){await c.rtcStore?.dispose();if(c.fileLibrary.service)await c.fileLibrary.service.dispose();}await center.close();}
+  }finally{for(const c of workers){c.stopRtc();await c.rtcClosing;if(c.fileLibrary.service)await c.fileLibrary.service.dispose();}center.server.closeIdleConnections();await center.close();}
 });
 
 test('chosen File System Access directory receives bytes directly and keeps its root reservation on restart',async()=>{
