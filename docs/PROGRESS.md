@@ -7,7 +7,8 @@
 - 真机41日志发现vivo拖影服务`com.vivo.globaldragdrop`（UID10119）在投放前读取文件，微信（UID10362）只查元数据、未打开；用户同一聊天窗口相册可插入、GlobalSend不可，菜单上投放会出现“该页面位置不支持插入”的分享面板。不能把系统预览读取或分享面板当作聊天已插入。
 - 42源码b51bbe2已加入位置/尺寸/状态持久化（横竖屏独立位置、先定位后建窗、前台恢复为把手）和vivo预览读取排除；相关位置、旋转、冷恢复及预览检查通过。原有短屏恢复检查发现归一化位置越界，已修正并通过定向复验。Windows完整包已更新重启，PID36224响应，文件版本1.0.42+51；APK16,269,916字节，已生成但未安装到手机。备份 `backups/native-state/20261029-114734-pre-1.0.42`。
 - 用户接入USB后，实体手机10AG5S1SR4005X7覆盖安装42成功，实际读回versionName1.0.42/versionCode51，MainActivity启动，PID18214。压缩截图确认主界面已连接、保留主题及原有设备；未清数据。安装日志 `artifacts/logs/phone-1.0.42-usb-install.log`，位置记忆的OEM手感仍待实测。
-- 相册/GlobalSend拖放元数据对照夹具已补齐并通过USB安装；合成相册图片尚未创建，对照尚未运行，不能把工具安装当作微信插入通过。
+- USB真机同图对照已完成：GlobalSend与vivo相册均导出单项image/png及content URI，接收器取得授权且可读；相册authority为media，额外提供photo_type_flags=[0]，GlobalSend使用dock-files及本地拖动关联字段。报告 `artifacts/reports/phone-42-globalsend-clip.json`、`phone-42-gallery-clip.json`。差异尚不能单独证明微信拒收的根因。相册合成测试图已通过工具专用删除按钮清理，保存的插入引用为空；未删除用户照片。
+- 位置记忆已增加真实冷启动证据：将贴边把手移动到(1161,1691)，仅强停并重启GlobalSend，重建后仍为(1161,1691)、55×221px。验后恢复原高度。报告 `artifacts/reports/phone-42-placement-before-restart.txt` 与 `phone-42-placement-after-restart.txt`。左右动画手感及横竖屏的OEM验收仍独立保留。
 
 ## 2026-10-29 历史交付：1.0.40+49
 

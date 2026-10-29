@@ -126,7 +126,9 @@ public final class ShelfAcceptanceActivity extends Activity {
             result.put("mimeTypes",types);result.put("count",clip.getItemCount());
             android.os.PersistableBundle extras=clip.getDescription().getExtras();JSONObject fields=new JSONObject();
             if(extras!=null)for(String key:extras.keySet()) {
-                Object value=extras.get(key);fields.put(key,value instanceof Number || value instanceof Boolean?value:value==null?"null":value.getClass().getSimpleName());
+                Object value=extras.get(key);
+                if(value instanceof int[]) {org.json.JSONArray flags=new org.json.JSONArray();for(int flag:(int[])value)flags.put(flag);fields.put(key,flags);}
+                else fields.put(key,value instanceof Number || value instanceof Boolean?value:value==null?"null":value.getClass().getSimpleName());
             }
             result.put("extraFields",fields);String kind="other";
             for(int i=0;i<clip.getItemCount();i++) {
