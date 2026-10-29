@@ -284,4 +284,71 @@ public class ReceiveOverlayHeaderDragTest {
         String metadata="{\"x\":"+window.x+",\"y\":"+window.y+",\"width\":"+window.width+",\"height\":"+window.height+"}";
         java.nio.file.Files.write(new java.io.File(folder,name+".json").toPath(),metadata.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
+
+    private void reflow(ReceiveOverlay overlay,android.graphics.Rect bounds) throws Exception {
+        java.lang.reflect.Method method=ReceiveOverlay.class.getDeclaredMethod("reflowForBounds",android.graphics.Rect.class);
+        method.setAccessible(true);method.invoke(overlay,bounds);
+    }
+    private void setField(Object owner,String name,Object value) throws Exception {
+        java.lang.reflect.Field f=owner.getClass().getDeclaredField(name);f.setAccessible(true);f.set(owner,value);
+    }
+    private void assertInside(WindowManager.LayoutParams window,android.graphics.Rect bounds) {
+        assertTrue(bounds.contains(window.x,window.y,window.x+window.width,window.y+window.height));
+    }
+    @Test public void rotationKeepsExpandedDockAtSameEdgesAndRetainsContent() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
+        android.graphics.Rect portrait=new android.graphics.Rect((android.graphics.Rect)field(overlay,"lastBounds"));
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        int x=window.x,y=window.y,rightGap=portrait.right-window.x-window.width,bottomGap=portrait.bottom-window.y-window.height;
+        android.graphics.Rect landscape=new android.graphics.Rect(0,24,1200,776);
+        reflow(overlay,landscape);
+        assertSame(root,field(overlay,"root"));assertInside(window,landscape);
+        assertEquals(rightGap,landscape.right-window.x-window.width);
+        assertEquals(bottomGap,landscape.bottom-window.y-window.height);
+        assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
+        reflow(overlay,portrait);assertEquals(x,window.x);assertEquals(y,window.y);
+        // Exercise the production configuration callback with real framework metrics.
+        RuntimeEnvironment.setQualifiers("w1200dp-h800dp-land");
+        ((android.content.ComponentCallbacks)field(overlay,"configurationChanges")).onConfigurationChanged(RuntimeEnvironment.getApplication().getResources().getConfiguration());
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertInside(window,(android.graphics.Rect)field(overlay,"lastBounds"));
+        assertTrue(((android.graphics.Rect)field(overlay,"lastBounds")).width()>((android.graphics.Rect)field(overlay,"lastBounds")).height());
+        overlay.hide();
+    }
+    @Test public void rotationKeepsCollapsedHandleOnItsChosenEdge() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)((View)field(overlay,"root")).getLayoutParams();
+        android.graphics.Rect portrait=new android.graphics.Rect((android.graphics.Rect)field(overlay,"lastBounds"));
+        for(boolean right:new boolean[]{true,false}) {
+            window.x=right?portrait.right-window.width:portrait.left;window.y=portrait.centerY();
+            overlay.setCollapsed(true);advanceGeometry(overlay,240);
+            android.graphics.Rect landscape=new android.graphics.Rect(0,24,1200,776);
+            reflow(overlay,landscape);
+            assertTrue((Boolean)field(overlay,"collapsed"));assertEquals(right,(Boolean)field(overlay,"edgeRight"));
+            assertInside(window,landscape);assertEquals(right?landscape.right-window.width:landscape.left,window.x);
+            reflow(overlay,portrait);
+            overlay.setCollapsed(false);advanceGeometry(overlay,240);
+        }
+        overlay.hide();
+    }
+    @Test public void rotationFinishesOldAnimationAndRestoresUserSizeAfterShortDisplay() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)((View)field(overlay,"root")).getLayoutParams();
+        android.graphics.Rect portrait=new android.graphics.Rect((android.graphics.Rect)field(overlay,"lastBounds"));
+        setField(overlay,"preferredWidth",360);setField(overlay,"preferredHeight",260);
+        setField(overlay,"expandedWidth",360);setField(overlay,"expandedHeight",260);
+        window.width=360;window.height=260;
+        overlay.setCollapsed(true);advanceGeometry(overlay,80);
+        android.graphics.Rect shortDisplay=new android.graphics.Rect(0,0,1200,240);
+        reflow(overlay,shortDisplay);assertNull(field(overlay,"geometry"));assertInside(window,shortDisplay);
+        int x=window.x,y=window.y;
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
+        assertEquals(x,window.x);assertEquals(y,window.y);
+        overlay.setCollapsed(false);advanceGeometry(overlay,240);
+        assertEquals(224,window.height);assertEquals(360,window.width);
+        reflow(overlay,portrait);assertEquals(260,window.height);assertEquals(360,window.width);
+        assertInside(window,portrait);overlay.hide();
+    }
 }

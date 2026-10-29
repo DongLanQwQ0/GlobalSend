@@ -104,6 +104,16 @@ public final class ShelfAcceptanceActivity extends Activity {
         targetSize.topMargin = dp(20);
         page.addView(destination, targetSize);
         page.requestApplyInsets();
+        applyRotation(getIntent());
+    }
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);setIntent(intent);applyRotation(intent);
+    }
+    private void applyRotation(android.content.Intent intent) {
+        String orientation=intent.getStringExtra("orientation");
+        if("landscape".equals(orientation))setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        else if("portrait".equals(orientation))setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        else if("release".equals(orientation))setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
     private TextView label(String text, int size) {
         TextView view = new TextView(this);

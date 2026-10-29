@@ -60,12 +60,14 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private boolean doubleTapGesture;
     private boolean collapsed, shelfVisible, edgeRight = true;
     private int expandedWidth, expandedHeight;
+    private int preferredWidth, preferredHeight;
+    private Rect lastBounds;
     private android.animation.ValueAnimator geometry;
     private Runnable dragExpand;
     private int importing;
     private android.os.FileObserver appearanceChanges;
     private final android.content.ComponentCallbacks configurationChanges = new android.content.ComponentCallbacks() {
-        @Override public void onConfigurationChanged(android.content.res.Configuration next) { main.post(() -> shelfChanged()); }
+        @Override public void onConfigurationChanged(android.content.res.Configuration next) { main.post(ReceiveOverlay.this::configurationChanged); }
         @Override public void onLowMemory() { }
     };
     private final Runnable countdown = new Runnable() {
@@ -120,6 +122,44 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         render();
         main.removeCallbacks(countdown);
         if (shelf.removalSeconds() > 0) main.post(countdown);
+    }
+
+    private void configurationChanged() {
+        if(root==null)return;
+        if(DockCoordinator.afterExportFrom(root,this::configurationChanged))return;
+        reflowForBounds(availableBounds());
+    }
+
+    /** Preserve edge attachment or relative free position across display changes. */
+    private void reflowForBounds(Rect next) {
+        if(lastBounds.equals(next)) { renderKeepingScroll(); return; }
+        Rect previous=lastBounds;
+        int oldX=layout.x, oldY=layout.y, oldWidth=layout.width, oldHeight=layout.height;
+        stopGeometry(); cancelPendingOpen();
+        if(dragExpand!=null)main.removeCallbacks(dragExpand);
+        dragExpand=null;
+        expandedWidth=Math.min(preferredWidth,Math.max(1,next.width()-dp(16)));
+        expandedHeight=Math.min(preferredHeight,Math.max(1,next.height()-dp(16)));
+        layout.width=collapsed?dp(18):expandedWidth;
+        layout.height=collapsed?dp(72):expandedHeight;
+        layout.x=collapsed?(edgeRight?next.right-layout.width:next.left)
+            :projectPosition(oldX,oldWidth,previous.left,previous.right,layout.width,next.left,next.right);
+        layout.y=projectPosition(oldY,oldHeight,previous.top,previous.bottom,layout.height,next.top,next.bottom);
+        lastBounds=new Rect(next);
+        windows.updateViewLayout(root,layout);
+        renderKeepingScroll(); finishGeometry(collapsed);
+    }
+
+    private int projectPosition(int position,int size,int oldStart,int oldEnd,int newSize,int newStart,int newEnd) {
+        int leading=position-oldStart,trailing=oldEnd-position-size;
+        int result;
+        if(leading<=dp(16))result=newStart+leading;
+        else if(trailing<=dp(16))result=newEnd-newSize-trailing;
+        else {
+            float fraction=(float)leading/Math.max(1,oldEnd-oldStart-size);
+            result=newStart+Math.round(fraction*Math.max(0,newEnd-newStart-newSize));
+        }
+        return clamp(result,newStart,newEnd-newSize);
     }
 
     @Override public void show(ReceiveNotifications.Receipt item, long arrival, java.util.function.Consumer<Boolean> shown) {
@@ -279,6 +319,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         layout.gravity = Gravity.TOP | Gravity.LEFT;
         layout.setTitle("GlobalSend 接收");
         Rect bounds = availableBounds();
+        lastBounds=new Rect(bounds);
+        preferredWidth=layout.width; preferredHeight=layout.height;
         layout.width = Math.min(layout.width, bounds.width() - dp(16));
         layout.height = Math.min(layout.height, bounds.height() - dp(16));
         layout.x = bounds.right - layout.width - dp(8);
@@ -637,7 +679,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 layout.x = clamp(layout.x, bounds.left, bounds.right - layout.width);
                 layout.y = clamp(layout.y, bounds.top, bounds.bottom - layout.height);
                 windows.updateViewLayout(root, layout);
-                if (resize) { expandedWidth = layout.width; expandedHeight = layout.height; render(); }
+                if (resize) {
+                    preferredWidth=expandedWidth=layout.width; preferredHeight=expandedHeight=layout.height;
+                    render();
+                }
                 return true;
             }
             if (!resize && event.getActionMasked() == MotionEvent.ACTION_UP) {
