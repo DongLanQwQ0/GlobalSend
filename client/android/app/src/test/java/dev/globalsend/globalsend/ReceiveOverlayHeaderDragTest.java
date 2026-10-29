@@ -255,6 +255,8 @@ public class ReceiveOverlayHeaderDragTest {
             int originalWidth=window.width;float originalCenter=window.x+window.width/2f;
             float targetCenter=right?bounds.right-9:bounds.left+9;
             overlay.setCollapsed(true);int envelopeWidth=window.width;
+            draw(root);
+            assertRailSide(overlay,right);
             for(long time:new long[]{24,80,160}) {
                 advanceGeometry(overlay,time);
                 android.graphics.Rect visible=(android.graphics.Rect)field(overlay,"visualBounds");
@@ -271,8 +273,21 @@ public class ReceiveOverlayHeaderDragTest {
             assertTrue(visible.width()>18 && visible.width()<originalWidth);
             assertTrue(right?visible.exactCenterX()<targetCenter:visible.exactCenterX()>targetCenter);
             advanceGeometry(overlay,240);
+            assertRailSide(overlay,right);
         }
         overlay.hide();
+    }
+    private void assertRailSide(ReceiveOverlay overlay,boolean right) throws Exception {
+        LinearLayout panel=(LinearLayout)field(overlay,"expanded");
+        View rail=(View)field(overlay,"rail"), viewport=(View)field(overlay,"scroll");
+        assertSame("controls follow the attached edge",rail,panel.getChildAt(right?1:0));
+        assertSame("viewport stays inward",viewport,panel.getChildAt(right?0:1));
+        assertSame("do not recreate gesture controls",field(overlay,"header"),((LinearLayout)rail).getChildAt(0));
+        assertEquals(right?0:1,panel.getPaddingLeft());
+        assertEquals(right?1:0,panel.getPaddingRight());
+        if(panel.getVisibility()==View.VISIBLE) {
+            assertTrue("actual control coordinates mirror",right?rail.getLeft()>=viewport.getRight():rail.getRight()<=viewport.getLeft());
+        }
     }
     @Test public void backgroundFollowsPressedOffsetButControlsAndFileDragKeepTheirGestures() throws Exception {
         int[] actions=new int[3];ReceiveOverlay overlay=create(actions);View root=(View)field(overlay,"root");
@@ -410,7 +425,14 @@ public class ReceiveOverlayHeaderDragTest {
         overlay.foreground();Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250));
         WindowManager.LayoutParams window=(WindowManager.LayoutParams)((View)field(overlay,"root")).getLayoutParams();
         assertTrue((Boolean)field(overlay,"collapsed"));assertEquals(18,window.width);assertEquals(0,window.x);
-        assertEquals(272,field(overlay,"preferredWidth"));overlay.hide();
+        assertEquals(272,field(overlay,"preferredWidth"));
+        assertRailSide(overlay,false);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        overlay.setCollapsed(false);advanceGeometry(overlay,240);
+        assertRailSide(overlay,false);
+        ((View)field(overlay,"shelfTab")).performClick();draw((View)field(overlay,"root"));
+        assertTrue((Boolean)field(overlay,"shelfVisible"));assertRailSide(overlay,false);
+        overlay.hide();
     }
     @Test public void contentDoubleTapOpensApplicationWithoutAlsoOpeningTheItem() throws Exception {
         android.content.Context context=RuntimeEnvironment.getApplication();

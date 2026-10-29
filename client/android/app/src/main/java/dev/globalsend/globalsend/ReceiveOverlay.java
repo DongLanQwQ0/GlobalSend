@@ -43,7 +43,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
     private final Handler main = new Handler(Looper.getMainLooper());
     private FrameLayout root, surface;
-    private LinearLayout row, expanded;
+    private LinearLayout row, expanded, rail;
     private HorizontalScrollView scroll;
     private TextView count;
     private WindowManager.LayoutParams layout;
@@ -388,7 +388,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         row.setOrientation(LinearLayout.HORIZONTAL);
         scroll.addView(row, new HorizontalScrollView.LayoutParams(-2, -1));
         expanded.addView(scroll, new LinearLayout.LayoutParams(0, -1, 1));
-        LinearLayout rail=new LinearLayout(context);rail.setOrientation(LinearLayout.VERTICAL);
+        rail=new LinearLayout(context);rail.setOrientation(LinearLayout.VERTICAL);
         rail.addView(header,new LinearLayout.LayoutParams(-1,-1));
         expanded.addView(rail,new LinearLayout.LayoutParams(dp(38),-1));
         handle = label("", 10, appearance.accent);
@@ -421,6 +421,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         expandedWidth = layout.width; expandedHeight = layout.height; collapsed = initiallyCollapsed;
         if(initiallyCollapsed) {layout.width=dp(18);layout.height=dp(72);layout.x=bounds.right-layout.width;}
         restorePlacement(bounds);
+        placeControlRail();
         visualBounds = new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
         expansion=initiallyCollapsed?0:1;surfaceAnchored=false;
         surface.setLayoutParams(new FrameLayout.LayoutParams(layout.width,layout.height));
@@ -451,7 +452,19 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void render() {render(true);}
+    private void placeControlRail() {
+        // The controls stay on the attached edge; the viewport opens inward.
+        // Reorder the existing views so gestures, content and scroll survive.
+        int index=edgeRight?1:0;
+        if(expanded.indexOfChild(rail)!=index) {
+            expanded.removeView(rail);
+            expanded.addView(rail,index,new LinearLayout.LayoutParams(dp(38),-1));
+        }
+        expanded.setPadding(edgeRight?0:dp(1),dp(4),edgeRight?dp(1):0,dp(4));
+        scroll.setPadding(edgeRight?dp(4):0,0,edgeRight?0:dp(4),0);
+    }
     private void render(boolean animateChanges) {
+        placeControlRail();
         appearance = ReceiveAppearance.load(context);
         if(geometry==null) {
             visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
@@ -908,6 +921,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (value && !collapsed) {
             edgeRight = initial.centerX() >= bounds.centerX();
         }
+        placeControlRail();
         collapsed = value;
         styleHandle();
         int width = value ? dp(18) : expandedWidth, height = value ? dp(72) : expandedHeight;
@@ -1031,7 +1045,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             final Rect leavingBounds=new Rect(visualBounds);
             final WindowManager.LayoutParams leavingLayout = layout;
             final boolean registered = rootAdded;
-            root = null; surface=null; expanded = null; row = null; scroll = null; count = null; layout = null;
+            root = null; surface=null; expanded = null; rail=null; row = null; scroll = null; count = null; layout = null;
             header = null; handle = null; shelfTab = null; contentGestures=null;
             countGroup=null;shelfGroup=null;countIcon=null;shelfIcon=null;
             rootAdded = false;
