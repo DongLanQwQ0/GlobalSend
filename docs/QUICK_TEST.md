@@ -4,10 +4,10 @@
 
 截至 2026-10-29，发布记录确认：
 
-- Windows **1.0.49+58** 已完整更新并启动于 `E:\Programs\GlobalSend`；本轮不进行Windows界面测试。
-- [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.49-android-arm64-v8a.apk)：16,292,096字节。USB覆盖安装成功，手机实际读回 **1.0.49+58**，数据保留；用户确认APK打开安装可用。48的微信图片投放验收保留。
-- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.49-windows-x64.zip)：22,370,225字节，不要只复制EXE。[GitHub分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.49-build58)提供两平台包及各自更新清单；中心不托管包。
-- 中心及[网页版](https://123.207.180.163/globalsend/app/)已部署多组连接、流式中继和链接识别，镜像 `globalsend:multi-group-20261029-1620`。49仅改Android安装器调用，无需重复部署中心；iPad保持48。
+- Windows **1.0.50+59** 已完整更新并启动于 `E:\Programs\GlobalSend`；本轮不进行Windows界面测试。[开机启动与后台参数](WINDOWS_STARTUP.md)已实现，开关保持默认关闭，登录启动、不抢焦点及托盘恢复仍待手动验收。
+- [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.50-android-arm64-v8a.apk)：16,291,960字节。USB覆盖安装成功，手机实际读回 **1.0.50+59**，数据保留；49的APK打开安装与48的微信图片投放验收保留。
+- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.50-windows-x64.zip)：22,377,049字节，不要只复制EXE。[GitHub分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)提供两平台包及各自更新清单；中心不托管包。
+- 中心及[网页版](https://123.207.180.163/globalsend/app/)已部署多组连接、流式中继和链接识别，镜像 `globalsend:multi-group-20261029-1620`。50仅新增Windows启动功能，无需重复部署中心；iPad保持48。
 
 版本以 [本机发布记录](../artifacts/releases/latest-local.json) 和 [中心部署记录](../artifacts/deploy/current-workspace-deployment.json) 为准。新版手机重点为 [独立暂存坞](TEMPORARY_SHELF.md)、系统拖影主题及应用安装包选择；不能把框架测试当作手机更新或物理跨应用拖放验收。步骤见 [UI 验收](UI_ACCEPTANCE.md)。
 
