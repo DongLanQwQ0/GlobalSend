@@ -36,9 +36,9 @@ public class ReceiveOverlayTest {
         assertEquals(Math.round(6*dp), ((View)field(overlay,"expanded")).getPaddingRight());
         ((View)field(overlay,"shelfTab")).performClick();
         LinearLayout row=(LinearLayout)field(overlay,"row"); assertEquals(2,row.getChildCount());
-        assertEquals("仅暂存",((android.widget.TextView)((android.widget.FrameLayout)((LinearLayout)row.getChildAt(0)).getChildAt(0)).getChildAt(0)).getText().toString());
+        assertEquals("仅暂存",((android.widget.TextView)((android.widget.FrameLayout)row.getChildAt(0)).getChildAt(0)).getText().toString());
         ((View)field(overlay,"count")).performClick();
-        assertEquals("remote",((android.widget.TextView)((android.widget.FrameLayout)((LinearLayout)row.getChildAt(0)).getChildAt(0)).getChildAt(0)).getText().toString());
+        assertEquals("remote",((android.widget.TextView)((android.widget.FrameLayout)row.getChildAt(0)).getChildAt(0)).getText().toString());
         overlay.hide();
     }
 

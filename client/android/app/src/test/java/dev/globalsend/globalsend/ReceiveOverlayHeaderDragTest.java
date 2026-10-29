@@ -77,11 +77,14 @@ public class ReceiveOverlayHeaderDragTest {
         ReceiveOverlay overlay = create(new int[3]);
         LinearLayout header = (LinearLayout)field(overlay, "header");
         View shelf = header.getChildAt(1), bulk = header.getChildAt(2);
-        android.widget.TextView received=(android.widget.TextView)header.getChildAt(0);
+        android.widget.TextView received=(android.widget.TextView)field(overlay,"count");
+        android.widget.TextView staged=(android.widget.TextView)field(overlay,"shelfTab");
         assertEquals("1",received.getText().toString());
-        assertEquals("0",((android.widget.TextView)shelf).getText().toString());
-        assertNotNull(received.getCompoundDrawablesRelative()[2]);
-        assertNotNull(((android.widget.TextView)shelf).getCompoundDrawablesRelative()[2]);
+        assertEquals("0",staged.getText().toString());
+        View receivedIcon=(View)field(overlay,"countIcon"),stagedIcon=(View)field(overlay,"shelfIcon");
+        int gap=Math.round(4*header.getResources().getDisplayMetrics().density);
+        assertEquals(gap,receivedIcon.getLeft()-received.getRight());
+        assertEquals(gap,stagedIcon.getLeft()-staged.getRight());
         float x = (shelf.getLeft()+shelf.getRight())/2f, y=header.getHeight()/2f;
         touch(header, 0, MotionEvent.ACTION_DOWN, x, y);
         touch(header, 10, MotionEvent.ACTION_UP, x, y);
@@ -153,10 +156,10 @@ public class ReceiveOverlayHeaderDragTest {
         ((View)field(overlay,"shelfTab")).performClick();
         LinearLayout row=(LinearLayout)field(overlay,"row");
         assertEquals(3,row.getChildCount());
-        LinearLayout card=(LinearLayout)row.getChildAt(0);
-        android.widget.FrameLayout preview=(android.widget.FrameLayout)card.getChildAt(0);
-        assertEquals("移除",preview.getChildAt(1).getContentDescription());
-        preview.getChildAt(1).performClick();
+        View card=row.getChildAt(0);
+        View remove=card.findViewWithTag("remove-item");
+        assertEquals("移除",remove.getContentDescription());
+        remove.performClick();
         assertEquals(1,shelf.items.size());
         assertEquals("清空当前列表",row.getChildAt(row.getChildCount()-1).getContentDescription());
         row.getChildAt(row.getChildCount()-1).performClick();
@@ -288,6 +291,64 @@ public class ReceiveOverlayHeaderDragTest {
     private void reflow(ReceiveOverlay overlay,android.graphics.Rect bounds) throws Exception {
         java.lang.reflect.Method method=ReceiveOverlay.class.getDeclaredMethod("reflowForBounds",android.graphics.Rect.class);
         method.setAccessible(true);method.invoke(overlay,bounds);
+    }
+    @Test public void pullingHandleOpenDoesNotCollapseItAgainWhenFingerIsReleased() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)((View)field(overlay,"root")).getLayoutParams();
+        for(boolean right:new boolean[]{true,false}) {
+            android.graphics.Rect bounds=(android.graphics.Rect)field(overlay,"lastBounds");
+            window.x=right?bounds.right-window.width:bounds.left;
+            overlay.setCollapsed(true);advanceGeometry(overlay,240);
+            View handle=(View)field(overlay,"handle");
+            touch(handle,0,MotionEvent.ACTION_DOWN,9,36);
+            touch(handle,60,MotionEvent.ACTION_MOVE,right?-31:49,36);
+            assertFalse((Boolean)field(overlay,"collapsed"));advanceGeometry(overlay,240);
+            touch(handle,350,MotionEvent.ACTION_UP,right?-31:49,36);
+            assertFalse("same UP must not reverse the completed expansion",(Boolean)field(overlay,"collapsed"));
+            assertNull(field(overlay,"geometry"));
+        }
+        overlay.hide();
+    }
+    private void waitForImage(android.widget.ImageView image) throws Exception {
+        for(int i=0;i<200 && image.getDrawable()==null;i++) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle();Thread.sleep(5);
+        }
+        assertNotNull("actual thumbnail decode completed",image.getDrawable());
+    }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void imageFillsCardWithCropAndNoMetadataFooter() throws Exception {
+        android.content.Context context=RuntimeEnvironment.getApplication();
+        java.io.File file=new java.io.File(context.getFilesDir(),"full-card-fixture.png");
+        android.graphics.Bitmap original=android.graphics.Bitmap.createBitmap(300,150,android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas=new android.graphics.Canvas(original);canvas.drawColor(android.graphics.Color.YELLOW);
+        android.graphics.Paint paint=new android.graphics.Paint();paint.setColor(android.graphics.Color.BLUE);canvas.drawRect(0,0,75,150,paint);
+        paint.setColor(android.graphics.Color.RED);canvas.drawRect(225,0,300,150,paint);
+        try(java.io.FileOutputStream out=new java.io.FileOutputStream(file)){original.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}original.recycle();
+        ReceiveOverlay overlay=create(new int[3]);
+        overlay.show(new ReceiveNotifications.Receipt("image","1","source-not-a-footer",null,file.getName(),file.getPath(),file.length()),2,ignored -> {});
+        View root=(View)field(overlay,"root");draw(root);root.getViewTreeObserver().dispatchOnPreDraw();
+        android.widget.FrameLayout card=(android.widget.FrameLayout)((LinearLayout)field(overlay,"row")).getChildAt(0);
+        android.widget.ImageView image=(android.widget.ImageView)card.getChildAt(0);waitForImage(image);
+        assertEquals(0,card.getPaddingLeft());assertEquals(0,card.getPaddingTop());
+        assertEquals(card.getWidth(),image.getWidth());assertEquals(card.getHeight(),image.getHeight());
+        assertEquals(android.widget.ImageView.ScaleType.CENTER_CROP,image.getScaleType());
+        android.graphics.Bitmap rendered=android.graphics.Bitmap.createBitmap(card.getWidth(),card.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);
+        card.draw(new android.graphics.Canvas(rendered));
+        assertEquals("no reserved footer below the image",android.graphics.Color.YELLOW,rendered.getPixel(card.getWidth()/2,card.getHeight()-5));
+        assertEquals("center crop removes source side bands",android.graphics.Color.YELLOW,rendered.getPixel(5,card.getHeight()/2));
+        rendered.recycle();
+        for(int i=0;i<card.getChildCount();i++)if(card.getChildAt(i) instanceof android.widget.TextView)
+            assertEquals("×",((android.widget.TextView)card.getChildAt(i)).getText().toString());
+        capture(overlay,"received-full-image");
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");shelf.add(java.util.List.of(file.getPath()),java.util.List.of("Text preview"),Map.of());
+        ((View)field(overlay,"shelfTab")).performClick();draw(root);
+        android.widget.FrameLayout staged=(android.widget.FrameLayout)((LinearLayout)field(overlay,"row")).getChildAt(0);
+        waitForImage((android.widget.ImageView)staged.getChildAt(0));
+        capture(overlay,"staged-full-image");
+        ReceiveAppearance colors=ReceiveAppearance.load(context);
+        assertNotEquals(colors.receivedAccent,colors.accent);assertNotEquals(colors.receivedSoft,colors.stagedSoft);
+        overlay.hide();assertTrue(file.delete());
     }
     private void setField(Object owner,String name,Object value) throws Exception {
         java.lang.reflect.Field f=owner.getClass().getDeclaredField(name);f.setAccessible(true);f.set(owner,value);

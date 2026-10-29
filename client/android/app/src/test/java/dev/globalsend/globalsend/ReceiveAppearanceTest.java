@@ -76,9 +76,9 @@ public class ReceiveAppearanceTest {
         overlay.show(new ReceiveNotifications.Receipt("theme","1","电脑","暗色接收小窗",null,null,0),1,shown -> {});
         java.lang.reflect.Field field=ReceiveOverlay.class.getDeclaredField("root");field.setAccessible(true);
         View root=(View)field.get(overlay);assertNotNull(root);
-        assertEquals(0xf5202124,((GradientDrawable)root.getBackground()).getColor().getDefaultColor());
+        assertEquals(0x99202124,((GradientDrawable)root.getBackground()).getColor().getDefaultColor());
         field=ReceiveOverlay.class.getDeclaredField("row");field.setAccessible(true);
-        LinearLayout row=(LinearLayout)field.get(overlay),card=(LinearLayout)row.getChildAt(0);
+        LinearLayout row=(LinearLayout)field.get(overlay);android.widget.FrameLayout card=(android.widget.FrameLayout)row.getChildAt(0);
         TextView text=(TextView)card.getChildAt(0);assertEquals(0xffe9eaed,text.getCurrentTextColor());
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
         WindowManager.LayoutParams size=(WindowManager.LayoutParams)root.getLayoutParams();

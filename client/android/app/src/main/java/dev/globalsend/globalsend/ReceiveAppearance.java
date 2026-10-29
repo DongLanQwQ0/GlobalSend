@@ -10,6 +10,7 @@ import org.json.JSONObject;
 /** Reads the same installation preference as Flutter, including headless reception. */
 final class ReceiveAppearance {
     final int surface, field, ink, muted, accent, soft, border;
+    final int receivedAccent, receivedSoft, stagedSoft;
     ReceiveAppearance(String mode, String color) {
         boolean dark = "dark".equals(mode), neutral = "neutral".equals(mode);
         surface = dark ? 0xff202124 : neutral ? 0xfff7f7f8 : 0xffffffff;
@@ -25,6 +26,12 @@ final class ReceiveAppearance {
         field = neutral ? 0xffefeff1 : tint(accent, surface, dark ? .055f : .03f);
         float opacity = dark ? .13f : .08f;
         soft = tint(accent, surface, opacity);
+        // Keep the receive category green, visibly different from the cool
+        // green theme used for staging. Other native drag artwork is unchanged.
+        receivedAccent = index == 0 ? (dark ? 0xffb9f56a : 0xff5b9223)
+            : (dark ? 0xff81d6a1 : 0xff168942);
+        receivedSoft = tint(receivedAccent, surface, index == 0 ? .24f : .16f);
+        stagedSoft = tint(accent, surface, index == 0 ? .14f : .12f);
     }
     private static int tint(int accent, int surface, float opacity) {
         int mixed=0xff000000;

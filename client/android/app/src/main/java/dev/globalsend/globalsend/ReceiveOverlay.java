@@ -55,6 +55,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private final TemporaryShelf shelf;
     private LinearLayout header;
     private TextView shelfTab, handle, resize;
+    private LinearLayout countGroup, shelfGroup;
+    private ImageView countIcon, shelfIcon;
     private android.view.GestureDetector contentGestures;
     private Runnable pendingOpen;
     private boolean doubleTapGesture;
@@ -280,14 +282,14 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         header = new MoveHeader(context);
         header.setGravity(Gravity.CENTER_VERTICAL);
         count = control("", "接收", () -> { shelfVisible = false; render(); });
-        count.setCompoundDrawablesRelativeWithIntrinsicBounds(0,0,R.drawable.ic_shelf_inbox,0);
-        count.setCompoundDrawablePadding(dp(4));
         count.setSingleLine(true);
-        header.addView(count, new LinearLayout.LayoutParams(0, dp(30), 1));
+        countIcon=new ImageView(context);countIcon.setImageResource(R.drawable.ic_shelf_inbox);
+        countGroup=countTab(count,countIcon,() -> {shelfVisible=false;render();});
+        header.addView(countGroup, new LinearLayout.LayoutParams(0, dp(30), 1));
         shelfTab = control("", "暂存", () -> { shelfVisible = true; render(); });
-        shelfTab.setCompoundDrawablesRelativeWithIntrinsicBounds(0,0,R.drawable.ic_shelf_folder,0);
-        shelfTab.setCompoundDrawablePadding(dp(4));
-        header.addView(shelfTab, new LinearLayout.LayoutParams(0, dp(30), 1));
+        shelfIcon=new ImageView(context);shelfIcon.setImageResource(R.drawable.ic_shelf_folder);
+        shelfGroup=countTab(shelfTab,shelfIcon,() -> {shelfVisible=true;render();});
+        header.addView(shelfGroup, new LinearLayout.LayoutParams(0, dp(30), 1));
         View all = icon(R.drawable.ic_drag_all, "全部拖出");
         all.setOnLongClickListener(view -> export(view, new ArrayList<>(displayed().values())));
         header.addView(all, new LinearLayout.LayoutParams(dp(30), dp(30)));
@@ -361,16 +363,14 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             row.addView(empty, new LinearLayout.LayoutParams(expandedWidth - dp(12), side));
         }
         for (ReceiveNotifications.Receipt receipt : displayed().values()) {
-            LinearLayout card = new LinearLayout(context);
-            card.setOrientation(LinearLayout.VERTICAL);
+            FrameLayout card = new FrameLayout(context);
             card.setTag(receipt);
-            card.setPadding(dp(8), dp(6), dp(8), dp(4));
-            card.setBackground(shape(glass(appearance.soft,0xb3), 12));
+            card.setClipToOutline(true);
             boolean pending = shelfVisible && shelf.pendingRemoval(receipt.id);
-            if (pending) card.setBackground(shape(pendingColor(), 12));
             View content;
-            if (receipt.text == null && !receipt.localPath.isEmpty() &&
-                receipt.fileName.toLowerCase(java.util.Locale.ROOT).matches(".*\\.(png|jpe?g|webp|gif|bmp|heic|heif)$")) {
+            boolean picture=receipt.text == null && !receipt.localPath.isEmpty() &&
+                receipt.fileName.toLowerCase(java.util.Locale.ROOT).matches(".*\\.(png|jpe?g|webp|gif|bmp|heic|heif)$");
+            if (picture) {
                 ImageView image = new ImageView(context);
                 image.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 image.setContentDescription(receipt.fileName);
@@ -382,28 +382,32 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 });
             } else {
                 TextView text = label(receipt.text == null ? "▧\n" + receipt.fileName : receipt.text, 14, appearance.ink);
+                text.setPadding(dp(8),dp(8),dp(8),dp(28));
                 text.setMaxLines(3);
                 text.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 content = text;
             }
-            FrameLayout preview = new FrameLayout(context);
-            preview.addView(content, new FrameLayout.LayoutParams(-1,-1));
+            card.addView(content,new FrameLayout.LayoutParams(-1,-1));
+            View tint=new View(context);tint.setTag("pending-tint");tint.setBackgroundColor(0x33d84c53);
+            tint.setVisibility(pending ? View.VISIBLE : View.GONE);
+            card.addView(tint,new FrameLayout.LayoutParams(-1,-1));
             TextView remove = control("×", "移除", () -> remove(receipt));
+            remove.setTag("remove-item");
             remove.setBackground(shape(glass(appearance.surface,0xb3), 12));
-            preview.addView(remove,new FrameLayout.LayoutParams(dp(28),dp(28),Gravity.TOP|Gravity.RIGHT));
-            card.addView(preview, new LinearLayout.LayoutParams(-1, 0, 1));
-            LinearLayout footer = new LinearLayout(context);
-            footer.setGravity(Gravity.CENTER_VERTICAL);
-            TextView source = label(receipt.source, 10, appearance.muted);
-            source.setSingleLine(true); source.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            footer.addView(source, new LinearLayout.LayoutParams(0, dp(24), 1));
+            FrameLayout.LayoutParams removeSize=new FrameLayout.LayoutParams(dp(28),dp(28),Gravity.TOP|Gravity.RIGHT);
+            removeSize.topMargin=dp(4);removeSize.rightMargin=dp(4);
+            card.addView(remove,removeSize);
             View deleting = icon(android.R.drawable.ic_menu_delete,"3秒后移除，轻点取消");
             deleting.setTag("pending-removal"); deleting.setVisibility(pending ? View.VISIBLE : View.GONE);
             ((ImageView)deleting).setColorFilter(0xffd84c53);
-            footer.addView(deleting,new LinearLayout.LayoutParams(dp(24),dp(24)));
-            if (receipt.text != null) footer.addView(control("复制", "复制", () -> copy(receipt)),
-                new LinearLayout.LayoutParams(dp(40), dp(24)));
-            card.addView(footer);
+            FrameLayout.LayoutParams deletingSize=new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.BOTTOM|Gravity.LEFT);
+            deletingSize.leftMargin=dp(4);deletingSize.bottomMargin=dp(4);card.addView(deleting,deletingSize);
+            if (receipt.text != null) {
+                FrameLayout.LayoutParams copySize=new FrameLayout.LayoutParams(dp(40),dp(24),Gravity.BOTTOM|Gravity.RIGHT);
+                copySize.rightMargin=dp(4);copySize.bottomMargin=dp(4);
+                card.addView(control("复制", "复制", () -> copy(receipt)),copySize);
+            }
+            styleCard(card,pending);
             card.setOnClickListener(view -> queueOpen(receipt));
             card.setOnLongClickListener(view -> {
                 return export(view, java.util.Collections.singletonList(receipt));
@@ -415,8 +419,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (!displayed().isEmpty()) {
             LinearLayout clear = new LinearLayout(context);
             clear.setGravity(Gravity.CENTER); clear.setOrientation(LinearLayout.VERTICAL);
-            clear.setBackground(shape(glass(appearance.soft,0xb3),12)); clear.setContentDescription("清空当前列表");
-            TextView clearIcon=label("×",30,appearance.accent);
+            clear.setBackground(shape(glass(listSoft(),0xb3),12)); clear.setContentDescription("清空当前列表");
+            TextView clearIcon=label("×",30,listAccent());
             clearIcon.setGravity(Gravity.CENTER);
             clear.addView(clearIcon,new LinearLayout.LayoutParams(dp(40),dp(40)));
             TextView clearLabel=label("清空",12,appearance.muted);clearLabel.setGravity(Gravity.CENTER);
@@ -429,6 +433,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
 
     private int pendingColor() {
         return android.graphics.Color.luminance(appearance.surface) < .3f ? 0xff542b32 : 0xffffe4e6;
+    }
+    private int listAccent() {return shelfVisible?appearance.accent:appearance.receivedAccent;}
+    private int listSoft() {return shelfVisible?appearance.stagedSoft:appearance.receivedSoft;}
+    private void styleCard(FrameLayout card,boolean pending) {
+        card.setBackground(shape(pending?pendingColor():glass(listSoft(),0xb3),12));
+        GradientDrawable border=shape(0,12);border.setStroke(dp(1),pending?0xffd84c53:listAccent());
+        card.setForeground(border);
     }
     private int glass(int color,int alpha) { return (color&0x00ffffff)|(alpha<<24); }
     private void styleHandle() {
@@ -471,8 +482,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             View card=row.getChildAt(i);
             if(!(card.getTag() instanceof ReceiveNotifications.Receipt))continue;
             boolean pending=shelfVisible && shelf.pendingRemoval(((ReceiveNotifications.Receipt)card.getTag()).id);
-            card.setBackground(shape(pending ? pendingColor() : glass(appearance.soft,0xb3),12));
+            styleCard((FrameLayout)card,pending);
             card.findViewWithTag("pending-removal").setVisibility(pending ? View.VISIBLE : View.GONE);
+            card.findViewWithTag("pending-tint").setVisibility(pending ? View.VISIBLE : View.GONE);
         }
     }
     private void renderKeepingScroll() {
@@ -502,15 +514,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         count.setText(String.valueOf(items.size())); shelfTab.setText(String.valueOf(shelf.items.size()));
         count.setContentDescription("接收 " + items.size() + " 项");
         shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项");
-        count.setTextColor(shelfVisible ? appearance.muted : appearance.accent);
-        shelfTab.setTextColor(shelfVisible ? appearance.accent : appearance.muted);
-        count.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(count.getCurrentTextColor()));
-        shelfTab.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(shelfTab.getCurrentTextColor()));
+        countGroup.setContentDescription(count.getContentDescription());
+        shelfGroup.setContentDescription(shelfTab.getContentDescription());
+        count.setTextColor(appearance.receivedAccent);countIcon.setColorFilter(appearance.receivedAccent);
+        shelfTab.setTextColor(appearance.accent);shelfIcon.setColorFilter(appearance.accent);
+        countGroup.setAlpha(shelfVisible?.65f:1);shelfGroup.setAlpha(shelfVisible?1:.65f);
         count.setTypeface(null, shelfVisible ? 0 : 1); shelfTab.setTypeface(null, shelfVisible ? 1 : 0);
         handle.setText("");
         handle.setContentDescription("展开文件暂存坞，接收 " + items.size() + " 项，暂存 " + shelf.items.size() + " 项");
         if (remaining > 0) shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项，" + remaining + " 秒后移除，轻点取消");
         else if (importing > 0) shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项，正在导入");
+        shelfGroup.setContentDescription(shelfTab.getContentDescription());
     }
 
     private boolean export(View source, List<ReceiveNotifications.Receipt> selection) {
@@ -698,19 +712,24 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void installEdgeMove(View view) {
+        final boolean[] pulledOpen={false};
         view.setOnTouchListener((handle, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                pulledOpen[0]=false;
                 stopGeometry();
                 downX = event.getRawX(); downY = event.getRawY(); startY = layout.y;
                 return true;
             }
             if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                if(pulledOpen[0])return true;
                 int dx = Math.round(event.getRawX() - downX), dy = Math.round(event.getRawY() - downY);
-                if ((edgeRight ? -dx : dx) > dp(28)) { setCollapsed(false); return true; }
+                if ((edgeRight ? -dx : dx) > dp(28)) { pulledOpen[0]=true;setCollapsed(false);return true; }
                 Rect bounds = availableBounds();
                 layout.y = clamp(startY + dy, bounds.top, bounds.bottom - layout.height);
                 windows.updateViewLayout(root, layout); return true;
             }
+            if(event.getActionMasked()==MotionEvent.ACTION_UP && pulledOpen[0]) {pulledOpen[0]=false;return true;}
+            if(event.getActionMasked()==MotionEvent.ACTION_CANCEL) {pulledOpen[0]=false;return true;}
             if (event.getActionMasked() == MotionEvent.ACTION_UP &&
                     Math.abs(event.getRawY() - downY) < dp(6) && Math.abs(event.getRawX() - downX) < dp(6)) handle.performClick();
             else if (event.getActionMasked() == MotionEvent.ACTION_UP) setCollapsed(true);
@@ -825,6 +844,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             final boolean registered = rootAdded;
             root = null; expanded = null; row = null; scroll = null; count = null; layout = null;
             header = null; handle = null; resize = null; shelfTab = null; contentGestures=null;
+            countGroup=null;shelfGroup=null;countIcon=null;shelfIcon=null;
             rootAdded = false;
             leaving.animate().cancel();
             if (registered && leaving.isAttachedToWindow()) {
@@ -858,6 +878,15 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         button.setGravity(Gravity.CENTER); button.setContentDescription(description);
         button.setOnClickListener(view -> action.run());
         return button;
+    }
+    private LinearLayout countTab(TextView number,ImageView icon,Runnable action) {
+        LinearLayout group=new LinearLayout(context);group.setOrientation(LinearLayout.HORIZONTAL);group.setGravity(Gravity.CENTER);
+        number.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        group.addView(number,new LinearLayout.LayoutParams(-2,-1));
+        LinearLayout.LayoutParams iconSize=new LinearLayout.LayoutParams(dp(18),dp(18));iconSize.leftMargin=dp(4);
+        group.addView(icon,iconSize);group.setOnClickListener(view -> action.run());
+        return group;
     }
     private TextView label(String value, int sp, int color) {
         TextView text = new TextView(context); text.setText(value); text.setTextSize(sp); text.setTextColor(color);
