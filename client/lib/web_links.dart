@@ -11,20 +11,48 @@ class WebLink {
 }
 
 List<WebLink> findWebLinks(String text) {
-  final matches = RegExp(
+  final candidate = RegExp(
     r'''(?:https?://|www\.)[^\s<>"'，。；！？、【】《》“”‘’（）]+''',
     caseSensitive: false,
+  );
+  final starts = RegExp(
+    r'(?:https?://|www\.)',
+    caseSensitive: false,
   ).allMatches(text);
+  // A bare ASCII host followed immediately by Chinese prose is not an IDN.
+  // Only inspect the authority: Chinese paths, query values and IDN hosts remain intact.
+  final proseAfterHost = RegExp(
+    r'^(?:\[[0-9a-z:.%_-]+\]|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}|(?:\d{1,3}\.){3}\d{1,3}|localhost)(?::\d+)?(?=[\u3400-\u9fff\uf900-\ufaff])',
+    caseSensitive: false,
+  );
   final links = <WebLink>[];
-  for (final match in matches) {
+  for (final start in starts) {
+    if (links.isNotEmpty && start.start < links.last.end) continue;
+    final match = candidate.matchAsPrefix(text, start.start);
+    if (match == null) continue;
     var label = match.group(0)!;
-    label = label.replaceFirst(RegExp(r'[.,;:!?]+$'), '');
-    for (final pair in [('(', ')'), ('[', ']'), ('{', '}')]) {
-      while (label.endsWith(pair.$2) &&
-          pair.$2.allMatches(label).length > pair.$1.allMatches(label).length) {
-        label = label.substring(0, label.length - 1);
+    final authorityStart = label.toLowerCase().startsWith('www.')
+        ? 0
+        : label.indexOf('://') + 3;
+    final authority = label
+        .substring(authorityStart)
+        .split(RegExp(r'[/?#]'))
+        .first;
+    final boundary = proseAfterHost.firstMatch(authority);
+    if (boundary != null)
+      label = label.substring(0, authorityStart + boundary.end);
+    String before;
+    do {
+      before = label;
+      label = label.replaceFirst(RegExp(r'[.,;:!?]+$'), '');
+      for (final pair in [('(', ')'), ('[', ']'), ('{', '}')]) {
+        while (label.endsWith(pair.$2) &&
+            pair.$2.allMatches(label).length >
+                pair.$1.allMatches(label).length) {
+          label = label.substring(0, label.length - 1);
+        }
       }
-    }
+    } while (label != before);
     final uri = Uri.tryParse(
       label.toLowerCase().startsWith('www.') ? 'https://$label' : label,
     );

@@ -1,10 +1,34 @@
 import 'package:flutter/material.dart';
+
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/system_bridge.dart';
 import 'package:globalsend/web_links.dart';
 
 void main() {
+  test(
+    'shared recognition examples preserve prose and Chinese URL components',
+    () async {
+      final cases = jsonDecode(
+        await File('../packages/protocol/fixtures/web-links.json')
+            .readAsString(),
+      ) as List;
+      for (final item in cases) {
+        final text = item['text'] as String,
+            links = findWebLinks(item['text'] as String);
+        expect(
+          links.map((link) => link.label).toList(),
+          item['labels'],
+          reason: text,
+        );
+        for (final link in links)
+          expect(text.substring(link.start, link.end), link.label);
+      }
+    },
+  );
   test('recognizes web links with punctuation, query, balanced paths and IPv6', () {
     const text =
         '打开（https://example.com/a_(b)?q=1&x=2）。\nwww.example.com，http://[2408::1]:8787/globalsend/。';

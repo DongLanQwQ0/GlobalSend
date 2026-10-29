@@ -1,0 +1,10 @@
+[
+  {"text":"你的导师是于云龙老师，登录“浙江大学本科生找导师平台”https://zds.zju.edu.cn可查看更多导师信息。同时请尽快在平台上填写你的兴趣标签和自我介绍，让老师更好地了解你！","labels":["https://zds.zju.edu.cn"]},
+  {"text":"打开www.zju.edu.cn查看通知","labels":["www.zju.edu.cn"]},
+  {"text":"http://10.0.0.1:8787用于内网；http://[2408::1]:8787也能访问。","labels":["http://10.0.0.1:8787","http://[2408::1]:8787"]},
+  {"text":"访问https://example.com/中文路径/通知?q=机械设计&年级=2026。","labels":["https://example.com/中文路径/通知?q=机械设计&年级=2026"]},
+  {"text":"https://例子.中国/中文 https://example.中国/页面 https://xn--fsqu00a.xn--fiqs8s/","labels":["https://例子.中国/中文","https://example.中国/页面","https://xn--fsqu00a.xn--fiqs8s/"]},
+  {"text":"先https://zju.edu.cn再https://example.com查看","labels":["https://zju.edu.cn","https://example.com"]},
+  {"text":"见(https://example.com/a_(b)?q=1&x=2). [https://example.com/docs.)]","labels":["https://example.com/a_(b)?q=1&x=2","https://example.com/docs"]},
+  {"text":"https://example.com/?next=https://zju.edu.cn/path www.example.com/#中文","labels":["https://example.com/?next=https://zju.edu.cn/path","www.example.com/#中文"]}
+]

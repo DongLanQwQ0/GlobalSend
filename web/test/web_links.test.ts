@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { findWebLinks, linkifyHtml, webLinkActions } from '../src/web_links.ts';
+import {readFile} from 'node:fs/promises';
+
+test('shared recognition examples keep adjacent prose outside anchors and Chinese URL components inside',async()=>{
+  const cases=JSON.parse(await readFile(new URL('../../packages/protocol/fixtures/web-links.json',import.meta.url),'utf8')) as {text:string;labels:string[]}[];
+  for(const {text,labels} of cases){
+    assert.deepEqual(findWebLinks(text).map(link=>link.label),labels,text);
+    const {document}=parseHTML(`<div id="text">${linkifyHtml(text)}</div>`).window;
+    assert.equal(document.querySelector('#text')!.textContent,text);
+    assert.deepEqual([...document.querySelectorAll('a')].map(node=>node.textContent),labels);
+  }
+});
 
 test('URLs retain query, parentheses and IPv6 while trailing punctuation stays text',()=>{
   const text='打开（https://example.com/a_(b)?q=1&x=2）。\nwww.example.com，http://[2408::1]:8787/globalsend/。';
