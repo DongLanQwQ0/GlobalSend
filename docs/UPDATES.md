@@ -28,7 +28,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows与真实vivo均已更新 **1.0.48+57**；手机USB安装成功并读回版本，微信图片投放实测成功。最后构建的同源码IPA也已成功。[公开Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.48-build57)已提供Windows ZIP、Android arm64 APK、未签名IPA及各自平台更新清单。
+Windows与真实vivo均已更新 **1.0.49+58**，手机USB安装成功并读回版本，用户确认APK安装可用。[49版Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.49-build58)提供Windows ZIP、Android APK与对应清单。Android专属修复不重建iOS，未签名IPA仍为[1.0.48（57）](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.48-build57)，其更新清单留在48版Release；iOS不能因为出现49版Release就误报更新。
 
 2026-10-29通过GitHub API确认仓库为public，1.0.48三平台包及三份更新清单均为uploaded。当前版本实际“设置 → 检查更新”和手机通知仍需界面验收。此前1.0.28的公开客户端检查遇到GitHub网络超时，保留为历史未通过结果，不用资产上传成功冒充整条客户端更新检查通过。
 
