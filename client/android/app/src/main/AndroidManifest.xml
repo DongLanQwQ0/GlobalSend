@@ -78,6 +78,7 @@
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
         <package android:name="com.vivo.globaldragdrop" />
+        <package android:name="com.tencent.mm" />
         <package android:name="com.donglan.chrona" />
         <intent>
             <action android:name="android.intent.action.MAIN"/>

@@ -700,7 +700,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 shelf.exported(staged, accepted, item -> {
                     // Directory document drags retain their original system
                     // result contract; ordinary exported files are observable.
-                    boolean consumed=item.text!=null || !DockShareProvider.canObserveRead(item.localPath) || DockShareProvider.wasReadSince(item.localPath,started);
+                    boolean consumed=item.text!=null || !DockShareProvider.canObserveAccess(item.localPath) || DockShareProvider.wasAccessedSince(item.localPath,started);
                     if(!consumed && !warned[0]) {warned[0]=true;android.widget.Toast.makeText(context,"目标未读取，已保留暂存项",android.widget.Toast.LENGTH_SHORT).show();}
                     return consumed;
                 });

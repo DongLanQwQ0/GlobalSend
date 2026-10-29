@@ -20,6 +20,7 @@ import org.json.JSONObject;
 public final class ShelfAcceptanceActivity extends Activity {
     private int sequence = 1, accepted;
     private TextView source, destination;
+    private android.widget.CheckBox legacyReader;
     private String marker() { return "GS-shelf-physical:" + sequence; }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     @Override public void onCreate(Bundle state) {
@@ -56,6 +57,9 @@ public final class ShelfAcceptanceActivity extends Activity {
         Button cleanup=new Button(this);cleanup.setText("移除本工具创建的相册测试图");
         cleanup.setOnClickListener(view -> removeSyntheticGalleryImage());
         page.addView(cleanup,new LinearLayout.LayoutParams(-1,dp(48)));
+        legacyReader=new android.widget.CheckBox(this);legacyReader.setText("按真实路径读取（微信兼容）");
+        legacyReader.setChecked(getIntent().getBooleanExtra("legacyReader",false));
+        page.addView(legacyReader,new LinearLayout.LayoutParams(-1,dp(48)));
         destination = label("将测试项拖到这里\n接受明确投放的文件，仅检查读取授权和格式", 18);
         destination.setContentDescription("fixture-target");
         destination.setGravity(Gravity.CENTER);
@@ -74,7 +78,15 @@ public final class ShelfAcceptanceActivity extends Activity {
                     if(uri!=null) {
                         // Exercise the target-side grant and actual provider FD,
                         // without saving the URI, filename, or user file content.
-                        try(java.io.InputStream input=getContentResolver().openInputStream(uri)) {
+                        java.io.InputStream stream;
+                        if(legacyReader.isChecked()) {
+                            try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{"_data"},null,null,null)) {
+                                if(cursor==null || !cursor.moveToFirst() || cursor.isNull(cursor.getColumnIndexOrThrow("_data")))
+                                    throw new java.io.FileNotFoundException("No legacy path");
+                                stream=new java.io.FileInputStream(cursor.getString(cursor.getColumnIndexOrThrow("_data")));
+                            }
+                        } else stream=getContentResolver().openInputStream(uri);
+                        try(java.io.InputStream input=stream) {
                             if(input==null)throw new java.io.IOException("No stream");
                             input.read(); fileItems++;
                         }
@@ -89,6 +101,7 @@ public final class ShelfAcceptanceActivity extends Activity {
                     JSONObject result=new JSONObject();
                     result.put("fileGrantObtained",permission!=null);result.put("readable",false);
                     result.put("errorType",failure.getClass().getSimpleName());
+                    result.put("readMode",legacyReader.isChecked()?"legacy-path":"content-stream");
                     Files.write(new File(getFilesDir(),"uri-outcome.json").toPath(),result.toString().getBytes(StandardCharsets.UTF_8));
                 } catch(Exception writeFailed) { throw new IllegalStateException(writeFailed); }
                 return false;
@@ -103,6 +116,7 @@ public final class ShelfAcceptanceActivity extends Activity {
                 result.put("fileItems",fileItems);
                 result.put("fileGrantObtained",permission!=null);
                 result.put("readable",true);
+                result.put("readMode",legacyReader.isChecked()?"legacy-path":"content-stream");
                 result.put("syntheticOnly",fileItems==0);
                 Files.write(new File(getFilesDir(), "outcome.json").toPath(), result.toString().getBytes(StandardCharsets.UTF_8));
             } catch (Exception failed) { throw new IllegalStateException(failed); }
@@ -117,6 +131,7 @@ public final class ShelfAcceptanceActivity extends Activity {
     }
     @Override protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);setIntent(intent);applyRotation(intent);
+        if(intent.hasExtra("legacyReader"))legacyReader.setChecked(intent.getBooleanExtra("legacyReader",false));
         if("gallery".equals(intent.getStringExtra("probe")))openSyntheticGalleryImage();
     }
     private void recordClip(ClipData clip) {

@@ -41,13 +41,13 @@ public class DockShareProviderTest {
         try(Cursor cursor=proxy.query(exported,new String[]{OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE},null,null,null)) {
             assertTrue(cursor.moveToFirst());assertEquals(file.getName(),cursor.getString(0));assertEquals(data.length,cursor.getLong(1));
         }
-        long started=android.os.SystemClock.uptimeMillis();assertFalse(DockShareProvider.wasReadSince(original,started));
+        long started=android.os.SystemClock.uptimeMillis();assertFalse(DockShareProvider.wasAccessedSince(original,started));
         ShadowBinder.setCallingUid(android.os.Process.myUid());
         try(ParcelFileDescriptor fd=proxy.openFile(exported,"r")) {assertArrayEquals(data,new java.io.FileInputStream(fd.getFileDescriptor()).readAllBytes());}
-        assertFalse("source previews are not delivery",DockShareProvider.wasReadSince(original,started));
+        assertFalse("source previews are not delivery",DockShareProvider.wasAccessedSince(original,started));
         int caller=android.os.Process.FIRST_APPLICATION_UID+2345;ShadowBinder.setCallingUid(caller);
         try(ParcelFileDescriptor fd=proxy.openFile(exported,"r")) {assertArrayEquals(data,new java.io.FileInputStream(fd.getFileDescriptor()).readAllBytes());}
-        assertEquals(caller,android.os.Binder.getCallingUid());assertTrue(DockShareProvider.wasReadSince(original,started));
+        assertEquals(caller,android.os.Binder.getCallingUid());assertTrue(DockShareProvider.wasAccessedSince(original,started));
         try {proxy.openFile(exported,"w");fail("read only");}catch(java.io.FileNotFoundException expected){}
         assertArrayEquals(data,Files.readAllBytes(file.toPath()));
     }
@@ -93,9 +93,9 @@ public class DockShareProviderTest {
         DockShareProvider proxy=published(context);File image=new File(context.getFilesDir(),"preview.png");Files.write(image.toPath(),new byte[]{1,2,3});
         Uri uri=DockShareProvider.registerReadSource(context,image.getPath());long started=android.os.SystemClock.uptimeMillis();
         ShadowBinder.setCallingUid(preview);try(ParcelFileDescriptor descriptor=proxy.openFile(uri,"r")){assertNotNull(descriptor);}
-        assertFalse("system preview happens before the destination accepts the drop",DockShareProvider.wasReadSince(image.getPath(),started));
+        assertFalse("system preview happens before the destination accepts the drop",DockShareProvider.wasAccessedSince(image.getPath(),started));
         ShadowBinder.setCallingUid(android.os.Process.FIRST_APPLICATION_UID+2345);
         try(ParcelFileDescriptor descriptor=proxy.openFile(uri,"r")){assertNotNull(descriptor);}
-        assertTrue(DockShareProvider.wasReadSince(image.getPath(),started));
+        assertTrue(DockShareProvider.wasAccessedSince(image.getPath(),started));
     }
 }
