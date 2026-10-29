@@ -35,6 +35,7 @@ public final class ReceiveNotifications {
         void show(Receipt receipt, long generation, java.util.function.Consumer<Boolean> shown);
         void hide();
         default void foreground() { hide(); }
+        default void background() { }
     }
     static final class Receipt {
         final String id, version, source, text, fileName, localPath;
@@ -132,6 +133,7 @@ public final class ReceiveNotifications {
             presenter.foreground();
             for (PopupAttempt attempt : popupAttempts.values()) attempt.succeeded = true;
         }
+        if (!value)presenter.background();
         if (value && !popupRejected) cancelDisplayedNotices();
     }
 

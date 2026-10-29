@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Read-only, unguessable, short-lived capabilities for explicit cross-app drag gestures. */
 public final class DockShareProvider extends ContentProvider {
+    private int previewUid=-1;
     private static void trace(String event) {
         if(android.util.Log.isLoggable("GlobalSendDrag",android.util.Log.DEBUG))
             android.util.Log.d("GlobalSendDrag",event+" caller="+android.os.Binder.getCallingUid());
@@ -82,7 +83,11 @@ public final class DockShareProvider extends ContentProvider {
         if (entry == null || entry.expires < System.currentTimeMillis()) throw new FileNotFoundException("Drag authorization expired; drag again");
         return entry;
     }
-    @Override public boolean onCreate() { return true; }
+    @Override public boolean onCreate() {
+        try {previewUid=getContext().getPackageManager().getApplicationInfo("com.vivo.globaldragdrop",0).uid;}
+        catch(android.content.pm.PackageManager.NameNotFoundException absent) { }
+        return true;
+    }
     static String mimeType(String name) {
         int dot = name.lastIndexOf('.');
         String type = dot < 0 ? null : MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substring(dot + 1).toLowerCase(Locale.ROOT));
@@ -108,8 +113,10 @@ public final class DockShareProvider extends ContentProvider {
         markRead(entry,caller);
         trace("open-readable");return descriptor;
     }
-    private static void markRead(Entry entry,int caller) {
-        if(caller!=android.os.Process.myUid() && caller>=android.os.Process.FIRST_APPLICATION_UID)
+    private void markRead(Entry entry,int caller) {
+        // Vivo opens the item while drawing its drag preview, before a drop.
+        // That is not consumption by the selected destination (e.g. WeChat).
+        if(caller!=previewUid && caller!=android.os.Process.myUid() && caller>=android.os.Process.FIRST_APPLICATION_UID)
             entry.externalRead=android.os.SystemClock.uptimeMillis();
     }
     @Override public android.content.res.AssetFileDescriptor openAssetFile(Uri uri,String mode) throws FileNotFoundException {
@@ -141,7 +148,7 @@ public final class DockShareProvider extends ContentProvider {
         } catch(FileNotFoundException missing){return null;}
     }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] arguments, String order) {
-        trace("query data="+(projection!=null && java.util.Arrays.asList(projection).contains("_data")));
+        trace("query columns="+(projection==null?"default":java.util.Arrays.toString(projection)));
         try {
             Entry e = lookup(uri); String[] columns = projection == null ? new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE} : projection;
             MatrixCursor cursor = new MatrixCursor(columns); Object[] values = new Object[columns.length];

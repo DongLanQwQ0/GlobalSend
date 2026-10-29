@@ -332,6 +332,38 @@ public class ReceiveOverlayHeaderDragTest {
         assertEquals(Math.round(18*root.getResources().getDisplayMetrics().density),root.getLayoutParams().width);
         ReceiveOverlay.closeShelf();ReceiveOverlay.restoreShelf();assertNull(field(overlay,"root"));
     }
+    @Test public void placementSizeAndModeRestoreBeforeFirstWindowAndKeepOrientationPositions() throws Exception {
+        android.content.Context context=RuntimeEnvironment.getApplication();org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true);
+        context.getSharedPreferences("received-popup-settings",0).edit().putBoolean("enabled",true).commit();
+        ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
+        ((View)field(overlay,"shelfTab")).performClick();draw(root);
+        touch(root,0,MotionEvent.ACTION_DOWN,20,50);touch(root,30,MotionEvent.ACTION_MOVE,-100,-100);touch(root,60,MotionEvent.ACTION_UP,-100,-100);
+        draw(root);WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();int width=window.width,height=window.height;
+        touch(root,0,MotionEvent.ACTION_DOWN,width-1,height-1);touch(root,30,MotionEvent.ACTION_MOVE,width+39,height+19);touch(root,60,MotionEvent.ACTION_UP,width+39,height+19);
+        int x=window.x,y=window.y,w=window.width,h=window.height;overlay.hide();
+        overlay=new ReceiveOverlay(context,new ReceiveOverlay.Actions(){public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> v,long g){}});
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250));root=(View)field(overlay,"root");
+        window=(WindowManager.LayoutParams)root.getLayoutParams();assertEquals(x,window.x);assertEquals(y,window.y);assertEquals(w,window.width);assertEquals(h,window.height);
+        assertFalse((Boolean)field(overlay,"collapsed"));
+        android.graphics.Rect portrait=new android.graphics.Rect((android.graphics.Rect)field(overlay,"lastBounds"));
+        android.graphics.Rect landscape=new android.graphics.Rect(0,24,1200,776);reflow(overlay,landscape);draw(root);
+        int dx=200-window.x,dy=140-window.y;
+        touch(root,0,MotionEvent.ACTION_DOWN,20,50);touch(root,30,MotionEvent.ACTION_MOVE,20+dx,50+dy);touch(root,60,MotionEvent.ACTION_UP,20+dx,50+dy);
+        reflow(overlay,portrait);assertEquals(x,window.x);assertEquals(y,window.y);
+        reflow(overlay,landscape);assertEquals(200,window.x);assertEquals(140,window.y);
+        overlay.hide();
+    }
+    @Test public void appAlreadyForegroundRestoresHandleRatherThanFlashingSavedExpandedWindow() throws Exception {
+        android.content.Context context=RuntimeEnvironment.getApplication();org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true);
+        context.getSharedPreferences("received-popup-settings",0).edit().putBoolean("enabled",true).commit();
+        context.getSharedPreferences("received-dock-placement",0).edit().putFloat("portrait.x",.25f).putFloat("portrait.y",.6f)
+            .putBoolean("portrait.right",false).putBoolean("portrait.collapsed",false).putFloat("widthDp",272).putFloat("heightDp",136).commit();
+        ReceiveOverlay overlay=new ReceiveOverlay(context,new ReceiveOverlay.Actions(){public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> v,long g){}});
+        overlay.foreground();Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250));
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)((View)field(overlay,"root")).getLayoutParams();
+        assertTrue((Boolean)field(overlay,"collapsed"));assertEquals(18,window.width);assertEquals(0,window.x);
+        assertEquals(272,field(overlay,"preferredWidth"));overlay.hide();
+    }
     @Test public void contentDoubleTapOpensApplicationWithoutAlsoOpeningTheItem() throws Exception {
         android.content.Context context=RuntimeEnvironment.getApplication();
         android.content.pm.ResolveInfo launcher=new android.content.pm.ResolveInfo();

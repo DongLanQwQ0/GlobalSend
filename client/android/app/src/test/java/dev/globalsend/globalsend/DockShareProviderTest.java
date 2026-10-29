@@ -85,4 +85,17 @@ public class DockShareProviderTest {
         }
         assertArrayEquals(new String[]{"image/png"},proxy.getStreamTypes(exported,"image/*"));
     }
+    @Test public void vivoDragPreviewIsNotMistakenForDestinationConsumption() throws Exception {
+        Context context=RuntimeEnvironment.getApplication();int preview=android.os.Process.FIRST_APPLICATION_UID+777;
+        android.content.pm.PackageInfo installed=new android.content.pm.PackageInfo();installed.packageName="com.vivo.globaldragdrop";
+        installed.applicationInfo=new android.content.pm.ApplicationInfo();installed.applicationInfo.packageName=installed.packageName;installed.applicationInfo.uid=preview;
+        org.robolectric.Shadows.shadowOf(context.getPackageManager()).installPackage(installed);
+        DockShareProvider proxy=published(context);File image=new File(context.getFilesDir(),"preview.png");Files.write(image.toPath(),new byte[]{1,2,3});
+        Uri uri=DockShareProvider.registerReadSource(context,image.getPath());long started=android.os.SystemClock.uptimeMillis();
+        ShadowBinder.setCallingUid(preview);try(ParcelFileDescriptor descriptor=proxy.openFile(uri,"r")){assertNotNull(descriptor);}
+        assertFalse("system preview happens before the destination accepts the drop",DockShareProvider.wasReadSince(image.getPath(),started));
+        ShadowBinder.setCallingUid(android.os.Process.FIRST_APPLICATION_UID+2345);
+        try(ParcelFileDescriptor descriptor=proxy.openFile(uri,"r")){assertNotNull(descriptor);}
+        assertTrue(DockShareProvider.wasReadSince(image.getPath(),started));
+    }
 }

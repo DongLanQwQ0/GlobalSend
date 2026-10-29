@@ -39,6 +39,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private final Context context;
     private final WindowManager windows;
     private final Actions actions;
+    private final android.content.SharedPreferences placement;
     private final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
     private final Handler main = new Handler(Looper.getMainLooper());
     private FrameLayout root, surface;
@@ -61,6 +62,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private Runnable pendingOpen;
     private boolean doubleTapGesture;
     private boolean collapsed, shelfVisible, edgeRight = true;
+    private boolean appForeground;
     private int expandedWidth, expandedHeight;
     private int preferredWidth, preferredHeight;
     private Rect lastBounds;
@@ -90,6 +92,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     ReceiveOverlay(Context context, Actions actions) {
         this.context = context;
         this.actions = actions;
+        placement=context.getSharedPreferences("received-dock-placement",Context.MODE_PRIVATE);
         windows = context.getSystemService(WindowManager.class);
         shelf = new TemporaryShelf(context, this::shelfChanged);
         current = new java.lang.ref.WeakReference<>(this);
@@ -102,7 +105,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void restoreIfEnabled() {
         if(root!=null || !context.getSharedPreferences("received-popup-settings",Context.MODE_PRIVATE).getBoolean("enabled",true) ||
             !android.provider.Settings.canDrawOverlays(context))return;
-        shelfVisible=!shelf.items.isEmpty();create(true);render();
+        shelfVisible=!shelf.items.isEmpty();create(appForeground || placement.getBoolean(placementKey(availableBounds())+"collapsed",true));render();
         View appearing=root;
         appearing.post(() -> {
             if(root==appearing)appearing.animate().alpha(1).translationX(0).scaleX(1).scaleY(1).setDuration(180).start();
@@ -131,10 +134,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     @Override public void foreground() {
+        appForeground=true;
         // A persistent shelf stays reachable while the user moves between apps.
         // Received records are still shown in the main app, not duplicated there.
         if (root != null) setCollapsed(true);
     }
+    @Override public void background() {appForeground=false;}
 
     private Map<String, ReceiveNotifications.Receipt> displayed() { return shelfVisible ? shelf.items : items; }
 
@@ -157,6 +162,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if(lastBounds.equals(next)) { renderKeepingScroll(); return; }
         Rect previous=lastBounds;
         stopGeometry(); cancelPendingOpen();
+        savePlacement();
         int oldX=layout.x, oldY=layout.y, oldWidth=layout.width, oldHeight=layout.height;
         if(dragExpand!=null)main.removeCallbacks(dragExpand);
         dragExpand=null;
@@ -168,8 +174,29 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             :projectPosition(oldX,oldWidth,previous.left,previous.right,layout.width,next.left,next.right);
         layout.y=projectPosition(oldY,oldHeight,previous.top,previous.bottom,layout.height,next.top,next.bottom);
         lastBounds=new Rect(next);
+        restorePlacement(next,false);
         windows.updateViewLayout(root,layout);
-        renderKeepingScroll(); finishGeometry(collapsed);
+        renderKeepingScroll(); finishGeometry(collapsed);savePlacement();
+    }
+
+    private String placementKey(Rect bounds) {return bounds.width()>bounds.height()?"landscape.":"portrait.";}
+    private void restorePlacement(Rect bounds) {restorePlacement(bounds,true);}
+    private void restorePlacement(Rect bounds,boolean restoreSide) {
+        String key=placementKey(bounds);if(!placement.contains(key+"x"))return;
+        if(restoreSide)edgeRight=placement.getBoolean(key+"right",true);
+        layout.x=collapsed?(edgeRight?bounds.right-layout.width:bounds.left):
+            bounds.left+Math.round(placement.getFloat(key+"x",1)*Math.max(0,bounds.width()-layout.width));
+        layout.y=bounds.top+Math.round(placement.getFloat(key+"y",1)*Math.max(0,bounds.height()-layout.height));
+        layout.x=clamp(layout.x,bounds.left,bounds.right-layout.width);
+        layout.y=clamp(layout.y,bounds.top,bounds.bottom-layout.height);
+    }
+    private void savePlacement() {
+        if(root==null)return;
+        Rect bounds=lastBounds;String key=placementKey(bounds);float density=context.getResources().getDisplayMetrics().density;
+        placement.edit().putFloat(key+"x",(layout.x-bounds.left)/(float)Math.max(1,bounds.width()-layout.width))
+            .putFloat(key+"y",(layout.y-bounds.top)/(float)Math.max(1,bounds.height()-layout.height))
+            .putBoolean(key+"right",edgeRight).putBoolean(key+"collapsed",collapsed)
+            .putFloat("widthDp",preferredWidth/density).putFloat("heightDp",preferredHeight/density).apply();
     }
 
     private int projectPosition(int position,int size,int oldStart,int oldEnd,int newSize,int newStart,int newEnd) {
@@ -292,7 +319,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 }
                 if(sizingEdges!=0) {
                     if(event.getActionMasked()==MotionEvent.ACTION_MOVE)resizeFromEdges(sizingEdges,Math.round(event.getRawX()-downX),Math.round(event.getRawY()-downY));
-                    if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL){sizingEdges=0;cancelTap=false;}
+                    if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL){sizingEdges=0;cancelTap=false;savePlacement();}
                     return true;
                 }
                 if(backgroundMove) {
@@ -309,6 +336,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                         if(backgroundMoved && event.getActionMasked()==MotionEvent.ACTION_UP) {
                             Rect bounds=availableBounds();
                             if(layout.x<=bounds.left+dp(16) || layout.x+layout.width>=bounds.right-dp(16))setCollapsed(true);
+                            else savePlacement();
                         }
                     }
                     return true;
@@ -380,13 +408,16 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         layout.setTitle("GlobalSend 接收");
         Rect bounds = availableBounds();
         lastBounds=new Rect(bounds);
-        preferredWidth=layout.width; preferredHeight=layout.height;
+        preferredWidth=Math.round(placement.getFloat("widthDp",232)*context.getResources().getDisplayMetrics().density);
+        preferredHeight=Math.round(placement.getFloat("heightDp",116)*context.getResources().getDisplayMetrics().density);
+        layout.width=preferredWidth;layout.height=preferredHeight;
         layout.width = Math.min(layout.width, bounds.width() - dp(16));
         layout.height = Math.min(layout.height, bounds.height() - dp(16));
         layout.x = bounds.right - layout.width - dp(8);
         layout.y = bounds.bottom - layout.height - dp(12);
         expandedWidth = layout.width; expandedHeight = layout.height; collapsed = initiallyCollapsed;
         if(initiallyCollapsed) {layout.width=dp(18);layout.height=dp(72);layout.x=bounds.right-layout.width;}
+        restorePlacement(bounds);
         visualBounds = new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
         expansion=initiallyCollapsed?0:1;surfaceAnchored=false;
         surface.setLayoutParams(new FrameLayout.LayoutParams(layout.width,layout.height));
@@ -791,6 +822,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     if (!dragged) { performClick(); return true; }
                     Rect work = availableBounds();
                     setCollapsed(layout.x <= work.left + dp(16) || layout.x + layout.width >= work.right - dp(16));
+                    if(geometry==null)savePlacement();
                     return true;
                 case MotionEvent.ACTION_CANCEL:
                     tracking = false; moving = false;
@@ -843,6 +875,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             if (event.getActionMasked() == MotionEvent.ACTION_UP &&
                     Math.abs(event.getRawY() - downY) < dp(6) && Math.abs(event.getRawX() - downX) < dp(6)) handle.performClick();
             else if (event.getActionMasked() == MotionEvent.ACTION_UP) setCollapsed(true);
+            if(event.getActionMasked()==MotionEvent.ACTION_UP && geometry==null)savePlacement();
             return true;
         });
     }
@@ -852,7 +885,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (DockCoordinator.afterExportFrom(root, () -> setCollapsed(value))) return;
         if (collapsed == value && geometry == null && layout.width == (value ? dp(18) : expandedWidth)
                 && layout.height == (value ? dp(72) : expandedHeight)) {
-            finishGeometry(value); return;
+            finishGeometry(value);savePlacement(); return;
         }
         // Reverse from the currently drawn rectangle, not the OS envelope or
         // the previous target. Cancelled completions cannot win a later morph.
@@ -870,7 +903,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         Rect target=new Rect(x,y,x+width,y+height);
         if (initial.equals(target)) {
             visualBounds=target;commitVisualWindow();
-            finishGeometry(value); return;
+            finishGeometry(value);savePlacement(); return;
         }
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
             Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
@@ -902,7 +935,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         moving.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
                 if (root != owner || geometry != moving) return;
-                geometry = null; visualBounds=target;commitVisualWindow();finishGeometry(value);
+                geometry = null; visualBounds=target;commitVisualWindow();finishGeometry(value);savePlacement();
             }
         });
         windows.updateViewLayout(root,layout);
@@ -973,6 +1006,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             context.unregisterComponentCallbacks(configurationChanges);
             if (appearanceChanges != null) { appearanceChanges.stopWatching(); appearanceChanges = null; }
             stopGeometry();
+            savePlacement();
             cancelPendingOpen();
             main.removeCallbacks(countdown);
             if (dragExpand != null) main.removeCallbacks(dragExpand);
