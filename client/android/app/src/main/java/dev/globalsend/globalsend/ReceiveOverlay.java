@@ -54,7 +54,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private ReceiveAppearance appearance;
     private final TemporaryShelf shelf;
     private LinearLayout header;
-    private TextView shelfTab, handle, resize;
+    private TextView shelfTab, handle;
     private LinearLayout countGroup, shelfGroup;
     private ImageView countIcon, shelfIcon;
     private android.view.GestureDetector contentGestures;
@@ -254,12 +254,16 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         root = new FrameLayout(context) {
             private boolean cancelTap;
             private boolean backgroundMove, backgroundMoved;
+            private int sizingEdges;
             @Override public boolean dispatchTouchEvent(MotionEvent event) {
                 if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
                     doubleTapGesture=false;
-                    backgroundMove=!collapsed && geometry==null && !hitsInteraction(surface,event);
+                    sizingEdges=collapsed || geometry!=null?0:
+                        (event.getX()<dp(4)?1:0)|(event.getX()>getWidth()-dp(4)?2:0)|
+                        (event.getY()<dp(4)?4:0)|(event.getY()>getHeight()-dp(4)?8:0);
+                    backgroundMove=sizingEdges==0 && !collapsed && geometry==null && !hitsInteraction(surface,event);
                     backgroundMoved=false;
-                    if(backgroundMove) {downX=event.getRawX();downY=event.getRawY();startX=layout.x;startY=layout.y;}
+                    if(backgroundMove || sizingEdges!=0) {downX=event.getRawX();downY=event.getRawY();startX=layout.x;startY=layout.y;startWidth=layout.width;startHeight=layout.height;}
                 }
                 if(contentGestures!=null) {
                     if(isContentArea(event))contentGestures.onTouchEvent(event);
@@ -272,7 +276,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL)doubleTapGesture=false;
                     return true;
                 }
-                if (cancelTap && !backgroundMove && event.getActionMasked() == MotionEvent.ACTION_UP) {
+                if (cancelTap && !backgroundMove && sizingEdges==0 && event.getActionMasked() == MotionEvent.ACTION_UP) {
                     MotionEvent cancel = MotionEvent.obtain(event);
                     cancel.setAction(MotionEvent.ACTION_CANCEL);
                     super.dispatchTouchEvent(cancel); cancel.recycle();
@@ -285,6 +289,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     cancelTap = true;
                     // Deliver DOWN/MOVE so a long press can still start a system
                     // drag. Only suppress the short tap's UP/click.
+                }
+                if(sizingEdges!=0) {
+                    if(event.getActionMasked()==MotionEvent.ACTION_MOVE)resizeFromEdges(sizingEdges,Math.round(event.getRawX()-downX),Math.round(event.getRawY()-downY));
+                    if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL){sizingEdges=0;cancelTap=false;}
+                    return true;
                 }
                 if(backgroundMove) {
                     if(event.getActionMasked()==MotionEvent.ACTION_MOVE &&
@@ -325,7 +334,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         root.setScaleX(.96f); root.setScaleY(.96f);
         expanded = new LinearLayout(context);
         expanded.setOrientation(LinearLayout.HORIZONTAL);
-        expanded.setPadding(dp(4), dp(4), dp(4), dp(4));
+        expanded.setPadding(dp(4), dp(4), dp(1), dp(4));
         surface.addView(expanded);
         header = new MoveHeader(context);
         header.setOrientation(LinearLayout.VERTICAL);
@@ -349,14 +358,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         scroll.addView(row, new HorizontalScrollView.LayoutParams(-2, -1));
         expanded.addView(scroll, new LinearLayout.LayoutParams(0, -1, 1));
         LinearLayout rail=new LinearLayout(context);rail.setOrientation(LinearLayout.VERTICAL);
-        rail.addView(header,new LinearLayout.LayoutParams(-1,0,1));
-        expanded.addView(rail,new LinearLayout.LayoutParams(dp(44),-1));
-        // A small bottom grip changes the actual OS window, not a full-screen wrapper.
-        resize = label("⌟", 12, appearance.muted);
-        resize.setGravity(Gravity.RIGHT);
-        resize.setContentDescription("拖动调整大小");
-        installMove(resize, true);
-        rail.addView(resize, new LinearLayout.LayoutParams(-1, dp(12)));
+        rail.addView(header,new LinearLayout.LayoutParams(-1,-1));
+        expanded.addView(rail,new LinearLayout.LayoutParams(dp(38),-1));
         handle = label("", 10, appearance.accent);
         handle.setGravity(Gravity.CENTER); handle.setContentDescription("展开文件暂存坞");
         handle.setOnClickListener(view -> setCollapsed(false));
@@ -364,7 +367,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         handle.setVisibility(View.GONE);
         surface.addView(handle, new FrameLayout.LayoutParams(dp(18), dp(72), Gravity.CENTER_VERTICAL | Gravity.RIGHT));
         root.setOnDragListener((view, event) -> receiveDrop(event));
-        layout = new WindowManager.LayoutParams(dp(244), dp(124),
+        layout = new WindowManager.LayoutParams(dp(232), dp(116),
             Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -413,7 +416,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         appearanceChanges.startWatching();
     }
 
-    private void render() {
+    private void render() {render(true);}
+    private void render(boolean animateChanges) {
         appearance = ReceiveAppearance.load(context);
         if(geometry==null) {
             visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
@@ -425,14 +429,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             if (child instanceof TextView) ((TextView)child).setTextColor(appearance.accent);
             if (child instanceof ImageView) ((ImageView)child).setColorFilter(appearance.accent);
         }
-        resize.setTextColor(appearance.muted);
         styleHandle();
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
             Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
         handle.setLayoutParams(new FrameLayout.LayoutParams(dp(18), dp(72),
             Gravity.CENTER_VERTICAL | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
         Map<String,Integer> oldPositions=new LinkedHashMap<>();
-        boolean animateCards=root.isLaidOut() && root.getAlpha()>.9f;
+        boolean animateCards=animateChanges && root.isLaidOut() && root.getAlpha()>.9f;
         for(int i=row.getChildCount()-1;i>=0;i--) {
             View previous=row.getChildAt(i);
             if(!(previous.getTag() instanceof ReceiveNotifications.Receipt))continue;
@@ -450,7 +453,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (displayed().isEmpty()) {
             TextView empty = label(shelfVisible ? "拖入文件、图片或文字" : "暂无接收内容", 13, appearance.muted);
             empty.setGravity(Gravity.CENTER);
-            row.addView(empty, new LinearLayout.LayoutParams(expandedWidth - dp(52), side));
+            row.addView(empty, new LinearLayout.LayoutParams(expandedWidth - dp(43), side));
         }
         for (ReceiveNotifications.Receipt receipt : displayed().values()) {
             FrameLayout card = new FrameLayout(context);
@@ -580,7 +583,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private boolean hitsInteraction(View view,MotionEvent event) {
         if(view.getVisibility()!=View.VISIBLE || !hits(view,event))return false;
-        if(view==scroll || view==resize || view.isClickable() || view.isLongClickable())return true;
+        if(view==scroll && !displayed().isEmpty() || view.isClickable() || view.isLongClickable())return true;
         if(view instanceof android.view.ViewGroup) {
             android.view.ViewGroup group=(android.view.ViewGroup)view;
             for(int i=0;i<group.getChildCount();i++)if(hitsInteraction(group.getChildAt(i),event))return true;
@@ -797,44 +800,18 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
     }
 
-    private void installMove(View handle, boolean resize) {
-        handle.setOnTouchListener((view, event) -> {
-            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                downX = event.getRawX(); downY = event.getRawY();
-                startX = layout.x; startY = layout.y;
-                startWidth = layout.width; startHeight = layout.height;
-                stopGeometry();
-                return true;
-            }
-            if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                int dx = Math.round(event.getRawX() - downX), dy = Math.round(event.getRawY() - downY);
-                Rect bounds = availableBounds();
-                if (resize) {
-                    layout.width = clamp(startWidth + dx, dp(160), Math.min(dp(400), bounds.width() - dp(16)));
-                    layout.height = clamp(startHeight + dy, dp(104), Math.min(dp(260), bounds.height() - dp(16)));
-                } else { layout.x = startX + dx; layout.y = startY + dy; }
-                layout.x = clamp(layout.x, bounds.left, bounds.right - layout.width);
-                layout.y = clamp(layout.y, bounds.top, bounds.bottom - layout.height);
-                visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
-                windows.updateViewLayout(root, layout);
-                if (resize) {
-                    preferredWidth=expandedWidth=layout.width; preferredHeight=expandedHeight=layout.height;
-                    render();
-                }
-                return true;
-            }
-            if (!resize && event.getActionMasked() == MotionEvent.ACTION_UP) {
-                if (Math.abs(event.getRawX() - downX) < dp(6) && Math.abs(event.getRawY() - downY) < dp(6)) {
-                    view.performClick(); return true;
-                }
-                Rect bounds = availableBounds();
-                if (layout.x <= bounds.left + dp(16) || layout.x + layout.width >= bounds.right - dp(16)) setCollapsed(true);
-            }
-            if (resize && event.getActionMasked() == MotionEvent.ACTION_UP) setCollapsed(false);
-            return true;
-        });
+    private void resizeFromEdges(int edges,int dx,int dy) {
+        Rect bounds=availableBounds();int left=startX,right=startX+startWidth,top=startY,bottom=startY+startHeight;
+        int minW=dp(152),maxW=Math.min(dp(400),bounds.width()-dp(16));
+        int minH=dp(92),maxH=Math.min(dp(260),bounds.height()-dp(16));
+        if((edges&1)!=0)left=clamp(startX+dx,Math.max(bounds.left,right-maxW),right-minW);
+        if((edges&2)!=0)right=clamp(startX+startWidth+dx,left+minW,Math.min(bounds.right,left+maxW));
+        if((edges&4)!=0)top=clamp(startY+dy,Math.max(bounds.top,bottom-maxH),bottom-minH);
+        if((edges&8)!=0)bottom=clamp(startY+startHeight+dy,top+minH,Math.min(bounds.bottom,top+maxH));
+        layout.x=left;layout.y=top;layout.width=right-left;layout.height=bottom-top;
+        preferredWidth=expandedWidth=layout.width;preferredHeight=expandedHeight=layout.height;
+        visualBounds=new Rect(left,top,right,bottom);windows.updateViewLayout(root,layout);render(false);
     }
-
     private void installEdgeMove(View view) {
         final boolean[] pulledOpen={false};
         view.setOnTouchListener((handle, event) -> {
@@ -998,7 +975,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             final WindowManager.LayoutParams leavingLayout = layout;
             final boolean registered = rootAdded;
             root = null; surface=null; expanded = null; row = null; scroll = null; count = null; layout = null;
-            header = null; handle = null; resize = null; shelfTab = null; contentGestures=null;
+            header = null; handle = null; shelfTab = null; contentGestures=null;
             countGroup=null;shelfGroup=null;countIcon=null;shelfIcon=null;
             rootAdded = false;
             leaving.animate().cancel();

@@ -16,6 +16,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Read-only, unguessable, short-lived capabilities for explicit cross-app drag gestures. */
 public final class DockShareProvider extends ContentProvider {
+    private static void trace(String event) {
+        if(android.util.Log.isLoggable("GlobalSendDrag",android.util.Log.DEBUG))
+            android.util.Log.d("GlobalSendDrag",event+" caller="+android.os.Binder.getCallingUid());
+    }
     private static final class Entry {
         final File file; final String name; final String mimeType; final long expires = System.currentTimeMillis() + 600000;
         Entry(File file, String name) { this.file = file; this.name = name; this.mimeType = mimeType(file.getName()); }
@@ -47,14 +51,16 @@ public final class DockShareProvider extends ContentProvider {
         return type == null ? "application/octet-stream" : type;
     }
     @Override public String getType(Uri uri) {
-        try { return lookup(uri).mimeType; }
+        try { String type=lookup(uri).mimeType;trace("type="+type);return type; }
         catch (FileNotFoundException error) { return null; }
     }
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         if (!mode.equals("r")) throw new FileNotFoundException("Read-only drag capability");
-        return ParcelFileDescriptor.open(lookup(uri).file, ParcelFileDescriptor.MODE_READ_ONLY);
+        ParcelFileDescriptor descriptor=ParcelFileDescriptor.open(lookup(uri).file, ParcelFileDescriptor.MODE_READ_ONLY);
+        trace("open-readable");return descriptor;
     }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] arguments, String order) {
+        trace("query data="+(projection!=null && java.util.Arrays.asList(projection).contains("_data")));
         try {
             Entry e = lookup(uri); String[] columns = projection == null ? new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE} : projection;
             MatrixCursor cursor = new MatrixCursor(columns); Object[] values = new Object[columns.length];

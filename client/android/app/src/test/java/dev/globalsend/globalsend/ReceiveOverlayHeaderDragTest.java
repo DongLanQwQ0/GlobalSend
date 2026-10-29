@@ -276,9 +276,11 @@ public class ReceiveOverlayHeaderDragTest {
     }
     @Test public void backgroundFollowsPressedOffsetButControlsAndFileDragKeepTheirGestures() throws Exception {
         int[] actions=new int[3];ReceiveOverlay overlay=create(actions);View root=(View)field(overlay,"root");
+        ((View)field(overlay,"shelfTab")).performClick();draw(root);
         WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();int x=window.x,y=window.y;
-        touch(root,0,MotionEvent.ACTION_DOWN,1,50);touch(root,30,MotionEvent.ACTION_MOVE,-29,30);touch(root,60,MotionEvent.ACTION_UP,-29,30);
+        touch(root,0,MotionEvent.ACTION_DOWN,20,50);touch(root,30,MotionEvent.ACTION_MOVE,-10,30);touch(root,60,MotionEvent.ACTION_UP,-10,30);
         assertEquals(x-30,window.x);assertEquals(y-20,window.y);assertArrayEquals(new int[3],actions);
+        ((View)field(overlay,"count")).performClick();
         draw(root);View card=((LinearLayout)field(overlay,"row")).getChildAt(0);int[] dragged={0};
         card.setOnLongClickListener(view -> {dragged[0]++;return true;});
         touch(root,0,MotionEvent.ACTION_DOWN,20,40);
@@ -286,6 +288,18 @@ public class ReceiveOverlayHeaderDragTest {
         touch(root,800,MotionEvent.ACTION_UP,20,40);
         assertEquals(1,dragged[0]);assertEquals(x-30,window.x);assertEquals(y-20,window.y);
         overlay.hide();
+    }
+    @Test public void edgeResizeKeepsOppositeEdgeAndNoExtraResizeControl() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        int x=window.x,width=window.width;
+        touch(root,0,MotionEvent.ACTION_DOWN,1,50);touch(root,30,MotionEvent.ACTION_MOVE,-19,50);touch(root,60,MotionEvent.ACTION_UP,-19,50);
+        assertEquals(x-20,window.x);assertEquals(width+20,window.width);assertEquals(x+width,window.x+window.width);
+        draw(root);int height=window.height;
+        touch(root,0,MotionEvent.ACTION_DOWN,50,height-1);touch(root,30,MotionEvent.ACTION_MOVE,50,height-101);touch(root,60,MotionEvent.ACTION_UP,50,height-101);
+        assertEquals(92,window.height);
+        LinearLayout header=(LinearLayout)field(overlay,"header");assertEquals(3,header.getChildCount());
+        assertEquals(1,((View)field(overlay,"expanded")).getPaddingRight());overlay.hide();
     }
     @Test public void receiptOpensCollapsedShelfAndCardsEnterAndExitIndependently() throws Exception {
         ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
