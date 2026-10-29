@@ -9,7 +9,7 @@
 
 ## iPad 手动签名
 
-这个实现不要求购买 Apple Developer 会员。免费 Apple ID 的手动签名仍要正确处理主应用、扩展和 App Group；开发者模式不能替代签名权限配置。参见 Apple 的[能力支持表](https://developer.apple.com/help/account/reference/supported-capabilities-ios/)。
+Apple 的[能力支持表](https://developer.apple.com/help/account/reference/supported-capabilities-ios/)目前在免费的 Apple Developer 列中也列明支持 App groups（2026-10-29 核对了原表图标）。所以不以购买会员作为前提；免费 Apple ID 的手动签名仍需为主应用、扩展签入匹配的 App Group，开发者模式不能替代该配置。
 
 构建产物包含：
 

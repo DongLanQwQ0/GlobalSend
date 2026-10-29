@@ -6,13 +6,15 @@
 
 网页版：[GlobalSend](https://123.207.180.163/globalsend/app/)。Windows/Android 的中心地址为 `https://123.207.180.163/globalsend`。
 
-新版入组只需同一中心和**至少 10 位的相同组密码**，设备名称自动获取，也可修改。不需要邀请码、互相配对或首次建组确认。发现只通过中心完成；仅在线组员互换 IPv4/IPv6 地址，地址上传后 30 分钟到期，最后一个连接断开立即撤下。文件仍按局域网 → 公网 → 中继传输，保留手动选择。
+新版入组只需同一中心和**至少 10 位的相同组密码**，设备名称自动获取，也可修改。不需要邀请码、互相配对或首次建组确认。发现只通过中心完成；仅在线组员互换 IPv4/IPv6 地址，地址上传后 30 分钟到期，最后一个连接断开立即撤下。文件仍按局域网 → 公网 → 中继传输，复用已测通路径并保留手动选择；最后使用的中继已支持边上传边接收，不再等待整份上传。
 
-Windows 最新本地版为 **1.0.35+44**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。Android 暂存坞改为半透明窗格、数量图标、设置开关；内容区双击打开主应用，贴边收起，细把手的透明触控区扩大到1.5倍。
+同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.35-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows 最新本地版为 **1.0.47+56**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。Android 暂存坞改为半透明窗格、数量图标、设置开关；内容区双击打开主应用，贴边收起，细把手的透明触控区扩大到1.5倍。
 
-Android [1.0.35+44 arm64 APK，约15.51 MiB](artifacts/releases/GlobalSend-1.0.35-android-arm64-v8a.apk)已构建并验签。**手机仍为已确认的1.0.32+41**：USB已断开，提供的无线地址超时，新包尚未推送；保留原组和数据。微信图片/文件拖入问题仍待恢复同台手机连接后实测定位。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.47-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+
+Android [1.0.47+56 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.47-android-arm64-v8a.apk)已构建、验签且不打包字体。**手机最后确认1.0.43+52**：当前没有可用 ADB 连接，新包尚未推送。47补齐公共文件/媒体原件的路径读取授权；微信真实聊天插入仍待同台手机验收，见 [兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
 
 iPad / iPhone 最后交付的未签名 IPA 为 **1.0.24 (33)**，需要自行签名安装，不含本轮主题功能。构建入口仍仅支持手动触发，见 [iPad 构建说明](docs/IPAD.md)。**中心服务器不托管安装包；当前已公开的 [GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.35-build44) 为1.0.35，包含Windows、Android及平台更新清单。**
 

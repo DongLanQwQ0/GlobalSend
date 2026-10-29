@@ -201,6 +201,7 @@ export interface EnrollmentResponse {
   device: Device;
   groupId: string;
   createdGroup: boolean;
+  groups?: GroupMembership[];
 }
 export interface GroupKeyRotation {
   groupId: string;
