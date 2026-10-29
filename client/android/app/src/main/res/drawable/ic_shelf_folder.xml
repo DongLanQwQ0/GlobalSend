@@ -1,0 +1,5 @@
+<!-- Google Material folder_outlined, same path as app_icon_paths.dart; CC BY 4.0.
+     Attribution: client/assets/licenses/material-icons.txt. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="18dp" android:height="18dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF000000" android:pathData="M9.1875,6 L11.1562,8.0156 L20.0156,8.0156 L20.0156,18 L3.9844,18 L3.9844,6 L9.1875,6 Z M9.9844,3.9844 L3.9844,3.9844 C2.9062,3.9844,2.0156,4.9219,2.0156,6 L2.0156,18 C2.0156,19.0781,2.9062,20.0156,3.9844,20.0156 L20.0156,20.0156 C21.0938,20.0156,21.9844,19.0781,21.9844,18 L21.9844,8.0156 C21.9844,6.8906,21.0938,6,20.0156,6 L12,6 L9.9844,3.9844 Z" />
+</vector>

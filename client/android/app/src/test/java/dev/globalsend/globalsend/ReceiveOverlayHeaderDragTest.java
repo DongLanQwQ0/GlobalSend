@@ -77,6 +77,11 @@ public class ReceiveOverlayHeaderDragTest {
         ReceiveOverlay overlay = create(new int[3]);
         LinearLayout header = (LinearLayout)field(overlay, "header");
         View shelf = header.getChildAt(1), bulk = header.getChildAt(2);
+        android.widget.TextView received=(android.widget.TextView)header.getChildAt(0);
+        assertEquals("1",received.getText().toString());
+        assertEquals("0",((android.widget.TextView)shelf).getText().toString());
+        assertNotNull(received.getCompoundDrawablesRelative()[2]);
+        assertNotNull(((android.widget.TextView)shelf).getCompoundDrawablesRelative()[2]);
         float x = (shelf.getLeft()+shelf.getRight())/2f, y=header.getHeight()/2f;
         touch(header, 0, MotionEvent.ACTION_DOWN, x, y);
         touch(header, 10, MotionEvent.ACTION_UP, x, y);
@@ -183,7 +188,7 @@ public class ReceiveOverlayHeaderDragTest {
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1));
         assertTrue(shelf.items.isEmpty());
     }
-    @Test
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
     public void pendingCardsAreRedAndTouchCanContinueIntoLongPressWhileCancelingWholeBatch() throws Exception {
         ReceiveOverlay overlay=create(new int[3]);
         TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
@@ -196,10 +201,12 @@ public class ReceiveOverlayHeaderDragTest {
         card.setOnLongClickListener(view -> { held[0]++; return true; });
         assertEquals(View.VISIBLE,card.findViewWithTag("pending-removal").getVisibility());
         assertEquals(0xffffe4e6,((android.graphics.drawable.GradientDrawable)card.getBackground()).getColor().getDefaultColor());
+        capture(overlay,"pending-red");
         touch(root,0,MotionEvent.ACTION_DOWN,25,60);
         assertEquals(0,shelf.removalSeconds());
         assertSame("cancel must not rebuild away the touched drag source",card,((LinearLayout)field(overlay,"row")).getChildAt(0));
         assertEquals(View.GONE,card.findViewWithTag("pending-removal").getVisibility());
+        capture(overlay,"pending-canceled");
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout()+100));
         assertEquals("long press still reaches the card's drag handler",1,held[0]);
         touch(root,1000,MotionEvent.ACTION_CANCEL,25,60);

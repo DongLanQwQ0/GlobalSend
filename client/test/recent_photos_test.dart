@@ -1,7 +1,7 @@
 import 'system_font_fixture.dart';
+
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -76,8 +76,9 @@ void main() {
     final root = Directory('${Directory.current.path}/../artifacts/tmp')
         .absolute
         .path;
-    if (!folder.absolute.path.startsWith(root))
+    if (!folder.absolute.path.startsWith(root)) {
       throw StateError('Unexpected fixture path');
+    }
     await folder.delete(recursive: true);
   });
 
@@ -131,9 +132,46 @@ void main() {
       );
       photos.setVisible(true);
       await photos.setEnabled(true);
-      await until(() => photos.items.isNotEmpty);
-      expect(photos.items.map((item) => item.id), ['two']);
+      expect(
+        photos.items,
+        isEmpty,
+      ); // Already suggested, even without manual dismissal.
+      gallery.photos.add(SuggestedPhoto('three', Uint8List(0)));
+      await photos.refresh();
+      expect(photos.items.map((item) => item.id), ['three']);
       expect(gallery.requests.where((request) => request), hasLength(1));
+    },
+  );
+
+  test(
+    'suggests once per opening and clears itself without manual dismissal',
+    () async {
+      photos.dispose();
+      photos = RecentPhotos(
+        library: gallery,
+        directory: () async => folder,
+        supported: true,
+        suggestionDuration: const Duration(milliseconds: 40),
+      );
+      photos.setVisible(true);
+      await until(() => photos.items.isNotEmpty);
+      await until(() => photos.items.isEmpty);
+      gallery.photos.add(SuggestedPhoto('later', Uint8List(0)));
+      await photos.refresh();
+      photos.setVisible(false);
+      photos.setVisible(true);
+      await photos.refresh();
+      expect(photos.items, isEmpty);
+      expect(gallery.reads, 1);
+      photos.dispose();
+      photos = RecentPhotos(
+        library: gallery,
+        directory: () async => folder,
+        supported: true,
+      );
+      photos.setVisible(true);
+      await until(() => photos.items.isNotEmpty);
+      expect(photos.items.map((item) => item.id), ['later']);
     },
   );
 

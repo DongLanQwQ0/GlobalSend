@@ -86,6 +86,7 @@ class RecentPhotos extends ChangeNotifier {
     Future<Directory> Function()? directory,
     bool? supported,
     DateTime Function()? now,
+    this.suggestionDuration = const Duration(seconds: 8),
   }) : library = library ?? DevicePhotoLibrary(),
        directory = directory ?? appDataDirectory,
        supported = supported ?? (Platform.isAndroid || Platform.isIOS),
@@ -95,6 +96,7 @@ class RecentPhotos extends ChangeNotifier {
   final Future<Directory> Function() directory;
   final bool supported;
   final DateTime Function() now;
+  final Duration suggestionDuration;
   bool enabled = true, permissionGranted = false;
   String? problem;
   List<SuggestedPhoto> items = [];
@@ -104,6 +106,8 @@ class RecentPhotos extends ChangeNotifier {
   DateTime? _since;
   Future<void>? _loaded;
   Timer? _timer;
+  Timer? _suggestionTimer;
+  bool _suggestedThisRun = false;
   Future<void> _writes = Future.value();
 
   Future<void> openSettings() => PhotoManager.openSetting();
@@ -163,7 +167,7 @@ class RecentPhotos extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
-    if (!supported || !_visible || _disposed) return;
+    if (!supported || !_visible || _disposed || _suggestedThisRun) return;
     if (_busy) {
       _again = true;
       return;
@@ -171,7 +175,7 @@ class RecentPhotos extends ChangeNotifier {
     _busy = true;
     try {
       await (_loaded ??= _load());
-      if (!enabled || !_visible || _disposed) return;
+      if (!enabled || !_visible || _disposed || _suggestedThisRun) return;
       final request = !_asked;
       if (request) {
         await _save();
@@ -192,6 +196,19 @@ class RecentPhotos extends ChangeNotifier {
       if (_visible && enabled && !_disposed) {
         items = found.where((item) => !_handled.contains(item.id)).toList();
         problem = null;
+        if (items.isNotEmpty) {
+          _suggestedThisRun = true;
+          _handled.addAll(items.map((item) => item.id));
+          while (_handled.length > 256) {
+            _handled.remove(_handled.first);
+          }
+          _since = now();
+          _suggestionTimer = Timer(suggestionDuration, () {
+            items = [];
+            _changed();
+          });
+          await _save();
+        }
       }
     } catch (_) {
       problem = '暂时无法检查新图片';
@@ -206,11 +223,12 @@ class RecentPhotos extends ChangeNotifier {
   }
 
   Future<void> dismiss(Iterable<String> ids) async {
-    _handled.addAll(ids);
+    final dismissed = ids.toSet();
+    _handled.addAll(dismissed);
     while (_handled.length > 256) {
       _handled.remove(_handled.first);
     }
-    items.removeWhere((item) => _handled.contains(item.id));
+    items.removeWhere((item) => dismissed.contains(item.id));
     _changed();
     await _save();
   }
@@ -235,6 +253,7 @@ class RecentPhotos extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _suggestionTimer?.cancel();
     super.dispose();
   }
 }

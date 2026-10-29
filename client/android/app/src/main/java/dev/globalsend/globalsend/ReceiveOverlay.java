@@ -209,9 +209,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         header = new MoveHeader(context);
         header.setGravity(Gravity.CENTER_VERTICAL);
         count = control("", "接收", () -> { shelfVisible = false; render(); });
+        count.setCompoundDrawablesRelativeWithIntrinsicBounds(0,0,R.drawable.ic_shelf_inbox,0);
+        count.setCompoundDrawablePadding(dp(4));
         count.setSingleLine(true);
         header.addView(count, new LinearLayout.LayoutParams(0, dp(30), 1));
         shelfTab = control("", "暂存", () -> { shelfVisible = true; render(); });
+        shelfTab.setCompoundDrawablesRelativeWithIntrinsicBounds(0,0,R.drawable.ic_shelf_folder,0);
+        shelfTab.setCompoundDrawablePadding(dp(4));
         header.addView(shelfTab, new LinearLayout.LayoutParams(0, dp(30), 1));
         View all = icon(R.drawable.ic_drag_all, "全部拖出");
         all.setOnLongClickListener(view -> export(view, new ArrayList<>(displayed().values())));
@@ -395,15 +399,19 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void updateLabels() {
         if (root == null) return;
         int remaining = shelf.removalSeconds();
-        count.setText("接收 " + items.size()); shelfTab.setText("暂存 " + shelf.items.size());
+        count.setText(String.valueOf(items.size())); shelfTab.setText(String.valueOf(shelf.items.size()));
+        count.setContentDescription("接收 " + items.size() + " 项");
+        shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项");
         count.setTextColor(shelfVisible ? appearance.muted : appearance.accent);
         shelfTab.setTextColor(shelfVisible ? appearance.accent : appearance.muted);
+        count.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(count.getCurrentTextColor()));
+        shelfTab.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(shelfTab.getCurrentTextColor()));
         count.setTypeface(null, shelfVisible ? 0 : 1); shelfTab.setTypeface(null, shelfVisible ? 1 : 0);
         handle.setText("");
         handle.setContentDescription("展开文件暂存坞，接收 " + items.size() + " 项，暂存 " + shelf.items.size() + " 项");
         collapseButton.setText(edgeRight ? "›" : "‹");
-        if (remaining > 0) shelfTab.setText("暂存 · " + remaining + "s");
-        else if (importing > 0) shelfTab.setText("暂存 · …");
+        if (remaining > 0) shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项，" + remaining + " 秒后移除，轻点取消");
+        else if (importing > 0) shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项，正在导入");
     }
 
     private boolean export(View source, List<ReceiveNotifications.Receipt> selection) {

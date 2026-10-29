@@ -48,7 +48,7 @@ public final class ShelfAcceptanceActivity extends Activity {
         next.setText("下一条测试文本");
         next.setOnClickListener(view -> { sequence++; source.setText(marker()); });
         page.addView(next, new LinearLayout.LayoutParams(-1, dp(56)));
-        destination = label("将暂存项拖到这里\n只接受 GS-shelf-physical 测试文本", 18);
+        destination = label("将暂存项拖到这里\n接受测试文本或 GlobalSend 文件，仅检查读取授权", 18);
         destination.setContentDescription("fixture-target");
         destination.setGravity(Gravity.CENTER);
         destination.setBackgroundColor(0xffe6e8ec);
@@ -57,10 +57,34 @@ public final class ShelfAcceptanceActivity extends Activity {
             if (event.getAction() != DragEvent.ACTION_DROP) return true;
             ClipData clip = event.getClipData();
             if (clip == null || clip.getItemCount() == 0) return false;
-            for (int i = 0; i < clip.getItemCount(); i++) {
-                CharSequence text = clip.getItemAt(i).getText();
-                if (text == null || !text.toString().startsWith("GS-shelf-physical:")) return false;
-            }
+            android.view.DragAndDropPermissions permission=requestDragAndDropPermissions(event);
+            int fileItems=0;
+            try {
+                for (int i = 0; i < clip.getItemCount(); i++) {
+                    android.net.Uri uri=clip.getItemAt(i).getUri();
+                    if(uri!=null) {
+                        if(!"dev.globalsend.globalsend.dock-files".equals(uri.getAuthority()))return false;
+                        // Exercise the target-side grant and actual provider FD,
+                        // without saving the URI, filename, or user file content.
+                        try(java.io.InputStream input=getContentResolver().openInputStream(uri)) {
+                            if(input==null)throw new java.io.IOException("No stream");
+                            input.read(); fileItems++;
+                        }
+                    } else {
+                        CharSequence text = clip.getItemAt(i).getText();
+                        if (text == null || !text.toString().startsWith("GS-shelf-physical:")) return false;
+                    }
+                }
+            } catch(Exception failure) {
+                destination.setText("文件读取失败："+failure.getClass().getSimpleName());
+                try {
+                    JSONObject result=new JSONObject();
+                    result.put("fileGrantObtained",permission!=null);result.put("readable",false);
+                    result.put("errorType",failure.getClass().getSimpleName());
+                    Files.write(new File(getFilesDir(),"uri-outcome.json").toPath(),result.toString().getBytes(StandardCharsets.UTF_8));
+                } catch(Exception writeFailed) { throw new IllegalStateException(writeFailed); }
+                return false;
+            } finally { if(permission!=null)permission.release(); }
             accepted++;
             destination.setText("系统已接收 " + accepted + " 次测试投放");
             try {
@@ -68,7 +92,10 @@ public final class ShelfAcceptanceActivity extends Activity {
                 result.put("acceptedDrops", accepted);
                 result.put("items", clip.getItemCount());
                 result.put("receivedAtMillis", System.currentTimeMillis());
-                result.put("syntheticOnly", true);
+                result.put("fileItems",fileItems);
+                result.put("fileGrantObtained",permission!=null);
+                result.put("readable",true);
+                result.put("syntheticOnly",fileItems==0);
                 Files.write(new File(getFilesDir(), "outcome.json").toPath(), result.toString().getBytes(StandardCharsets.UTF_8));
             } catch (Exception failed) { throw new IllegalStateException(failed); }
             return true;
