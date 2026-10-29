@@ -25,7 +25,7 @@ public class ReceiveOverlayTest {
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(280));
         WindowManager.LayoutParams size = (WindowManager.LayoutParams)root.getLayoutParams();
         float dp = root.getResources().getDisplayMetrics().density;
-        assertEquals(Math.round(12*dp), size.width); assertEquals(Math.round(48*dp), size.height);
+        assertEquals(Math.round(18*dp), size.width); assertEquals(Math.round(72*dp), size.height);
         assertEquals(0, root.getPaddingLeft()); assertEquals(0, root.getPaddingRight());
         assertTrue(root.isAttachedToWindow()); assertEquals(1,shelf.items.size());
         assertEquals(View.GONE,((View)field(overlay,"expanded")).getVisibility());

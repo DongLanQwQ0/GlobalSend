@@ -63,6 +63,16 @@ public class ReceiveNotificationsTest {
     private void deadline() {
         Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1));
     }
+    @Test @Config(sdk=34) public void turningDockOffHidesCurrentWindowAndUsesNotificationForNextArrival() throws Exception {
+        Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS);
+        notices.setPopupEnabled(true);receive("first","1","one");
+        int before=presenter.hidden;
+        notices.setPopupEnabled(false);
+        assertEquals(before+1,presenter.hidden);
+        receive("second","1","two");
+        assertEquals(1,presenter.receipts.size());
+        assertFalse(Shadows.shadowOf(manager).getAllNotifications().isEmpty());
+    }
 
     @Test public void headsUpRequiresAnEnabledHighImportanceChannel() {
         assertTrue(notices.headsUpAllowed());

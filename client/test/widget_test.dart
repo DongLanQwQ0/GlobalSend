@@ -1,4 +1,5 @@
 import 'system_font_fixture.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -1519,11 +1520,82 @@ void main() {
   });
 
   testWidgets(
-    'background popup settings exposes permission and explicit toggle without a floating dock',
+    'receive and temporary dock use one switch with permission and native show hide actions',
     (tester) async {
+      final calls = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(DockPlatform.channel, (call) async {
+        calls.add(call.method);
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(DockPlatform.channel, null),
+      );
       final c = signedIn()
         ..popupSupported = true
         ..receiveNotificationsEnabled = true;
+      final key = GlobalKey();
+      await show(tester, c, key: key);
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pumpAndSettle();
+      final toggle = find.byKey(const ValueKey('receive-popup'));
+      await tester.scrollUntilVisible(
+        toggle,
+        150,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+      expect(find.text('接收与暂存坞'), findsOneWidget);
+      expect(find.text('后台弹出'), findsNothing);
+      expect(find.byKey(const ValueKey('temporary-shelf')), findsNothing);
+      expect(find.text('需要悬浮窗权限'), findsOneWidget);
+      await capture(tester, key, 'permission');
+      await tester.tap(find.byKey(const ValueKey('receive-popup-permission')));
+      await tester.pumpAndSettle();
+      expect(c.popupSettingsRequests, 1);
+      expect(c.popupChanges, isEmpty);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(c.popupChanges, [false]);
+      expect(calls, ['hideShelf']);
+      expect(
+        find.byKey(const ValueKey('receive-popup-permission')),
+        findsNothing,
+      );
+      expect(find.text('悬浮通知'), findsOneWidget);
+      expect(find.textContaining('悬浮窗'), findsNothing);
+      expect(tester.widget<SwitchListTile>(toggle).subtitle, isNull);
+      c.receivePopupAllowed = true;
+      c.changed();
+      await tester.pumpAndSettle();
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(c.popupChanges, [false, true]);
+      expect(calls, ['hideShelf', 'showShelf']);
+      expect(tester.widget<SwitchListTile>(toggle).subtitle, isNull);
+      await capture(tester, key, 'enabled');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'dock enable waits for overlay permission and opens once after permission is granted',
+    (tester) async {
+      final calls = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(DockPlatform.channel, (call) async {
+        calls.add(call.method);
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(DockPlatform.channel, null),
+      );
+      final c = signedIn()
+        ..popupSupported = true
+        ..receivePopupEnabled = false;
       await show(tester, c);
       await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
@@ -1533,21 +1605,23 @@ void main() {
         150,
         scrollable: find.byType(Scrollable).first,
       );
-      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
-      expect(find.text('需要授权'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('receive-popup-permission')));
       await tester.pumpAndSettle();
-      expect(c.popupSettingsRequests, 1);
-      expect(c.popupChanges, isEmpty);
       await tester.tap(toggle);
       await tester.pumpAndSettle();
-      expect(c.popupChanges, [false]);
-      expect(
-        find.byKey(const ValueKey('receive-popup-permission')),
-        findsNothing,
-      );
-      expect(find.text('悬浮通知'), findsOneWidget);
-      expect(find.textContaining('悬浮窗'), findsNothing);
+      expect(c.popupChanges, [true]);
+      expect(c.popupSettingsRequests, 1);
+      expect(calls, isEmpty);
+      expect(find.text('需要悬浮窗权限'), findsOneWidget);
+      final dynamic state = tester.state(find.byType(SendScreen));
+      await state.resumeShelfAfterPermission();
+      expect(calls, isEmpty);
+      c.receivePopupAllowed = true;
+      c.changed();
+      await state.resumeShelfAfterPermission();
+      await state.resumeShelfAfterPermission();
+      await tester.pumpAndSettle();
+      expect(calls, ['showShelf']);
+      expect(tester.widget<SwitchListTile>(toggle).subtitle, isNull);
       expect(tester.takeException(), isNull);
     },
   );

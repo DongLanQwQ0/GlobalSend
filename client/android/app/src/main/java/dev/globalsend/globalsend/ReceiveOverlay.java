@@ -54,7 +54,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private ReceiveAppearance appearance;
     private final TemporaryShelf shelf;
     private LinearLayout header;
-    private TextView shelfTab, collapseButton, handle, resize;
+    private TextView shelfTab, handle, resize;
+    private android.view.GestureDetector contentGestures;
+    private Runnable pendingOpen;
+    private boolean doubleTapGesture;
     private boolean collapsed, shelfVisible, edgeRight = true;
     private int expandedWidth, expandedHeight;
     private android.animation.ValueAnimator geometry;
@@ -95,6 +98,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     .setDuration(180).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
             });
         } else { overlay.setCollapsed(false); overlay.render(); }
+    }
+    static void closeShelf() {
+        ReceiveOverlay overlay=current.get();
+        if(overlay==null)return;
+        overlay.context.getSharedPreferences("received-popup-settings",Context.MODE_PRIVATE).edit().putBoolean("enabled",false).apply();
+        overlay.dismiss();
     }
 
     @Override public void foreground() {
@@ -180,6 +189,18 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         root = new FrameLayout(context) {
             private boolean cancelTap;
             @Override public boolean dispatchTouchEvent(MotionEvent event) {
+                if(event.getActionMasked()==MotionEvent.ACTION_DOWN)doubleTapGesture=false;
+                if(contentGestures!=null) {
+                    if(isContentArea(event))contentGestures.onTouchEvent(event);
+                    else if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
+                        MotionEvent cancel=MotionEvent.obtain(event);cancel.setAction(MotionEvent.ACTION_CANCEL);
+                        contentGestures.onTouchEvent(cancel);cancel.recycle();
+                    }
+                }
+                if(doubleTapGesture) {
+                    if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL)doubleTapGesture=false;
+                    return true;
+                }
                 if (cancelTap && event.getActionMasked() == MotionEvent.ACTION_UP) {
                     MotionEvent cancel = MotionEvent.obtain(event);
                     cancel.setAction(MotionEvent.ACTION_CANCEL);
@@ -197,7 +218,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 return super.dispatchTouchEvent(event);
             }
         };
-        root.setBackground(shape((appearance.surface & 0x00ffffff) | 0xf5000000, 18));
+        contentGestures=new android.view.GestureDetector(context,new android.view.GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent event) { return true; }
+            @Override public boolean onDoubleTap(MotionEvent event) {
+                doubleTapGesture=true; cancelPendingOpen();
+                android.content.Intent intent=context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+                if(intent!=null)context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+                return true;
+            }
+        });
+        contentGestures.setIsLongpressEnabled(false);
+        root.setBackground(shape(glass(appearance.surface,0x99), 18));
         root.setClipToOutline(true);
         root.setElevation(dp(8));
         root.setAlpha(0); root.setTranslationX(dp(20));
@@ -220,15 +251,6 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         View all = icon(R.drawable.ic_drag_all, "全部拖出");
         all.setOnLongClickListener(view -> export(view, new ArrayList<>(displayed().values())));
         header.addView(all, new LinearLayout.LayoutParams(dp(30), dp(30)));
-        collapseButton = control("›", "收起到屏幕边缘", () -> setCollapsed(true));
-        header.addView(collapseButton, new LinearLayout.LayoutParams(dp(26), dp(30)));
-        TextView open = control("↗", "打开 GlobalSend", () -> {
-            if (!items.isEmpty()) actions.open(items.keySet().iterator().next());
-            else context.startActivity(context.getPackageManager().getLaunchIntentForPackage(context.getPackageName()).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
-        });
-        TextView close = control("×", "关闭", this::dismiss);
-        header.addView(open, new LinearLayout.LayoutParams(dp(32), dp(30)));
-        header.addView(close, new LinearLayout.LayoutParams(dp(32), dp(30)));
         expanded.addView(header);
         scroll = new HorizontalScrollView(context);
         scroll.setHorizontalScrollBarEnabled(false);
@@ -247,7 +269,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         handle.setOnClickListener(view -> setCollapsed(false));
         installEdgeMove(handle);
         handle.setVisibility(View.GONE);
-        root.addView(handle, new FrameLayout.LayoutParams(dp(12), dp(48), Gravity.TOP | Gravity.RIGHT));
+        root.addView(handle, new FrameLayout.LayoutParams(dp(18), dp(72), Gravity.CENTER_VERTICAL | Gravity.RIGHT));
         root.setOnDragListener((view, event) -> receiveDrop(event));
         layout = new WindowManager.LayoutParams(dp(244), dp(156),
             Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
@@ -276,18 +298,18 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
 
     private void render() {
         appearance = ReceiveAppearance.load(context);
-        root.setBackground(shape((appearance.surface & 0x00ffffff) | 0xf5000000, 18));
+        root.setBackground(shape(collapsed ? 0 : glass(appearance.surface,0x99), 18));
         for (int i=0;i<header.getChildCount();i++) {
             View child = header.getChildAt(i);
             if (child instanceof TextView) ((TextView)child).setTextColor(appearance.accent);
             if (child instanceof ImageView) ((ImageView)child).setColorFilter(appearance.accent);
         }
         resize.setTextColor(appearance.muted);
-        handle.setBackground(new InsetDrawable(shape(appearance.accent, 2), dp(4), dp(12), dp(4), dp(12)));
+        styleHandle();
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
             Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
-        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(12), dp(48),
-            Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
+        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(18), dp(72),
+            Gravity.CENTER_VERTICAL | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
         row.removeAllViews();
         updateLabels();
         int side = Math.max(1, expandedHeight - dp(48));
@@ -301,7 +323,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             card.setOrientation(LinearLayout.VERTICAL);
             card.setTag(receipt);
             card.setPadding(dp(8), dp(6), dp(8), dp(4));
-            card.setBackground(shape(appearance.soft, 12));
+            card.setBackground(shape(glass(appearance.soft,0xb3), 12));
             boolean pending = shelfVisible && shelf.pendingRemoval(receipt.id);
             if (pending) card.setBackground(shape(pendingColor(), 12));
             View content;
@@ -325,7 +347,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             FrameLayout preview = new FrameLayout(context);
             preview.addView(content, new FrameLayout.LayoutParams(-1,-1));
             TextView remove = control("×", "移除", () -> remove(receipt));
-            remove.setBackground(shape(appearance.surface, 12));
+            remove.setBackground(shape(glass(appearance.surface,0xb3), 12));
             preview.addView(remove,new FrameLayout.LayoutParams(dp(28),dp(28),Gravity.TOP|Gravity.RIGHT));
             card.addView(preview, new LinearLayout.LayoutParams(-1, 0, 1));
             LinearLayout footer = new LinearLayout(context);
@@ -340,7 +362,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             if (receipt.text != null) footer.addView(control("复制", "复制", () -> copy(receipt)),
                 new LinearLayout.LayoutParams(dp(40), dp(24)));
             card.addView(footer);
-            card.setOnClickListener(view -> open(receipt));
+            card.setOnClickListener(view -> queueOpen(receipt));
             card.setOnLongClickListener(view -> {
                 return export(view, java.util.Collections.singletonList(receipt));
             });
@@ -351,11 +373,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (!displayed().isEmpty()) {
             LinearLayout clear = new LinearLayout(context);
             clear.setGravity(Gravity.CENTER); clear.setOrientation(LinearLayout.VERTICAL);
-            clear.setBackground(shape(appearance.soft,12)); clear.setContentDescription("清空当前列表");
+            clear.setBackground(shape(glass(appearance.soft,0xb3),12)); clear.setContentDescription("清空当前列表");
             TextView clearIcon=label("×",30,appearance.accent);
             clearIcon.setGravity(Gravity.CENTER);
             clear.addView(clearIcon,new LinearLayout.LayoutParams(dp(40),dp(40)));
-            clear.addView(label("清空",12,appearance.muted));
+            TextView clearLabel=label("清空",12,appearance.muted);clearLabel.setGravity(Gravity.CENTER);
+            clear.addView(clearLabel);
             clear.setOnClickListener(view -> clearDisplayed());
             row.addView(clear,new LinearLayout.LayoutParams(side,side));
         }
@@ -365,13 +388,48 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private int pendingColor() {
         return android.graphics.Color.luminance(appearance.surface) < .3f ? 0xff542b32 : 0xffffe4e6;
     }
+    private int glass(int color,int alpha) { return (color&0x00ffffff)|(alpha<<24); }
+    private void styleHandle() {
+        android.graphics.drawable.LayerDrawable layers=new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{
+            new InsetDrawable(shape(glass(appearance.surface,0x33),6),dp(edgeRight?6:0),dp(12),dp(edgeRight?0:6),dp(12)),
+            new InsetDrawable(shape(glass(appearance.accent,0x80),2),dp(edgeRight?10:4),dp(24),dp(edgeRight?4:10),dp(24))
+        });
+        layers.setPaddingMode(android.graphics.drawable.LayerDrawable.PADDING_MODE_STACK);
+        handle.setBackground(layers);
+    }
+    private boolean isContentArea(MotionEvent event) {
+        if(collapsed || scroll==null || !scroll.isShown())return false;
+        return hits(scroll,event) && !hitsAction(scroll,event);
+    }
+    private boolean hits(View view,MotionEvent event) {
+        Rect bounds=new Rect();view.getDrawingRect(bounds);root.offsetDescendantRectToMyCoords(view,bounds);
+        return bounds.contains((int)event.getX(),(int)event.getY());
+    }
+    private boolean hitsAction(View view,MotionEvent event) {
+        if(!hits(view,event))return false;
+        if((view instanceof TextView && view.isClickable()) || "清空当前列表".contentEquals(view.getContentDescription()==null?"":view.getContentDescription()))return true;
+        if(view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group=(android.view.ViewGroup)view;
+            for(int i=0;i<group.getChildCount();i++)if(hitsAction(group.getChildAt(i),event))return true;
+        }
+        return false;
+    }
+    private void cancelPendingOpen() {
+        if(pendingOpen!=null)main.removeCallbacks(pendingOpen);
+        pendingOpen=null;
+    }
+    private void queueOpen(ReceiveNotifications.Receipt receipt) {
+        cancelPendingOpen();View owner=root;
+        pendingOpen=() -> {pendingOpen=null;if(root==owner)open(receipt);};
+        main.postDelayed(pendingOpen,ViewConfiguration.getDoubleTapTimeout());
+    }
     private void refreshPendingStyles() {
         if(row==null)return;
         for(int i=0;i<row.getChildCount();i++) {
             View card=row.getChildAt(i);
             if(!(card.getTag() instanceof ReceiveNotifications.Receipt))continue;
             boolean pending=shelfVisible && shelf.pendingRemoval(((ReceiveNotifications.Receipt)card.getTag()).id);
-            card.setBackground(shape(pending ? pendingColor() : appearance.soft,12));
+            card.setBackground(shape(pending ? pendingColor() : glass(appearance.soft,0xb3),12));
             card.findViewWithTag("pending-removal").setVisibility(pending ? View.VISIBLE : View.GONE);
         }
     }
@@ -409,7 +467,6 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         count.setTypeface(null, shelfVisible ? 0 : 1); shelfTab.setTypeface(null, shelfVisible ? 1 : 0);
         handle.setText("");
         handle.setContentDescription("展开文件暂存坞，接收 " + items.size() + " 项，暂存 " + shelf.items.size() + " 项");
-        collapseButton.setText(edgeRight ? "›" : "‹");
         if (remaining > 0) shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项，" + remaining + " 秒后移除，轻点取消");
         else if (importing > 0) shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项，正在导入");
     }
@@ -424,6 +481,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
         if (paths.isEmpty() && texts.isEmpty()) return false;
         shelf.cancelRemoval();
+        cancelPendingOpen();
         main.removeCallbacks(countdown); refreshPendingStyles(); updateLabels();
         try {
             return DockCoordinator.startDrag(source, paths, texts, (paths.size() + texts.size()) + " 项", accepted -> {
@@ -439,6 +497,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private boolean receiveDrop(DragEvent event) {
         switch (event.getAction()) {
             case DragEvent.ACTION_DRAG_STARTED:
+                cancelPendingOpen();
                 if (shelf.cancelRemoval()) { main.removeCallbacks(countdown); shelfChanged(); }
                 return event.getClipDescription() != null;
             case DragEvent.ACTION_DRAG_ENTERED:
@@ -446,12 +505,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     dragExpand = () -> { dragExpand = null; setCollapsed(false); };
                     main.postDelayed(dragExpand, 250);
                 }
-                root.setBackground(shape(appearance.soft, 18)); return true;
+                root.setBackground(shape(glass(appearance.soft,0x99), 18)); return true;
             case DragEvent.ACTION_DRAG_EXITED:
             case DragEvent.ACTION_DRAG_ENDED:
                 if (dragExpand != null) main.removeCallbacks(dragExpand);
                 dragExpand = null;
-                if (root != null) root.setBackground(shape((appearance.surface & 0x00ffffff) | 0xf5000000, 18));
+                if (root != null) root.setBackground(shape(collapsed ? 0 : glass(appearance.surface,0x99), 18));
                 return true;
             case DragEvent.ACTION_DROP:
                 if (dragExpand != null) main.removeCallbacks(dragExpand);
@@ -617,8 +676,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     void setCollapsed(boolean value) {
         if (root == null || collapsed == value && geometry != null) return;
         if (DockCoordinator.afterExportFrom(root, () -> setCollapsed(value))) return;
-        if (collapsed == value && geometry == null && layout.width == (value ? dp(12) : expandedWidth)
-                && layout.height == (value ? dp(48) : expandedHeight)) {
+        if (collapsed == value && geometry == null && layout.width == (value ? dp(18) : expandedWidth)
+                && layout.height == (value ? dp(72) : expandedHeight)) {
             finishGeometry(value); return;
         }
         stopGeometry();
@@ -627,7 +686,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             edgeRight = layout.x + layout.width / 2 >= bounds.centerX();
         }
         collapsed = value;
-        int width = value ? dp(12) : expandedWidth, height = value ? dp(48) : expandedHeight;
+        styleHandle();
+        int width = value ? dp(18) : expandedWidth, height = value ? dp(72) : expandedHeight;
         int x = edgeRight ? bounds.right - width : bounds.left;
         int y = clamp(layout.y, bounds.top, bounds.bottom - height);
         if (layout.width == width && layout.height == height && layout.x == x && layout.y == y) {
@@ -635,8 +695,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
             Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
-        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(12), dp(48),
-            Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
+        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(18), dp(72),
+            Gravity.CENTER_VERTICAL | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
         float initialPanelAlpha = expanded.getVisibility() == View.VISIBLE ? expanded.getAlpha() : 0;
         float initialHandleAlpha = handle.getVisibility() == View.VISIBLE ? handle.getAlpha() : 0;
         expanded.setVisibility(View.VISIBLE); handle.setVisibility(View.VISIBLE);
@@ -651,10 +711,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             float t = (Float)animation.getAnimatedValue();
             layout.x = Math.round(initialX + (x - initialX) * t); layout.y = Math.round(initialY + (y - initialY) * t);
             layout.width = Math.round(initialWidth + (width - initialWidth) * t); layout.height = Math.round(initialHeight + (height - initialHeight) * t);
-            float panelProgress = value ? Math.min(1, 1.6f * t) : Math.max(0, (t - .15f) / .85f);
-            float handleProgress = value ? Math.max(0, (t - .3f) / .7f) : Math.min(1, 2 * t);
+            float panelProgress = t;
+            float handleProgress = t;
             expanded.setAlpha(initialPanelAlpha + ((value ? 0 : 1) - initialPanelAlpha) * panelProgress);
             handle.setAlpha(initialHandleAlpha + ((value ? 1 : 0) - initialHandleAlpha) * handleProgress);
+            root.setBackground(shape(glass(appearance.surface,Math.round(0x99*(value ? 1-t : t))),18));
             root.setElevation(dp(8) + (dp(4) - dp(8)) * (value ? t : 1 - t));
             windows.updateViewLayout(root, layout);
         });
@@ -677,6 +738,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         handle.setVisibility(small ? View.VISIBLE : View.GONE);
         expanded.setAlpha(1); handle.setAlpha(1);
         handle.setEnabled(true); handle.setClickable(true);
+        root.setBackground(shape(small ? 0 : glass(appearance.surface,0x99),18));
         root.setElevation(dp(small ? 4 : 8));
     }
 
@@ -709,6 +771,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             context.unregisterComponentCallbacks(configurationChanges);
             if (appearanceChanges != null) { appearanceChanges.stopWatching(); appearanceChanges = null; }
             stopGeometry();
+            cancelPendingOpen();
             main.removeCallbacks(countdown);
             if (dragExpand != null) main.removeCallbacks(dragExpand);
             dragExpand = null;
@@ -716,7 +779,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             final WindowManager.LayoutParams leavingLayout = layout;
             final boolean registered = rootAdded;
             root = null; expanded = null; row = null; scroll = null; count = null; layout = null;
-            header = null; handle = null; resize = null; shelfTab = null; collapseButton = null;
+            header = null; handle = null; resize = null; shelfTab = null; contentGestures=null;
             rootAdded = false;
             leaving.animate().cancel();
             if (registered && leaving.isAttachedToWindow()) {

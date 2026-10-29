@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:flutter/services.dart';
 
@@ -43,6 +42,7 @@ class DockPlatform {
   /// Cancellation completes normally without an import event.
   static Future<void> pickMedia() => channel.invokeMethod('pickMedia');
   static Future<void> showShelf() => channel.invokeMethod('showShelf');
+  static Future<void> hideShelf() => channel.invokeMethod('hideShelf');
   static Future<List<Map<String, dynamic>>> installedApps() async =>
       (await channel.invokeListMethod<Map>('installedApps') ?? [])
           .map((value) => Map<String, dynamic>.from(value))

@@ -137,6 +137,7 @@ class _SendScreenState extends State<SendScreen>
   bool _receiptWindowFloating = false;
   String _receiptSnapshot = '';
   bool _receiptPresentedExternally = false;
+  bool _shelfPermissionPending = false;
   final _nativeQueueKey = GlobalKey();
   final _savedFilesKey = GlobalKey<SavedFilesScreenState>();
   bool? _allFilesAccess;
@@ -680,7 +681,12 @@ class _SendScreenState extends State<SendScreen>
       c.refreshNativeDock().catchError((Object _) {});
       c
           .refreshReceiveNotifications(request: loggedIn)
-          .catchError((Object _) {});
+          .then((_) => resumeShelfAfterPermission())
+          .catchError((Object error) {
+            if (mounted && _shelfPermissionPending) {
+              notice(shortError('$error'));
+            }
+          });
     }
   }
 
@@ -741,6 +747,36 @@ class _SendScreenState extends State<SendScreen>
       if (mounted) notice(shortError('$error'));
     } finally {
       if (mounted) setState(() => working = false);
+    }
+  }
+
+  Future<void> requestShelfPermission() async {
+    _shelfPermissionPending = true;
+    await c.openReceivePopupSettings();
+  }
+
+  Future<void> resumeShelfAfterPermission() async {
+    if (!mounted ||
+        !_shelfPermissionPending ||
+        !c.receivePopupEnabled ||
+        !c.receivePopupAllowed) {
+      return;
+    }
+    await DockPlatform.showShelf();
+    _shelfPermissionPending = false;
+  }
+
+  Future<void> setReceiveDockEnabled(bool enabled) async {
+    if (!enabled) _shelfPermissionPending = false;
+    await c.setReceivePopupEnabled(enabled);
+    if (!enabled) {
+      await DockPlatform.hideShelf();
+    } else if (c.receivePopupEnabled) {
+      if (c.receivePopupAllowed) {
+        await DockPlatform.showShelf();
+      } else {
+        await requestShelfPermission();
+      }
     }
   }
 
@@ -4439,24 +4475,25 @@ class _SendScreenState extends State<SendScreen>
               SwitchListTile.adaptive(
                 key: const ValueKey('receive-popup'),
                 contentPadding: EdgeInsets.zero,
-                title: const Text('后台弹出'),
-                subtitle: Row(
-                  children: [
-                    Expanded(child: Text(c.receivePopupStatus)),
-                    if (c.receivePopupEnabled && !c.receivePopupAllowed)
-                      TextButton(
-                        key: const ValueKey('receive-popup-permission'),
-                        onPressed: working
-                            ? null
-                            : () => perform(c.openReceivePopupSettings),
-                        child: const Text('授权'),
-                      ),
-                  ],
-                ),
+                title: const Text('接收与暂存坞'),
+                subtitle: c.receivePopupEnabled && !c.receivePopupAllowed
+                    ? Row(
+                        children: [
+                          const Expanded(child: Text('需要悬浮窗权限')),
+                          TextButton(
+                            key: const ValueKey('receive-popup-permission'),
+                            onPressed: working
+                                ? null
+                                : () => perform(requestShelfPermission),
+                            child: const Text('授权'),
+                          ),
+                        ],
+                      )
+                    : null,
                 value: c.receivePopupEnabled,
                 onChanged: working
                     ? null
-                    : (value) => perform(() => c.setReceivePopupEnabled(value)),
+                    : (value) => perform(() => setReceiveDockEnabled(value)),
               ),
             if (Platform.isAndroid)
               ListTile(
@@ -4467,20 +4504,6 @@ class _SendScreenState extends State<SendScreen>
                 onTap: working
                     ? null
                     : () => perform(c.urlIntents.native.manageAssociations),
-              ),
-            if (Platform.isAndroid)
-              ListTile(
-                key: const ValueKey('temporary-shelf'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('文件暂存坞'),
-                trailing: const AppIcon(Icons.chevron_right, size: 20),
-                onTap: working
-                    ? null
-                    : () => perform(
-                        c.receivePopupAllowed
-                            ? DockPlatform.showShelf
-                            : c.openReceivePopupSettings,
-                      ),
               ),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,

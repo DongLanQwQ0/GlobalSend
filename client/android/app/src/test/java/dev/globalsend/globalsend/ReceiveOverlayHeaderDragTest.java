@@ -53,7 +53,7 @@ public class ReceiveOverlayHeaderDragTest {
         View root = (View)field(overlay, "root");
         LinearLayout header = (LinearLayout)field(overlay, "header");
         WindowManager.LayoutParams window = (WindowManager.LayoutParams)root.getLayoutParams();
-        assertEquals(6, header.getChildCount());
+        assertEquals(3, header.getChildCount());
         assertTrue("header width", header.getWidth() > 0);
         assertTrue("header height", header.getHeight() > 0);
         for (int i=0; i<header.getChildCount(); i++) {
@@ -113,7 +113,7 @@ public class ReceiveOverlayHeaderDragTest {
         capture(overlay,"expanded-before");
         overlay.setCollapsed(true);
         advanceGeometry(overlay,80);
-        assertTrue("intermediate width="+window.width,window.width < expandedWidth && window.width > Math.round(12*density));
+        assertTrue("intermediate width="+window.width,window.width < expandedWidth && window.width > Math.round(18*density));
         assertTrue("window moves right while shrinking",window.x > expandedX);
         draw(root);
         assertEquals("content moves with the window, not pinned to screen edge",0,panel.getLeft());
@@ -129,12 +129,12 @@ public class ReceiveOverlayHeaderDragTest {
         assertEquals(View.GONE,handle.getVisibility());
         overlay.setCollapsed(true);
         advanceGeometry(overlay,240);
-        assertEquals(Math.round(12*density),window.width); assertEquals(Math.round(48*density),window.height);
+        assertEquals(Math.round(18*density),window.width); assertEquals(Math.round(72*density),window.height);
         assertEquals(View.GONE,panel.getVisibility()); assertEquals(View.VISIBLE,handle.getVisibility());
         capture(overlay,"collapsed");
         handle.performClick();
         advanceGeometry(overlay,80);
-        assertTrue(window.width > Math.round(12*density) && window.width < expandedWidth);
+        assertTrue(window.width > Math.round(18*density) && window.width < expandedWidth);
         assertTrue(handle.getAlpha() < 1);
         assertEquals(expandedWidth,panel.getLayoutParams().width);
         capture(overlay,"expand-intermediate");
@@ -219,6 +219,56 @@ public class ReceiveOverlayHeaderDragTest {
         assertNotNull("transition is active",animator);
         animator.setCurrentPlayTime(millis);
         if(millis>=animator.getDuration())animator.end();
+    }
+    @Test public void contentDoubleTapOpensApplicationWithoutAlsoOpeningTheItem() throws Exception {
+        android.content.Context context=RuntimeEnvironment.getApplication();
+        android.content.pm.ResolveInfo launcher=new android.content.pm.ResolveInfo();
+        launcher.activityInfo=new android.content.pm.ActivityInfo();
+        launcher.activityInfo.packageName=context.getPackageName();launcher.activityInfo.name="test.GlobalSendActivity";
+        launcher.activityInfo.applicationInfo=new android.content.pm.ApplicationInfo();
+        launcher.activityInfo.applicationInfo.packageName=context.getPackageName();
+        Shadows.shadowOf(context.getPackageManager()).addResolveInfoForIntent(
+            new android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER).setPackage(context.getPackageName()),launcher);
+        int[] actions=new int[3];ReceiveOverlay overlay=create(actions);
+        View root=(View)field(overlay,"root");
+        touch(root,0,MotionEvent.ACTION_DOWN,25,60);touch(root,10,MotionEvent.ACTION_UP,25,60);
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(50));
+        touch(root,0,MotionEvent.ACTION_DOWN,25,60);touch(root,10,MotionEvent.ACTION_UP,25,60);
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
+        android.content.Intent opened=Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity();
+        assertNotNull(opened);assertEquals("test.GlobalSendActivity",opened.getComponent().getClassName());
+        assertArrayEquals(new int[3],actions);
+        overlay.hide();
+    }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void collapsedVisualStaysThinButInvisibleHitAreaIsOneAndHalfTimesAsLarge() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        overlay.setCollapsed(true);advanceGeometry(overlay,240);
+        View root=(View)field(overlay,"root"), handle=(View)field(overlay,"handle");draw(root);
+        float density=root.getResources().getDisplayMetrics().density;
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        assertEquals(Math.round(12*density*1.5f),window.width);
+        assertEquals(Math.round(48*density*1.5f),window.height);
+        assertEquals(0,((android.graphics.drawable.GradientDrawable)root.getBackground()).getColor().getDefaultColor());
+        android.graphics.Bitmap pixels=android.graphics.Bitmap.createBitmap(window.width,window.height,android.graphics.Bitmap.Config.ARGB_8888);
+        root.draw(new android.graphics.Canvas(pixels));
+        assertEquals("expanded hit margin stays invisible",0,android.graphics.Color.alpha(pixels.getPixel(1,Math.round(36*density))));
+        assertTrue("grip is visible above its translucent backing",android.graphics.Color.alpha(pixels.getPixel(Math.round(12*density),Math.round(36*density)))>100);
+        pixels.recycle();
+        capture(overlay,"expanded-hit-area");
+        touch(handle,0,MotionEvent.ACTION_DOWN,1,30*density);
+        touch(handle,10,MotionEvent.ACTION_UP,1,30*density);
+        assertFalse((Boolean)field(overlay,"collapsed"));
+        advanceGeometry(overlay,240);overlay.hide();
+    }
+    @Test public void settingClosesWindowAndPreservesStagedContent() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        shelf.add(java.util.List.of(),java.util.List.of("keep"),Map.of());
+        ReceiveOverlay.closeShelf();
+        assertNull(field(overlay,"root"));assertEquals(1,shelf.items.size());
+        assertFalse(RuntimeEnvironment.getApplication().getSharedPreferences("received-popup-settings",0).getBoolean("enabled",true));
     }
     private void capture(ReceiveOverlay overlay,String name) throws Exception {
         String directory=System.getenv("GLOBALSEND_TEST_ARTIFACTS");

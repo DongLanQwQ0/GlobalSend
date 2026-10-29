@@ -114,6 +114,7 @@ public final class ReceiveNotifications {
 
     public void setPopupEnabled(boolean enabled) {
         popupPreferences.edit().putBoolean("enabled", enabled).apply();
+        if(!enabled)presenter.hide();
     }
 
     public boolean popupAllowed() {

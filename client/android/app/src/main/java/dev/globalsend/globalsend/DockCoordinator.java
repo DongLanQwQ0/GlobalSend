@@ -105,6 +105,7 @@ final class DockCoordinator {
                 switch (call.method) {
                     case "status": result.success(status()); break;
                     case "showShelf": ReceiveOverlay.openShelf(); result.success(null); break;
+                    case "hideShelf": ReceiveOverlay.closeShelf(); result.success(null); break;
                     case "installedApps":
                         importer.execute(() -> {
                             try { List<Map<String,Object>> apps = InstalledApps.list(this.context); main.post(() -> result.success(apps)); }
