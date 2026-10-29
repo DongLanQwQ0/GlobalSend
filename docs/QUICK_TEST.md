@@ -7,7 +7,7 @@
 - Windows **1.0.50+59** 已完整更新并启动于 `E:\Programs\GlobalSend`；本轮不进行Windows界面测试。[开机启动与后台参数](WINDOWS_STARTUP.md)已实现，开关保持默认关闭，登录启动、不抢焦点及托盘恢复仍待手动验收。
 - [Android arm64 APK](../artifacts/releases/GlobalSend-1.0.50-android-arm64-v8a.apk)：16,291,960字节。USB覆盖安装成功，手机实际读回 **1.0.50+59**，数据保留；49的APK打开安装与48的微信图片投放验收保留。
 - [Windows 完整包](../artifacts/releases/GlobalSend-1.0.50-windows-x64.zip)：22,377,049字节，不要只复制EXE。[GitHub分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)提供两平台包及各自更新清单；中心不托管包。
-- 中心及[网页版](https://123.207.180.163/globalsend/app/)已部署多组连接、流式中继和链接识别，镜像 `globalsend:multi-group-20261029-1620`。iPad另提供52版分享唤起和唯一ID定向发送，不需要中心升级。
+- 中心及[网页版](https://123.207.180.163/globalsend/app/)已部署多组连接、流式中继和链接识别，镜像 `globalsend:multi-group-20261029-1620`。iPad另提供53版分享唤起、系统设备建议和唯一ID定向发送，不需要中心升级。
 
 版本以 [本机发布记录](../artifacts/releases/latest-local.json) 和 [中心部署记录](../artifacts/deploy/current-workspace-deployment.json) 为准。新版手机重点为 [独立暂存坞](TEMPORARY_SHELF.md)、系统拖影主题及应用安装包选择；不能把框架测试当作手机更新或物理跨应用拖放验收。步骤见 [UI 验收](UI_ACCEPTANCE.md)。
 
@@ -24,7 +24,7 @@
 - 手机：三次左右贴边往返、横竖屏位置恢复通过；用户确认窗口行为、投放和重启后位置记忆正常，并要求跳过后续同类测试。
 - 微信：用户提前打开的文件传输助手实际收到合成测试图；代理没有点击发送。微信松手后直接显示聊天图片，而非确认预览。
 - Windows：按用户最新要求停止测试，不继续操作窗口，不把构建和进程响应当作本轮交互验收。
-- iPad：51版分享已由用户确认可用。52版Swift共享组/URL/持久化回归、Dart分享与发送回归和真机编译通过。1.0.52（61）IPA位于`artifacts/releases/ios-1.0.52-build61/GlobalSend-iPad-unsigned.ipa`，14,749,200字节、不打包字体。由用户用iloader手动覆盖安装，验收分享后自动打开待发送、设置默认目标后按ID自动发送，并确认不带走原有草稿。跨应用拖放、右滑返回和图片缩放仍由iPad实机验收。
+- iPad：51版分享已由用户确认可用。53版Swift共享组/URL/建议标识/持久化回归、Dart分享桥检查和真机编译通过，复用52版仍适用的导入与定向发送回归。1.0.53（62）IPA位于`artifacts/releases/ios-1.0.53-build62/GlobalSend-iPad-unsigned.ipa`，14,750,103字节、不打包字体。由用户用iloader手动覆盖安装：确认设置中已无“系统分享”；普通分享唤起待发送；正常给设备发送后，到系统分享面板检查第一排设备建议，选择建议时只发送本批、不带走原有草稿。建议是否出现由iPadOS决定，旧默认目标不再生效。跨应用拖放、右滑返回和图片缩放仍由iPad实机验收。
 
 失败时记录：两端版本、来源/目标、操作步骤、实际路径或错误提示。先用小文件验证；中继不要用大文件做吞吐测试。
 

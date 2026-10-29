@@ -4,11 +4,11 @@
 
 工作流仅手动触发，推送源码不构建 IPA。Actions 产物保留 14 天；成功后另发布 IPA 与 iOS 更新清单到 GitHub Release。签名证书、Apple 账号、描述文件和 TestFlight 都不参与这条流水线。安装包不放到 GlobalSend 中心服务器。
 
-若当前版本/构建号已有Windows或Android Release，应选择它的源码Tag运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。Windows与真实手机仍为1.0.50+59。本轮只交付iOS：[1.0.52（61）IPA构建](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/40892729580)已成功，源码`63eeef9`，包含分享后唤起、默认分享目标和按唯一设备ID定向发送接口。
+若当前版本/构建号已有Windows或Android Release，应选择它的源码Tag运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。Windows与真实手机仍为1.0.50+59。本轮只交付iOS：[1.0.53（62）IPA构建](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/40897159334)已成功，源码`3ffafa8`，移除设置中的系统分享及默认目标，接入系统分享面板第一排的设备建议。普通分享仍保存本批并唤起待发送。
 
-本地文件：`artifacts/releases/ios-1.0.52-build61/GlobalSend-iPad-unsigned.ipa`，14,749,200字节。主应用与分享扩展均为1.0.52（61），App Group模板匹配，没有内置字体，`globalsend`URL入口已注册，通用Flutter页面路由关闭以免抢占原生分享入口。也可从[GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.52-build61)下载。Swift共享组、URL调用和持久化回归检查通过；iPhoneOS主应用与扩展编译通过。51版分享已获用户确认，52版由用户手动安装，实际前台切换与定向发送待验。
+本地文件：`artifacts/releases/ios-1.0.53-build62/GlobalSend-iPad-unsigned.ipa`，14,750,103字节。主应用与分享扩展均为1.0.53（62），App Group模板匹配，没有内置字体，`globalsend`URL入口已注册，通用Flutter页面路由关闭以免抢占原生分享入口。也可从[GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.53-build62)下载。Swift共享组、URL调用、设备建议标识和持久化回归检查通过；iPhoneOS主应用与扩展编译通过。51版分享已获用户确认，53版由用户手动安装，实际前台切换、系统建议出现和定向发送待验。
 
-安装后先分享一张图片，确认自动打开GlobalSend并显示在待发送。需要免点设备发送时，在 **设置 → 系统分享 → 分享后发送到** 选择目标，之后再分享一批；应只发送本批，不包含原有草稿。默认“仅加入待发送”，不会自行选择收件人。接口见[定向分享调用](MOBILE_SHARING.md#定向调用接口)。
+安装后先分享一张图片，确认打开GlobalSend并显示在待发送。需要直接发给设备时，先在GlobalSend给该设备正常发送一次，再到其他应用打开系统分享面板，选择第一排带GlobalSend标记的设备建议。建议是否显示及顺序由iPadOS决定；点击普通GlobalSend应用图标仍只加入待发送，不读取旧默认目标。指定设备分享应只发送本批，不包含原有草稿。详细入口及接口见[系统分享设备快捷项](MOBILE_SHARING.md#系统分享面板里的设备快捷项ios--ipados-53版)。
 
 iloader会按当前账号改写共享组名称。51版起保留原组优先，原组不可用时识别重签后的宿主组；不要重新生成密钥或卸载旧应用。使用原账号覆盖安装，并保留分享扩展，详见[iloader兼容说明](MOBILE_SHARING.md#iloader-重签)。
 

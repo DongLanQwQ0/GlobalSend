@@ -16,7 +16,7 @@ Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP
 
 Android [1.0.50+59 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.50-android-arm64-v8a.apk)已验签、不打包字体，并经USB覆盖安装到vivo，实际版本读回一致。50新增功能仅限Windows；49修复[APK打开与安装](docs/ANDROID_APK_INSTALL.md)，用户确认可用。48的左右贴边往返、横竖屏恢复及微信图片投放已通过，重启位置记忆由用户确认，见[兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
 
-iPad / iPhone 的[**1.0.52 (61) 未签名IPA，约14.7 MB**](artifacts/releases/ios-1.0.52-build61/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。51版分享已获用户确认，52新增分享后自动唤起、默认分享目标及唯一ID定向发送接口；本版由用户手动安装验收，见[iPad构建说明](docs/IPAD.md)。**中心服务器不托管安装包；[Windows/Android 1.0.50](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iPad 1.0.52](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.52-build61)分别提供对应平台包和更新清单。**
+iPad / iPhone 的[**1.0.53 (62) 未签名IPA，约14.8 MB**](artifacts/releases/ios-1.0.53-build62/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。53移除设置中的系统分享及默认目标，改为系统分享面板第一排的设备建议；普通分享仍唤起待发送，选指定设备建议才按唯一ID自动发送。建议的显示由iPadOS决定，本版由用户手动安装验收，见[iPad构建说明](docs/IPAD.md)。**中心服务器不托管安装包；[Windows/Android 1.0.50](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iPad 1.0.53](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.53-build62)分别提供对应平台包和更新清单。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 
