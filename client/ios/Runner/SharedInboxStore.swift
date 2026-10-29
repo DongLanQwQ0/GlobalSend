@@ -25,6 +25,18 @@ struct SharedSendTarget: Codable {
   let serverKey: String
   let deviceId: String
   var name: String?
+  var platform: String?
+  var conversationIdentifier: String {
+    "globalsend-device:" + String(data: try! JSONEncoder().encode([serverKey, deviceId]), encoding: .utf8)!
+  }
+  static func fromConversationIdentifier(_ value: String?, name: String?) -> SharedSendTarget? {
+    let prefix = "globalsend-device:"
+    guard let value = value, value.hasPrefix(prefix),
+          let data = String(value.dropFirst(prefix.count)).data(using: .utf8),
+          let ids = try? JSONDecoder().decode([String].self, from: data), ids.count == 2,
+          !ids[0].isEmpty, !ids[1].isEmpty else { return nil }
+    return SharedSendTarget(serverKey: ids[0], deviceId: ids[1], name: name)
+  }
 }
 
 struct ShareLaunchRequest {
@@ -121,14 +133,6 @@ final class SharedInboxStore {
   }
   func commit(_ payload: SharedPayload) throws {
     try JSONEncoder().encode(payload).write(to: root.appendingPathComponent(payload.batchId + ".json"), options: .atomic)
-  }
-  func defaultTarget() throws -> SharedSendTarget? {
-    let url = root.appendingPathComponent("default-target.json")
-    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-    return try JSONDecoder().decode(SharedSendTarget?.self, from: Data(contentsOf: url))
-  }
-  func setDefaultTarget(_ target: SharedSendTarget?) throws {
-    try JSONEncoder().encode(target).write(to: root.appendingPathComponent("default-target.json"), options: .atomic)
   }
   func apply(_ request: ShareLaunchRequest) throws {
     let manifest = root.appendingPathComponent(request.batchId + ".json")

@@ -48,11 +48,16 @@ struct SharedInboxGroupTests {
     let fixture = URL(fileURLWithPath: "artifacts/tmp/ios-share-tests/" + UUID().uuidString, isDirectory: true)
     let store = try SharedInboxStore(root: fixture)
     defer { try? FileManager.default.removeItem(at: fixture) }
-    try store.setDefaultTarget(request.target)
-    let selected = try store.defaultTarget()
-    precondition(selected?.deviceId == "unique-device-id")
+    let target = request.target!
+    let renamed = SharedSendTarget(serverKey: target.serverKey, deviceId: target.deviceId, name: "改名后")
+    precondition(target.conversationIdentifier == renamed.conversationIdentifier)
+    let selected = SharedSendTarget.fromConversationIdentifier(target.conversationIdentifier, name: "设备")
+    precondition(selected?.deviceId == target.deviceId && selected?.serverKey == target.serverKey)
+    precondition(SharedSendTarget.fromConversationIdentifier(nil, name: nil) == nil)
+    precondition(SharedSendTarget.fromConversationIdentifier("another-app:abc", name: nil) == nil)
+    try Data("{\"deviceId\":\"old-default\"}".utf8).write(to: fixture.appendingPathComponent("default-target.json"))
     let before = try store.pending()
-    precondition(before.isEmpty, "Target settings are not an incoming batch")
+    precondition(before.isEmpty, "Removed default-target settings must not become an incoming batch")
     try store.apply(request)
     try store.apply(request)
     let pending = try store.pending()
@@ -64,7 +69,7 @@ struct SharedInboxGroupTests {
     let old = Data("{\"batchId\":\"old\",\"paths\":[],\"texts\":[\"legacy\"],\"temporaryPaths\":[]}".utf8)
     let legacy = try JSONDecoder().decode(SharedPayload.self, from: old)
     precondition(legacy.target == nil)
-    print("PASS: wake URL, directed text API, durable target, same-ID idempotence, ack and old share schema")
+    print("PASS: wake URL, directed text API, system suggestion identity, ignored old defaults, idempotence, ack and legacy shares")
     print("PASS: original group, iloader group, denied container, missing ID, duplicate candidate, host/extension agreement")
   }
 }

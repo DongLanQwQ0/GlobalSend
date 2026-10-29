@@ -1,5 +1,6 @@
 import UIKit
 import UniformTypeIdentifiers
+import Intents
 
 /// Commit the batch before the LocalSend-style responder-chain handoff.
 final class ShareViewController: UIViewController {
@@ -28,9 +29,12 @@ final class ShareViewController: UIViewController {
     guard !started else { return }; started = true
     let inputs = extensionContext?.inputItems as? [NSExtensionItem] ?? []
     let providers = inputs.flatMap { $0.attachments ?? [] }
-    DispatchQueue.global(qos: .userInitiated).async { self.importItems(inputs, providers: providers) }
+    let intent = extensionContext?.intent as? INSendMessageIntent
+    let target = SharedSendTarget.fromConversationIdentifier(intent?.conversationIdentifier,
+        name: intent?.speakableGroupName?.spokenPhrase)
+    DispatchQueue.global(qos: .userInitiated).async { self.importItems(inputs, providers: providers, target: target) }
   }
-  private func importItems(_ inputs: [NSExtensionItem], providers: [NSItemProvider]) {
+  private func importItems(_ inputs: [NSExtensionItem], providers: [NSItemProvider], target: SharedSendTarget?) {
     do {
       let store = try SharedInboxStore(extensionOnly: true), id = UUID().uuidString
       let folder = try store.folder(id)
@@ -56,7 +60,7 @@ final class ShareViewController: UIViewController {
         if let error = error { payload.error = error.localizedDescription }
       }
       payload.temporaryPaths = payload.paths
-      payload.target = try store.defaultTarget()
+      payload.target = target
       try store.commit(payload)
       DispatchQueue.main.async {
         self.finished = true

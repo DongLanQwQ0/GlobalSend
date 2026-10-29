@@ -49,8 +49,6 @@ class ServerProfile {
     this.cellularAllowed = true,
     this.relayConfirmMiB = 32,
     this.transferConcurrency = 4,
-    this.shareTargetDeviceId = '',
-    this.shareTargetName = '',
     this.storageId = '',
     this.legacyPeerIdentity = true,
   }) : groups = groups ?? [];
@@ -58,7 +56,6 @@ class ServerProfile {
   final String storageId;
   bool legacyPeerIdentity;
   String deviceId, name, groupId;
-  String shareTargetDeviceId, shareTargetName;
   List<Map<String, dynamic>> groups;
   int cursor;
   bool autoReceive;
@@ -89,8 +86,6 @@ class ServerProfile {
     'cellularAllowed': cellularAllowed,
     'relayConfirmMiB': relayConfirmMiB,
     'transferConcurrency': transferConcurrency,
-    'shareTargetDeviceId': shareTargetDeviceId,
-    'shareTargetName': shareTargetName,
     'storageId': storageId,
     'legacyPeerIdentity': legacyPeerIdentity,
   };
@@ -110,8 +105,6 @@ class ServerProfile {
     cellularAllowed: j['cellularAllowed'] ?? true,
     relayConfirmMiB: j['relayConfirmMiB'] ?? 32,
     transferConcurrency: j['transferConcurrency'] ?? 4,
-    shareTargetDeviceId: j['shareTargetDeviceId'] ?? '',
-    shareTargetName: j['shareTargetName'] ?? '',
     storageId: j['storageId'] ?? '',
     legacyPeerIdentity: j['legacyPeerIdentity'] ?? true,
   );

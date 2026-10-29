@@ -2868,31 +2868,22 @@ class SendController extends ChangeNotifier {
     return root != null;
   }
 
-  SharedSendTarget? get shareTarget {
+  void _recordShareInteraction(String deviceId) {
     final p = profile;
-    if (p == null || p.shareTargetDeviceId.isEmpty) return null;
-    final peer = devices
-        .where((d) => d['deviceId'] == p.shareTargetDeviceId)
-        .firstOrNull;
-    return SharedSendTarget(
-      serverKey: p.key,
-      deviceId: p.shareTargetDeviceId,
-      name: peer?['name'] as String? ?? p.shareTargetName,
+    if (!Platform.isIOS || p == null || deviceId == p.deviceId) return;
+    final peer = devices.where((d) => d['deviceId'] == deviceId).firstOrNull;
+    unawaited(
+      FileShareBridge.recordTarget(
+        SharedSendTarget(
+          serverKey: p.key,
+          deviceId: deviceId,
+          name: peer?['name'] as String? ?? _noticeSource(deviceId),
+          platform: peer?['platform'] as String? ?? 'other',
+        ),
+      ).catchError((Object error) {
+        debugPrint('iOS 分享建议未更新：$error');
+      }),
     );
-  }
-
-  Future<void> setShareTarget(String deviceId) async {
-    final p = profile;
-    if (p == null) return;
-    final peer = sendablePeers
-        .where((d) => d['deviceId'] == deviceId)
-        .firstOrNull;
-    if (deviceId.isNotEmpty && peer == null) throw StateError('请选择组内设备');
-    p.shareTargetDeviceId = deviceId;
-    p.shareTargetName = peer?['name'] as String? ?? '';
-    await save();
-    await FileShareBridge.setDefaultTarget(shareTarget);
-    changed();
   }
 
   Future<void> sendSharedBatch(SharedBatch batch) async {
@@ -3523,6 +3514,7 @@ class SendController extends ChangeNotifier {
     });
     _requireSession(epoch, a, p);
     pendingTexts.remove(key);
+    _recordShareInteraction(target);
     await save();
     _requireSession(epoch, a, p);
     await safeReconcile();
@@ -3626,6 +3618,7 @@ class SendController extends ChangeNotifier {
     });
     _requireSession(epoch, a, p);
     sources.addAll(pending);
+    _recordShareInteraction(target);
     updateTransfer(j['transfer']);
     await save();
     changed();

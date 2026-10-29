@@ -2,9 +2,45 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/dock_platform.dart';
 import 'package:globalsend/file_share.dart';
+import 'package:globalsend/models.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('share suggestions retain the unique target while old default settings disappear', () async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    MethodCall? actual;
+    messenger.setMockMethodCallHandler(FileShareBridge.channel, (call) async {
+      actual = call;
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(FileShareBridge.channel, null),
+    );
+    await FileShareBridge.recordTarget(
+      const SharedSendTarget(
+        serverKey: 'center',
+        deviceId: 'uuid',
+        name: '电脑',
+        platform: 'windows',
+      ),
+    );
+    expect(actual!.method, 'recordShareTarget');
+    expect(actual!.arguments, {
+      'serverKey': 'center',
+      'deviceId': 'uuid',
+      'name': '电脑',
+      'platform': 'windows',
+    });
+    final profile = ServerProfile.fromJson({
+      'baseUrl': 'https://fixture.test',
+      'instanceId': 'one',
+      'shareTargetDeviceId': 'old-target',
+      'shareTargetName': '旧设备',
+    });
+    expect(profile.toJson().containsKey('shareTargetDeviceId'), isFalse);
+    expect(profile.toJson().containsKey('shareTargetName'), isFalse);
+  });
   test('shared inbox schema preserves batch identity and every file/text without acknowledging it', () {
     final batch = SharedBatch.fromMap({
       'batchId': 'batch',

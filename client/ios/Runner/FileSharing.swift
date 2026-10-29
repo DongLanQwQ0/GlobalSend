@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import Intents
 
 final class FileSharing {
   static let shared = FileSharing()
@@ -14,18 +15,22 @@ final class FileSharing {
       if call.method == "share" {
         let args = call.arguments as? [String: Any] ?? [:]
         self.share(paths: args["paths"] as? [String] ?? [], text: args["text"] as? String, result: result)
-      } else if call.method == "pending" || call.method == "ack" || call.method == "setDefaultTarget" {
+      } else if call.method == "recordShareTarget" {
+        do {
+          let args = call.arguments as? [String: Any] ?? [:]
+          let target = try JSONDecoder().decode(SharedSendTarget.self, from: JSONSerialization.data(withJSONObject: args))
+          self.donate(target) { error in
+            DispatchQueue.main.async {
+              if let error = error { result(FlutterError(code: "SHARE_SUGGESTION", message: error.localizedDescription, details: nil)) }
+              else { result(nil) }
+            }
+          }
+        } catch { result(FlutterError(code: "SHARE_SUGGESTION", message: "设备信息无效", details: nil)) }
+      } else if call.method == "pending" || call.method == "ack" {
         self.work.async {
           do {
             let store = try SharedInboxStore()
-            if call.method == "setDefaultTarget" {
-              let args = call.arguments as? [String: Any] ?? [:]
-              let target = try (args["target"] as? [String: Any]).map {
-                try JSONDecoder().decode(SharedSendTarget.self, from: JSONSerialization.data(withJSONObject: $0))
-              }
-              try store.setDefaultTarget(target)
-              DispatchQueue.main.async { result(nil) }
-            } else if call.method == "ack" {
+            if call.method == "ack" {
               let args = call.arguments as? [String: Any] ?? [:]
               try store.ack(args["batchId"] as? String ?? "")
               DispatchQueue.main.async { result(nil) }
@@ -38,6 +43,30 @@ final class FileSharing {
       } else { result(FlutterMethodNotImplemented) }
     }
     return bridge
+  }
+  private func donate(_ target: SharedSendTarget, completed: @escaping (Error?) -> Void) {
+    let name = target.name?.isEmpty == false ? target.name! : "设备"
+    let intent = INSendMessageIntent(recipients: nil, outgoingMessageType: .outgoingMessageText,
+        content: nil, speakableGroupName: INSpeakableString(spokenPhrase: name),
+        conversationIdentifier: target.conversationIdentifier, serviceName: nil, sender: nil, attachments: nil)
+    let symbol: String
+    switch target.platform {
+    case "windows": symbol = "desktopcomputer"
+    case "android": symbol = "iphone"
+    case "web": symbol = "globe"
+    default: symbol = "ipad"
+    }
+    let image = UIGraphicsImageRenderer(size: CGSize(width: 360, height: 360)).image { _ in
+      UIColor.secondarySystemBackground.setFill()
+      UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: 360, height: 360)).fill()
+      UIImage(systemName: symbol)?.withTintColor(.label, renderingMode: .alwaysOriginal)
+          .draw(in: CGRect(x: 84, y: 84, width: 192, height: 192))
+    }
+    if let data = image.pngData() { intent.setImage(INImage(imageData: data), forParameterNamed: \.speakableGroupName) }
+    let interaction = INInteraction(intent: intent, response: nil)
+    interaction.identifier = target.conversationIdentifier
+    interaction.direction = .outgoing
+    interaction.donate(completion: completed)
   }
   @discardableResult func handleURL(_ url: URL) -> Bool {
     guard url.scheme?.lowercased() == "globalsend" else { return false }

@@ -12,17 +12,20 @@ class SharedSendTarget {
     required this.serverKey,
     required this.deviceId,
     this.name = '',
+    this.platform = 'other',
   });
-  final String serverKey, deviceId, name;
+  final String serverKey, deviceId, name, platform;
   factory SharedSendTarget.fromMap(Map value) => SharedSendTarget(
     serverKey: value['serverKey'] as String,
     deviceId: value['deviceId'] as String,
     name: value['name'] as String? ?? '',
+    platform: value['platform'] as String? ?? 'other',
   );
   Map<String, String> toJson() => {
     'serverKey': serverKey,
     'deviceId': deviceId,
     'name': name,
+    'platform': platform,
   };
 }
 
@@ -100,12 +103,8 @@ abstract final class FileShareBridge {
   static Future<void> ack(String batchId) =>
       channel.invokeMethod<void>('ack', {'batchId': batchId});
 
-  static Future<void> setDefaultTarget(SharedSendTarget? target) async {
-    if (Platform.isIOS)
-      await channel.invokeMethod<void>('setDefaultTarget', {
-        'target': target?.toJson(),
-      });
-  }
+  static Future<void> recordTarget(SharedSendTarget target) =>
+      channel.invokeMethod<void>('recordShareTarget', target.toJson());
 }
 
 /// Small native drag handle; it never replaces the page's existing gestures.
