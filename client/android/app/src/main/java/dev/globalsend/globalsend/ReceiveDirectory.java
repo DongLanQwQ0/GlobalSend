@@ -89,9 +89,7 @@ final class ReceiveDirectory {
                 case "openExternal":
                     try {
                         Uri document = contentUri(call.argument("location"));
-                        String type = context.getContentResolver().getType(document);
-                        host().startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(document, type == null ? "application/octet-stream" : type)
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+                        AndroidFileOpener.open(host(), document);
                         result.success(null);
                     } catch (Exception error) { fail(result, error); }
                     break;

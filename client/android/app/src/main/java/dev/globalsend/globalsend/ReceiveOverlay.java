@@ -782,9 +782,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         try {
             android.net.Uri uri = receipt.localPath.startsWith("content://") ? android.net.Uri.parse(receipt.localPath) :
                 DockShareProvider.register(context, new java.io.File(receipt.localPath), receipt.fileName);
-            String type = context.getContentResolver().getType(uri);
-            context.startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, type == null ? "application/octet-stream" : type)
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION));
+            AndroidFileOpener.open(context, uri);
         } catch (Exception unavailable) { android.widget.Toast.makeText(context, "无法打开文件", android.widget.Toast.LENGTH_SHORT).show(); }
     }
 
