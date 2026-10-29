@@ -45,6 +45,7 @@ for name in ['Runner/SharedInboxStore.swift','Runner/FileSharing.swift','ShareEx
 info=plistlib.loads((root/'client/ios/ShareExtension/Info.plist').read_bytes())
 assert info['NSExtension']['NSExtensionPointIdentifier']=='com.apple.share-services'
 host_info=plistlib.loads((root/'client/ios/Runner/Info.plist').read_bytes())
+assert host_info['FlutterDeepLinkingEnabled'] is False, 'Native sharing owns the URL; Flutter must not interpret it as a page route'
 assert any('globalsend' in item.get('CFBundleURLSchemes',[]) for item in host_info['CFBundleURLTypes'])
 for name in ['Runner/AppDelegate.swift','Runner/SceneDelegate.swift']:
  assert 'FileSharing.shared.handleURL' in (root/'client/ios'/name).read_text(encoding='utf-8')
