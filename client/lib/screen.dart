@@ -383,7 +383,13 @@ class _SendScreenState extends State<SendScreen>
     }
     if (_nativeSendNavigationSerial != c.nativeSendNavigationSerial) {
       _nativeSendNavigationSerial = c.nativeSendNavigationSerial;
-      if (loggedIn &&
+      if (Platform.isIOS && loggedIn) {
+        settingsOpen = false;
+        page = 1;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+        });
+      } else if (loggedIn &&
           !working &&
           !settingsOpen &&
           _queueRouteVisible &&
@@ -4319,6 +4325,46 @@ class _SendScreenState extends State<SendScreen>
           settingsSection('外观', [const AppearancePicker()]),
           if (Platform.isWindows)
             settingsSection('启动', [const WindowsStartupControl()]),
+          if (Platform.isIOS)
+            settingsSection('系统分享', [
+              UiField(
+                label: '分享后发送到',
+                child: DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    'share-target-${c.profile!.shareTargetDeviceId}',
+                  ),
+                  initialValue: c.profile!.shareTargetDeviceId,
+                  isExpanded: true,
+                  icon: const AppIcon(Icons.arrow_drop_down),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('仅加入待发送')),
+                    for (final peer in c.sendablePeers)
+                      DropdownMenuItem(
+                        value: peer['deviceId'] as String,
+                        child: Text(
+                          '${peer['name']} · ${(peer['deviceId'] as String).substring(0, 6)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    if (c.profile!.shareTargetDeviceId.isNotEmpty &&
+                        !c.sendablePeers.any(
+                          (d) =>
+                              d['deviceId'] == c.profile!.shareTargetDeviceId,
+                        ))
+                      DropdownMenuItem(
+                        value: c.profile!.shareTargetDeviceId,
+                        child: Text('${c.profile!.shareTargetName} · 不在线'),
+                      ),
+                  ],
+                  onChanged: working
+                      ? null
+                      : (id) {
+                          if (id != null) perform(() => c.setShareTarget(id));
+                        },
+                ),
+              ),
+            ]),
           settingsSection('更新', [const UpdateCheckControl()]),
           settingsSection('本机', [
             ValueListenableBuilder<TextEditingValue>(

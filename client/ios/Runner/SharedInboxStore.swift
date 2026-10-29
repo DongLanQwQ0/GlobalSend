@@ -21,18 +21,59 @@ enum SharedInboxGroup {
   }
 }
 
+struct SharedSendTarget: Codable {
+  let serverKey: String
+  let deviceId: String
+  var name: String?
+}
+
+struct ShareLaunchRequest {
+  let batchId: String
+  let target: SharedSendTarget?
+  let text: String?
+  static func parse(_ url: URL) throws -> ShareLaunchRequest? {
+    guard url.scheme?.lowercased() == "globalsend" else { return nil }
+    let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    func query(_ key: String) -> String? { components?.queryItems?.first { $0.name == key }?.value }
+    let sending = url.host == "send"
+    guard sending || url.host == "share",
+          let id = query(sending ? "requestId" : "batchId"), let uuid = UUID(uuidString: id) else {
+      throw CocoaError(.fileReadInvalidFileName)
+    }
+    var target: SharedSendTarget?
+    if let deviceId = query("deviceId"), !deviceId.isEmpty,
+       let serverKey = query("serverKey"), !serverKey.isEmpty {
+      target = SharedSendTarget(serverKey: serverKey, deviceId: deviceId, name: query("deviceName"))
+    }
+    let text = sending ? query("text") : nil
+    if sending && (target == nil || text?.isEmpty != false) { throw CocoaError(.fileReadCorruptFile) }
+    return ShareLaunchRequest(batchId: uuid.uuidString, target: target, text: text)
+  }
+  static func handoffURL(batchId: String) -> URL {
+    var url = URLComponents()
+    url.scheme = "globalsend"; url.host = "share"
+    url.queryItems = [URLQueryItem(name: "batchId", value: batchId)]
+    return url.url!
+  }
+}
+
 struct SharedPayload: Codable {
   let batchId: String
   var paths: [String]
   var texts: [String]
   var temporaryPaths: [String]
   var error: String?
+  var target: SharedSendTarget?
 }
 
 /// Compiled into both targets. The extension commits a manifest only after its
 /// provider-owned temporary files have been copied into this stable container.
 final class SharedInboxStore {
   let root: URL
+  init(root: URL) throws {
+    self.root = root
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  }
   init(extensionOnly: Bool = false) throws {
     let manager = FileManager.default
     let group = Bundle.main.object(forInfoDictionaryKey: "GLOBALSEND_APP_GROUP_ID") as? String ?? "group.dev.globalsend.globalsend"
@@ -81,9 +122,29 @@ final class SharedInboxStore {
   func commit(_ payload: SharedPayload) throws {
     try JSONEncoder().encode(payload).write(to: root.appendingPathComponent(payload.batchId + ".json"), options: .atomic)
   }
+  func defaultTarget() throws -> SharedSendTarget? {
+    let url = root.appendingPathComponent("default-target.json")
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    return try JSONDecoder().decode(SharedSendTarget?.self, from: Data(contentsOf: url))
+  }
+  func setDefaultTarget(_ target: SharedSendTarget?) throws {
+    try JSONEncoder().encode(target).write(to: root.appendingPathComponent("default-target.json"), options: .atomic)
+  }
+  func apply(_ request: ShareLaunchRequest) throws {
+    let manifest = root.appendingPathComponent(request.batchId + ".json")
+    if FileManager.default.fileExists(atPath: manifest.path) {
+      if let target = request.target {
+        var payload = try JSONDecoder().decode(SharedPayload.self, from: Data(contentsOf: manifest))
+        payload.target = target
+        try commit(payload)
+      }
+    } else if let text = request.text {
+      try commit(SharedPayload(batchId: request.batchId, paths: [], texts: [text], temporaryPaths: [], target: request.target))
+    }
+  }
   func pending() throws -> [SharedPayload] {
     try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.creationDateKey])
-      .filter { $0.pathExtension == "json" }
+      .filter { $0.pathExtension == "json" && UUID(uuidString: $0.deletingPathExtension().lastPathComponent) != nil }
       .sorted { ((try? $0.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? .distantPast) < ((try? $1.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? .distantPast) }
       .map { try JSONDecoder().decode(SharedPayload.self, from: Data(contentsOf: $0)) }
   }

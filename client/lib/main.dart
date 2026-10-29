@@ -48,6 +48,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   StreamSubscription<void>? shareSubscription;
   Future<void>? shareWork;
   bool shareAgain = false;
+  String shareTargetSnapshot = '';
   bool windowVisible = true;
   int receiptSerial = 0;
   String receiptPayload = '';
@@ -224,6 +225,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     WidgetsBinding.instance.addObserver(this);
     receiptSerial = controller.receiptSerial;
     controller.addListener(receiptChanged);
+    controller.addListener(syncShareTarget);
     controller.appearance.addListener(appearanceChanged);
     if (Platform.isWindows || Platform.isAndroid) {
       windowSubscription = SystemBridge.windowEvents.listen(windowEvent);
@@ -242,6 +244,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     await controller.init();
     if (!mounted) return;
     if (FileShareBridge.supported) {
+      syncShareTarget();
       shareSubscription ??= FileShareBridge.incoming.listen(
         (_) => unawaited(drainSharedInputs()),
         onError: (Object error) {
@@ -324,8 +327,19 @@ class _GlobalSendAppState extends State<GlobalSendApp>
                 batch.paths,
                 batch.texts,
                 batch.temporaryPaths,
+                preserveTextCopies: batch.target != null,
               );
-              if (stored) await FileShareBridge.ack(batch.batchId);
+              if (stored) {
+                await FileShareBridge.ack(batch.batchId);
+                if (batch.target != null) {
+                  try {
+                    await owner.sendSharedBatch(batch);
+                  } catch (error) {
+                    owner.message = '自动发送未完成：$error';
+                    owner.changed();
+                  }
+                }
+              }
             }
           } while (shareAgain && mounted);
         }().catchError((Object error) {
@@ -336,6 +350,22 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         });
     shareWork = work;
     return work.whenComplete(() => shareWork = null);
+  }
+
+  void syncShareTarget() {
+    if (!Platform.isIOS) return;
+    final target = controller.shareTarget;
+    final snapshot = jsonEncode(target?.toJson());
+    if (snapshot == shareTargetSnapshot) return;
+    shareTargetSnapshot = snapshot;
+    unawaited(
+      FileShareBridge.setDefaultTarget(target).catchError((Object error) {
+        if (mounted) {
+          shareTargetSnapshot = '';
+          controller.message = '分享目标未保存：$error';
+        }
+      }),
+    );
   }
 
   void updateForeground(AppLifecycleState? state) {
@@ -366,12 +396,15 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != controller) {
       oldWidget.controller.removeListener(receiptChanged);
+      oldWidget.controller.removeListener(syncShareTarget);
       oldWidget.controller.appearance.removeListener(appearanceChanged);
       oldWidget.controller.dispose();
       receiptSerial = controller.receiptSerial;
       receiptPayload = '';
       presentationRequest++;
       controller.addListener(receiptChanged);
+      controller.addListener(syncShareTarget);
+      shareTargetSnapshot = '';
       controller.appearance.addListener(appearanceChanged);
       session = SendUiSession();
       initialize();
@@ -384,6 +417,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     shareSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(receiptChanged);
+    controller.removeListener(syncShareTarget);
     controller.appearance.removeListener(appearanceChanged);
     controller.dispose();
     super.dispose();

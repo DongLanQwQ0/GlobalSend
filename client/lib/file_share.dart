@@ -7,6 +7,25 @@ import 'package:flutter/widgets.dart';
 import 'dock_platform.dart';
 import 'ui_tokens.dart';
 
+class SharedSendTarget {
+  const SharedSendTarget({
+    required this.serverKey,
+    required this.deviceId,
+    this.name = '',
+  });
+  final String serverKey, deviceId, name;
+  factory SharedSendTarget.fromMap(Map value) => SharedSendTarget(
+    serverKey: value['serverKey'] as String,
+    deviceId: value['deviceId'] as String,
+    name: value['name'] as String? ?? '',
+  );
+  Map<String, String> toJson() => {
+    'serverKey': serverKey,
+    'deviceId': deviceId,
+    'name': name,
+  };
+}
+
 class SharedBatch {
   SharedBatch({
     required this.batchId,
@@ -14,16 +33,21 @@ class SharedBatch {
     required this.texts,
     required this.temporaryPaths,
     this.error,
+    this.target,
   });
   final String batchId;
   final List<String> paths, texts, temporaryPaths;
   final String? error;
+  final SharedSendTarget? target;
   factory SharedBatch.fromMap(Map<Object?, Object?> value) => SharedBatch(
     batchId: value['batchId'] as String,
     paths: List<String>.from(value['paths'] as List? ?? []),
     texts: List<String>.from(value['texts'] as List? ?? []),
     temporaryPaths: List<String>.from(value['temporaryPaths'] as List? ?? []),
     error: value['error'] as String?,
+    target: value['target'] is Map
+        ? SharedSendTarget.fromMap(value['target'] as Map)
+        : null,
   );
 }
 
@@ -75,6 +99,13 @@ abstract final class FileShareBridge {
 
   static Future<void> ack(String batchId) =>
       channel.invokeMethod<void>('ack', {'batchId': batchId});
+
+  static Future<void> setDefaultTarget(SharedSendTarget? target) async {
+    if (Platform.isIOS)
+      await channel.invokeMethod<void>('setDefaultTarget', {
+        'target': target?.toJson(),
+      });
+  }
 }
 
 /// Small native drag handle; it never replaces the page's existing gestures.

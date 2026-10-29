@@ -12,12 +12,20 @@ void main() {
       'texts': ['https://example.test', 'second'],
       'temporaryPaths': ['a.pdf', 'b.mp4'],
       'error': 'one source unavailable',
+      'target': {
+        'serverKey': 'center-instance',
+        'deviceId': 'uuid-two',
+        'name': '同名设备',
+      },
     });
     expect(batch.batchId, 'batch');
     expect(batch.paths, ['a.pdf', 'b.mp4']);
     expect(batch.texts, ['https://example.test', 'second']);
     expect(batch.temporaryPaths, batch.paths);
     expect(batch.error, 'one source unavailable');
+    expect(batch.target!.deviceId, 'uuid-two');
+    expect(batch.target!.serverKey, 'center-instance');
+    expect(SharedBatch.fromMap({'batchId': 'old'}).target, isNull);
   });
   test('bulk drag channel keeps all file and text items while preserving old single-item calls', () async {
     final calls = <MethodCall>[];

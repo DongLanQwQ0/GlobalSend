@@ -14,11 +14,18 @@ final class FileSharing {
       if call.method == "share" {
         let args = call.arguments as? [String: Any] ?? [:]
         self.share(paths: args["paths"] as? [String] ?? [], text: args["text"] as? String, result: result)
-      } else if call.method == "pending" || call.method == "ack" {
+      } else if call.method == "pending" || call.method == "ack" || call.method == "setDefaultTarget" {
         self.work.async {
           do {
             let store = try SharedInboxStore()
-            if call.method == "ack" {
+            if call.method == "setDefaultTarget" {
+              let args = call.arguments as? [String: Any] ?? [:]
+              let target = try (args["target"] as? [String: Any]).map {
+                try JSONDecoder().decode(SharedSendTarget.self, from: JSONSerialization.data(withJSONObject: $0))
+              }
+              try store.setDefaultTarget(target)
+              DispatchQueue.main.async { result(nil) }
+            } else if call.method == "ack" {
               let args = call.arguments as? [String: Any] ?? [:]
               try store.ack(args["batchId"] as? String ?? "")
               DispatchQueue.main.async { result(nil) }
@@ -31,6 +38,20 @@ final class FileSharing {
       } else { result(FlutterMethodNotImplemented) }
     }
     return bridge
+  }
+  @discardableResult func handleURL(_ url: URL) -> Bool {
+    guard url.scheme?.lowercased() == "globalsend" else { return false }
+    work.async {
+      do {
+        if let request = try ShareLaunchRequest.parse(url) {
+          try SharedInboxStore().apply(request)
+          DispatchQueue.main.async { self.channel?.invokeMethod("pendingChanged", arguments: nil) }
+        }
+      } catch {
+        DispatchQueue.main.async { self.channel?.invokeMethod("importError", arguments: "分享调用参数无效") }
+      }
+    }
+    return true
   }
   func importURLs(_ urls: [URL]) {
     let files = urls.filter { $0.isFileURL }

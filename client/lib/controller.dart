@@ -40,6 +40,7 @@ import 'candidate_routes.dart';
 import 'transfer_operation.dart';
 import 'transfer_route_selection.dart';
 import 'url_intents.dart';
+import 'file_share.dart';
 
 String newId() {
   final r = Random.secure();
@@ -306,6 +307,7 @@ class SendController extends ChangeNotifier {
   bool _sendingStaged = false;
   final Set<String> _nativeDropIds = {};
   final Set<String> _sharedBatchIds = {};
+  final Set<String> _autoSharedBatchIds = {};
   StreamSubscription<Map<String, dynamic>>? _dockSubscription;
   bool nativeDragActive = false, nativeImporting = false;
   bool nativeQueueDragActive = false;
@@ -1273,6 +1275,7 @@ class SendController extends ChangeNotifier {
       'directorySources': Map<String, String>.from(_directorySources),
       'directoryNames': Map<String, String>.from(stagedDirectoryNames),
       'sharedBatchIds': _sharedBatchIds.toList(),
+      'autoSharedBatchIds': _autoSharedBatchIds.toList(),
     });
     final state = <String, dynamic>{
       'sources': Map<String, String>.from(sources),
@@ -2811,6 +2814,9 @@ class SendController extends ChangeNotifier {
     if (!await file.exists()) return;
     final value = jsonDecode(await file.readAsString()) as Map;
     _sharedBatchIds.addAll(List<String>.from(value['sharedBatchIds'] ?? []));
+    _autoSharedBatchIds.addAll(
+      List<String>.from(value['autoSharedBatchIds'] ?? []),
+    );
     _temporarySources.addAll(
       List<String>.from(value['temporarySources'] ?? []),
     );
@@ -2834,14 +2840,17 @@ class SendController extends ChangeNotifier {
     String batchId,
     List<String> paths,
     List<String> texts,
-    List<String> temporaryPaths,
-  ) async {
+    List<String> temporaryPaths, {
+    bool preserveTextCopies = false,
+  }) async {
     final epoch = generation;
     if (!_sharedBatchIds.contains(batchId)) {
       _temporarySources.addAll(temporaryPaths);
       await stageInputs(
         paths.where((path) => !stagedFiles.contains(path)).toList(),
-        texts.where((text) => !stagedTexts.contains(text)).toList(),
+        preserveTextCopies
+            ? texts
+            : texts.where((text) => !stagedTexts.contains(text)).toList(),
       );
       if (disposed || epoch != generation) return false;
       _sharedBatchIds.add(batchId);
@@ -2857,6 +2866,63 @@ class SendController extends ChangeNotifier {
     // Confirmed queued content (not an editor's unconfirmed draft) has its own
     // installation-wide outbox, so sharing also survives before first enrollment.
     return root != null;
+  }
+
+  SharedSendTarget? get shareTarget {
+    final p = profile;
+    if (p == null || p.shareTargetDeviceId.isEmpty) return null;
+    final peer = devices
+        .where((d) => d['deviceId'] == p.shareTargetDeviceId)
+        .firstOrNull;
+    return SharedSendTarget(
+      serverKey: p.key,
+      deviceId: p.shareTargetDeviceId,
+      name: peer?['name'] as String? ?? p.shareTargetName,
+    );
+  }
+
+  Future<void> setShareTarget(String deviceId) async {
+    final p = profile;
+    if (p == null) return;
+    final peer = sendablePeers
+        .where((d) => d['deviceId'] == deviceId)
+        .firstOrNull;
+    if (deviceId.isNotEmpty && peer == null) throw StateError('请选择组内设备');
+    p.shareTargetDeviceId = deviceId;
+    p.shareTargetName = peer?['name'] as String? ?? '';
+    await save();
+    await FileShareBridge.setDefaultTarget(shareTarget);
+    changed();
+  }
+
+  Future<void> sendSharedBatch(SharedBatch batch) async {
+    final target = batch.target;
+    if (target == null || !_autoSharedBatchIds.add(batch.batchId)) return;
+    // A durable attempt marker prevents repeated scene callbacks or launches
+    // from sending the same request twice. A failed attempt remains in outbox.
+    await save();
+    final p = profile, a = api, epoch = generation;
+    if (p == null ||
+        a == null ||
+        a.token.isEmpty ||
+        p.key != target.serverKey) {
+      throw StateError('分享内容已保留，请连接原中心后发送');
+    }
+    if (target.deviceId == p.deviceId) throw StateError('不能发送给本机');
+    if (!sendablePeers.any((d) => d['deviceId'] == target.deviceId)) {
+      await reconcile().timeout(const Duration(seconds: 4));
+      _requireSession(epoch, a, p);
+    }
+    if (!sendablePeers.any((d) => d['deviceId'] == target.deviceId)) {
+      throw StateError('目标设备不可用，分享内容已保留在待发送');
+    }
+    await sendStagedToMany(
+      [target.deviceId],
+      onlyFiles: batch.paths,
+      onlyTexts: batch.texts,
+      expectedServerKey: target.serverKey,
+    );
+    await save();
   }
 
   Future<void> stageClipboard() async {
@@ -3165,12 +3231,24 @@ class SendController extends ChangeNotifier {
     changed();
   }
 
-  Future<void> sendStagedToMany(List<String> targets) async {
-    await _receiveDirectoryMigration?.future;
+  Future<void> sendStagedToMany(
+    List<String> targets, {
+    List<String>? onlyFiles,
+    List<String>? onlyTexts,
+    String? expectedServerKey,
+  }) async {
+    final migration = _receiveDirectoryMigration;
+    if (migration != null) await migration.future;
+    if (expectedServerKey != null && profile?.key != expectedServerKey)
+      throw StateError('中心已切换，分享内容已保留');
     if (_sendingStaged) throw StateError('待发区正在发送');
     final epoch = generation, a = api!, p = profile!;
-    final files = List<String>.from(stagedFiles);
-    final texts = List<String>.from(stagedTexts);
+    final files = onlyFiles == null
+        ? List<String>.from(stagedFiles)
+        : onlyFiles.where(stagedFiles.contains).toSet().toList();
+    final texts = onlyTexts == null
+        ? List<String>.from(stagedTexts)
+        : onlyTexts.where(stagedTexts.contains).toList();
     final recipients = targets.toSet().toList();
     if (recipients.isEmpty || (files.isEmpty && texts.isEmpty)) return;
     if (!listEquals(files, _stagedBatchFiles) ||

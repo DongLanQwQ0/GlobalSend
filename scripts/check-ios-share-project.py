@@ -44,6 +44,10 @@ for name in ['Runner/SharedInboxStore.swift','Runner/FileSharing.swift','ShareEx
  assert (root/'client/ios'/name).is_file()
 info=plistlib.loads((root/'client/ios/ShareExtension/Info.plist').read_bytes())
 assert info['NSExtension']['NSExtensionPointIdentifier']=='com.apple.share-services'
+host_info=plistlib.loads((root/'client/ios/Runner/Info.plist').read_bytes())
+assert any('globalsend' in item.get('CFBundleURLSchemes',[]) for item in host_info['CFBundleURLTypes'])
+for name in ['Runner/AppDelegate.swift','Runner/SceneDelegate.swift']:
+ assert 'FileSharing.shared.handleURL' in (root/'client/ios'/name).read_text(encoding='utf-8')
 assert 'UIApplication.shared' not in (root/'client/ios/ShareExtension/ShareViewController.swift').read_text(encoding='utf-8')
 assert 'Flutter' not in (root/'client/ios/ShareExtension/ShareViewController.swift').read_text(encoding='utf-8')
 print('Host dependency, extension target/embed, three matching entitlement configurations, sources and plists: OK')

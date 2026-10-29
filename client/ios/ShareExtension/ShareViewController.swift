@@ -1,7 +1,7 @@
 import UIKit
 import UniformTypeIdentifiers
 
-/// A standard share extension. It queues content, never privately launches the app.
+/// Commit the batch before the LocalSend-style responder-chain handoff.
 final class ShareViewController: UIViewController {
   private let label = UILabel()
   private let done = UIButton(type: .system)
@@ -56,15 +56,31 @@ final class ShareViewController: UIViewController {
         if let error = error { payload.error = error.localizedDescription }
       }
       payload.temporaryPaths = payload.paths
+      payload.target = try store.defaultTarget()
       try store.commit(payload)
       DispatchQueue.main.async {
         self.finished = true
         self.label.text = payload.paths.isEmpty && payload.texts.isEmpty ? (payload.error ?? "没有可分享的内容") : "已加入待发送\n打开 GlobalSend 即可发送"
         self.done.setTitle("完成", for: .normal)
+        if !payload.paths.isEmpty || !payload.texts.isEmpty { self.openHost(batchId: id) }
       }
     } catch {
       DispatchQueue.main.async { self.label.text = error.localizedDescription; self.done.setTitle("关闭", for: .normal) }
     }
+  }
+  private func openHost(batchId: String) {
+    let url = ShareLaunchRequest.handoffURL(batchId: batchId)
+    var responder: UIResponder? = self
+    while let current = responder {
+      if let application = current as? UIApplication {
+        application.open(url, options: [:]) { opened in
+          if opened { self.extensionContext?.completeRequest(returningItems: nil) }
+        }
+        return
+      }
+      responder = current.next
+    }
+    // The durable batch remains available if this iPadOS version denies opening.
   }
   private static func load(_ provider: NSItemProvider, store: SharedInboxStore, folder: URL, completed: @escaping (String?, String?, Error?) -> Void) {
     if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {

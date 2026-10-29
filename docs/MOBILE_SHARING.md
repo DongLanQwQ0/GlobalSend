@@ -5,7 +5,7 @@
 - 在照片、视频、文件或浏览器的系统分享菜单中选择 **GlobalSend**。打开应用后，内容会进入待发送区。
 - 接收/已发送/文件库的“分享”调用系统分享面板，原文件不转换、不移动。
 - “全部拖拽”可一次带出多个文件和文本。Android 使用系统 ClipData；iPad 使用多个 NSItemProvider。目标应用能接收哪些类型，由目标应用决定。
-- iPad 分享扩展显示“已加入待发送”后点完成，再打开 GlobalSend。扩展不使用私有方法强制唤起主应用。
+- iPad 52版在保存分享内容后，使用与LocalSend相同的响应链URL唤起方式打开GlobalSend，自动显示待发送。系统拒绝唤起时，保留原来的手动打开入口和已保存的批次。
 
 ## iPad 手动签名
 
@@ -44,6 +44,27 @@ iloader 2.4.0/2.4.1（分别使用isideload 0.5.0/0.5.2）将主应用标识改�
 主应用的“用其他应用打开/Open In”独立支持普通文件导入，主应用未取得组容器时仍使用自己的接收队列。未修复的48版IPA仍需原签名组名与运行配置完全匹配。
 
 本项目不收集 Apple 账号、私钥或签名材料。实际重签和 iPad 安装验收由设备上的签名结果决定。
+
+## 分享后直接发送（iOS / iPadOS 52版）
+
+默认只打开应用并加入待发送，不自行选择设备。在 **设置 → 系统分享 → 分享后发送到** 选择一次目标设备后，后续系统分享会打开GlobalSend，并自动将这一批分享内容发给该设备，无需再点设备卡片。切回“仅加入待发送”即可取消默认目标。
+
+目标记录使用 **中心标识 + deviceId**，名称仅展示。`deviceId`由中心注册时分配UUID，同一身份改名、换IP和切组不改变ID；重新注册身份会获得新ID。多组内重复出现的同一ID仍是同一设备。目标暂不可用或已换到其他中心时，保留本批待发送并显示失败，不改发同名设备，也不捎带原有草稿。相同分享批次只自动尝试一次，失败后可手动重试。
+
+### 定向调用接口
+
+```text
+globalsend://send?requestId=<UUID>&serverKey=<中心标识>&deviceId=<设备ID>&text=<URL编码的正文>
+```
+
+- `requestId`：每次新调用生成一个UUID。同一请求重复到达不会重复发送。
+- `serverKey`：客户端`ServerProfile.key`，即规范化中心地址与服务实例ID以换行连接后计算的SHA-256十六进制值。不包含组密码或登录token。
+- `deviceId`：中心`GET /devices`返回的唯一ID，不是设备名或IP。目标仍须属于当前中心可发送的组内设备。
+- `text`：完整正文，按URL查询参数编码；支持换行、中文、`+`和`&`。调用只发送该正文，不发送待发区其他内容。
+
+分享附件通过扩展保存到共享收件箱；唤起入口为`globalsend://share?batchId=<UUID>`。扩展批次可携带`target: {serverKey, deviceId, name}`指定收件人，文件不塞入URL，不使用外部传入的磁盘路径读取文件。
+
+此唤起方式参考[LocalSend分享扩展](https://github.com/localsend/localsend/blob/main/app/ios/ShareExtension/ShareViewController.swift)使用的[share_handler响应链实现](https://github.com/ShoutSocial/share_handler/blob/main/share_handler_ios/ios/Models/Classes/ShareHandlerIosViewController.swift)。保存成功后再请求唤起；不同iPadOS版本和来源应用的实际前台切换仍需实机验收。它不自动安装、不自动更换账号。
 
 ## 队列与文件生命周期
 

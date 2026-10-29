@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/controller.dart';
+import 'package:globalsend/file_share.dart';
 import 'package:globalsend/local_ip_addresses.dart';
 
 import 'saved_files_test.dart' show fixtureDirectory;
@@ -72,5 +73,29 @@ void main() {
     await File(path).writeAsString('ready');
     expect(await c.stageSharedInputs('retry', [path], [], []), isTrue);
     expect(c.stagedFiles, [path]);
+  });
+  test('directed call before connection keeps durable content and one attempt marker', () async {
+    final root = await fixtureDirectory();
+    final c = SendController(documentsDirectory: () async => root)..root = root;
+    addTearDown(c.dispose);
+    final batch = SharedBatch(
+      batchId: 'directed',
+      paths: [],
+      texts: ['before login'],
+      temporaryPaths: [],
+      target: const SharedSendTarget(
+        serverKey: 'center',
+        deviceId: 'recipient',
+      ),
+    );
+    await c.stageSharedInputs(batch.batchId, batch.paths, batch.texts, []);
+    await expectLater(c.sendSharedBatch(batch), throwsStateError);
+    final value = jsonDecode(
+      await File('${root.path}/outbox.json').readAsString(),
+    ) as Map;
+    expect(value['texts'], ['before login']);
+    expect(value['autoSharedBatchIds'], ['directed']);
+    await c.sendSharedBatch(batch);
+    expect(c.stagedTexts, ['before login']);
   });
 }
