@@ -41,7 +41,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private final Actions actions;
     private final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
     private final Handler main = new Handler(Looper.getMainLooper());
-    private FrameLayout root;
+    private FrameLayout root, surface;
     private LinearLayout row, expanded;
     private HorizontalScrollView scroll;
     private TextView count;
@@ -65,6 +65,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private int preferredWidth, preferredHeight;
     private Rect lastBounds;
     private android.animation.ValueAnimator geometry;
+    // Screen-space visual bounds are independent of WindowManager relayouts.
+    // During a morph the OS window is the bounded union of the two endpoints;
+    // only the child surface moves/resizes on the rendering clock.
+    private Rect visualBounds;
+    private float expansion = 1;
+    private boolean surfaceAnchored;
     private Runnable dragExpand;
     private int importing;
     private android.os.FileObserver appearanceChanges;
@@ -87,6 +93,20 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         windows = context.getSystemService(WindowManager.class);
         shelf = new TemporaryShelf(context, this::shelfChanged);
         current = new java.lang.ref.WeakReference<>(this);
+        main.post(this::restoreIfEnabled);
+    }
+
+    static void restoreShelf() {
+        ReceiveOverlay overlay=current.get();if(overlay!=null)overlay.restoreIfEnabled();
+    }
+    private void restoreIfEnabled() {
+        if(root!=null || !context.getSharedPreferences("received-popup-settings",Context.MODE_PRIVATE).getBoolean("enabled",true) ||
+            !android.provider.Settings.canDrawOverlays(context))return;
+        shelfVisible=!shelf.items.isEmpty();create(true);render();
+        View appearing=root;
+        appearing.post(() -> {
+            if(root==appearing)appearing.animate().alpha(1).translationX(0).scaleX(1).scaleY(1).setDuration(180).start();
+        });
     }
 
     static void openShelf() {
@@ -136,8 +156,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void reflowForBounds(Rect next) {
         if(lastBounds.equals(next)) { renderKeepingScroll(); return; }
         Rect previous=lastBounds;
-        int oldX=layout.x, oldY=layout.y, oldWidth=layout.width, oldHeight=layout.height;
         stopGeometry(); cancelPendingOpen();
+        int oldX=layout.x, oldY=layout.y, oldWidth=layout.width, oldHeight=layout.height;
         if(dragExpand!=null)main.removeCallbacks(dragExpand);
         dragExpand=null;
         expandedWidth=Math.min(preferredWidth,Math.max(1,next.width()-dp(16)));
@@ -226,6 +246,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void create() {
+        create(false);
+    }
+    private void create(boolean initiallyCollapsed) {
         appearance = ReceiveAppearance.load(context);
         rootAdded = false;
         root = new FrameLayout(context) {
@@ -270,15 +293,16 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             }
         });
         contentGestures.setIsLongpressEnabled(false);
-        root.setBackground(shape(glass(appearance.surface,0x99), 18));
-        root.setClipToOutline(true);
-        root.setElevation(dp(8));
+        root.setBackground(shape(0, 0));
+        surface = new FrameLayout(context);
+        surface.setClipToOutline(true);
+        root.addView(surface);
         root.setAlpha(0); root.setTranslationX(dp(20));
         root.setScaleX(.96f); root.setScaleY(.96f);
         expanded = new LinearLayout(context);
         expanded.setOrientation(LinearLayout.VERTICAL);
         expanded.setPadding(dp(6), dp(2), dp(6), dp(4));
-        root.addView(expanded);
+        surface.addView(expanded);
         header = new MoveHeader(context);
         header.setGravity(Gravity.CENTER_VERTICAL);
         count = control("", "接收", () -> { shelfVisible = false; render(); });
@@ -311,7 +335,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         handle.setOnClickListener(view -> setCollapsed(false));
         installEdgeMove(handle);
         handle.setVisibility(View.GONE);
-        root.addView(handle, new FrameLayout.LayoutParams(dp(18), dp(72), Gravity.CENTER_VERTICAL | Gravity.RIGHT));
+        surface.addView(handle, new FrameLayout.LayoutParams(dp(18), dp(72), Gravity.CENTER_VERTICAL | Gravity.RIGHT));
         root.setOnDragListener((view, event) -> receiveDrop(event));
         layout = new WindowManager.LayoutParams(dp(244), dp(156),
             Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
@@ -327,9 +351,27 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         layout.height = Math.min(layout.height, bounds.height() - dp(16));
         layout.x = bounds.right - layout.width - dp(8);
         layout.y = bounds.bottom - layout.height - dp(12);
-        expandedWidth = layout.width; expandedHeight = layout.height; collapsed = false;
+        expandedWidth = layout.width; expandedHeight = layout.height; collapsed = initiallyCollapsed;
+        if(initiallyCollapsed) {layout.width=dp(18);layout.height=dp(72);layout.x=bounds.right-layout.width;}
+        visualBounds = new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
+        expansion=initiallyCollapsed?0:1;surfaceAnchored=false;
+        surface.setLayoutParams(new FrameLayout.LayoutParams(layout.width,layout.height));
+        styleSurface();
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight));
+        expanded.setVisibility(initiallyCollapsed?View.GONE:View.VISIBLE);
+        handle.setVisibility(initiallyCollapsed?View.VISIBLE:View.GONE);styleHandle();
         windows.addView(root, layout);
+        final View owner=root;
+        root.getViewTreeObserver().addOnPreDrawListener(() -> {
+            if(root==owner && surfaceAnchored) {
+                positionSurface();
+                // Wait for the union surface to be drawn before starting the
+                // child animation. There is no per-frame OS move/resize race.
+                if(geometry!=null && !geometry.isStarted() && root.getWidth()==layout.width && root.getHeight()==layout.height)
+                    geometry.start();
+            }
+            return true;
+        });
         rootAdded = true;
         context.registerComponentCallbacks(configurationChanges);
         appearanceChanges = new android.os.FileObserver(context.getFilesDir().getPath(), android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
@@ -342,7 +384,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
 
     private void render() {
         appearance = ReceiveAppearance.load(context);
-        root.setBackground(shape(collapsed ? 0 : glass(appearance.surface,0x99), 18));
+        if(geometry==null) {
+            visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
+            surface.setLayoutParams(new FrameLayout.LayoutParams(layout.width,layout.height));
+        }
+        styleSurface();
         for (int i=0;i<header.getChildCount();i++) {
             View child = header.getChildAt(i);
             if (child instanceof TextView) ((TextView)child).setTextColor(appearance.accent);
@@ -393,9 +439,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             card.addView(tint,new FrameLayout.LayoutParams(-1,-1));
             TextView remove = control("×", "移除", () -> remove(receipt));
             remove.setTag("remove-item");
-            remove.setBackground(shape(glass(appearance.surface,0xb3), 12));
-            FrameLayout.LayoutParams removeSize=new FrameLayout.LayoutParams(dp(28),dp(28),Gravity.TOP|Gravity.RIGHT);
-            removeSize.topMargin=dp(4);removeSize.rightMargin=dp(4);
+            remove.setTextSize(24);
+            // A larger transparent target, without another rounded tile on top.
+            remove.setShadowLayer(dp(1),0,0,glass(appearance.surface,0xb3));
+            FrameLayout.LayoutParams removeSize=new FrameLayout.LayoutParams(dp(36),dp(36),Gravity.TOP|Gravity.RIGHT);
+            removeSize.topMargin=dp(2);removeSize.rightMargin=dp(2);
             card.addView(remove,removeSize);
             View deleting = icon(android.R.drawable.ic_menu_delete,"3秒后移除，轻点取消");
             deleting.setTag("pending-removal"); deleting.setVisibility(pending ? View.VISIBLE : View.GONE);
@@ -561,12 +609,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     dragExpand = () -> { dragExpand = null; setCollapsed(false); };
                     main.postDelayed(dragExpand, 250);
                 }
-                root.setBackground(shape(glass(appearance.soft,0x99), 18)); return true;
+                surface.setBackground(shape(glass(appearance.soft,0x99), 18)); return true;
             case DragEvent.ACTION_DRAG_EXITED:
             case DragEvent.ACTION_DRAG_ENDED:
                 if (dragExpand != null) main.removeCallbacks(dragExpand);
                 dragExpand = null;
-                if (root != null) root.setBackground(shape(collapsed ? 0 : glass(appearance.surface,0x99), 18));
+                if (root != null) styleSurface();
                 return true;
             case DragEvent.ACTION_DROP:
                 if (dragExpand != null) main.removeCallbacks(dragExpand);
@@ -594,6 +642,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (!receipt.id.startsWith("shelf:")) { actions.copy(receipt.id); return; }
         context.getSystemService(android.content.ClipboardManager.class)
             .setPrimaryClip(android.content.ClipData.newPlainText("GlobalSend", receipt.text));
+        android.widget.Toast.makeText(context,"已复制",android.widget.Toast.LENGTH_SHORT).show();
     }
     private void open(ReceiveNotifications.Receipt receipt) {
         if (!receipt.id.startsWith("shelf:")) { actions.open(receipt.id); return; }
@@ -623,6 +672,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         @Override public boolean onInterceptTouchEvent(MotionEvent event) {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
+                    stopGeometry();
                     initialTouchX = event.getRawX(); initialTouchY = event.getRawY();
                     initialWindowX = layout.x; initialWindowY = layout.y;
                     tracking = true; moving = false;
@@ -670,6 +720,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             Rect bounds = availableBounds();
             layout.x = clamp(initialWindowX + Math.round(event.getRawX() - initialTouchX), bounds.left, bounds.right - layout.width);
             layout.y = clamp(initialWindowY + Math.round(event.getRawY() - initialTouchY), bounds.top, bounds.bottom - layout.height);
+            visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
             windows.updateViewLayout(root, layout);
         }
     }
@@ -692,6 +743,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 } else { layout.x = startX + dx; layout.y = startY + dy; }
                 layout.x = clamp(layout.x, bounds.left, bounds.right - layout.width);
                 layout.y = clamp(layout.y, bounds.top, bounds.bottom - layout.height);
+                visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
                 windows.updateViewLayout(root, layout);
                 if (resize) {
                     preferredWidth=expandedWidth=layout.width; preferredHeight=expandedHeight=layout.height;
@@ -726,6 +778,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 if ((edgeRight ? -dx : dx) > dp(28)) { pulledOpen[0]=true;setCollapsed(false);return true; }
                 Rect bounds = availableBounds();
                 layout.y = clamp(startY + dy, bounds.top, bounds.bottom - layout.height);
+                visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
                 windows.updateViewLayout(root, layout); return true;
             }
             if(event.getActionMasked()==MotionEvent.ACTION_UP && pulledOpen[0]) {pulledOpen[0]=false;return true;}
@@ -744,28 +797,35 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 && layout.height == (value ? dp(72) : expandedHeight)) {
             finishGeometry(value); return;
         }
-        stopGeometry();
+        // Reverse from the currently drawn rectangle, not the OS envelope or
+        // the previous target. Cancelled completions cannot win a later morph.
+        Rect initial=geometry==null?new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height):new Rect(visualBounds);
+        cancelGeometry();
         Rect bounds = availableBounds();
         if (value && !collapsed) {
-            edgeRight = layout.x + layout.width / 2 >= bounds.centerX();
+            edgeRight = initial.centerX() >= bounds.centerX();
         }
         collapsed = value;
         styleHandle();
         int width = value ? dp(18) : expandedWidth, height = value ? dp(72) : expandedHeight;
         int x = edgeRight ? bounds.right - width : bounds.left;
-        int y = clamp(layout.y, bounds.top, bounds.bottom - height);
-        if (layout.width == width && layout.height == height && layout.x == x && layout.y == y) {
+        int y = clamp(initial.top, bounds.top, bounds.bottom - height);
+        Rect target=new Rect(x,y,x+width,y+height);
+        if (initial.equals(target)) {
+            visualBounds=target;commitVisualWindow();
             finishGeometry(value); return;
         }
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
             Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
         handle.setLayoutParams(new FrameLayout.LayoutParams(dp(18), dp(72),
             Gravity.CENTER_VERTICAL | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
-        float initialPanelAlpha = expanded.getVisibility() == View.VISIBLE ? expanded.getAlpha() : 0;
-        float initialHandleAlpha = handle.getVisibility() == View.VISIBLE ? handle.getAlpha() : 0;
+        float initialExpansion=expansion;
         expanded.setVisibility(View.VISIBLE); handle.setVisibility(View.VISIBLE);
         handle.setEnabled(false); handle.setClickable(false);
-        int initialX = layout.x, initialY = layout.y, initialWidth = layout.width, initialHeight = layout.height;
+        root.animate().cancel();root.setAlpha(1);root.setTranslationX(0);root.setScaleX(1);root.setScaleY(1);
+        Rect envelope=new Rect(initial);envelope.union(target);
+        layout.x=envelope.left;layout.y=envelope.top;layout.width=envelope.width();layout.height=envelope.height();
+        visualBounds=initial;surfaceAnchored=true;
         View owner = root;
         android.animation.ValueAnimator moving = android.animation.ValueAnimator.ofFloat(0, 1);
         geometry = moving;
@@ -773,37 +833,58 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         moving.addUpdateListener(animation -> {
             if (root != owner || geometry != moving) return;
             float t = (Float)animation.getAnimatedValue();
-            layout.x = Math.round(initialX + (x - initialX) * t); layout.y = Math.round(initialY + (y - initialY) * t);
-            layout.width = Math.round(initialWidth + (width - initialWidth) * t); layout.height = Math.round(initialHeight + (height - initialHeight) * t);
-            float panelProgress = t;
-            float handleProgress = t;
-            expanded.setAlpha(initialPanelAlpha + ((value ? 0 : 1) - initialPanelAlpha) * panelProgress);
-            handle.setAlpha(initialHandleAlpha + ((value ? 1 : 0) - initialHandleAlpha) * handleProgress);
-            root.setBackground(shape(glass(appearance.surface,Math.round(0x99*(value ? 1-t : t))),18));
-            root.setElevation(dp(8) + (dp(4) - dp(8)) * (value ? t : 1 - t));
-            windows.updateViewLayout(root, layout);
+            visualBounds=new Rect(Math.round(initial.left+(target.left-initial.left)*t),
+                Math.round(initial.top+(target.top-initial.top)*t),
+                Math.round(initial.right+(target.right-initial.right)*t),
+                Math.round(initial.bottom+(target.bottom-initial.bottom)*t));
+            expansion=initialExpansion+((value?0:1)-initialExpansion)*t;
+            surface.setLayoutParams(new FrameLayout.LayoutParams(visualBounds.width(),visualBounds.height()));
+            expanded.setAlpha(expansion);handle.setAlpha(1-expansion);
+            styleSurface();positionSurface();
         });
         moving.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
                 if (root != owner || geometry != moving) return;
-                geometry = null; finishGeometry(value);
+                geometry = null; visualBounds=target;commitVisualWindow();finishGeometry(value);
             }
         });
-        updateLabels(); moving.start();
+        windows.updateViewLayout(root,layout);
+        surface.setLayoutParams(new FrameLayout.LayoutParams(initial.width(),initial.height()));
+        positionSurface();updateLabels();root.requestLayout();root.invalidate();
     }
 
-    private void stopGeometry() {
+    private void cancelGeometry() {
         android.animation.ValueAnimator previous = geometry;
         geometry = null;
         if (previous != null) previous.cancel();
     }
+    private void stopGeometry() {
+        if(geometry==null)return;
+        cancelGeometry();commitVisualWindow();
+    }
+    private void commitVisualWindow() {
+        layout.x=visualBounds.left;layout.y=visualBounds.top;
+        layout.width=visualBounds.width();layout.height=visualBounds.height();
+        surface.setLayoutParams(new FrameLayout.LayoutParams(layout.width,layout.height));
+        surfaceAnchored=true;windows.updateViewLayout(root,layout);positionSurface();
+    }
+    private void positionSurface() {
+        int[] origin=new int[2];root.getLocationOnScreen(origin);
+        surface.setTranslationX(visualBounds.left-origin[0]);surface.setTranslationY(visualBounds.top-origin[1]);
+        if(geometry==null && origin[0]==visualBounds.left && origin[1]==visualBounds.top &&
+            root.getWidth()==visualBounds.width() && root.getHeight()==visualBounds.height())surfaceAnchored=false;
+    }
+    private void styleSurface() {
+        surface.setBackground(shape(glass(appearance.surface,Math.round(0x99*expansion)),Math.round(6+12*expansion)));
+        surface.setElevation(dp(4)+dp(4)*expansion);
+    }
     private void finishGeometry(boolean small) {
+        expansion=small?0:1;
         expanded.setVisibility(small ? View.GONE : View.VISIBLE);
         handle.setVisibility(small ? View.VISIBLE : View.GONE);
         expanded.setAlpha(1); handle.setAlpha(1);
         handle.setEnabled(true); handle.setClickable(true);
-        root.setBackground(shape(small ? 0 : glass(appearance.surface,0x99),18));
-        root.setElevation(dp(small ? 4 : 8));
+        styleSurface();
     }
 
     private View icon(int drawable, String description) {
@@ -840,17 +921,25 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             if (dragExpand != null) main.removeCallbacks(dragExpand);
             dragExpand = null;
             final View leaving = root;
+            final FrameLayout leavingSurface=surface;
+            final Rect leavingBounds=new Rect(visualBounds);
             final WindowManager.LayoutParams leavingLayout = layout;
             final boolean registered = rootAdded;
-            root = null; expanded = null; row = null; scroll = null; count = null; layout = null;
+            root = null; surface=null; expanded = null; row = null; scroll = null; count = null; layout = null;
             header = null; handle = null; resize = null; shelfTab = null; contentGestures=null;
             countGroup=null;shelfGroup=null;countIcon=null;shelfIcon=null;
             rootAdded = false;
             leaving.animate().cancel();
+            leaving.setScaleX(1);leaving.setScaleY(1);
             if (registered && leaving.isAttachedToWindow()) {
+                leaving.getViewTreeObserver().addOnPreDrawListener(() -> {
+                    int[] origin=new int[2];leaving.getLocationOnScreen(origin);
+                    leavingSurface.setTranslationX(leavingBounds.left-origin[0]+leaving.getTranslationX());
+                    leavingSurface.setTranslationY(leavingBounds.top-origin[1]);return true;
+                });
                 leavingLayout.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
                 windows.updateViewLayout(leaving, leavingLayout);
-                leaving.animate().alpha(0).translationX(dp(20)).scaleX(.96f).scaleY(.96f)
+                leaving.animate().alpha(0).translationX(dp(20))
                     .setDuration(150).start();
                 // Cleanup must not depend on ViewPropertyAnimator's end action:
                 // cancellation or a late first-frame callback can suppress it.

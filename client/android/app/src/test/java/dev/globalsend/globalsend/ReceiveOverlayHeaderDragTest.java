@@ -39,6 +39,11 @@ public class ReceiveOverlayHeaderDragTest {
     }
     private void draw(View root) {
         WindowManager.LayoutParams p = (WindowManager.LayoutParams)root.getLayoutParams();
+        // Deliver the OS frame coordinates: the shadow's updateViewLayout
+        // updates sizes but otherwise retains its original attach-info origin.
+        Object attached=org.robolectric.util.ReflectionHelpers.getField(root,"mAttachInfo");
+        org.robolectric.util.ReflectionHelpers.setField(attached,"mWindowLeft",p.x);
+        org.robolectric.util.ReflectionHelpers.setField(attached,"mWindowTop",p.y);
         root.measure(View.MeasureSpec.makeMeasureSpec(p.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(p.height, View.MeasureSpec.EXACTLY));
         root.layout(0, 0, p.width, p.height);
     }
@@ -116,8 +121,13 @@ public class ReceiveOverlayHeaderDragTest {
         capture(overlay,"expanded-before");
         overlay.setCollapsed(true);
         advanceGeometry(overlay,80);
-        assertTrue("intermediate width="+window.width,window.width < expandedWidth && window.width > Math.round(18*density));
-        assertTrue("window moves right while shrinking",window.x > expandedX);
+        android.graphics.Rect visual=(android.graphics.Rect)field(overlay,"visualBounds");
+        assertTrue("intermediate visible width="+visual.width(),visual.width() < expandedWidth && visual.width() > Math.round(18*density));
+        assertTrue("surface moves right while shrinking",visual.left > expandedX);
+        assertEquals("OS window stays at the union origin throughout animation",expandedX,window.x);
+        int envelopeWidth=window.width;
+        advanceGeometry(overlay,120);
+        assertEquals("no per-frame OS resize",envelopeWidth,window.width);
         draw(root);
         assertEquals("content moves with the window, not pinned to screen edge",0,panel.getLeft());
         assertTrue(panel.getAlpha() < 1);
@@ -137,7 +147,9 @@ public class ReceiveOverlayHeaderDragTest {
         capture(overlay,"collapsed");
         handle.performClick();
         advanceGeometry(overlay,80);
-        assertTrue(window.width > Math.round(18*density) && window.width < expandedWidth);
+        visual=(android.graphics.Rect)field(overlay,"visualBounds");
+        assertTrue(visual.width() > Math.round(18*density) && visual.width() < expandedWidth);
+        assertTrue("expansion simultaneously moves left",visual.left < window.x+window.width-Math.round(18*density));
         assertTrue(handle.getAlpha() < 1);
         assertEquals(expandedWidth,panel.getLayoutParams().width);
         capture(overlay,"expand-intermediate");
@@ -159,6 +171,10 @@ public class ReceiveOverlayHeaderDragTest {
         View card=row.getChildAt(0);
         View remove=card.findViewWithTag("remove-item");
         assertEquals("移除",remove.getContentDescription());
+        assertNull("remove has no background tile",remove.getBackground());
+        assertEquals(Math.round(36*card.getResources().getDisplayMetrics().density),remove.getLayoutParams().width);
+        ((android.widget.FrameLayout)card).getChildAt(((android.widget.FrameLayout)card).getChildCount()-1).performClick();
+        assertEquals("已复制",org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
         remove.performClick();
         assertEquals(1,shelf.items.size());
         assertEquals("清空当前列表",row.getChildAt(row.getChildCount()-1).getContentDescription());
@@ -218,10 +234,57 @@ public class ReceiveOverlayHeaderDragTest {
         overlay.hide();
     }
     private void advanceGeometry(ReceiveOverlay overlay,long millis) throws Exception {
+        View root=(View)field(overlay,"root");draw(root);root.getViewTreeObserver().dispatchOnPreDraw();
         android.animation.ValueAnimator animator=(android.animation.ValueAnimator)field(overlay,"geometry");
         assertNotNull("transition is active",animator);
         animator.setCurrentPlayTime(millis);
         if(millis>=animator.getDuration())animator.end();
+        draw(root);root.getViewTreeObserver().dispatchOnPreDraw();
+    }
+    @Test public void bothEdgesMoveAndShrinkOnEveryPhaseOfTheSameClock() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        View root=(View)field(overlay,"root");
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        android.graphics.Rect bounds=(android.graphics.Rect)field(overlay,"lastBounds");
+        for(boolean right:new boolean[]{false,true}) {
+            window.x=right?bounds.right-window.width-8:bounds.left+8;
+            java.lang.reflect.Method render=ReceiveOverlay.class.getDeclaredMethod("render");render.setAccessible(true);render.invoke(overlay);
+            draw(root);
+            int originalWidth=window.width;float originalCenter=window.x+window.width/2f;
+            float targetCenter=right?bounds.right-9:bounds.left+9;
+            overlay.setCollapsed(true);int envelopeWidth=window.width;
+            for(long time:new long[]{24,80,160}) {
+                advanceGeometry(overlay,time);
+                android.graphics.Rect visible=(android.graphics.Rect)field(overlay,"visualBounds");
+                float shrinking=(originalWidth-visible.width())/(float)(originalWidth-18);
+                float moving=(visible.exactCenterX()-originalCenter)/(targetCenter-originalCenter);
+                assertTrue("starts shrinking immediately on "+right,shrinking>0 && shrinking<1);
+                assertEquals("movement and size share progress on "+right,shrinking,moving,.035f);
+                assertEquals(envelopeWidth,window.width);
+            }
+            capture(overlay,right?"right-simultaneous":"left-simultaneous");
+            advanceGeometry(overlay,240);
+            overlay.setCollapsed(false);advanceGeometry(overlay,24);
+            android.graphics.Rect visible=(android.graphics.Rect)field(overlay,"visualBounds");
+            assertTrue(visible.width()>18 && visible.width()<originalWidth);
+            assertTrue(right?visible.exactCenterX()<targetCenter:visible.exactCenterX()>targetCenter);
+            advanceGeometry(overlay,240);
+        }
+        overlay.hide();
+    }
+    @Test public void enabledShelfRestoresCollapsedOnNewRuntimeAndDisabledShelfStaysClosed() throws Exception {
+        android.content.Context context=RuntimeEnvironment.getApplication();
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true);
+        context.getSharedPreferences("received-popup-settings",0).edit().putBoolean("enabled",true).commit();
+        ReceiveOverlay overlay=new ReceiveOverlay(context,new ReceiveOverlay.Actions() {
+            public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}
+        });
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250));
+        View root=(View)field(overlay,"root");assertNotNull(root);
+        assertTrue((Boolean)field(overlay,"collapsed"));
+        assertEquals(Math.round(18*root.getResources().getDisplayMetrics().density),root.getLayoutParams().width);
+        ReceiveOverlay.closeShelf();ReceiveOverlay.restoreShelf();assertNull(field(overlay,"root"));
     }
     @Test public void contentDoubleTapOpensApplicationWithoutAlsoOpeningTheItem() throws Exception {
         android.content.Context context=RuntimeEnvironment.getApplication();

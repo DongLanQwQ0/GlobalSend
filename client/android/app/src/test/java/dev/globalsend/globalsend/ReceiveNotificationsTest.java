@@ -81,7 +81,8 @@ public class ReceiveNotificationsTest {
             ReceiveNotifications.CHANNEL, "收到的内容", NotificationManager.IMPORTANCE_LOW));
         assertFalse(notices.headsUpAllowed());
     }
-    @Test public void updateKeepsOneNoticeAndOldCopyActionReadsFullLatestText() throws Exception {
+    @Test @Config(sdk=34) public void updateKeepsOneNoticeAndOldCopyActionReadsFullLatestText() throws Exception {
+        Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS);
         receive("message", "1", "第一版");
         Notification old = current();
         String latest = "完整正文\n" + "长文字".repeat(4000);
@@ -89,6 +90,7 @@ public class ReceiveNotificationsTest {
         assertEquals(1, Shadows.shadowOf(manager).getAllNotifications().size());
         assertTrue(notices.copy(Shadows.shadowOf(old.actions[0].actionIntent).getSavedIntent()));
         assertEquals(latest, context.getSystemService(ClipboardManager.class).getPrimaryClip().getItemAt(0).getText().toString());
+        assertEquals("已复制",org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
         assertFalse(notices.show("group-a", "sender", "message", "2", "电脑", latest, null, true, "receive"));
     }
     @Test public void fileNoticeOpensExactItemWithoutCopyAction() throws Exception {

@@ -296,6 +296,7 @@ public final class ReceiveNotifications {
         JSONObject record = new JSONObject(value);
         if (!record.has("copyText")) return false;
         context.getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("GlobalSend", record.getString("copyText")));
+        android.widget.Toast.makeText(context,"已复制",android.widget.Toast.LENGTH_SHORT).show();
         return true;
     }
 

@@ -69,7 +69,7 @@ final class NativeReceiveRuntime {
         dockCoordinator.detach(activity); receiveDirectory.detach(activity); receivedNotifications.detach(activity);
         background.detach(activity);
     }
-    void resumed() { dockCoordinator.resumed(); }
+    void resumed() { dockCoordinator.resumed(); ReceiveOverlay.restoreShelf(); }
     void visible(Activity activity, boolean foreground) { receivedNotifications.visible(activity, foreground); }
     void presentationRejected(boolean rejected) { receivedNotifications.presentationRejected(rejected); }
     void presentationResult(MainActivity activity, String id, boolean converted, boolean resumed) {
