@@ -1,3 +1,11 @@
+## 1.0.46 已交付状态（2026-10-29 16:24）
+
+- Windows 完整包已更新并重启：`E:\Programs\GlobalSend`，运行文件版本 1.0.46+55。
+- Android arm64 APK 已构建：`artifacts/releases/GlobalSend-1.0.46-android-arm64-v8a.apk`，16,291,168 字节，无打包字体。手机无线连接超时，未安装，最后确认手机仍为 1.0.43+52；不宣称已推送。
+- 中心与 Web 已部署 `globalsend:multi-group-20261029-1620`。健康、multiGroup/relayStreaming 能力、原有设备/文件/记录与卷保留均验证通过；Caddy 未替换，安装包路径仍为 410。
+- 链接识别修复：截图中 `https://zds.zju.edu.cn` 后的中文说明不再进入链接。中文路径、查询参数、IDN、IPv6、平衡括号保留；三端使用同组回归样例。Web 257 项、Flutter 链接 5 项通过。
+- 微信聊天实际插入、vivo 交互手感和 Windows 物理触屏拖放仍未验收；Windows 物理 UI 自动化停止约束保持。IPA 仍未启动。
+
 ## 1.0.46 候选：多组、选路和流式中继（2026-10-29）
 
 - 多组已实现：一个设备身份同时加入多组、设备并集按 ID 去重、设置内加入/退出、共享文本按组切换，不清本地文件或历史。详见 `MULTI_GROUP.md`。
