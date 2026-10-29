@@ -16,7 +16,7 @@ Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP
 
 Android [1.0.50+59 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.50-android-arm64-v8a.apk)已验签、不打包字体，并经USB覆盖安装到vivo，实际版本读回一致。50新增功能仅限Windows；49修复[APK打开与安装](docs/ANDROID_APK_INSTALL.md)，用户确认可用。48的左右贴边往返、横竖屏恢复及微信图片投放已通过，重启位置记忆由用户确认，见[兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
 
-iPad / iPhone 的[**1.0.48 (57) 未签名IPA，约14.7 MB**](artifacts/releases/ios-1.0.48-build57/GlobalSend-iPad-unsigned.ipa)已构建，含系统分享扩展、不打包字体，需要自行签名安装，见[iPad构建说明](docs/IPAD.md)。**中心服务器不托管安装包；[Windows/Android 1.0.50](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iPad 1.0.48](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.48-build57)分别提供对应平台包和更新清单。**
+iPad / iPhone 的[**1.0.51 (60) 未签名IPA，约14.7 MB**](artifacts/releases/ios-1.0.51-build60/GlobalSend-iPad-unsigned.ipa)已构建，修复iloader重签后的共享组识别，含系统分享扩展、不打包字体。用户选择手动覆盖安装，分享结果待iPad确认，见[iPad构建说明](docs/IPAD.md)。**中心服务器不托管安装包；[Windows/Android 1.0.50](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iPad 1.0.51](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.51-build60)分别提供对应平台包和更新清单。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 
