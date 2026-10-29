@@ -53,7 +53,10 @@ public final class ShelfAcceptanceActivity extends Activity {
             android.net.Uri.parse("content://dev.globalsend.shelfacceptance.probe/probe.png")),new View.DragShadowBuilder(view),null,
             View.DRAG_FLAG_GLOBAL | View.DRAG_FLAG_GLOBAL_URI_READ));
         page.addView(image,new LinearLayout.LayoutParams(-1,dp(72)));
-        destination = label("将暂存项拖到这里\n接受测试文本或 GlobalSend 文件，仅检查读取授权", 18);
+        Button cleanup=new Button(this);cleanup.setText("移除本工具创建的相册测试图");
+        cleanup.setOnClickListener(view -> removeSyntheticGalleryImage());
+        page.addView(cleanup,new LinearLayout.LayoutParams(-1,dp(48)));
+        destination = label("将测试项拖到这里\n接受明确投放的文件，仅检查读取授权和格式", 18);
         destination.setContentDescription("fixture-target");
         destination.setGravity(Gravity.CENTER);
         destination.setBackgroundColor(0xffe6e8ec);
@@ -62,14 +65,13 @@ public final class ShelfAcceptanceActivity extends Activity {
             if (event.getAction() != DragEvent.ACTION_DROP) return true;
             ClipData clip = event.getClipData();
             if (clip == null || clip.getItemCount() == 0) return false;
+            recordClip(clip);
             android.view.DragAndDropPermissions permission=requestDragAndDropPermissions(event);
             int fileItems=0;
             try {
                 for (int i = 0; i < clip.getItemCount(); i++) {
                     android.net.Uri uri=clip.getItemAt(i).getUri();
                     if(uri!=null) {
-                        if(!"dev.globalsend.globalsend.dock-files".equals(uri.getAuthority()) &&
-                            !"dev.globalsend.shelfacceptance.probe".equals(uri.getAuthority()))return false;
                         // Exercise the target-side grant and actual provider FD,
                         // without saving the URI, filename, or user file content.
                         try(java.io.InputStream input=getContentResolver().openInputStream(uri)) {
@@ -111,9 +113,65 @@ public final class ShelfAcceptanceActivity extends Activity {
         page.addView(destination, targetSize);
         page.requestApplyInsets();
         applyRotation(getIntent());
+        if("gallery".equals(getIntent().getStringExtra("probe")))openSyntheticGalleryImage();
     }
     @Override protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);setIntent(intent);applyRotation(intent);
+        if("gallery".equals(intent.getStringExtra("probe")))openSyntheticGalleryImage();
+    }
+    private void recordClip(ClipData clip) {
+        try {
+            JSONObject result=new JSONObject();org.json.JSONArray types=new org.json.JSONArray(),items=new org.json.JSONArray();
+            for(int i=0;i<clip.getDescription().getMimeTypeCount();i++)types.put(clip.getDescription().getMimeType(i));
+            result.put("mimeTypes",types);result.put("count",clip.getItemCount());
+            android.os.PersistableBundle extras=clip.getDescription().getExtras();JSONObject fields=new JSONObject();
+            if(extras!=null)for(String key:extras.keySet()) {
+                Object value=extras.get(key);fields.put(key,value instanceof Number || value instanceof Boolean?value:value==null?"null":value.getClass().getSimpleName());
+            }
+            result.put("extraFields",fields);String kind="other";
+            for(int i=0;i<clip.getItemCount();i++) {
+                ClipData.Item item=clip.getItemAt(i);JSONObject record=new JSONObject();android.net.Uri uri=item.getUri();
+                String authority=uri==null || uri.getAuthority()==null?"":uri.getAuthority();
+                record.put("hasText",item.getText()!=null);record.put("authority",authority);
+                record.put("scheme",uri==null?"":uri.getScheme());
+                if(uri!=null && "dev.globalsend.globalsend.dock-files".equals(uri.getAuthority()))kind="globalsend";
+                if(uri!=null && ("media".equals(authority) || authority.contains("gallery")))kind="gallery";
+                android.content.Intent intent=item.getIntent();
+                if(intent!=null) {
+                    record.put("intentAction",intent.getAction());record.put("intentType",intent.getType());record.put("intentFlags",intent.getFlags());
+                    record.put("hasStreamExtra",intent.hasExtra(android.content.Intent.EXTRA_STREAM));
+                    record.put("intentExtraKeys",new org.json.JSONArray(intent.getExtras()==null?java.util.List.of():new java.util.ArrayList<>(intent.getExtras().keySet())));
+                }
+                items.put(record);
+            }
+            result.put("items",items);result.put("receivedAtMillis",System.currentTimeMillis());
+            Files.write(new File(getFilesDir(),kind+"-clip.json").toPath(),result.toString().getBytes(StandardCharsets.UTF_8));
+        } catch(Exception error){throw new IllegalStateException(error);}
+    }
+    private void openSyntheticGalleryImage() {
+        try {
+            String prior=getPreferences(0).getString("galleryImage","");android.net.Uri uri;
+            if(prior.isEmpty()) {
+                android.content.ContentValues values=new android.content.ContentValues();values.put("_display_name","GS-shelf-probe.png");values.put("mime_type","image/png");
+                values.put("relative_path","Pictures/GlobalSend-test");values.put("is_pending",1);
+                uri=getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
+                if(uri==null)throw new java.io.IOException("No image row");
+                try(java.io.InputStream input=getContentResolver().openInputStream(android.net.Uri.parse("content://dev.globalsend.shelfacceptance.probe/probe.png"));java.io.OutputStream out=getContentResolver().openOutputStream(uri)){input.transferTo(out);}
+                values.clear();values.put("is_pending",0);getContentResolver().update(uri,values,null,null);
+                getPreferences(0).edit().putString("galleryImage",uri.toString()).apply();
+            }else uri=android.net.Uri.parse(prior);
+            startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri,"image/png").setPackage("com.vivo.gallery").addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        } catch(Exception error){throw new IllegalStateException(error);}
+    }
+    private void removeSyntheticGalleryImage() {
+        String prior=getPreferences(0).getString("galleryImage","");
+        if(!prior.isEmpty()) {
+            // Only this fixture's saved insert result; never enumerate/delete
+            // the user's Gallery or the containing directory.
+            getContentResolver().delete(android.net.Uri.parse(prior),null,null);
+            getPreferences(0).edit().remove("galleryImage").apply();
+        }
+        android.widget.Toast.makeText(this,"测试图已移除",android.widget.Toast.LENGTH_SHORT).show();
     }
     private void applyRotation(android.content.Intent intent) {
         String orientation=intent.getStringExtra("orientation");
