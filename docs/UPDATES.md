@@ -28,8 +28,8 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows已安装启动 **1.0.35+44**；真实vivo仍 **1.0.32+41**，ADB断开，新包待推送。[公开Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.35-build44)含Windows ZIP、Android arm64 APK和各自清单，四资产已上传，无新IPA。
+Windows与真实vivo均已更新 **1.0.48+57**；手机USB安装成功并读回版本，随后断开。[公开Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.35-build44)仍为35，含Windows ZIP、Android arm64 APK和各自清单，四资产已上传；本地48不等于已公开分发，无新IPA。
 
-GitHub API 已确认 1.0.35 四个资产均上传完成，证据 `artifacts/reports/github-release-1.0.35.json`。当前版本实际“设置 → 检查更新”和手机通知仍需界面验收。此前 1.0.28 的公开客户端检查遇到 GitHub 网络超时，保留为历史未通过结果，不用资产上传成功冒充整条客户端更新检查通过。
+2026-10-29重新通过GitHub API确认仓库为public，latest仍为1.0.35，四个资产均为uploaded。当前版本实际“设置 → 检查更新”和手机通知仍需界面验收。此前1.0.28的公开客户端检查遇到GitHub网络超时，保留为历史未通过结果，不用资产上传成功冒充整条客户端更新检查通过。
 
 客户端选包、重复通知、检查时机及通知按钮分别有自动检查；Android 通知在主机框架中验证。iOS 原生通知代码需在原生端稳定后下一次 IPA 构建和真机安装时验收，不因为发布其他平台包就触发 IPA 构建。

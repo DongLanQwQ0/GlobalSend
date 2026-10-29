@@ -10,11 +10,11 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows 最新本地版为 **1.0.47+56**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。Android 暂存坞改为半透明窗格、数量图标、设置开关；内容区双击打开主应用，贴边收起，细把手的透明触控区扩大到1.5倍。
+Windows 最新本地版为 **1.0.48+57**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。Android 暂存坞改为半透明窗格、数量图标、设置开关；按钮栏随左右贴边镜像，内容向屏幕内展开。内容区双击打开主应用，贴边收起，细把手的透明触控区扩大到1.5倍。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.47-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.48-windows-x64.zip)。不要单独复制 EXE；重复打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.47+56 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.47-android-arm64-v8a.apk)已构建、验签且不打包字体。**手机最后确认1.0.43+52**：当前没有可用 ADB 连接，新包尚未推送。47补齐公共文件/媒体原件的路径读取授权；微信真实聊天插入仍待同台手机验收，见 [兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
+Android [1.0.48+57 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.48-android-arm64-v8a.apk)已验签、不打包字体，并经 USB 覆盖安装到 vivo，实际版本读回为 **1.0.48+57**。47补齐公共文件/媒体原件的路径读取授权；48修复贴边按钮位置。后续 USB 断开，完整左右往返和微信真实聊天插入仍待同台手机验收，见 [兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
 
 iPad / iPhone 最后交付的未签名 IPA 为 **1.0.24 (33)**，需要自行签名安装，不含本轮主题功能。构建入口仍仅支持手动触发，见 [iPad 构建说明](docs/IPAD.md)。**中心服务器不托管安装包；当前已公开的 [GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.35-build44) 为1.0.35，包含Windows、Android及平台更新清单。**
 
