@@ -180,16 +180,19 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         root = new FrameLayout(context) {
             private boolean cancelTap;
             @Override public boolean dispatchTouchEvent(MotionEvent event) {
-                if (cancelTap) {
-                    if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) cancelTap = false;
+                if (cancelTap && event.getActionMasked() == MotionEvent.ACTION_UP) {
+                    MotionEvent cancel = MotionEvent.obtain(event);
+                    cancel.setAction(MotionEvent.ACTION_CANCEL);
+                    super.dispatchTouchEvent(cancel); cancel.recycle();
+                    cancelTap = false;
                     return true;
                 }
+                if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) cancelTap = false;
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN && shelf.cancelRemoval()) {
-                    main.removeCallbacks(countdown); updateLabels();
+                    main.removeCallbacks(countdown); refreshPendingStyles(); updateLabels();
                     cancelTap = true;
-                    // The cancel tap has one meaning; it must not also open a
-                    // file, close the dock or start a second action underneath.
-                    return true;
+                    // Deliver DOWN/MOVE so a long press can still start a system
+                    // drag. Only suppress the short tap's UP/click.
                 }
                 return super.dispatchTouchEvent(event);
             }
@@ -278,7 +281,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         resize.setTextColor(appearance.muted);
         handle.setBackground(new InsetDrawable(shape(appearance.accent, 2), dp(4), dp(12), dp(4), dp(12)));
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
-            Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
+            Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
         handle.setLayoutParams(new FrameLayout.LayoutParams(dp(12), dp(48),
             Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
         row.removeAllViews();
@@ -292,8 +295,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         for (ReceiveNotifications.Receipt receipt : displayed().values()) {
             LinearLayout card = new LinearLayout(context);
             card.setOrientation(LinearLayout.VERTICAL);
+            card.setTag(receipt);
             card.setPadding(dp(8), dp(6), dp(8), dp(4));
             card.setBackground(shape(appearance.soft, 12));
+            boolean pending = shelfVisible && shelf.pendingRemoval(receipt.id);
+            if (pending) card.setBackground(shape(pendingColor(), 12));
             View content;
             if (receipt.text == null && !receipt.localPath.isEmpty() &&
                 receipt.fileName.toLowerCase(java.util.Locale.ROOT).matches(".*\\.(png|jpe?g|webp|gif|bmp|heic|heif)$")) {
@@ -312,12 +318,21 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 text.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 content = text;
             }
-            card.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+            FrameLayout preview = new FrameLayout(context);
+            preview.addView(content, new FrameLayout.LayoutParams(-1,-1));
+            TextView remove = control("×", "移除", () -> remove(receipt));
+            remove.setBackground(shape(appearance.surface, 12));
+            preview.addView(remove,new FrameLayout.LayoutParams(dp(28),dp(28),Gravity.TOP|Gravity.RIGHT));
+            card.addView(preview, new LinearLayout.LayoutParams(-1, 0, 1));
             LinearLayout footer = new LinearLayout(context);
             footer.setGravity(Gravity.CENTER_VERTICAL);
             TextView source = label(receipt.source, 10, appearance.muted);
             source.setSingleLine(true); source.setEllipsize(android.text.TextUtils.TruncateAt.END);
             footer.addView(source, new LinearLayout.LayoutParams(0, dp(24), 1));
+            View deleting = icon(android.R.drawable.ic_menu_delete,"3秒后移除，轻点取消");
+            deleting.setTag("pending-removal"); deleting.setVisibility(pending ? View.VISIBLE : View.GONE);
+            ((ImageView)deleting).setColorFilter(0xffd84c53);
+            footer.addView(deleting,new LinearLayout.LayoutParams(dp(24),dp(24)));
             if (receipt.text != null) footer.addView(control("复制", "复制", () -> copy(receipt)),
                 new LinearLayout.LayoutParams(dp(40), dp(24)));
             card.addView(footer);
@@ -325,17 +340,56 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             card.setOnLongClickListener(view -> {
                 return export(view, java.util.Collections.singletonList(receipt));
             });
-            if (shelfVisible) {
-                android.widget.PopupMenu menu = new android.widget.PopupMenu(context, card);
-                menu.getMenu().add("移出暂存坞").setOnMenuItemClickListener(item -> { shelf.remove(receipt.id); return true; });
-                TextView remove = control("×", "移出暂存坞", () -> menu.show());
-                footer.addView(remove, new LinearLayout.LayoutParams(dp(24), dp(24)));
-            }
             LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(side, side);
             size.rightMargin = dp(6);
             row.addView(card, size);
         }
+        if (!displayed().isEmpty()) {
+            LinearLayout clear = new LinearLayout(context);
+            clear.setGravity(Gravity.CENTER); clear.setOrientation(LinearLayout.VERTICAL);
+            clear.setBackground(shape(appearance.soft,12)); clear.setContentDescription("清空当前列表");
+            TextView clearIcon=label("×",30,appearance.accent);
+            clearIcon.setGravity(Gravity.CENTER);
+            clear.addView(clearIcon,new LinearLayout.LayoutParams(dp(40),dp(40)));
+            clear.addView(label("清空",12,appearance.muted));
+            clear.setOnClickListener(view -> clearDisplayed());
+            row.addView(clear,new LinearLayout.LayoutParams(side,side));
+        }
         scroll.scrollTo(0, 0);
+    }
+
+    private int pendingColor() {
+        return android.graphics.Color.luminance(appearance.surface) < .3f ? 0xff542b32 : 0xffffe4e6;
+    }
+    private void refreshPendingStyles() {
+        if(row==null)return;
+        for(int i=0;i<row.getChildCount();i++) {
+            View card=row.getChildAt(i);
+            if(!(card.getTag() instanceof ReceiveNotifications.Receipt))continue;
+            boolean pending=shelfVisible && shelf.pendingRemoval(((ReceiveNotifications.Receipt)card.getTag()).id);
+            card.setBackground(shape(pending ? pendingColor() : appearance.soft,12));
+            card.findViewWithTag("pending-removal").setVisibility(pending ? View.VISIBLE : View.GONE);
+        }
+    }
+    private void renderKeepingScroll() {
+        int offset=scroll.getScrollX(); render();
+        HorizontalScrollView owner=scroll;
+        owner.post(() -> { if(scroll==owner)owner.scrollTo(offset,0); });
+    }
+    private void remove(ReceiveNotifications.Receipt receipt) {
+        if (shelfVisible) shelf.remove(receipt.id);
+        else {
+            items.remove(receipt.id); renderKeepingScroll();
+            actions.dismiss(java.util.Collections.singletonMap(receipt.id,receipt.version),generation);
+        }
+    }
+    private void clearDisplayed() {
+        if (shelfVisible) shelf.clear();
+        else {
+            Map<String,String> versions=new LinkedHashMap<>();
+            for(ReceiveNotifications.Receipt receipt:items.values())versions.put(receipt.id,receipt.version);
+            items.clear(); render(); actions.dismiss(versions,generation);
+        }
     }
 
     private void updateLabels() {
@@ -362,11 +416,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
         if (paths.isEmpty() && texts.isEmpty()) return false;
         shelf.cancelRemoval();
+        main.removeCallbacks(countdown); refreshPendingStyles(); updateLabels();
         try {
             return DockCoordinator.startDrag(source, paths, texts, (paths.size() + texts.size()) + " 项", accepted -> {
-                if (root != null) shelf.exported(staged, accepted);
+                shelf.exported(staged, accepted);
             });
         } catch (Exception unavailable) {
+            android.util.Log.w("GlobalSend", "Cannot export temporary shelf drag", unavailable);
             android.widget.Toast.makeText(context, "无法拖出，请重试", android.widget.Toast.LENGTH_SHORT).show(); return false;
         }
     }
@@ -374,7 +430,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     @SuppressWarnings("unchecked")
     private boolean receiveDrop(DragEvent event) {
         switch (event.getAction()) {
-            case DragEvent.ACTION_DRAG_STARTED: return event.getClipDescription() != null;
+            case DragEvent.ACTION_DRAG_STARTED:
+                if (shelf.cancelRemoval()) { main.removeCallbacks(countdown); shelfChanged(); }
+                return event.getClipDescription() != null;
             case DragEvent.ACTION_DRAG_ENTERED:
                 if (collapsed) {
                     dragExpand = () -> { dragExpand = null; setCollapsed(false); };
@@ -568,7 +626,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             finishGeometry(value); return;
         }
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
-            Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
+            Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
         handle.setLayoutParams(new FrameLayout.LayoutParams(dp(12), dp(48),
             Gravity.TOP | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
         float initialPanelAlpha = expanded.getVisibility() == View.VISIBLE ? expanded.getAlpha() : 0;
@@ -643,7 +701,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             context.unregisterComponentCallbacks(configurationChanges);
             if (appearanceChanges != null) { appearanceChanges.stopWatching(); appearanceChanges = null; }
             stopGeometry();
-            main.removeCallbacks(countdown); shelf.cancelRemoval();
+            main.removeCallbacks(countdown);
             if (dragExpand != null) main.removeCallbacks(dragExpand);
             dragExpand = null;
             final View leaving = root;

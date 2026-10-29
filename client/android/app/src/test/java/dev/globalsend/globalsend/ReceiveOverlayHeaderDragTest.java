@@ -103,12 +103,15 @@ public class ReceiveOverlayHeaderDragTest {
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16));
         WindowManager.LayoutParams window = (WindowManager.LayoutParams)root.getLayoutParams();
-        int expandedWidth = window.width, expandedHeight = window.height;
+        int expandedWidth = window.width, expandedHeight = window.height, expandedX = window.x;
         float density=root.getResources().getDisplayMetrics().density;
         capture(overlay,"expanded-before");
         overlay.setCollapsed(true);
         advanceGeometry(overlay,80);
         assertTrue("intermediate width="+window.width,window.width < expandedWidth && window.width > Math.round(12*density));
+        assertTrue("window moves right while shrinking",window.x > expandedX);
+        draw(root);
+        assertEquals("content moves with the window, not pinned to screen edge",0,panel.getLeft());
         assertTrue(panel.getAlpha() < 1);
         assertEquals(expandedWidth,panel.getLayoutParams().width);
         capture(overlay,"snap-intermediate");
@@ -136,6 +139,72 @@ public class ReceiveOverlayHeaderDragTest {
         advanceGeometry(overlay,240);
         assertEquals(expandedWidth,window.width); assertEquals(View.VISIBLE,panel.getVisibility());
         capture(overlay,"expanded-after");
+        overlay.hide();
+    }
+    @Test public void topRightRemoveAndTailClearOperateOnOnlyCurrentList() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        shelf.add(java.util.List.of(),java.util.List.of("one","two"),Map.of());
+        ((View)field(overlay,"shelfTab")).performClick();
+        LinearLayout row=(LinearLayout)field(overlay,"row");
+        assertEquals(3,row.getChildCount());
+        LinearLayout card=(LinearLayout)row.getChildAt(0);
+        android.widget.FrameLayout preview=(android.widget.FrameLayout)card.getChildAt(0);
+        assertEquals("移除",preview.getChildAt(1).getContentDescription());
+        preview.getChildAt(1).performClick();
+        assertEquals(1,shelf.items.size());
+        assertEquals("清空当前列表",row.getChildAt(row.getChildCount()-1).getContentDescription());
+        row.getChildAt(row.getChildCount()-1).performClick();
+        assertTrue(shelf.items.isEmpty());
+        assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
+        overlay.hide();
+    }
+    @Test @Config(shadows=AndroidDragTest.NativeDragView.class)
+    public void acceptedDropStillExpiresWhenDockWasHiddenBeforeNativeCompletion() throws Exception {
+        AndroidDragTest.NativeDragView.resetFixture();
+        ReceiveOverlay overlay=create(new int[3]);
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        shelf.add(java.util.List.of(),java.util.List.of("expire"),Map.of());
+        ((View)field(overlay,"shelfTab")).performClick();
+        View source=new View(RuntimeEnvironment.getApplication());
+        ((android.widget.FrameLayout)field(overlay,"root")).addView(source);
+        java.lang.reflect.Method export=ReceiveOverlay.class.getDeclaredMethod("export",View.class,java.util.List.class);
+        export.setAccessible(true);
+        assertTrue((Boolean)export.invoke(overlay,source,new java.util.ArrayList<>(shelf.items.values())));
+        DockCoordinator.LocalDrag session=(DockCoordinator.LocalDrag)AndroidDragTest.NativeDragView.states.get(0);
+        overlay.hide(); // queued until native drag ends, before completion callback
+        session.accepted=true;
+        java.lang.reflect.Method finish=DockCoordinator.class.getDeclaredMethod("finishExport",DockCoordinator.LocalDrag.class);
+        finish.setAccessible(true); finish.invoke(null,session);
+        assertNull(field(overlay,"root"));
+        assertEquals(3,shelf.removalSeconds());
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2999));
+        assertEquals(1,shelf.items.size());
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1));
+        assertTrue(shelf.items.isEmpty());
+    }
+    @Test
+    public void pendingCardsAreRedAndTouchCanContinueIntoLongPressWhileCancelingWholeBatch() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        shelf.add(java.util.List.of(),java.util.List.of("one","two"),Map.of());
+        ((View)field(overlay,"shelfTab")).performClick();
+        shelf.exported(new java.util.ArrayList<>(shelf.items.values()),true);
+        View root=(View)field(overlay,"root"); draw(root);
+        View card=((LinearLayout)field(overlay,"row")).getChildAt(0);
+        int[] held={0};
+        card.setOnLongClickListener(view -> { held[0]++; return true; });
+        assertEquals(View.VISIBLE,card.findViewWithTag("pending-removal").getVisibility());
+        assertEquals(0xffffe4e6,((android.graphics.drawable.GradientDrawable)card.getBackground()).getColor().getDefaultColor());
+        touch(root,0,MotionEvent.ACTION_DOWN,25,60);
+        assertEquals(0,shelf.removalSeconds());
+        assertSame("cancel must not rebuild away the touched drag source",card,((LinearLayout)field(overlay,"row")).getChildAt(0));
+        assertEquals(View.GONE,card.findViewWithTag("pending-removal").getVisibility());
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout()+100));
+        assertEquals("long press still reaches the card's drag handler",1,held[0]);
+        touch(root,1000,MotionEvent.ACTION_CANCEL,25,60);
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4));
+        assertEquals(2,shelf.items.size());
         overlay.hide();
     }
     private void advanceGeometry(ReceiveOverlay overlay,long millis) throws Exception {

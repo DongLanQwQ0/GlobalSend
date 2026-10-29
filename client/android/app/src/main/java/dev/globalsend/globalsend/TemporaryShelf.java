@@ -106,6 +106,10 @@ final class TemporaryShelf {
     int removalSeconds() {
         return pendingRemoval.isEmpty() ? 0 : Math.max(1, (int)Math.ceil((removalDeadline - android.os.SystemClock.uptimeMillis()) / 1000d));
     }
+    boolean pendingRemoval(String id) { return pendingRemoval.containsKey(id); }
+    void clear() {
+        cancelRemoval(); items.clear(); save(); changed.run();
+    }
     void remove(String id) {
         pendingRemoval.remove(id); items.remove(id); save(); changed.run();
     }
