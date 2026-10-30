@@ -3030,8 +3030,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(c.edited, [('sent-message', '修改后的发件\n同步给对方')]);
       expect(find.text('已同步'), findsNothing);
-      await tester.tap(find.byTooltip('关闭'));
-      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('text-viewer-input')), findsNothing);
+      expect(find.byType(Dialog), findsNothing);
       expect(find.text('修改后的发件\n同步给对方'), findsOneWidget);
       expect(c.dock.single.editedAt, isNotEmpty);
       expect(tester.takeException(), isNull);

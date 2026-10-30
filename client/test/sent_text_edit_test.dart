@@ -42,6 +42,46 @@ class EditingController extends SendController {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'dismissal clears the stale latest receipt but preserves a newer revision',
+    () {
+      final incoming = DockEntry(
+        id: 'incoming',
+        kind: 'text',
+        title: 'text',
+        source: 'other',
+        text: 'before',
+      );
+      final c = EditingController()
+        ..profile = ServerProfile(
+          baseUrl: 'https://fixture.invalid',
+          instanceId: 'one',
+          deviceId: 'self',
+        )
+        ..dock = [incoming];
+      addTearDown(c.dispose);
+      void update(int cursor) => c.applyTextUpdate({
+        'cursor': cursor,
+        'sourceDeviceId': 'other',
+        'payload': {
+          'sourceEventId': incoming.id,
+          'text': 'revision $cursor',
+          'editedAt': '2026-10-30T13:00:00Z',
+        },
+      });
+      update(1);
+      final first = c.receiptSerial;
+      update(2);
+      c.dismissReceipts([incoming.id], throughSerial: first);
+      expect(c.latestReceipt, incoming);
+      expect(c.pendingReceipts[incoming.id], incoming);
+      c.dismissReceipts([incoming.id], throughSerial: c.receiptSerial);
+      expect(c.latestReceipt, isNull);
+      expect(c.pendingReceipts, isEmpty);
+      expect(c.dock, [incoming]);
+    },
+  );
   test(
     'sent edits update the same persisted card without resending a new message',
     () async {

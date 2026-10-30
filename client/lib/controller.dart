@@ -990,6 +990,7 @@ class SendController extends ChangeNotifier {
       if (throughSerial == null ||
           (_receiptSequence[id] ?? 0) <= throughSerial) {
         pendingReceipts.remove(id);
+        if (latestReceipt?.id == id) latestReceipt = null;
       }
     }
   }
