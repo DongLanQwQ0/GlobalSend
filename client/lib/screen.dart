@@ -2849,9 +2849,11 @@ class _SendScreenState extends State<SendScreen>
         if (mounted) showSentFeedback([id]);
       }),
       builder: (_, candidates, _) => DecoratedBox(
+        key: ValueKey('device-drop-$id'),
+        position: DecorationPosition.foreground,
         decoration: BoxDecoration(
           borderRadius: Ui.fieldRadius,
-          border: candidates.isNotEmpty
+          border: candidates.isNotEmpty || c.nativeHoveredDeviceId == id
               ? Border.all(color: Ui.colors(context).green, width: 2)
               : null,
         ),

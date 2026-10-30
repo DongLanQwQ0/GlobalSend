@@ -91,9 +91,10 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
     }
   }
   func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
-    let allowed = destination(session) != nil
+    let target = destination(session)
+    let allowed = target != nil
     channel?.invokeMethod("nativeDrag", arguments: ["active": allowed, "local": session.localDragSession != nil,
-      "sessionActive": session.localDragSession != nil, "importing": false])
+      "sessionActive": session.localDragSession != nil, "importing": false, "targetDeviceId": target ?? ""])
     return UIDropProposal(operation: allowed ? .copy : .cancel)
   }
   func dropInteraction(_ interaction: UIDropInteraction, sessionDidExit session: UIDropSession) { endHover(session) }

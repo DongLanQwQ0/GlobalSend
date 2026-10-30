@@ -1,7 +1,9 @@
 import 'dart:ui';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/android_queue_drop_host.dart';
 import 'package:globalsend/dock_platform.dart';
@@ -10,6 +12,7 @@ import 'package:globalsend/models.dart';
 import 'package:globalsend/system_bridge.dart';
 
 import 'widget_test.dart' show signedIn;
+import 'system_font_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +38,62 @@ void main() {
     messenger.setMockMethodCallHandler(SystemBridge.channel, null);
     messenger.setMockMethodCallHandler(DockPlatform.channel, null);
   });
+
+  testWidgets(
+    'native device hover highlights only its card without covering the window',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(950, 650);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final controller = signedIn();
+      await tester.runAsync(loadSystemTestFonts);
+      final capture = GlobalKey();
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: capture,
+          child: GlobalSendApp(controller: controller),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await controller.handleNativeDockEvent({
+        'type': 'nativeDrag',
+        'active': true,
+        'local': false,
+        'targetDeviceId': 'phone',
+      });
+      await tester.pumpAndSettle();
+      final card = tester.widget<DecoratedBox>(
+        find.byKey(const ValueKey('device-drop-phone')),
+      );
+      expect((card.decoration as BoxDecoration).border, isNotNull);
+      expect(card.position, DecorationPosition.foreground);
+      expect(find.byKey(const ValueKey('native-drop-feedback')), findsNothing);
+      await tester.runAsync(() async {
+        final boundary =
+            capture.currentContext!.findRenderObject() as RenderRepaintBoundary;
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ImageByteFormat.png);
+        final output = File(
+          '../artifacts/screenshots/native74-device-hover.png',
+        );
+        await output.parent.create(recursive: true);
+        await output.writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+      await controller.handleNativeDockEvent({
+        'type': 'nativeDrag',
+        'active': false,
+      });
+      await tester.pumpAndSettle();
+      final cleared = tester.widget<DecoratedBox>(
+        find.byKey(const ValueKey('device-drop-phone')),
+      );
+      expect((cleared.decoration as BoxDecoration).border, isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
 
   testWidgets(
     'publishes only the visible queue in physical view pixels and updates its layout',
@@ -175,8 +234,10 @@ void main() {
       final device = (geometry.last['devices'] as List).single as Map;
       final tile = tester.getRect(find.byKey(const ValueKey('target-phone')));
       expect(device['deviceId'], 'phone');
-      expect(device['left'], tile.left); expect(device['top'], tile.top);
-      expect(device['right'], tile.right); expect(device['bottom'], tile.bottom);
+      expect(device['left'], tile.left);
+      expect(device['top'], tile.top);
+      expect(device['right'], tile.right);
+      expect(device['bottom'], tile.bottom);
       expect(geometry.last['serverKey'], controller.profile!.key);
       await tester.tap(find.byKey(const ValueKey('add-text')));
       await tester.pumpAndSettle();

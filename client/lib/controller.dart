@@ -315,6 +315,7 @@ class SendController extends ChangeNotifier {
   String _dockTargetsSnapshot = '';
   bool nativeDragActive = false, nativeImporting = false;
   bool nativeQueueDragActive = false;
+  String? nativeHoveredDeviceId;
   bool nativeLocalDragActive = false;
   int nativeSendNavigationSerial = 0;
   List<ServerProfile> profiles = [];
@@ -3527,13 +3528,21 @@ class SendController extends ChangeNotifier {
 
   Future<void> handleNativeDockEvent(Map<String, dynamic> event) async {
     if (event['type'] == 'nativeDrag') {
+      final target = event['targetDeviceId'] as String? ?? '';
+      nativeHoveredDeviceId = event['active'] == true && target.isNotEmpty
+          ? target
+          : null;
+      final queueHover =
+          event['active'] == true && nativeHoveredDeviceId == null;
       if (event['local'] == true) {
-        nativeQueueDragActive = event['active'] == true;
+        nativeDragActive = false;
+        nativeQueueDragActive = queueHover;
         if (event['sessionActive'] is bool)
           nativeLocalDragActive = event['sessionActive'] == true;
         if (event['navigate'] == 'send') nativeSendNavigationSerial++;
       } else {
-        nativeDragActive = event['active'] == true;
+        nativeQueueDragActive = false;
+        nativeDragActive = queueHover;
       }
       nativeImporting = event['importing'] == true;
       changed();
@@ -3580,6 +3589,7 @@ class SendController extends ChangeNotifier {
   }
 
   void _adoptDockState(Map<String, dynamic> value) {
+    nativeHoveredDeviceId = null;
     nativeDragActive = value['active'] == true;
     nativeImporting = value['importing'] == true;
     nativeQueueDragActive = value['queueActive'] == true;

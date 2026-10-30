@@ -1,4 +1,8 @@
 import Foundation
+#if canImport(ImageIO) && canImport(UniformTypeIdentifiers)
+import ImageIO
+import UniformTypeIdentifiers
+#endif
 
 @main
 struct SharedInboxGroupTests {
@@ -48,6 +52,33 @@ struct SharedInboxGroupTests {
     let fixture = URL(fileURLWithPath: "artifacts/tmp/ios-share-tests/" + UUID().uuidString, isDirectory: true)
     let store = try SharedInboxStore(root: fixture)
     defer { try? FileManager.default.removeItem(at: fixture) }
+    #if canImport(ImageIO) && canImport(UniformTypeIdentifiers)
+    let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNUCOhhYGBgYgADAAuOAQCntjSiAAAAAElFTkSuQmCC")!
+    let suffixless = fixture.appendingPathComponent("provider-image")
+    try png.write(to: suffixless)
+    let importedFolder = try store.folder(UUID().uuidString)
+    // public.file-url must use the same resolver as loadFileRepresentation.
+    let imported = try store.copy(suffixless, to: importedFolder, suggestedName: "IMG_0042",
+                                  typeIdentifiers: ["public.file-url", "public.data", "public.image"])
+    precondition(URL(fileURLWithPath: imported).lastPathComponent == "IMG_0042.png")
+    let importedBytes = try Data(contentsOf: URL(fileURLWithPath: imported))
+    precondition(importedBytes == png, "Keep image bytes unchanged")
+    precondition(SharedImportedFileName.resolve(source: suffixless, suggestedName: nil) == "provider-image.png")
+    precondition(SharedImportedFileName.resolve(source: suffixless, suggestedName: "original.PNG") == "original.PNG")
+    let jpegSource = fixture.appendingPathComponent("provider-photo")
+    let sourceImage = CGImageSourceCreateWithData(png as CFData, nil)!
+    let jpeg = CGImageDestinationCreateWithURL(jpegSource as CFURL, UTType.jpeg.identifier as CFString, 1, nil)!
+    CGImageDestinationAddImageFromSource(jpeg, sourceImage, 0, nil)
+    precondition(CGImageDestinationFinalize(jpeg))
+    let jpegPath = try store.copy(jpegSource, to: importedFolder, suggestedName: "Photo", typeIdentifiers: ["public.data"])
+    precondition(URL(fileURLWithPath: jpegPath).pathExtension == UTType.jpeg.preferredFilenameExtension)
+    let importedJPEG = try Data(contentsOf: URL(fileURLWithPath: jpegPath)), originalJPEG = try Data(contentsOf: jpegSource)
+    precondition(importedJPEG == originalJPEG)
+    let directory = fixture.appendingPathComponent("Album", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    precondition(SharedImportedFileName.resolve(source: directory, suggestedName: "Album", typeIdentifiers: ["public.png"]) == "Album")
+    print("PASS: suffixless file URLs and generic providers retain PNG/JPEG formats, exact bytes, explicit names and folders")
+    #endif
     let target = request.target!
     let renamed = SharedSendTarget(serverKey: target.serverKey, deviceId: target.deviceId, name: "改名后")
     precondition(target.conversationIdentifier == renamed.conversationIdentifier)

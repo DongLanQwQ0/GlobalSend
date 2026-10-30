@@ -1,4 +1,8 @@
 import Foundation
+#if canImport(ImageIO) && canImport(UniformTypeIdentifiers)
+import ImageIO
+import UniformTypeIdentifiers
+#endif
 
 #if canImport(UIKit) && canImport(UniformTypeIdentifiers)
 import UIKit
@@ -9,7 +13,9 @@ enum SharedItemLoader {
     if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
       provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
         guard let url = item as? URL else { completed(nil, nil, error ?? CocoaError(.fileReadUnknown)); return }
-        do { completed(try store.copy(url, to: folder), nil, nil) } catch { completed(nil, nil, error) }
+        do { completed(try store.copy(url, to: folder, suggestedName: provider.suggestedName,
+                                     typeIdentifiers: provider.registeredTypeIdentifiers), nil, nil) }
+        catch { completed(nil, nil, error) }
       }
       return
     }
@@ -38,10 +44,9 @@ enum SharedItemLoader {
       provider.loadFileRepresentation(forTypeIdentifier: type) { url, error in
         guard let url = url else { completed(nil, nil, error ?? CocoaError(.fileReadUnknown)); return }
         // The provider deletes this URL when this callback returns.
-        let ext = UTType(type)?.preferredFilenameExtension ?? url.pathExtension
-        var name = provider.suggestedName ?? url.lastPathComponent
-        if (name as NSString).pathExtension.isEmpty && !ext.isEmpty { name += "." + ext }
-        do { completed(try store.copy(url, to: folder, suggestedName: name), nil, nil) } catch { completed(nil, nil, error) }
+        do { completed(try store.copy(url, to: folder, suggestedName: provider.suggestedName,
+                                     typeIdentifiers: [type] + provider.registeredTypeIdentifiers), nil, nil) }
+        catch { completed(nil, nil, error) }
       }
       return
     }
@@ -64,6 +69,32 @@ enum SharedItemLoader {
   }
 }
 #endif
+
+enum SharedImportedFileName {
+  static func resolve(source: URL, suggestedName: String?, typeIdentifiers: [String] = []) -> String {
+    let name = (suggestedName?.isEmpty == false ? suggestedName! : source.lastPathComponent) as NSString
+    let leaf = name.lastPathComponent.isEmpty ? "shared-file" : name.lastPathComponent
+    if !(leaf as NSString).pathExtension.isEmpty ||
+        (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { return leaf }
+    var suffix = source.pathExtension
+    #if canImport(ImageIO) && canImport(UniformTypeIdentifiers)
+    // Photos often supplies public.file-url first, with a suffixless name.
+    // Inspect the image container, without decoding pixels or transcoding it.
+    if let image = CGImageSourceCreateWithURL(source as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+       let identifier = CGImageSourceGetType(image),
+       let actual = UTType(identifier as String)?.preferredFilenameExtension {
+      suffix = actual
+    }
+    if suffix.isEmpty {
+      suffix = typeIdentifiers.compactMap { UTType($0)?.preferredFilenameExtension }.first ?? ""
+    }
+    if suffix.isEmpty {
+      suffix = (try? source.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.preferredFilenameExtension ?? ""
+    }
+    #endif
+    return suffix.isEmpty ? leaf : leaf + "." + suffix
+  }
+}
 
 enum SharedInboxGroup {
   static func hostBundleURL(for bundleURL: URL) -> URL {
@@ -171,11 +202,10 @@ final class SharedInboxStore {
     try FileManager.default.createDirectory(at: location, withIntermediateDirectories: true)
     return location
   }
-  func copy(_ source: URL, to folder: URL, suggestedName: String? = nil) throws -> String {
+  func copy(_ source: URL, to folder: URL, suggestedName: String? = nil, typeIdentifiers: [String] = []) throws -> String {
     let scoped = source.startAccessingSecurityScopedResource()
     defer { if scoped { source.stopAccessingSecurityScopedResource() } }
-    let name = (suggestedName?.isEmpty == false ? suggestedName! : source.lastPathComponent) as NSString
-    let leaf = name.lastPathComponent.isEmpty ? "shared-file" : name.lastPathComponent
+    let leaf = SharedImportedFileName.resolve(source: source, suggestedName: suggestedName, typeIdentifiers: typeIdentifiers)
     let item = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: item, withIntermediateDirectories: true)
     let target = item.appendingPathComponent(leaf)
