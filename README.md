@@ -14,7 +14,7 @@ Windows 最新本地候选版为 **1.0.54+64**，完整客户端已更新并运�
 
 Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.54-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.54+64 arm64 候选 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.54-android-arm64-v8a.apk)已验签、不打包字体。手机已安装64版，用户确认拖出后可以切换设备栏；随后构建的边缘滚动平滑修订待覆盖，实际安装状态见[本机发布记录](artifacts/releases/latest-local.json)。49的[APK打开与安装](docs/ANDROID_APK_INSTALL.md)以及48的微信图片投放验收保留，见[兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
+Android [1.0.54+64 arm64 候选 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.54-android-arm64-v8a.apk)已验签、不打包字体。手机已安装64版，用户确认拖出后可以切换设备栏；边缘滚动平滑修订也已USB覆盖并完成左右滚动检查；新增轻震与把手惯性修订已构建，但USB断开未覆盖，实际安装状态见[本机发布记录](artifacts/releases/latest-local.json)。49的[APK打开与安装](docs/ANDROID_APK_INSTALL.md)以及48的微信图片投放验收保留，见[兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
 
 iPad / iPhone 的[**1.0.53 (62) 未签名IPA，约14.8 MB**](artifacts/releases/ios-1.0.53-build62/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。53移除设置中的系统分享及默认目标，改为系统分享面板第一排的设备建议；普通分享仍唤起待发送，选指定设备建议才按唯一ID自动发送。建议的显示由iPadOS决定，本版由用户手动安装验收，见[iPad构建说明](docs/IPAD.md)。**中心服务器不托管安装包；[Windows/Android 1.0.50](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iPad 1.0.53](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.53-build62)分别提供对应平台包和更新清单。**
 
