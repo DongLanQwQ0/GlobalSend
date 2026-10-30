@@ -112,6 +112,7 @@ class UrlIntentIntegration {
   final Future<void> Function(Uri) openWebUrl;
   final DateTime Function() now;
   final Map<String, Map<String, dynamic>> _records = {};
+  final Map<String, Map<String, dynamic>> _outgoingLinks = {};
   final Completer<void> _initialized = Completer<void>();
   File? _file;
   Future<void> _writes = Future.value();
@@ -134,6 +135,13 @@ class UrlIntentIntegration {
           stored['records'] as Map? ?? {},
         ).entries) {
           _records[entry.key] = Map<String, dynamic>.from(entry.value as Map);
+        }
+        for (final entry in Map<String, dynamic>.from(
+          stored['outgoingLinks'] as Map? ?? {},
+        ).entries) {
+          _outgoingLinks[entry.key] = Map<String, dynamic>.from(
+            entry.value as Map,
+          );
         }
       }
     } catch (_) {
@@ -187,7 +195,10 @@ class UrlIntentIntegration {
   Future<void> _save() {
     if (_loadFailed || _file == null)
       throw const _IntegrationFailure('local_state_unavailable', '网页打开记录暂不可写');
-    final encoded = jsonEncode({'records': _records});
+    final encoded = jsonEncode({
+      'records': _records,
+      'outgoingLinks': _outgoingLinks,
+    });
     final file = _file!;
     return _writes = _writes.catchError((Object _) {}).then((_) async {
       await file.parent.create(recursive: true);
@@ -251,7 +262,7 @@ class UrlIntentIntegration {
           'appVersion': '',
           'connected': session() != null,
           'associationState': 'authorized',
-          'capabilities': ['list_devices', 'send_open_url'],
+          'capabilities': ['list_devices', 'send_open_url', 'send_link'],
         });
       }
       final active = session();
@@ -279,12 +290,104 @@ class UrlIntentIntegration {
                   'sendable': true,
                   'capabilities': {
                     'openUrlIntentV1': d['openUrlIntentV1'] == true,
+                    'sendLinkV1': true,
                   },
                 },
               )
               .toList(),
           'updatedAt': now().toUtc().toIso8601String(),
         });
+      }
+      if (request['method'] == 'send_link') {
+        final target = request['targetDeviceId'];
+        if (target is! String || target == active.deviceId) {
+          throw const _IntegrationFailure(
+            'target_unavailable',
+            '目标设备暂不可用',
+            retryable: true,
+          );
+        }
+        final uri = validUrl(request['url']);
+        if (uri == null) {
+          throw const _IntegrationFailure(
+            'invalid_url',
+            '请输入有效的 HTTP 或 HTTPS 地址',
+          );
+        }
+        final key = _key(active, active.deviceId, id);
+        var record = _outgoingLinks[key];
+        if (record != null &&
+            (record['callerAppId'] != caller ||
+                record['targetDeviceId'] != target ||
+                record['url'] != uri.toString())) {
+          throw const _IntegrationFailure('conflict', 'requestId 已用于另一次链接发送');
+        }
+        if (record?['state'] == 'sent')
+          return _success(id, _publicStatus(record!));
+        if (!devices().any(
+          (d) => d['deviceId'] == target && d['revoked'] != true,
+        )) {
+          throw const _IntegrationFailure(
+            'target_unavailable',
+            '目标设备暂不可用',
+            retryable: true,
+          );
+        }
+        if (record == null) {
+          final timestamp = now().toUtc().toIso8601String();
+          record = {
+            'requestId': id,
+            'targetDeviceId': target,
+            'callerAppId': caller,
+            'url': uri.toString(),
+            'deliveryMode': 'link',
+            'state': 'queued',
+            'createdAt': timestamp,
+            'updatedAt': timestamp,
+          };
+          _outgoingLinks[key] = record;
+          await _save();
+        }
+        if (record['state'] == 'failed') {
+          record['state'] = 'queued';
+          record.remove('error');
+          record['updatedAt'] = now().toUtc().toIso8601String();
+          await _save();
+        }
+        if (record['state'] != 'sent') {
+          // The normal text endpoint already deduplicates this event ID. Only
+          // an explicit send/retry calls it; status never resends a message.
+          try {
+            await _call(active, 'POST', '/texts', {
+              'eventId': id,
+              'targetDeviceId': target,
+              'text': uri.toString(),
+            });
+          } on ApiException catch (error) {
+            if (error.status >= 400 && error.status < 500) {
+              record['state'] = 'failed';
+              record['error'] = {
+                'code': _apiCode(error),
+                'message': error.message,
+              };
+              record['updatedAt'] = now().toUtc().toIso8601String();
+              await _save();
+            }
+            rethrow;
+          }
+          record['state'] = 'sent';
+          record['updatedAt'] = now().toUtc().toIso8601String();
+          await _save();
+          _check(active);
+        }
+        return _success(id, _publicStatus(record));
+      }
+      if (request['method'] == 'status' && request['deliveryMode'] == 'link') {
+        final record = _outgoingLinks[_key(active, active.deviceId, id)];
+        if (record == null || record['callerAppId'] != caller) {
+          throw const _IntegrationFailure('request_not_found', '未找到本应用的链接发送');
+        }
+        return _success(id, _publicStatus(record));
       }
       if (!active.supported)
         throw const _IntegrationFailure('unsupported_version', '中心尚不支持定向打开网页');
@@ -362,16 +465,7 @@ class UrlIntentIntegration {
           '中心结果尚未确认，请使用原 requestId 查询',
           true,
         );
-      final remote = error.response?['error'];
-      final code = remote is Map
-          ? (remote['code'] as String? ?? '').toLowerCase()
-          : '';
-      return _failure(
-        id,
-        code.isEmpty ? 'request_failed' : code,
-        error.message,
-        error.status >= 500,
-      );
+      return _failure(id, _apiCode(error), error.message, error.status >= 500);
     } on TimeoutException {
       return _failure(
         id,
@@ -388,6 +482,18 @@ class UrlIntentIntegration {
     }
   }
 
+  String _apiCode(ApiException error) {
+    final remote = error.response?['error'];
+    final code = remote is Map
+        ? (remote['code'] as String? ?? '').toLowerCase()
+        : '';
+    return code == 'id_conflict'
+        ? 'conflict'
+        : code.isEmpty
+        ? 'request_failed'
+        : code;
+  }
+
   Map<String, dynamic> _publicStatus(Map<String, dynamic> value) => {
     for (final field in [
       'requestId',
@@ -396,6 +502,7 @@ class UrlIntentIntegration {
       'createdAt',
       'expiresAt',
       'updatedAt',
+      'deliveryMode',
       'error',
     ])
       if (value.containsKey(field)) field: value[field],

@@ -28,6 +28,8 @@ class Center extends CenterApi {
   List<Map<String, dynamic>> pending = [];
   Map<String, dynamic> status = intent();
   bool failAccepted = false;
+  bool failTextOnce = false;
+  ApiException? textError;
   String? deliveredState;
   @override
   Future<Map<String, dynamic>> call(
@@ -37,6 +39,16 @@ class Center extends CenterApi {
     bool authenticated = true,
   ]) async {
     calls.add({'method': method, 'path': path, 'body': body});
+    if (path == '/texts') {
+      if (textError != null) throw textError!;
+      if (failTextOnce) {
+        failTextOnce = false;
+        throw TimeoutException('reply lost');
+      }
+      return {
+        'event': {'id': (body as Map)['eventId'], 'type': 'text.created'},
+      };
+    }
     if (path == '/url-intents/pending') return {'intents': pending};
     if (path.endsWith('/result')) {
       final value = body as Map;
@@ -159,7 +171,7 @@ void main() {
       'platform': 'windows',
       'online': false,
       'sendable': true,
-      'capabilities': {'openUrlIntentV1': true},
+      'capabilities': {'openUrlIntentV1': true, 'sendLinkV1': true},
     });
     expect(jsonEncode(response), isNot(contains('secret')));
   });
@@ -317,5 +329,142 @@ void main() {
     });
     expect(response['result']['state'], 'expired');
     expect(api.calls, isEmpty);
+  });
+  test('iPad links use ordinary text without remote-open capability or a new center', () async {
+    peers = [
+      {
+        'deviceId': 'ipad',
+        'name': 'iPad',
+        'platform': 'other',
+        'online': true,
+        'openUrlIntentV1': false,
+      },
+    ];
+    active = UrlIntentSession(
+      api: api,
+      scope: 'scope',
+      deviceId: 'target',
+      supported: false,
+    );
+    expect(
+      (await request('hello'))['result']['capabilities'],
+      contains('send_link'),
+    );
+    final device =
+        ((await request('list_devices'))['result']['devices'] as List).single;
+    expect(device['capabilities'], {
+      'openUrlIntentV1': false,
+      'sendLinkV1': true,
+    });
+    final result = await request('send_link', {
+      'targetDeviceId': 'ipad',
+      'url': 'http://10.0.0.2:8765/',
+    });
+    expect(result['ok'], true);
+    expect(result['result']['state'], 'sent');
+    expect(result['result']['deliveryMode'], 'link');
+    expect(result['result'].containsKey('expiresAt'), false);
+    expect(api.calls.single, {
+      'method': 'POST',
+      'path': '/texts',
+      'body': {
+        'eventId': id,
+        'targetDeviceId': 'ipad',
+        'text': 'http://10.0.0.2:8765/',
+      },
+    });
+    expect(opens, 0);
+    integration.dispose();
+    integration = create();
+    await integration.initialize(file);
+    final status = await request('status', {'deliveryMode': 'link'});
+    expect(status['result']['state'], 'sent');
+    expect(api.calls, hasLength(1));
+    peers = []; // A completed request stays completed after presence changes.
+    await request('send_link', {
+      'targetDeviceId': 'ipad',
+      'url': 'http://10.0.0.2:8765/',
+    });
+    expect(api.calls, hasLength(1));
+  });
+  test('ambiguous link result persists queued; status does not resend and explicit retry keeps ID', () async {
+    api.failTextOnce = true;
+    const body = {'targetDeviceId': 'peer', 'url': 'https://example.org/'};
+    expect(
+      (await request('send_link', body))['error']['code'],
+      'timeout_unknown',
+    );
+    integration.dispose();
+    integration = create();
+    await integration.initialize(file);
+    expect(
+      (await request('status', {'deliveryMode': 'link'}))['result']['state'],
+      'queued',
+    );
+    expect(api.calls, hasLength(1));
+    expect((await request('send_link', body))['result']['state'], 'sent');
+    expect(api.calls, hasLength(2));
+    expect(api.calls.map((c) => c['body']['eventId']), [id, id]);
+    expect(
+      (await request('send_link', {
+        ...body,
+        'url': 'https://other.example/',
+      }))['error']['code'],
+      'conflict',
+    );
+    final foreign = await integration.handleLocalRequest({
+      'callerAppId': 'other.app',
+      'request': {
+        'v': 1,
+        'requestId': id,
+        'method': 'status',
+        'deliveryMode': 'link',
+      },
+    });
+    expect(foreign['error']['code'], 'request_not_found');
+    expect(api.calls, hasLength(2));
+  });
+  test(
+    'definitive link rejection remains failed until an explicit same-ID retry',
+    () async {
+      api.textError = ApiException(
+        403,
+        'target left',
+        response: {
+          'error': {'code': 'FORBIDDEN'},
+        },
+      );
+      const body = {'targetDeviceId': 'peer', 'url': 'https://example.org/'};
+      expect((await request('send_link', body))['error']['code'], 'forbidden');
+      final rejected = await request('status', {'deliveryMode': 'link'});
+      expect(rejected['result']['state'], 'failed');
+      expect(rejected['result']['error']['code'], 'forbidden');
+      expect(api.calls, hasLength(1));
+      api.textError = null;
+      final sent = await request('send_link', body);
+      expect(sent['result']['state'], 'sent');
+      expect(sent['result'].containsKey('error'), false);
+      expect(api.calls.map((c) => c['body']['eventId']), [id, id]);
+    },
+  );
+  test('open requests never silently become a link and legacy status remains remote', () async {
+    peers = [
+      {'deviceId': 'ipad', 'openUrlIntentV1': false},
+    ];
+    expect(
+      (await request('send_open_url', {
+        'targetDeviceId': 'ipad',
+        'url': 'https://example.org/',
+      }))['error']['code'],
+      'unsupported_target',
+    );
+    expect(api.calls, isEmpty);
+    await request('send_link', {
+      'targetDeviceId': 'ipad',
+      'url': 'https://example.org/',
+    });
+    await request('status');
+    expect(api.calls.last['path'], '/url-intents/$id');
+    expect(opens, 0);
   });
 }

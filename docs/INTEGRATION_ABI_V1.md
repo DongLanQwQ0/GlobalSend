@@ -1,6 +1,6 @@
 # Android 本机集成 ABI v1
 
-本机集成ABI已实现；真实跨进程绑定、首次关联、通知点击与系统浏览器页面在原共享AVD的1.0.31包上完成记录。该ABI在本轮暂存坞调整中未改变。当前Windows/手机安装版本分开记录于 [快速测试](QUICK_TEST.md)，不把构建完成等同于手机安装。Chrona负责调用端和LAN页面，GlobalSend负责本机桥与组内定向投递。
+本机集成ABI已实现；真实跨进程绑定、首次关联、通知点击与系统浏览器页面在原共享AVD的1.0.31包上完成记录。55版在v1中兼容新增`send_link`，让iPad等不能自动打开网页的设备接收普通链接，原`send_open_url`不变。当前Windows/手机安装版本分开记录于 [快速测试](QUICK_TEST.md)，不把构建完成等同于手机安装。Chrona负责调用端和LAN页面，GlobalSend负责本机桥与组内定向投递。
 
 ## 绑定与消息
 
@@ -30,7 +30,7 @@
 ### hello.result
 
 ```json
-{"protocolVersion":1,"appVersion":"1.0.30","connected":true,"associationState":"authorized","capabilities":["list_devices","send_open_url"]}
+{"protocolVersion":1,"appVersion":"1.0.55","connected":true,"associationState":"authorized","capabilities":["list_devices","send_open_url","send_link"]}
 ```
 
 `associationState` 为 required / authorized；未授权 hello 不泄露设备、分组或凭据。required 时 connected 为 false，并附上述关联 PendingIntent。拒绝或撤销后重新关联。用户批准的范围仅“读取本组设备 / 发送所选网页”。Chrona 包为 `com.donglan.chrona`；候选签名及绑定规则见 `CHRONA_INTEGRATION_DRAFT.md`。不能只凭 Debug 证书授权别的包。
@@ -38,10 +38,25 @@
 ### list_devices.result
 
 ```json
-{"devices":[{"deviceId":"stable-id","name":"电脑","platform":"windows","online":true,"sendable":true,"capabilities":{"openUrlIntentV1":true}}],"updatedAt":"2026-10-28T14:00:00.000Z"}
+{"devices":[{"deviceId":"stable-id","name":"电脑","platform":"windows","online":true,"sendable":true,"capabilities":{"openUrlIntentV1":true,"sendLinkV1":true}}],"updatedAt":"2026-10-28T14:00:00.000Z"}
 ```
 
 列表不含自身、撤销设备、凭据、peer证书或完整内部地址信息。sendable 复用现有在线/30秒宽限；online 明确是否当前在线。未支持自动打开的设备 capability=false，不能在 Chrona 显示成可自动打开。
+
+### iPad 等设备：发送普通链接
+
+`sendLinkV1`独立于`openUrlIntentV1`。Chrona优先按原`send_open_url`合同调用支持自动打开的设备；不支持自动打开时，只有hello声明`send_link`且目标声明`sendLinkV1=true`，才可使用下面的新调用。旧端没有新能力时，不猜平台或伪造支持；打开请求失败也不自动改发普通链接。
+
+```json
+{"v":1,"requestId":"uuid","method":"send_link","targetDeviceId":"ipad-id","url":"http://10.x.x.x:8765/"}
+{"v":1,"requestId":"同一个uuid","method":"status","deliveryMode":"link"}
+```
+
+结果为`{requestId,targetDeviceId,deliveryMode:"link",state:"sent",createdAt,updatedAt}`。`sent`是链接发送成功终态，表示中心已接受，文案“链接已发送”；不表示iPad已读或浏览器已打开。iPad/Web沿用已有普通文本消息接收，收到后手动点击链接，不需要升级中心或iPad包。
+
+普通链接不传`expiresInMs`、结果不含`expiresAt`，保留时长沿用现有文本策略，不套用自动打开命令的120秒期限。发送结果持久化在来源客户端；中心结果不明时，`status`返回`queued`并且不重发，界面可提示待确认。中心明确拒绝时，记录为`failed`并带`error`。用户显式重试时复用原`requestId`调用`send_link`，复用现有文本事件幂等；同ID不同URL、目标或本机调用方返回`conflict`。错误沿用v1外壳，超时为`timeout_unknown`，查询他方或缺失记录为`request_not_found`。已确认`sent`的记录不会因目标稍后离线而回退。
+
+请求ID与操作种类一并持久化。`status`只有显式`deliveryMode:"link"`才查询普通链接记录；不带该字段的查询完全维持原自动打开合同。普通链接进入文本历史，自动打开意图仍不混入文本/文件历史。
 
 ### send_open_url.result / status.result
 

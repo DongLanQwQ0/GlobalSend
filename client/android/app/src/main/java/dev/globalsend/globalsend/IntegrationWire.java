@@ -70,12 +70,14 @@ final class IntegrationWire {
                 Map<?,?> item=(Map<?,?>)value;
                 Map<String,Object> device=subset(item,"deviceId","name","platform","online","sendable");
                 Object capabilities=item.get("capabilities");
-                device.put("capabilities",object("openUrlIntentV1",capabilities instanceof Map && Boolean.TRUE.equals(((Map<?,?>)capabilities).get("openUrlIntentV1"))));
+                device.put("capabilities",object(
+                    "openUrlIntentV1",capabilities instanceof Map && Boolean.TRUE.equals(((Map<?,?>)capabilities).get("openUrlIntentV1")),
+                    "sendLinkV1",capabilities instanceof Map && Boolean.TRUE.equals(((Map<?,?>)capabilities).get("sendLinkV1"))));
                 devices.add(device);
             }
             result=object("devices",devices,"updatedAt",body.get("updatedAt"));
         } else {
-            result=subset(body,"requestId","targetDeviceId","state","createdAt","expiresAt","updatedAt");
+            result=subset(body,"requestId","targetDeviceId","state","createdAt","expiresAt","updatedAt","deliveryMode");
             if(body.get("error") instanceof Map) result.put("error",subset((Map<?,?>)body.get("error"),"code","message"));
         }
         return success(id,result);

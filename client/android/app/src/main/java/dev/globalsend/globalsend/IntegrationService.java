@@ -42,7 +42,7 @@ public class IntegrationService extends Service {
             String id=request.optString("requestId"),method=request.optString("method");
             if(what!=1||!IntegrationWire.uuid(id)) {respond(reply,sequence,IntegrationWire.error(id,"invalid_request","请求标识无效",false),null);return;}
             if(request.optInt("v",0)!=1) {respond(reply,sequence,IntegrationWire.error(id,"unsupported_version","不支持此集成协议版本",false),null);return;}
-            if(!java.util.Arrays.asList("hello","list_devices","send_open_url","status").contains(method)) {respond(reply,sequence,IntegrationWire.error(id,"invalid_request","不支持此操作",false),null);return;}
+            if(!java.util.Arrays.asList("hello","list_devices","send_open_url","send_link","status").contains(method)) {respond(reply,sequence,IntegrationWire.error(id,"invalid_request","不支持此操作",false),null);return;}
             IntegrationAssociations associations=new IntegrationAssociations(this);
             IntegrationAssociations.Caller caller=associations.caller(uid);
             if(caller==null) {respond(reply,sequence,IntegrationWire.error(id,"caller_not_allowed","此应用不能访问 GlobalSend",false),null);return;}
@@ -83,7 +83,7 @@ public class IntegrationService extends Service {
     private Map<String,Object> hello(boolean connected,String state) {
         String version="";
         try {version=getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(android.content.pm.PackageManager.NameNotFoundException impossible){ }
-        return IntegrationWire.object("protocolVersion",1,"appVersion",version==null?"":version,"connected",connected,"associationState",state,"capabilities",java.util.Arrays.asList("list_devices","send_open_url"));
+        return IntegrationWire.object("protocolVersion",1,"appVersion",version==null?"":version,"connected",connected,"associationState",state,"capabilities",java.util.Arrays.asList("list_devices","send_open_url","send_link"));
     }
     private void respond(Messenger target,int sequence,Map<String,Object> body,PendingIntent association) {
         Message response=Message.obtain(null,1);response.arg1=sequence;Bundle data=new Bundle();data.putString("response",IntegrationWire.encode(body));

@@ -110,6 +110,26 @@ public class IntegrationAndroidTest {
         rpc(service,23456,32,IntegrationWire.encode(IntegrationWire.object("v",1,"requestId",UUID.randomUUID().toString(),"method","list_devices","callerAppId",IntegrationAssociations.CHRONA,"uid",CHRONA_UID)),replies);
         await(()->replies.size()==2);assertEquals("caller_not_allowed",body(replies.get(1)).getJSONObject("error").getString("code"));assertEquals(0,service.calls);service.onDestroy();
     }
+    @Test public void approvedSendLinkAndLinkStatusReachTheBridgeAndHelloAdvertisesThem() throws Exception {
+        FakeService service=Robolectric.buildService(FakeService.class).create().get();
+        IntegrationAssociations associations=new IntegrationAssociations(context);
+        PendingIntent consent=associations.consent(associations.caller(CHRONA_UID));
+        assertTrue(associations.approve(Shadows.shadowOf(consent).getSavedIntent().getData().getLastPathSegment()));
+        List<Message> replies=new ArrayList<>();String id=UUID.randomUUID().toString();
+        rpc(service,CHRONA_UID,51,json("send_link",id),replies);await(()->service.calls==1);
+        assertEquals("send_link",service.seen.get("method"));
+        service.reply.accept(IntegrationWire.success(id,IntegrationWire.object("requestId",id,"deliveryMode","link","state","sent")));
+        await(()->replies.size()==1);assertEquals("sent",body(replies.get(0)).getJSONObject("result").getString("state"));
+        rpc(service,CHRONA_UID,52,new JSONObject(IntegrationWire.object("v",1,"requestId",id,"method","status","deliveryMode","link")).toString(),replies);
+        await(()->service.calls==2);assertEquals("link",service.seen.get("deliveryMode"));
+        service.reply.accept(IntegrationWire.success(id,IntegrationWire.object("requestId",id,"deliveryMode","link","state","sent")));
+        await(()->replies.size()==2);
+        rpc(service,CHRONA_UID,53,json("hello",id),replies);await(()->service.calls==3);
+        service.reply.accept(IntegrationWire.success(id,IntegrationWire.object("connected",true)));
+        await(()->replies.size()==3);
+        assertTrue(body(replies.get(2)).getJSONObject("result").getJSONArray("capabilities").toString().contains("send_link"));
+        service.onDestroy();
+    }
     static class FakeMessenger implements BinaryMessenger {
         BinaryMessageHandler incoming;int calls;boolean implemented=true;Object lastArguments;
         public void send(String channel,ByteBuffer message){send(channel,message,null);}
@@ -177,6 +197,16 @@ public class IntegrationAndroidTest {
         Map<String,Object> peer=IntegrationWire.object("deviceId","device","name","电脑","online",true,"token","SECRET","peer","https://private","capabilities",IntegrationWire.object("openUrlIntentV1",true,"secret","SECRET"));
         String result=IntegrationWire.encode(IntegrationWire.publicResponse("id","list_devices",IntegrationWire.success("id",IntegrationWire.object("devices",java.util.Arrays.asList(peer),"updatedAt","now","token","SECRET"))));
         assertFalse(result.contains("SECRET"));assertFalse(result.contains("private"));assertTrue(result.contains("openUrlIntentV1"));
+    }
+    @Test public void linkCapabilityAndSentStatusSurviveNativeProjection() {
+        Map<String,Object> peer=IntegrationWire.object("deviceId","ipad","platform","other","online",true,
+            "capabilities",IntegrationWire.object("openUrlIntentV1",false,"sendLinkV1",true));
+        Map<?,?> list=(Map<?,?>)IntegrationWire.publicResponse("id","list_devices",IntegrationWire.success("id",IntegrationWire.object("devices",List.of(peer)))).get("result");
+        Map<?,?> item=(Map<?,?>)((List<?>)list.get("devices")).get(0);
+        assertEquals(false,((Map<?,?>)item.get("capabilities")).get("openUrlIntentV1"));
+        assertEquals(true,((Map<?,?>)item.get("capabilities")).get("sendLinkV1"));
+        Map<?,?> status=(Map<?,?>)IntegrationWire.publicResponse("id","send_link",IntegrationWire.success("id",IntegrationWire.object("requestId","id","deliveryMode","link","state","sent","url","private-value"))).get("result");
+        assertEquals("link",status.get("deliveryMode"));assertEquals("sent",status.get("state"));assertFalse(status.containsKey("url"));
     }
     @Test public void duplicateArrivalsDuringDispatchJoinOneOperation() throws Exception {
         IntegrationUrlRequests requests=new IntegrationUrlRequests(context,()->{});FocusActivity activity=Robolectric.buildActivity(FocusActivity.class).setup().get();String id=UUID.randomUUID().toString();List<Map<String,Object>> replies=new ArrayList<>();

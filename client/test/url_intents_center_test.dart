@@ -168,6 +168,67 @@ void main() {
               as Map;
       expect(records.values.single['state'], 'launch_accepted');
       expect(records.values.single.containsKey('url'), false);
+      // An old iPad client needs only the already-shipped ordinary text path.
+      final ipad = await enroll('iPad manual-open target', 'other');
+      final ipadTicket = await ipad.api.call('POST', '/session/ws-ticket', {});
+      final ipadSocket = await WebSocket.connect(
+        ipad.api
+            .uri('/ws')
+            .replace(
+              scheme: 'ws',
+              queryParameters: {'ticket': ipadTicket['ticket']},
+            )
+            .toString(),
+      );
+      sockets.add(ipadSocket);
+      final ipadOnline = Completer<void>();
+      ipadSocket.listen((raw) {
+        if (jsonDecode(raw as String)['type'] == 'hello' &&
+            !ipadOnline.isCompleted)
+          ipadOnline.complete();
+      });
+      await ipadOnline.future.timeout(const Duration(seconds: 5));
+      await refresh();
+      const linkId = '22222222-3333-4444-5555-666666666666';
+      Future<Map<String, dynamic>> link(String method) =>
+          sender.handleLocalRequest({
+            'callerAppId': 'com.donglan.chrona',
+            'request': {
+              'v': 1,
+              'requestId': linkId,
+              'method': method,
+              'deliveryMode': 'link',
+              'targetDeviceId': ipad.id,
+              'url': 'http://10.194.43.84:8765/',
+            },
+          });
+      final listed = await sender.handleLocalRequest({
+        'callerAppId': 'com.donglan.chrona',
+        'request': {'v': 1, 'requestId': linkId, 'method': 'list_devices'},
+      });
+      final ipadProjection = (listed['result']['devices'] as List).singleWhere(
+        (d) => d['deviceId'] == ipad.id,
+      );
+      expect(ipadProjection['capabilities'], {
+        'openUrlIntentV1': false,
+        'sendLinkV1': true,
+      });
+      expect((await link('send_link'))['result']['state'], 'sent');
+      expect((await link('status'))['result']['deliveryMode'], 'link');
+      expect((await link('send_link'))['result']['state'], 'sent');
+      final ipadEvents =
+          (await ipad.api.call('GET', '/events'))['events'] as List;
+      expect(ipadEvents, hasLength(1));
+      expect(ipadEvents.single['type'], 'text.created');
+      expect(ipadEvents.single['payload']['text'], 'http://10.194.43.84:8765/');
+      expect(
+        (await ipad.api.call('GET', '/url-intents/pending'))['intents'],
+        isEmpty,
+      );
+      expect(
+        launches,
+        1,
+      ); // Only the earlier explicit Windows open was launched.
     } finally {
       for (final integration in integrations) {
         integration.dispose();
