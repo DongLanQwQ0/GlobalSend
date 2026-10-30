@@ -511,7 +511,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             if(firstDraw[0]) {
                 firstDraw[0]=false;
                 if(root==owner && !initiallyCollapsed && !collapsed)
-                    owner.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+                    owner.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
             }
             if(root==owner && surfaceAnchored) {
                 positionSurface();
@@ -925,7 +925,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void feedbackDragEntry() {
-        if(!dragInside && root!=null)root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+        if(!dragInside && root!=null)root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         dragInside=true;
     }
 
@@ -1155,7 +1155,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (root == null || collapsed == value && geometry != null) return;
         if (DockCoordinator.afterExportFrom(root, () -> setCollapsed(value))) return;
         stopHandleFling();
-        if(collapsed && !value)root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+        if(collapsed && !value)root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         if (collapsed == value && geometry == null && layout.width == (value ? dp(18) : expandedWidth)
                 && layout.height == (value ? dp(72) : expandedHeight)) {
             finishGeometry(value);savePlacement(); return;
