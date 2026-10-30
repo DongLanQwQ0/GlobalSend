@@ -20,22 +20,30 @@ if not args.android_only:
 im = Image.new('RGBA', (1024, 1024))
 d = ImageDraw.Draw(im)
 d.ellipse((176, 176, 848, 848), outline=(23,107,88,89), width=40)
-for points in [[(228,404),(704,404),(608,308)],[(704,404),(608,500)],[(796,620),(320,620),(416,524)],[(320,620),(416,716)]]:
-    d.line(points, fill='#176b58', width=64, joint='curve')
-    for x,y in points: d.ellipse((x-32,y-32,x+32,y+32), fill='#176b58')
+def draw_arrows(draw):
+    for points in [[(228,404),(704,404),(608,308)],[(704,404),(608,500)],[(796,620),(320,620),(416,524)],[(320,620),(416,716)]]:
+        draw.line(points, fill='#176b58', width=64, joint='curve')
+        for x,y in points: draw.ellipse((x-32,y-32,x+32,y+32), fill='#176b58')
+draw_arrows(d)
 if not args.android_only:
     im.resize((256,256), Image.Resampling.LANCZOS).save(assets / 'globalsend.png')
     im.save(ROOT / 'windows/runner/resources/app_icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
+# OEM APK inspectors may load a PNG directly instead of resolving anydpi.
+# Give those files the same complete opaque outline as the Android vector.
+android_im = Image.new('RGBA', (1024, 1024))
+android_draw = ImageDraw.Draw(android_im)
+android_draw.ellipse((156, 156, 868, 868), outline='#aecbc5', width=40)
+draw_arrows(android_draw)
 for bucket, size in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
     path = ROOT / f'android/app/src/main/res/mipmap-{bucket}/ic_launcher.png'
     path.parent.mkdir(parents=True,exist_ok=True)
-    im.resize((size,size),Image.Resampling.LANCZOS).save(path)
+    android_im.resize((size,size),Image.Resampling.LANCZOS).save(path)
 
 # Android package installers can display icons far above launcher size. Keep
 # the mark as vector paths rather than enlarging a density-selected PNG.
 paths = '''    <path android:pathData="M44,128a84,84 0,1 0,168 0a84,84 0,1 0,-168 0"
-        android:fillColor="@android:color/transparent" android:strokeColor="#176b58"
-        android:strokeWidth="10" android:strokeAlpha="0.35" />
+        android:fillColor="@android:color/transparent" android:strokeColor="#aecbc5"
+        android:strokeWidth="10" />
     <path android:pathData="M57,101h119l-24,-24m24,24l-24,24M199,155H80l24,-24m-24,24l24,24"
         android:fillColor="@android:color/transparent" android:strokeColor="#176b58"
         android:strokeWidth="16" android:strokeLineCap="round" android:strokeLineJoin="round" />'''

@@ -25,10 +25,15 @@ public class LauncherIconTest {
         Bitmap image=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);
         icon.setBounds(0,0,size,size);icon.draw(new Canvas(image));
         int left=size,top=size,right=-1,bottom=-1;double radius=0;
+        int opaqueLeft=size,opaqueTop=size,opaqueRight=-1,opaqueBottom=-1;
         for(int y=0;y<size;y++)for(int x=0;x<size;x++) {
             if(Color.alpha(image.getPixel(x,y))<8)continue;
             visible++;left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);
             radius=Math.max(radius,Math.hypot(x-size/2f,y-size/2f));
+            if(Color.alpha(image.getPixel(x,y))>=192) {
+                opaqueLeft=Math.min(opaqueLeft,x);opaqueTop=Math.min(opaqueTop,y);
+                opaqueRight=Math.max(opaqueRight,x);opaqueBottom=Math.max(opaqueBottom,y);
+            }
         }
         String output=System.getenv("GLOBALSEND_ICON_TEST_ARTIFACTS");
         if(output!=null) {
@@ -44,6 +49,8 @@ public class LauncherIconTest {
         assertTrue(visible>10000);
         assertTrue("outer ring retains its intended size",right-left>size*.65f);
         assertTrue(left>12 && top>12 && right<size-12 && bottom<size-12);
+        assertTrue("normalization sees the complete ring, not just the arrows",
+            opaqueLeft-left<=1 && opaqueTop-top<=1 && right-opaqueRight<=1 && bottom-opaqueBottom<=1);
         assertEquals("no colored backing",0,Color.alpha(image.getPixel(size/2,size/2)));
         image.recycle();
     }
