@@ -93,15 +93,9 @@ public class ReceiveOverlayDeviceTargetsTest {
         ReflectionHelpers.setField(event,"mLocalState",AndroidDragTest.NativeDragView.states.get(index));
         ReflectionHelpers.setField(event,"mClipDescription",clip.getDescription());ReflectionHelpers.setField(event,"mClipData",clip);
         ReflectionHelpers.setField(event,"mDragResult",result);
-        if(action==DragEvent.ACTION_DRAG_STARTED) {
+        if(action==DragEvent.ACTION_DRAG_STARTED || action==DragEvent.ACTION_DRAG_EXITED || action==DragEvent.ACTION_DRAG_ENDED) {
             java.lang.reflect.Method receive=ReceiveOverlay.class.getDeclaredMethod("receiveDrop",DragEvent.class);receive.setAccessible(true);
             return (Boolean)receive.invoke(overlay,event);
-        }
-        if(action==DragEvent.ACTION_DRAG_ENDED) {
-            DockCoordinator.LocalDrag session=(DockCoordinator.LocalDrag)AndroidDragTest.NativeDragView.states.get(index);
-            session.accepted|=result;
-            java.lang.reflect.Method finish=DockCoordinator.class.getDeclaredMethod("finishExport",DockCoordinator.LocalDrag.class);finish.setAccessible(true);finish.invoke(null,session);
-            return true;
         }
         return root.dispatchDragEvent(event);
     }

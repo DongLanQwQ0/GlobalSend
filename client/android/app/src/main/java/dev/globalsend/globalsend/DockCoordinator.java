@@ -605,6 +605,14 @@ final class DockCoordinator {
         }
         return false;
     }
+    static void finishExportFrom(View root,DragEvent event) {
+        LocalDrag session=activeExport;
+        View source=session==null?null:session.source.get();
+        while(source!=null) {
+            if(source==root) {session.accepted|=event.getResult();finishExport(session);return;}
+            source=source.getParent() instanceof View?(View)source.getParent():null;
+        }
+    }
     static boolean startDrag(View view, String path, String text, String label) throws Exception {
         return startDrag(view,path==null?java.util.Collections.emptyList():java.util.Collections.singletonList(path),path==null&&text!=null?java.util.Collections.singletonList(text):java.util.Collections.emptyList(),label);
     }
@@ -613,6 +621,10 @@ final class DockCoordinator {
     }
     static boolean startDrag(View view,List<String> paths,List<String> texts,String label,
             java.util.function.Consumer<Boolean> completed) throws Exception {
+        return startDrag(view,paths,texts,label,completed,false);
+    }
+    static boolean startDrag(View view,List<String> paths,List<String> texts,String label,
+            java.util.function.Consumer<Boolean> completed,boolean rootHandlesDrag) throws Exception {
         if (activeExport != null) return false; // A second long press must not re-enter a live system drag.
         traceDrag("begin export source="+view.getClass().getSimpleName());
         LocalDrag session = new LocalDrag(view, paths,texts);
@@ -637,7 +649,7 @@ final class DockCoordinator {
             @Override public void onViewDetachedFromWindow(View source) { finishExport(session); }
         };
         view.addOnAttachStateChangeListener(session.detachListener);
-        if (!(view instanceof FlutterView)) view.setOnDragListener((source, event) -> {
+        if (!(view instanceof FlutterView) && !rootHandlesDrag) view.setOnDragListener((source, event) -> {
             traceDrag("source action="+event.getAction()+" result="+event.getResult());
             if (event.getAction() == DragEvent.ACTION_DRAG_ENDED) {
                 session.accepted |= event.getResult(); finishExport(session);

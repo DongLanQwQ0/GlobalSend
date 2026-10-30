@@ -770,7 +770,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     if(!consumed && !warned[0]) {warned[0]=true;android.widget.Toast.makeText(context,"目标未读取，已保留暂存项",android.widget.Toast.LENGTH_SHORT).show();}
                     return consumed;
                 });
-            });
+            },true);
             if(!began)finishForwarding(drag);
             return began;
         } catch (Exception unavailable) {
@@ -887,7 +887,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 }
                 surface.setBackground(shape(glass(appearance.soft,0x99), 18)); return true;
             case DragEvent.ACTION_DRAG_EXITED:
+                // Since Android N, enter/exit is delivered to the innermost
+                // interested View, not through dispatchDragEvent on every parent.
+                // The dock root owns this gesture, including its completion.
+                if(forwarding!=null)showSendTargets();
+                stopTargetScroll();
+                if (dragExpand != null) main.removeCallbacks(dragExpand);
+                dragExpand = null;
+                if (root != null) styleSurface();
+                return true;
             case DragEvent.ACTION_DRAG_ENDED:
+                if(root!=null)DockCoordinator.finishExportFrom(root,event);
                 if (dragExpand != null) main.removeCallbacks(dragExpand);
                 dragExpand = null;
                 if (root != null) styleSurface();
