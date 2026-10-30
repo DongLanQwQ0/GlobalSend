@@ -12,4 +12,4 @@ python client/tool/generate_icon.py --android-only
 
 不使用透明背景的`adaptive-icon`：Android的[绘制实现](https://android.googlesource.com/platform/frameworks/base/+/refs/tags/android-15.0.0_r1/graphics/java/android/graphics/drawable/AdaptiveIconDrawable.java)先用黑色填充内部画布，再叠加背景和前景；透明背景会留下黑底。原生渲染也复现了这一点，因此这里直接使用透明矢量，不以另一块底色代替透明。
 
-`LauncherIconTest` 渲染安装器实际选择的资源，检查完整轮廓、圆形裁剪留白和透明背景。vivo安装界面的实际图标仍需在新APK上查看；框架渲染不代替厂商界面验收。
+`LauncherIconTest` 渲染安装器实际选择的资源，检查完整轮廓、圆形裁剪留白和透明背景。65版随后经USB覆盖安装，用户确认没有问题。此前64版只更换矢量仍被厂商裁切的截图保留为反例，不将当时框架渲染通过误写为厂商界面通过。

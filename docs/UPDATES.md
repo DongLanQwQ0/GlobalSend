@@ -28,7 +28,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-2026-10-30本地Windows候选已更新为 **1.0.54+64**，Android64版拖出坞后切换设备栏已获用户确认；之后的VSync边缘滚动修订已USB覆盖并完成左右滚动检查，146帧采样无系统记录卡顿帧。新增展开及拖入范围轻震、收起把手惯性滑行已构建，USB断开尚未覆盖；手机状态以[本机发布记录](../artifacts/releases/latest-local.json)为准。37项原生回归通过，包含60/120Hz等时滚动距离、边缘深度变速和离边立即停止；这不代替真机流畅度验收。54尚未发布为GitHub Release，本轮未进行Windows界面测试，也未构建新IPA。
+2026-10-30本地Windows和Android已更新为 **1.0.54+65**。手机USB安装成功并读回65版，包含增强触感、把手惯性和透明矢量安装图标；用户确认本轮没有问题。左右滚动的146帧无卡顿采样及原生回归证据保留。54尚未发布为GitHub Release，中心无安装包；本轮未进行Windows界面测试，也未构建新IPA。详情以[本机发布记录](../artifacts/releases/latest-local.json)为准。
 
 此前公开版：
 
