@@ -1,6 +1,6 @@
 # 1.0.57：媒体文件名与 Windows 触屏拖放
 
-本地发布：Windows **1.0.57+68** 已覆盖并重启，构建源码 `a965322`；Android APK 已构建并通过签名、无字体包检查，16,305,744 字节。手机仍为最后确认的 **1.0.56+67**，本轮按用户要求不访问 ADB。安装记录在 `artifacts/releases/latest-local.json`。
+本地发布：Windows 和 Android **1.0.57+68** 已覆盖并启动，构建源码 `a965322`；Android APK 已通过签名、无字体包检查，16,305,744 字节。手机原先暂缓，用户提供新地址后于2026-10-30 16:51覆盖安装成功，已确认版本68/1.0.57及进程存在，保留应用数据。安装记录在 `artifacts/releases/latest-local.json`。
 
 ## 修复
 
@@ -19,6 +19,6 @@
 ## 留给实机验收
 
 - Windows 触屏拖动的实际流畅度与向桌面/其他应用投放。按用户要求，本轮不进行 Windows 界面自动操作。
-- Android 暂存媒体建议拖入待发区、发送后的文件名和图片预览。用户已告知手机将断开，本轮不重连、不推送、不安装。
+- Android 暂存媒体建议拖入待发区、发送后的文件名和图片预览。新版已安装启动，实际手指拖放尚待验收；手机已交还 Chrona 会话串行使用，本轮不并发触控。
 
 Windows 系统接口文档：[ConvertPrimaryPointerToMouseDrag](https://learn.microsoft.com/en-us/windows/win32/winmsg/winuser/nf-winuser-convertprimarypointertomousedrag)。本机 Windows 11 的接口导出已只读确认。
