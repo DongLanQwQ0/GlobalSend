@@ -15,11 +15,11 @@ USB 实机确认：两个各含 4 条目录清单的文件夹均只显示根卡�
 - 暂存坞“全部拖拽”不包含建议；建议仍可单独拖出，明确加入暂存后才参与整批拖拽。用户已确认“建议图片拖到发送区”修复，不重复测试或改变该路径。
 - 将文件或文字投到发送页设备卡片，直接发给该设备，只发送投下的这一批，保留其他待发草稿。原生 Windows/Android 和 Web 均接通；iOS 使用同一批次与唯一设备 ID 的分享导入接口。
 - 已发送文本保存成功即关闭；失败保留编辑框和草稿。自己编辑消息不再触发本机的重复收件弹窗；Web 保存期间又输入的新草稿仍保留。
-- iOS 接入 UIKit 的 `UIDragInteraction` / `UIDropInteraction`，支持跨应用文件、媒体、网址、文本及应用内拖放。复用分享扩展的文件导入器，在系统临时 URL 失效前接管文件。iOS 编译检查单独运行，不在 Android/Windows 验收期间打包或发布 IPA。
+- iOS 接入 UIKit 的 `UIDragInteraction` / `UIDropInteraction`，支持跨应用文件、媒体、网址、文本及应用内拖放。复用分享扩展的文件导入器，在系统临时 URL 失效前接管文件。Windows/Android 本轮原生修复和手机复验完成后，最后构建 iOS IPA。
 
 已验证：2,000 文件单卡片组件及渲染；原生真实中心 LAN/中继目录传输、空目录与复用；Web 261 项检查、真实 Edge/OPFS 接收和页面重载，使用同一固定浏览器配置；Android 原生拖放目标坐标及整批排除建议；直接投放保留其他草稿；保存关闭与失败恢复。Windows 实际触控/外部投放未操作，iPad 真机拖放需安装后确认。
 
-[iOS 主应用及分享扩展编译检查](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41051688800)已通过；未打包或发布 IPA。公网中心 Docker 与 [Web](https://123.207.180.163/globalsend/app/) 已同步更新，API、页面及新 JS/CSS 均验证 200。Android 新增建议清理已完成并通过真机检查，接下来进行最终 IPA 构建。
+[最新 iOS 构建](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41078780704)已成功，1.0.58+73 的未签名 IPA 已下载至 `artifacts/releases/ios-1.0.58-build73/GlobalSend-iPad-unsigned.ipa`（14,802,730 字节）。归档完整、主应用和分享扩展均为真机 arm64、App Group 模板一致且无打包字体；用户用 iloader 手动签名安装，iPad 真机拖放尚待确认。[GitHub iOS 发布](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.58-build73)已提供对应平台更新清单。公网中心 Docker 与 [Web](https://123.207.180.163/globalsend/app/) 保持已部署的 58 版 Web 源码，API、页面及新 JS/CSS 已验证 200；71–73 未改服务端或 Web，不重复部署。
 
 本轮手动验收：
 1. 接收含子目录、空目录的文件夹：列表/弹窗只有文件夹卡片，完成后目录结构正确；暂停、重试及删除针对整棵目录。
