@@ -217,4 +217,71 @@ public class ReceiveOverlayDeviceTargetsTest {
         assertTrue("closer to edge scrolls faster",gentle<oneTwenty/2);
         drag(DragEvent.ACTION_DRAG_ENDED,0,0,false);
     }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void suggestionsFollowClearAndWholeBlankSquareOnlyInShelf() throws Exception {
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        shelf.add(List.of(),List.of("用户暂存"),Map.of());
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media(syntheticPicture(),"new.jpg",1),
+            new RecentMediaSuggestions.Media("content://media/external/video/media/92","new.mp4",2)));
+        ((View)field(overlay,"shelfTab")).performClick();draw();
+        LinearLayout row=(LinearLayout)field(overlay,"row");assertEquals(5,row.getChildCount());
+        assertEquals("用户暂存",((ReceiveNotifications.Receipt)row.getChildAt(0).getTag()).text);
+        assertEquals("清空当前列表",row.getChildAt(1).getContentDescription());
+        View blank=row.getChildAt(2);assertEquals("open-app-space",blank.getTag());
+        assertNull(blank.getBackground());assertEquals(blank.getHeight(),blank.getWidth());
+        for(int i=3;i<5;i++)assertTrue(shelf.isSuggested(((ReceiveNotifications.Receipt)row.getChildAt(i).getTag()).id));
+        waitForImage(row.getChildAt(3));
+        ((HorizontalScrollView)field(overlay,"scroll")).scrollTo(row.getWidth(),0);
+        capture("media-after-blank");
+        ((View)field(overlay,"count")).performClick();draw();
+        assertEquals(3,((LinearLayout)field(overlay,"row")).getChildCount());
+        assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
+    }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void emptyShelfKeepsInitialViewportBlankAndCanSwipeToMedia() throws Exception {
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");shelf.clear();
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media(syntheticPicture(),"new.jpg",1)));
+        ((View)field(overlay,"shelfTab")).performClick();draw();
+        LinearLayout row=(LinearLayout)field(overlay,"row");assertEquals(2,row.getChildCount());
+        HorizontalScrollView viewport=(HorizontalScrollView)field(overlay,"scroll");
+        View blank=row.getChildAt(0),media=row.getChildAt(1);
+        assertEquals("open-app-space",blank.getTag());assertTrue(blank.getWidth()>=viewport.getWidth()-viewport.getPaddingLeft()-viewport.getPaddingRight());
+        assertTrue("suggestion starts outside initial viewport",media.getLeft()>=viewport.getWidth()-viewport.getPaddingLeft());
+        capture("media-empty-initial");
+        android.content.pm.ResolveInfo launcher=new android.content.pm.ResolveInfo();launcher.activityInfo=new android.content.pm.ActivityInfo();
+        launcher.activityInfo.packageName=activity.getPackageName();launcher.activityInfo.name="test.GlobalSendActivity";
+        launcher.activityInfo.applicationInfo=new android.content.pm.ApplicationInfo();launcher.activityInfo.applicationInfo.packageName=activity.getPackageName();
+        Shadows.shadowOf(activity.getPackageManager()).addResolveInfoForIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(activity.getPackageName()),launcher);
+        tap(bounds(blank));idle(50);tap(bounds(blank));idle(400);
+        assertEquals("test.GlobalSendActivity",Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity().getComponent().getClassName());
+        assertEquals(1,shelf.items.size());
+        Rect area=bounds(viewport);int windowX=((WindowManager.LayoutParams)root.getLayoutParams()).x;
+        long now=android.os.SystemClock.uptimeMillis();
+        for(int i=0;i<5;i++) {
+            int action=i==0?MotionEvent.ACTION_DOWN:i==4?MotionEvent.ACTION_UP:MotionEvent.ACTION_MOVE;
+            MotionEvent event=MotionEvent.obtain(now,now+i*40,action,area.right-24-i*30,area.centerY(),0);
+            root.dispatchTouchEvent(event);event.recycle();
+        }
+        idle(120);draw();
+        assertTrue("empty region must scroll rather than move window",viewport.getScrollX()>0);
+        assertEquals(windowX,((WindowManager.LayoutParams)root.getLayoutParams()).x);
+        waitForImage(media);capture("media-empty-swiped");
+        media.findViewWithTag("remove-item").performClick();draw();
+        assertTrue(shelf.items.isEmpty());assertEquals(1,row.getChildCount());
+        assertEquals("open-app-space",row.getChildAt(0).getTag());
+    }
+    private String syntheticPicture() throws Exception {
+        java.io.File file=new java.io.File(activity.getFilesDir(),"suggestion.jpg");
+        android.graphics.Bitmap picture=android.graphics.Bitmap.createBitmap(240,160,android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas=new android.graphics.Canvas(picture);canvas.drawColor(0xff2b6f84);
+        android.graphics.Paint paint=new android.graphics.Paint();paint.setColor(0xffeab96c);canvas.drawCircle(150,50,38,paint);
+        paint.setColor(0xff426f52);canvas.drawRect(0,100,240,160,paint);
+        try(java.io.FileOutputStream output=new java.io.FileOutputStream(file)) {picture.compress(android.graphics.Bitmap.CompressFormat.JPEG,90,output);}
+        picture.recycle();return file.getPath();
+    }
+    private void waitForImage(View card) throws Exception {
+        android.widget.ImageView image=(android.widget.ImageView)((android.view.ViewGroup)card).getChildAt(0);
+        for(int i=0;i<150 && image.getDrawable()==null;i++) {Thread.sleep(5);idle(10);}
+        assertNotNull("native thumbnail must be rendered",image.getDrawable());
+    }
 }

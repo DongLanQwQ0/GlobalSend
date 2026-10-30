@@ -22,7 +22,7 @@ abstract class RecentPhotoLibrary {
 class DevicePhotoLibrary implements RecentPhotoLibrary {
   static const permissionOption = PermissionRequestOption(
     androidPermission: AndroidPermission(
-      type: RequestType.image,
+      type: RequestType.common,
       mediaLocation: false,
     ),
   );
@@ -47,7 +47,7 @@ class DevicePhotoLibrary implements RecentPhotoLibrary {
     final assets = await PhotoManager.getAssetListPaged(
       page: 0,
       pageCount: 24,
-      type: RequestType.image,
+      type: RequestType.common,
       filterOption: FilterOptionGroup(
         createTimeCond: DateTimeCond(min: since, max: DateTime.now()),
         orders: [
@@ -87,6 +87,7 @@ class RecentPhotos extends ChangeNotifier {
     bool? supported,
     DateTime Function()? now,
     this.suggestionDuration = const Duration(seconds: 8),
+    this.suggestInApp = true,
   }) : library = library ?? DevicePhotoLibrary(),
        directory = directory ?? appDataDirectory,
        supported = supported ?? (Platform.isAndroid || Platform.isIOS),
@@ -97,6 +98,7 @@ class RecentPhotos extends ChangeNotifier {
   final bool supported;
   final DateTime Function() now;
   final Duration suggestionDuration;
+  final bool suggestInApp;
   bool enabled = true, permissionGranted = false;
   String? problem;
   List<SuggestedPhoto> items = [];
@@ -133,6 +135,9 @@ class RecentPhotos extends ChangeNotifier {
       final state = jsonDecode(await file.readAsString()) as Map;
       enabled = state['enabled'] as bool;
       _asked = state['asked'] as bool;
+      if (!suggestInApp && (state['mediaPermissionVersion'] as int? ?? 1) < 2) {
+        _asked = false; // Upgrade the old image-only permission request once.
+      }
       _since = DateTime.parse(state['since'] as String);
       _handled.addAll((state['handled'] as List).cast<String>());
     } else {
@@ -144,6 +149,7 @@ class RecentPhotos extends ChangeNotifier {
     final contents = jsonEncode({
       'enabled': enabled,
       'asked': _asked,
+      'mediaPermissionVersion': 2,
       'since': _since!.toIso8601String(),
       'handled': _handled.toList(),
     });
@@ -187,6 +193,14 @@ class RecentPhotos extends ChangeNotifier {
       if (!permissionGranted) {
         items = [];
         problem = '未获得照片访问权限';
+        return;
+      }
+      // Android's persistent native dock owns discovery and presentation. Keep
+      // this object for the existing switch/permission flow, without consuming
+      // new media IDs or showing a competing eight-second main-page prompt.
+      if (!suggestInApp) {
+        items = [];
+        problem = null;
         return;
       }
       if (!enabled || !_visible || _disposed) return;

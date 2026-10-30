@@ -1,6 +1,7 @@
 import 'system_font_fixture.dart';
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -102,6 +103,31 @@ void main() {
   );
 
   test(
+    'Android dock mode keeps permission settings without consuming media IDs',
+    () async {
+      photos.dispose();
+      photos = RecentPhotos(
+        library: gallery,
+        directory: () async => folder,
+        supported: true,
+        suggestInApp: false,
+      );
+      photos.setVisible(true);
+      await until(() => photos.permissionGranted);
+      expect(gallery.requests, [true]);
+      expect(gallery.reads, 0);
+      expect(photos.items, isEmpty);
+      await photos.setEnabled(false);
+      final state = jsonDecode(
+        await File('${folder.path}/recent-photo-suggestions.json')
+            .readAsString(),
+      ) as Map;
+      expect(state['enabled'], false);
+      expect(state['handled'], isEmpty);
+    },
+  );
+
+  test(
     'denied access is not requested again; granting in Settings works',
     () async {
       gallery.allowed = false;
@@ -114,6 +140,34 @@ void main() {
       await photos.refresh();
       expect(photos.items, hasLength(2));
       expect(photos.problem, isNull);
+    },
+  );
+
+  test(
+    'old image-only setting requests image and video access once on upgrade',
+    () async {
+      photos.dispose();
+      await File('${folder.path}/recent-photo-suggestions.json').writeAsString(
+        jsonEncode({
+          'enabled': true,
+          'asked': true,
+          'since': DateTime.now().toIso8601String(),
+          'handled': <String>[],
+        }),
+      );
+      photos = RecentPhotos(
+        library: gallery,
+        directory: () async => folder,
+        supported: true,
+        suggestInApp: false,
+      );
+      photos.setVisible(true);
+      await until(() => photos.permissionGranted);
+      photos.setVisible(false);
+      photos.setVisible(true);
+      await photos.refresh();
+      expect(gallery.requests.where((request) => request), hasLength(1));
+      expect(gallery.reads, 0);
     },
   );
 

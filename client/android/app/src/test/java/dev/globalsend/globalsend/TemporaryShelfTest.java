@@ -20,6 +20,17 @@ import org.robolectric.annotation.Config;
 @Config(sdk=34, manifest=Config.NONE)
 public class TemporaryShelfTest {
     private void advance(long millis) { Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(millis)); }
+    @Test public void mediaSuggestionBecomesRegularWhenExplicitlyStagedAndKeepsExportGrace() {
+        TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
+        String uri="content://media/external/video/media/77";
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media(uri,"clip.mp4",1)));
+        ReceiveNotifications.Receipt item=shelf.items.values().iterator().next();assertTrue(shelf.isSuggested(item.id));
+        shelf.add(List.of(uri),List.of(),Map.of());
+        assertEquals(1,shelf.items.size());assertFalse(shelf.isSuggested(item.id));
+        shelf.exported(List.of(item),true);advance(2999);assertEquals(1,shelf.items.size());
+        assertTrue(shelf.cancelRemoval());advance(100);assertEquals(1,shelf.items.size());
+        shelf.exported(List.of(item),true);advance(3000);assertTrue(shelf.items.isEmpty());
+    }
     @Test public void nativeAcceptanceDoesNotRemoveAFileThatTheTargetNeverRead() {
         TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
         shelf.add(List.of("/unread.png","/read.png"),List.of("text"),Map.of());

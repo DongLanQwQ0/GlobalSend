@@ -19,6 +19,7 @@ import org.json.JSONObject;
 /** Installation-local references, deliberately separate from received messages. */
 final class TemporaryShelf {
     final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
+    private final java.util.Set<String> suggested = new java.util.HashSet<>();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final File file;
@@ -33,6 +34,7 @@ final class TemporaryShelf {
         this.changed = changed;
         io.execute(() -> {
             List<ReceiveNotifications.Receipt> restored = new ArrayList<>();
+            java.util.Set<String> restoredSuggested=new java.util.HashSet<>();
             try {
                 if (file.isFile()) {
                     JSONArray records = new JSONArray(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
@@ -43,6 +45,7 @@ final class TemporaryShelf {
                         if (!path.isEmpty() && !path.startsWith("content://") && !new File(path).exists()) continue;
                         restored.add(new ReceiveNotifications.Receipt(record.getString("id"), "1", "暂存",
                             record.has("text") ? record.getString("text") : null, record.optString("name"), path, 0));
+                        if(record.optBoolean("suggested"))restoredSuggested.add(record.getString("id"));
                     }
                 }
             } catch (java.io.IOException | org.json.JSONException unavailable) {
@@ -50,7 +53,10 @@ final class TemporaryShelf {
             }
             main.post(() -> {
                 for (ReceiveNotifications.Receipt receipt : restored)
-                    if (!contains(receipt.localPath, receipt.text)) items.put(receipt.id, receipt);
+                    if (!contains(receipt.localPath, receipt.text)) {
+                        items.put(receipt.id, receipt);
+                        if(restoredSuggested.contains(receipt.id))suggested.add(receipt.id);
+                    }
                 loaded = true;
                 save(); changed.run();
             });
@@ -65,6 +71,8 @@ final class TemporaryShelf {
 
     void add(List<String> paths, List<String> texts, Map<String, String> names) {
         cancelRemoval();
+        for(ReceiveNotifications.Receipt item:items.values())
+            if(paths.contains(item.localPath))suggested.remove(item.id);
         List<ReceiveNotifications.Receipt> added = new ArrayList<>();
         java.util.Set<String> batchPaths = new java.util.HashSet<>(), batchTexts = new java.util.HashSet<>();
         for (String path : paths) if (batchPaths.add(path) && !contains(path, null)) {
@@ -77,6 +85,22 @@ final class TemporaryShelf {
         for (ReceiveNotifications.Receipt item : added) next.put(item.id, item);
         next.putAll(items); items.clear(); items.putAll(next);
         save(); changed.run();
+    }
+
+    boolean isSuggested(String id) {return suggested.contains(id);}
+    void suggest(List<RecentMediaSuggestions.Media> media) {
+        LinkedHashMap<String,ReceiveNotifications.Receipt> next=new LinkedHashMap<>();
+        for(RecentMediaSuggestions.Media entry:media)if(!contains(entry.uri,null)) {
+            String id="shelf:"+UUID.randomUUID();suggested.add(id);
+            next.put(id,new ReceiveNotifications.Receipt(id,"1","暂存",null,entry.name,entry.uri,0));
+        }
+        if(next.isEmpty())return;
+        next.putAll(items);items.clear();items.putAll(next);save();changed.run();
+    }
+    void clearSuggestions() {
+        if(suggested.isEmpty())return;
+        for(String id:suggested)items.remove(id);
+        suggested.clear();save();changed.run();
     }
 
     void exported(List<ReceiveNotifications.Receipt> exported, boolean accepted) {
@@ -95,7 +119,9 @@ final class TemporaryShelf {
     private final Runnable removeExported = this::removeExported;
     private void removeExported() {
         for (Map.Entry<String, ReceiveNotifications.Receipt> entry : pendingRemoval.entrySet())
-            if(pendingConsumed.get(entry.getKey()).test(entry.getValue()))items.remove(entry.getKey(), entry.getValue());
+            if(pendingConsumed.get(entry.getKey()).test(entry.getValue())) {
+                items.remove(entry.getKey(), entry.getValue());suggested.remove(entry.getKey());
+            }
         pendingRemoval.clear();pendingConsumed.clear(); removalDeadline = 0;
         // Only references disappear. Original files and a target's in-progress
         // read of a copied drop must survive the three-second UI grace period.
@@ -112,10 +138,10 @@ final class TemporaryShelf {
     }
     boolean pendingRemoval(String id) { return pendingRemoval.containsKey(id); }
     void clear() {
-        cancelRemoval(); items.clear(); save(); changed.run();
+        cancelRemoval(); items.clear(); suggested.clear(); save(); changed.run();
     }
     void remove(String id) {
-        pendingRemoval.remove(id);pendingConsumed.remove(id); items.remove(id); save(); changed.run();
+        pendingRemoval.remove(id);pendingConsumed.remove(id); items.remove(id);suggested.remove(id); save(); changed.run();
     }
     private void save() {
         if (!loaded) return; // Loading merges any drops received during startup before the first write.
@@ -124,6 +150,7 @@ final class TemporaryShelf {
             JSONObject record = new JSONObject();
             try {
                 record.put("id", item.id); record.put("path", item.localPath); record.put("name", item.fileName);
+                if(suggested.contains(item.id))record.put("suggested",true);
                 if (item.text != null) record.put("text", item.text);
                 records.put(record);
             } catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }

@@ -150,7 +150,10 @@ class _SendScreenState extends State<SendScreen>
   bool _detailsScheduled = false;
   ModalRoute<dynamic>? _homeRoute;
   SendController get c => widget.controller;
-  late final recentPhotos = RecentPhotos(directory: c.stateDirectory);
+  late final recentPhotos = RecentPhotos(
+    directory: c.stateDirectory,
+    suggestInApp: !Platform.isAndroid,
+  );
   bool get loggedIn => c.api?.token.isNotEmpty == true;
   List<Map<String, dynamic>> get peers => c.onlinePeers;
   @override
@@ -4556,7 +4559,7 @@ class _SendScreenState extends State<SendScreen>
             if (recentPhotos.supported)
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('新图片建议'),
+                title: const Text('新图片与视频建议'),
                 subtitle: recentPhotos.problem == null
                     ? null
                     : Text(recentPhotos.problem!),

@@ -110,6 +110,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private int startX, startY, startWidth, startHeight;
     private ReceiveAppearance appearance;
     private final TemporaryShelf shelf;
+    private final RecentMediaSuggestions mediaSuggestions;
     private LinearLayout header;
     private TextView shelfTab, handle;
     private LinearLayout countGroup, shelfGroup;
@@ -152,6 +153,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         placement=context.getSharedPreferences("received-dock-placement",Context.MODE_PRIVATE);
         windows = context.getSystemService(WindowManager.class);
         shelf = new TemporaryShelf(context, this::shelfChanged);
+        mediaSuggestions=new RecentMediaSuggestions(context,this::suggestMedia,shelf::clearSuggestions);
         current = new java.lang.ref.WeakReference<>(this);
         main.post(this::restoreIfEnabled);
     }
@@ -192,13 +194,24 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
 
     @Override public void foreground() {
         appForeground=true;
+        mediaSuggestions.refresh();
         // A persistent shelf stays reachable while the user moves between apps.
         // Received records are still shown in the main app, not duplicated there.
         if (root != null) setCollapsed(true);
     }
-    @Override public void background() {appForeground=false;}
+    @Override public void background() {appForeground=false;mediaSuggestions.refresh();}
 
     private Map<String, ReceiveNotifications.Receipt> displayed() { return shelfVisible ? shelf.items : items; }
+
+    private void suggestMedia(List<RecentMediaSuggestions.Media> media) {
+        if(root!=null && DockCoordinator.afterExportFrom(root,() -> suggestMedia(media)))return;
+        int offset=scroll==null?0:scroll.getScrollX();
+        shelf.suggest(media);
+        if(scroll!=null) {
+            HorizontalScrollView owner=scroll;
+            owner.post(() -> {if(scroll==owner)owner.scrollTo(offset,0);});
+        }
+    }
 
     private void shelfChanged() {
         if (root == null) return;
@@ -527,9 +540,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         appearanceChanges = new android.os.FileObserver(context.getFilesDir().getPath(), android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
             @Override public void onEvent(int event, String path) {
                 if ("appearance.json".equals(path)) main.post(() -> shelfChanged());
+                if ("recent-photo-suggestions.json".equals(path)) main.post(() -> mediaSuggestions.refresh());
             }
         };
         appearanceChanges.startWatching();
+        mediaSuggestions.start();
     }
 
     private void render() {render(true);}
@@ -578,19 +593,29 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         List<FrameLayout> cards=new ArrayList<>();
         updateLabels();
         int side = Math.max(1, expandedHeight - dp(8));
-        if (displayed().isEmpty()) {
+        if (displayed().isEmpty() && !shelfVisible) {
             TextView empty = label(shelfVisible ? "拖入文件、图片或文字" : "暂无接收内容", 13, appearance.muted);
             empty.setGravity(Gravity.CENTER);
             row.addView(empty, new LinearLayout.LayoutParams(expandedWidth - dp(43), side));
         }
-        for (ReceiveNotifications.Receipt receipt : displayed().values()) {
+        List<ReceiveNotifications.Receipt> ordered=new ArrayList<>(),suggested=new ArrayList<>();
+        for(ReceiveNotifications.Receipt receipt:displayed().values()) {
+            if(shelfVisible && shelf.isSuggested(receipt.id))suggested.add(receipt);
+            else ordered.add(receipt);
+        }
+        boolean hasContent=!ordered.isEmpty(),tailAdded=false;
+        ordered.addAll(suggested);
+        for (ReceiveNotifications.Receipt receipt : ordered) {
+            if(shelfVisible && !tailAdded && shelf.isSuggested(receipt.id)) {
+                appendListTail(side,hasContent);tailAdded=true;
+            }
             FrameLayout card = new FrameLayout(context);
             card.setTag(receipt);
             card.setClipToOutline(true);
             boolean pending = shelfVisible && shelf.pendingRemoval(receipt.id);
             View content;
             boolean picture=receipt.text == null && !receipt.localPath.isEmpty() &&
-                receipt.fileName.toLowerCase(java.util.Locale.ROOT).matches(".*\\.(png|jpe?g|webp|gif|bmp|heic|heif)$");
+                receipt.fileName.toLowerCase(java.util.Locale.ROOT).matches(".*\\.(png|jpe?g|webp|gif|bmp|heic|heif|mp4|mov|m4v|webm|mkv|3gp)$");
             if (picture) {
                 ImageView image = new ImageView(context);
                 image.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -641,22 +666,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             row.addView(card, size);
             cards.add(card);
         }
-        if (!displayed().isEmpty()) {
-            LinearLayout clear = new LinearLayout(context);
-            clear.setGravity(Gravity.CENTER); clear.setOrientation(LinearLayout.VERTICAL);
-            clear.setBackground(shape(glass(listSoft(),0xb3),12)); clear.setContentDescription("清空当前列表");
-            TextView clearIcon=label("×",30,listAccent());
-            clearIcon.setGravity(Gravity.CENTER);
-            clear.addView(clearIcon,new LinearLayout.LayoutParams(dp(40),dp(40)));
-            TextView clearLabel=label("清空",12,appearance.muted);clearLabel.setGravity(Gravity.CENTER);
-            clear.addView(clearLabel);
-            clear.setOnClickListener(view -> clearDisplayed());
-            LinearLayout.LayoutParams clearSize=new LinearLayout.LayoutParams(side,side);clearSize.rightMargin=dp(3);
-            row.addView(clear,clearSize);
-            View openSpace=new View(context);openSpace.setTag("open-app-space");
-            openSpace.setContentDescription("双击打开 GlobalSend");
-            row.addView(openSpace,new LinearLayout.LayoutParams(side,side));
-        }
+        if(!tailAdded)appendListTail(side,hasContent);
         scroll.scrollTo(0, 0);
         if(animateCards) {
             LinearLayout owner=row;
@@ -674,6 +684,30 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     return true;
                 }
             });
+        }
+    }
+
+    private void appendListTail(int side,boolean hasContent) {
+        if (hasContent) {
+            LinearLayout clear = new LinearLayout(context);
+            clear.setGravity(Gravity.CENTER); clear.setOrientation(LinearLayout.VERTICAL);
+            clear.setBackground(shape(glass(listSoft(),0xb3),12)); clear.setContentDescription("清空当前列表");
+            TextView clearIcon=label("×",30,listAccent());
+            clearIcon.setGravity(Gravity.CENTER);
+            clear.addView(clearIcon,new LinearLayout.LayoutParams(dp(40),dp(40)));
+            TextView clearLabel=label("清空",12,appearance.muted);clearLabel.setGravity(Gravity.CENTER);
+            clear.addView(clearLabel);
+            clear.setOnClickListener(view -> clearDisplayed());
+            LinearLayout.LayoutParams clearSize=new LinearLayout.LayoutParams(side,side);clearSize.rightMargin=dp(3);
+            row.addView(clear,clearSize);
+        }
+        if(shelfVisible || hasContent) {
+            View openSpace=new View(context);openSpace.setTag("open-app-space");
+            openSpace.setContentDescription("双击打开 GlobalSend");
+            // With no staged content the initial viewport stays completely blank;
+            // suggestions are reached by swiping, never replacing the app-opening area.
+            int width=shelfVisible && !hasContent?Math.max(side,expandedWidth-dp(43)):side;
+            row.addView(openSpace,new LinearLayout.LayoutParams(width,side));
         }
     }
 
@@ -1280,6 +1314,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             hideWhenReady(request);
         })) return;
         if (root != null) {
+            mediaSuggestions.stop();
             context.unregisterComponentCallbacks(configurationChanges);
             if (appearanceChanges != null) { appearanceChanges.stopWatching(); appearanceChanges = null; }
             stopGeometry();
@@ -1361,6 +1396,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private static int clamp(int value, int min, int max) { return Math.max(Math.min(min, max), Math.min(value, max)); }
     private Bitmap thumbnail(String path, int size) {
         try {
+            if(Build.VERSION.SDK_INT>=29 && path.startsWith("content://media/"))
+                return context.getContentResolver().loadThumbnail(android.net.Uri.parse(path),new android.util.Size(size,size),null);
+            if(path.toLowerCase(java.util.Locale.ROOT).matches(".*\\.(mp4|mov|m4v|webm|mkv|3gp)$")) {
+                try(android.media.MediaMetadataRetriever video=new android.media.MediaMetadataRetriever()) {
+                    if(path.startsWith("content://"))video.setDataSource(context,android.net.Uri.parse(path));
+                    else video.setDataSource(path);
+                    return Build.VERSION.SDK_INT>=27?
+                        video.getScaledFrameAtTime(-1,android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC,size,size):
+                        video.getFrameAtTime();
+                }
+            }
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inJustDecodeBounds = true;
             try (java.io.InputStream input = open(path)) { BitmapFactory.decodeStream(input, null, options); }
