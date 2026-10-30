@@ -6,11 +6,49 @@ import 'package:globalsend/controller.dart';
 import 'package:globalsend/file_share.dart';
 import 'package:globalsend/local_ip_addresses.dart';
 import 'package:globalsend/receive_destination.dart';
+import 'package:globalsend/dock_platform.dart';
+import 'package:globalsend/models.dart';
 
 import 'saved_files_test.dart' show fixtureDirectory;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('dragging a received SAF folder back to sending retains a directory, not a zero-byte file', () async {
+    const uri =
+        'content://documents/tree/primary%3ADownload/document/primary%3ADownload%2F资料';
+    final c = SendController();
+    addTearDown(c.dispose);
+    c.dock.add(
+      DockEntry(
+        id: 'folder',
+        kind: 'file',
+        title: '资料',
+        source: 'peer',
+        localPath: uri,
+        entryKind: 'directory',
+      ),
+    );
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(DockPlatform.channel, (call) async {
+      expect(call.method, 'directoryEntries');
+      return [
+        {
+          'location': uri,
+          'relativePath': '资料',
+          'entryKind': 'directory',
+          'name': '资料',
+          'size': 0,
+        },
+      ];
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(DockPlatform.channel, null),
+    );
+    await c.stageInputs([uri], []);
+    expect(c.stagedFiles, [uri]);
+    expect(c.stagedDirectoryNames[uri], '资料');
+  });
   test('local dock URI keeps media display name in queue and durable outbox without copying', () async {
     final root = await fixtureDirectory();
     const uri = 'content://media/external/images/media/1000061883';

@@ -2912,10 +2912,17 @@ class SendController extends ChangeNotifier {
   Future<void> stageInputs(List<String> paths, List<String> texts) async {
     final epoch = generation;
     final prepared = <String>[];
+    final knownDirectories = <String>{
+      for (final entry in historyDock.where((entry) => entry.isDirectory)) ...[
+        if (entry.localPath.isNotEmpty) entry.localPath,
+        if (entry.sourceReference.isNotEmpty) entry.sourceReference,
+      ],
+    };
     for (final path in paths) {
       final contentDirectory =
           ReceivedFileAccess.isContentUri(path) &&
-          _directorySources.containsKey(path);
+          (_directorySources.containsKey(path) ||
+              knownDirectories.contains(path));
       if (contentDirectory ||
           await FileSystemEntity.type(path) == FileSystemEntityType.directory) {
         final entries = contentDirectory
