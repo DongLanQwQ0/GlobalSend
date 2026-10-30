@@ -17,9 +17,11 @@
 - Windows 隐藏 HWND 的 OLE/输入替身检查通过：1000 次指针移动无模拟输入，转换期间捕获交接、跨窗离开、松手与取消语义符合预期。此检查未操作用户桌面。
 - 57版手机：暂存空白区向左滑出已有图片建议，Android 系统长按拖到待发区成功，显示真实缩略图并可打开内部预览；无障碍完整标题保留`.jpg`。移出本次待发引用后恢复空队列和贴边把手，未向真实设备发送。此次样本本身已有图片后缀，不冒充无后缀数字媒体的实机样本。
 
+后续真实手机验收已补充：新建JPEG的MediaStore URI为`content://media/external/images/media/1000061898`，末尾只有数字。它自动进入媒体建议后，原生拖到待发区仍使用原始`GlobalSend57Probe-1793352769.jpg`并引用原URI；点击自建接收器的设备卡片，经公网中心送达2591字节，逐字节与fixture一致。已清理自建媒体、临时分组和接收器，原用户暂存1项保留。证据在`artifacts/reports/android57-mediastore-delivery.json`。
+
 ## 留给实机验收
 
 - Windows 触屏拖动的实际流畅度与向桌面/其他应用投放。按用户要求，本轮不进行 Windows 界面自动操作。
-- Android 无后缀数字媒体的真实来源样本、发送后的目标文件名与预览，以及新拍媒体只建议一次。已有后缀图片建议的系统长按拖入与本地预览已通过；手机已交还 Chrona 会话串行使用，本轮不并发触控。
+- Android 实际相机视频的建议触发、暂存坞设备模式直接转发实收。数字媒体URI的文件名和主页面设备发送全链路已通过；分段ADB触摸不作为连续手指拖放的验收替代。
 
 Windows 系统接口文档：[ConvertPrimaryPointerToMouseDrag](https://learn.microsoft.com/en-us/windows/win32/winmsg/winuser/nf-winuser-convertprimarypointertomousedrag)。本机 Windows 11 的接口导出已只读确认。
