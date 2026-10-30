@@ -624,4 +624,70 @@ public class ReceiveOverlayHeaderDragTest {
         reflow(overlay,portrait);assertEquals(260,window.height);assertEquals(360,window.width);
         assertInside(window,portrait);overlay.hide();
     }
+    @Test public void expansionAndDragEntryHaveHapticsButLocationAndRepeatedEntryDoNot() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        View root=(View)field(overlay,"root");
+        org.robolectric.shadows.ShadowView haptics=Shadows.shadowOf(root);
+        assertEquals(android.view.HapticFeedbackConstants.CONTEXT_CLICK,haptics.lastHapticFeedbackPerformed());
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.util.ReflectionHelpers.setField(haptics,"hapticFeedbackPerformed",-1);
+        overlay.setCollapsed(true);advanceGeometry(overlay,240);
+        assertEquals(-1,haptics.lastHapticFeedbackPerformed());
+        overlay.setCollapsed(false);advanceGeometry(overlay,240);
+        assertEquals(android.view.HapticFeedbackConstants.CONTEXT_CLICK,haptics.lastHapticFeedbackPerformed());
+        org.robolectric.util.ReflectionHelpers.setField(haptics,"hapticFeedbackPerformed",-1);overlay.setCollapsed(false);
+        assertEquals(-1,haptics.lastHapticFeedbackPerformed());
+        java.lang.reflect.Method receive=ReceiveOverlay.class.getDeclaredMethod("receiveDrop",android.view.DragEvent.class);receive.setAccessible(true);
+        android.view.DragEvent event=org.robolectric.util.ReflectionHelpers.callConstructor(android.view.DragEvent.class);
+        setField(event,"mAction",android.view.DragEvent.ACTION_DRAG_ENTERED);receive.invoke(overlay,event);
+        assertEquals(android.view.HapticFeedbackConstants.CONTEXT_CLICK,haptics.lastHapticFeedbackPerformed());
+        org.robolectric.util.ReflectionHelpers.setField(haptics,"hapticFeedbackPerformed",-1);receive.invoke(overlay,event);
+        setField(event,"mAction",android.view.DragEvent.ACTION_DRAG_LOCATION);receive.invoke(overlay,event);
+        assertEquals(-1,haptics.lastHapticFeedbackPerformed());
+        setField(event,"mAction",android.view.DragEvent.ACTION_DRAG_EXITED);receive.invoke(overlay,event);
+        setField(event,"mAction",android.view.DragEvent.ACTION_DRAG_ENTERED);receive.invoke(overlay,event);
+        assertEquals(android.view.HapticFeedbackConstants.CONTEXT_CLICK,haptics.lastHapticFeedbackPerformed());
+        setField(event,"mAction",android.view.DragEvent.ACTION_DRAG_ENDED);receive.invoke(overlay,event);
+        overlay.hide();
+    }
+    private void handleTouch(View handle,WindowManager.LayoutParams window,long when,int action,float rawY) {
+        if(action==MotionEvent.ACTION_DOWN)gestureStart=android.os.SystemClock.uptimeMillis();
+        MotionEvent event=MotionEvent.obtain(gestureStart,gestureStart+when,action,window.x+5,rawY,0);
+        event.offsetLocation(-window.x,-window.y);
+        handle.dispatchTouchEvent(event);event.recycle();
+    }
+    @Test public void handleReleaseUsesScreenVelocityCoastsAndStopsOnTouchAndBounds() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        overlay.setCollapsed(true);advanceGeometry(overlay,240);
+        View root=(View)field(overlay,"root"),handle=(View)field(overlay,"handle");
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        window.y=400;draw(root);
+        handleTouch(handle,window,0,MotionEvent.ACTION_DOWN,420);
+        handleTouch(handle,window,40,MotionEvent.ACTION_MOVE,480);
+        handleTouch(handle,window,80,MotionEvent.ACTION_MOVE,540);
+        handleTouch(handle,window,90,MotionEvent.ACTION_UP,550);
+        android.widget.OverScroller scroller=(android.widget.OverScroller)field(overlay,"handleScroller");
+        assertFalse("vertical release starts inertia",scroller.isFinished());
+        int released=window.y,x=window.x;
+        Runnable frame=(Runnable)field(overlay,"handleFling");
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(48));frame.run();
+        assertTrue("moves after release",window.y>released);assertEquals(x,window.x);
+        handleTouch(handle,window,0,MotionEvent.ACTION_DOWN,window.y+20);
+        assertTrue("new touch immediately stops inertia",scroller.isFinished());
+        int stopped=window.y;
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200));
+        assertEquals(stopped,window.y);
+        handleTouch(handle,window,10,MotionEvent.ACTION_CANCEL,window.y+20);
+        java.lang.reflect.Method fling=ReceiveOverlay.class.getDeclaredMethod("flingHandle",int.class);fling.setAccessible(true);
+        for(int velocity:new int[]{8000,-8000}) {
+            fling.invoke(overlay,velocity);
+            for(int i=0;i<150&&!scroller.isFinished();i++) {
+                Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16));frame.run();
+            }
+            assertTrue(scroller.isFinished());
+            assertInside(window,(android.graphics.Rect)field(overlay,"lastBounds"));
+        }
+        overlay.hide();
+    }
 }

@@ -13,13 +13,16 @@ import android.os.Looper;
 import android.view.Gravity;
 import android.view.DragEvent;
 import android.view.Choreographer;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.HorizontalScrollView;
+import android.widget.OverScroller;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -32,6 +35,20 @@ import java.util.List;
 /** A small independent OS overlay. No Activity, backdrop, or full-display touch surface. */
 final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private static java.lang.ref.WeakReference<ReceiveOverlay> current = new java.lang.ref.WeakReference<>(null);
+    private final OverScroller handleScroller;
+    private VelocityTracker handleVelocity;
+    private boolean dragInside;
+    private final Runnable handleFling = new Runnable() {
+        @Override public void run() {
+            if(root==null || !collapsed)return;
+            if(handleScroller.computeScrollOffset()) {
+                layout.y=handleScroller.getCurrY();
+                visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
+                windows.updateViewLayout(root,layout);
+                root.postOnAnimation(this);
+            } else savePlacement();
+        }
+    };
     interface Actions {
         void open(String id);
         void copy(String id);
@@ -131,6 +148,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     ReceiveOverlay(Context context, Actions actions) {
         this.context = context;
         this.actions = actions;
+        handleScroller=new OverScroller(context);
         placement=context.getSharedPreferences("received-dock-placement",Context.MODE_PRIVATE);
         windows = context.getSystemService(WindowManager.class);
         shelf = new TemporaryShelf(context, this::shelfChanged);
@@ -488,7 +506,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         handle.setVisibility(initiallyCollapsed?View.VISIBLE:View.GONE);styleHandle();
         windows.addView(root, layout);
         final View owner=root;
+        final boolean[] firstDraw={true};
         root.getViewTreeObserver().addOnPreDrawListener(() -> {
+            if(firstDraw[0]) {
+                firstDraw[0]=false;
+                if(root==owner && !initiallyCollapsed && !collapsed)
+                    owner.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+            }
             if(root==owner && surfaceAnchored) {
                 positionSurface();
                 // Wait for the union surface to be drawn before starting the
@@ -854,8 +878,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private boolean dragOverTargets(DragEvent event) {
         int action=event.getAction();
-        if(action==DragEvent.ACTION_DRAG_EXITED) {stopTargetScroll();highlightTarget(-1,-1);return true;}
+        if(action==DragEvent.ACTION_DRAG_EXITED) {dragInside=false;stopTargetScroll();highlightTarget(-1,-1);return true;}
         if(action==DragEvent.ACTION_DRAG_ENTERED || action==DragEvent.ACTION_DRAG_LOCATION) {
+            if(action==DragEvent.ACTION_DRAG_ENTERED)feedbackDragEntry();
             targetPointerX=event.getX();targetPointerY=event.getY();highlightTarget(targetPointerX,targetPointerY);
             int zone=dp(36);
             int direction=targetPointerX<zone?-1:targetPointerX>root.getWidth()-zone?1:0;
@@ -899,20 +924,28 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if(expanded!=null)expanded.setAlpha(1);
     }
 
+    private void feedbackDragEntry() {
+        if(!dragInside && root!=null)root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+        dragInside=true;
+    }
+
     @SuppressWarnings("unchecked")
     private boolean receiveDrop(DragEvent event) {
         switch (event.getAction()) {
             case DragEvent.ACTION_DRAG_STARTED:
+                dragInside=false;
                 cancelPendingOpen();
                 if (shelf.cancelRemoval()) { main.removeCallbacks(countdown); shelfChanged(); }
                 return event.getClipDescription() != null;
             case DragEvent.ACTION_DRAG_ENTERED:
+                feedbackDragEntry();
                 if (collapsed) {
                     dragExpand = () -> { dragExpand = null; setCollapsed(false); };
                     main.postDelayed(dragExpand, 250);
                 }
                 surface.setBackground(shape(glass(appearance.soft,0x99), 18)); return true;
             case DragEvent.ACTION_DRAG_EXITED:
+                dragInside=false;
                 // Since Android N, enter/exit is delivered to the innermost
                 // interested View, not through dispatchDragEvent on every parent.
                 // The dock root owns this gesture, including its completion.
@@ -923,6 +956,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 if (root != null) styleSurface();
                 return true;
             case DragEvent.ACTION_DRAG_ENDED:
+                dragInside=false;
                 if(root!=null)DockCoordinator.finishExportFrom(root,event);
                 if (dragExpand != null) main.removeCallbacks(dragExpand);
                 dragExpand = null;
@@ -1062,31 +1096,66 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 pulledOpen[0]=false;
                 stopGeometry();
+                releaseHandleVelocity();handleVelocity=VelocityTracker.obtain();
+                trackHandleVelocity(event);
                 downX = event.getRawX(); downY = event.getRawY(); startY = layout.y;
                 return true;
             }
             if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                trackHandleVelocity(event);
                 if(pulledOpen[0])return true;
                 int dx = Math.round(event.getRawX() - downX), dy = Math.round(event.getRawY() - downY);
-                if ((edgeRight ? -dx : dx) > dp(28)) { pulledOpen[0]=true;setCollapsed(false);return true; }
+                if ((edgeRight ? -dx : dx) > dp(28)) { pulledOpen[0]=true;releaseHandleVelocity();setCollapsed(false);return true; }
                 Rect bounds = availableBounds();
                 layout.y = clamp(startY + dy, bounds.top, bounds.bottom - layout.height);
                 visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
                 windows.updateViewLayout(root, layout); return true;
             }
-            if(event.getActionMasked()==MotionEvent.ACTION_UP && pulledOpen[0]) {pulledOpen[0]=false;return true;}
-            if(event.getActionMasked()==MotionEvent.ACTION_CANCEL) {pulledOpen[0]=false;return true;}
+            if(event.getActionMasked()==MotionEvent.ACTION_UP && pulledOpen[0]) {pulledOpen[0]=false;releaseHandleVelocity();return true;}
+            if(event.getActionMasked()==MotionEvent.ACTION_CANCEL) {pulledOpen[0]=false;releaseHandleVelocity();savePlacement();return true;}
+            int velocity=0;
+            if(event.getActionMasked()==MotionEvent.ACTION_UP && handleVelocity!=null) {
+                trackHandleVelocity(event);
+                handleVelocity.computeCurrentVelocity(1000,ViewConfiguration.get(context).getScaledMaximumFlingVelocity());
+                velocity=Math.round(handleVelocity.getYVelocity());releaseHandleVelocity();
+            }
             if (event.getActionMasked() == MotionEvent.ACTION_UP &&
                     Math.abs(event.getRawY() - downY) < dp(6) && Math.abs(event.getRawX() - downX) < dp(6)) handle.performClick();
-            else if (event.getActionMasked() == MotionEvent.ACTION_UP) setCollapsed(true);
+            else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                setCollapsed(true);flingHandle(velocity);
+            }
             if(event.getActionMasked()==MotionEvent.ACTION_UP && geometry==null)savePlacement();
             return true;
         });
     }
 
+    private void trackHandleVelocity(MotionEvent event) {
+        if(handleVelocity==null)return;
+        // The handle's local coordinates move with its OS window. Measure
+        // screen-space motion so following the finger does not cancel velocity.
+        MotionEvent screen=MotionEvent.obtain(event);
+        screen.offsetLocation(event.getRawX()-event.getX(),event.getRawY()-event.getY());
+        handleVelocity.addMovement(screen);screen.recycle();
+    }
+    private void releaseHandleVelocity() {
+        if(handleVelocity!=null){handleVelocity.recycle();handleVelocity=null;}
+    }
+    private void stopHandleFling() {
+        handleScroller.forceFinished(true);
+        if(root!=null)root.removeCallbacks(handleFling);
+    }
+    private void flingHandle(int velocity) {
+        if(root==null || !collapsed || Math.abs(velocity)<ViewConfiguration.get(context).getScaledMinimumFlingVelocity())return;
+        Rect bounds=availableBounds();
+        handleScroller.fling(layout.x,layout.y,0,velocity,layout.x,layout.x,bounds.top,bounds.bottom-layout.height);
+        root.postOnAnimation(handleFling);
+    }
+
     void setCollapsed(boolean value) {
         if (root == null || collapsed == value && geometry != null) return;
         if (DockCoordinator.afterExportFrom(root, () -> setCollapsed(value))) return;
+        stopHandleFling();
+        if(collapsed && !value)root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
         if (collapsed == value && geometry == null && layout.width == (value ? dp(18) : expandedWidth)
                 && layout.height == (value ? dp(72) : expandedHeight)) {
             finishGeometry(value);savePlacement(); return;
@@ -1154,6 +1223,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (previous != null) previous.cancel();
     }
     private void stopGeometry() {
+        stopHandleFling();
         if(geometry==null)return;
         cancelGeometry();commitVisualWindow();
     }
@@ -1213,6 +1283,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             context.unregisterComponentCallbacks(configurationChanges);
             if (appearanceChanges != null) { appearanceChanges.stopWatching(); appearanceChanges = null; }
             stopGeometry();
+            releaseHandleVelocity();
             savePlacement();
             cancelPendingOpen();
             main.removeCallbacks(countdown);
