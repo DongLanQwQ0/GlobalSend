@@ -555,6 +555,10 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       if (ok) result->Success(); else result->Error("CLIPBOARD_WATCH", "Clipboard listener unavailable");
     } else if (call.method_name() == "clipboardKind") {
       result->Success(Value(GlobalSendClipboardKind()));
+    } else if (call.method_name() == "clipboardSuggestion") {
+      result->Success(Value(Map{{Value("available"),Value(true)},
+        {Value("revision"),Value(std::to_string(GetClipboardSequenceNumber()))},
+        {Value("kind"),Value(GlobalSendClipboardKind())}}));
     } else if (call.method_name() == "readClipboard") {
       const auto content = ReadGlobalSendClipboard(owner, Wide(String(*arguments, "bitmapPath")));
       if (!content.error.empty()) { result->Error("CLIPBOARD_READ", content.error); return; }

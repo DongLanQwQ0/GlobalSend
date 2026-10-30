@@ -58,6 +58,7 @@ class SharedBatch {
 abstract final class FileShareBridge {
   static const channel = MethodChannel('dev.globalsend/share');
   static bool get supported => Platform.isAndroid || Platform.isIOS;
+  static Future<void> importClipboard() => channel.invokeMethod('importClipboard');
   static final _incoming = StreamController<void>.broadcast();
   static final _dragEvents = StreamController<Map<String, dynamic>>.broadcast();
   static bool _installed = false;

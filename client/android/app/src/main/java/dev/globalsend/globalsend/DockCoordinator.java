@@ -49,6 +49,7 @@ final class DockCoordinator {
     private java.lang.ref.WeakReference<Activity> attached = new java.lang.ref.WeakReference<>(null);
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private final MethodChannel channel;
+    private final ClipboardSuggestions clipboardSuggestions;
     private final ExecutorService importer = Executors.newSingleThreadExecutor();
     private static WeakReference<DockCoordinator> current = new WeakReference<>(null);
     private static final List<Map<String, Object>> pending = new ArrayList<>();
@@ -105,9 +106,14 @@ final class DockCoordinator {
         this.context = context.getApplicationContext(); current = new WeakReference<>(this);
         if (context instanceof Activity) attach((Activity) context);
         this.channel = channel;
+        clipboardSuggestions=new ClipboardSuggestions(this.context,ReceiveOverlay::clipboardChanged);
         channel.setMethodCallHandler((call, result) -> {
             try {
                 switch (call.method) {
+                    case "clipboardSuggestion":
+                        result.success(clipboardSuggestions.refresh(attached.get()!=null && attached.get().hasWindowFocus()));break;
+                    case "dismissClipboardSuggestion":
+                        clipboardSuggestions.dismiss(call.argument("revision"));result.success(null);break;
                     case "status": result.success(status()); break;
                     case "showShelf": ReceiveOverlay.openShelf(); result.success(null); break;
                     case "hideShelf": ReceiveOverlay.closeShelf(); result.success(null); break;
@@ -522,6 +528,27 @@ final class DockCoordinator {
     }
 
     /** The shelf owns its imports; they must not become received records or queued sends. */
+    static Map<String,Object> clipboardSuggestion() {
+        DockCoordinator coordinator=current.get();
+        return coordinator==null?java.util.Collections.emptyMap():coordinator.clipboardSuggestions.snapshot();
+    }
+    static void dismissClipboardSuggestion(String revision) {
+        DockCoordinator coordinator=current.get();
+        if(coordinator!=null)coordinator.clipboardSuggestions.dismiss(revision);
+    }
+    static void refreshClipboardSuggestion() {
+        DockCoordinator coordinator=current.get();
+        if(coordinator!=null)coordinator.clipboardSuggestions.refresh(true);
+    }
+    static boolean importClipboardToShelf(java.util.function.Consumer<Map<String,Object>> completed) {
+        DockCoordinator coordinator=current.get();
+        if(coordinator==null || coordinator.disposed)return false;
+        ClipData clip=coordinator.context.getSystemService(ClipboardManager.class).getPrimaryClip();
+        if(clip==null || clip.getItemCount()==0)return false;
+        coordinator.clipboardSuggestions.refresh(true);
+        coordinator.consume(clip,null,completed);
+        return true;
+    }
     static boolean importToShelf(DragEvent event, java.util.function.Consumer<Map<String, Object>> completed) {
         DockCoordinator coordinator = current.get();
         if (coordinator == null || coordinator.disposed) return false;
@@ -762,6 +789,7 @@ final class DockCoordinator {
     void resumed() { attachDragReceiver(); channel.invokeMethod("dockState", status()); }
     void dispose() {
         disposed = true;
+        clipboardSuggestions.dispose();
         synchronized (folderReadGrants) {
             for (DragAndDropPermissions grant : folderReadGrants) grant.release();
             folderReadGrants.clear();

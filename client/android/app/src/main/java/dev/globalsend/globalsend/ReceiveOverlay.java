@@ -222,6 +222,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         main.removeCallbacks(countdown);
         if (shelf.removalSeconds() > 0) main.post(countdown);
     }
+    static void clipboardChanged() {
+        ReceiveOverlay overlay=current.get();
+        if(overlay==null || overlay.root==null || !overlay.shelfVisible)return;
+        int offset=overlay.scroll==null?0:overlay.scroll.getScrollX();
+        if(DockCoordinator.afterExportFrom(overlay.root,ReceiveOverlay::clipboardChanged))return;
+        overlay.render();
+        if(overlay.scroll!=null) {
+            HorizontalScrollView owner=overlay.scroll;
+            owner.post(() -> {if(overlay.scroll==owner)owner.scrollTo(offset,0);});
+        }
+    }
 
     private void configurationChanged() {
         if(root==null)return;
@@ -454,9 +465,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         countIcon=new ImageView(context);countIcon.setImageResource(R.drawable.ic_shelf_inbox);
         countGroup=countTab(count,countIcon,() -> {shelfVisible=false;render();});
         header.addView(countGroup, new LinearLayout.LayoutParams(-1, dp(28)));
-        shelfTab = control("", "暂存", () -> { shelfVisible = true; render(); });
+        shelfTab = control("", "暂存", this::showClipboardShelf);
         shelfIcon=new ImageView(context);shelfIcon.setImageResource(R.drawable.ic_shelf_folder);
-        shelfGroup=countTab(shelfTab,shelfIcon,() -> {shelfVisible=true;render();});
+        shelfGroup=countTab(shelfTab,shelfIcon,this::showClipboardShelf);
         header.addView(shelfGroup, new LinearLayout.LayoutParams(-1, dp(28)));
         View all = icon(R.drawable.ic_drag_all, "全部拖出");
         all.setOnLongClickListener(view -> export(view, bulkDragItems()));
@@ -483,7 +494,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         surface.addView(targetScroll,new FrameLayout.LayoutParams(-1,-1));
         handle = label("", 10, appearance.accent);
         handle.setGravity(Gravity.CENTER); handle.setContentDescription("展开文件暂存坞");
-        handle.setOnClickListener(view -> setCollapsed(false));
+        handle.setOnClickListener(view -> {
+            setCollapsed(false);
+            withClipboardFocus(DockCoordinator::refreshClipboardSuggestion);
+        });
         installEdgeMove(handle);
         handle.setVisibility(View.GONE);
         surface.addView(handle, new FrameLayout.LayoutParams(dp(18), dp(72), Gravity.CENTER_VERTICAL | Gravity.RIGHT));
@@ -681,6 +695,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             cards.add(card);
         }
         if(!tailAdded)appendListTail(side,hasContent);
+        if(shelfVisible)appendClipboardSuggestion(side);
         scroll.scrollTo(0, 0);
         if(animateCards) {
             LinearLayout owner=row;
@@ -699,6 +714,68 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 }
             });
         }
+    }
+
+    private void showClipboardShelf() {
+        shelfVisible=true;render();withClipboardFocus(DockCoordinator::refreshClipboardSuggestion);
+    }
+    private void appendClipboardSuggestion(int side) {
+        Map<String,Object> suggestion=DockCoordinator.clipboardSuggestion();
+        String kind=(String)suggestion.getOrDefault("kind","empty");
+        if(kind.equals("empty"))return;
+        String revision=(String)suggestion.get("revision");
+        FrameLayout card=new FrameLayout(context);card.setTag("clipboard-suggestion");
+        card.setContentDescription("剪贴板建议");styleCard(card,false);
+        LinearLayout body=new LinearLayout(context);body.setGravity(Gravity.CENTER);body.setOrientation(LinearLayout.VERTICAL);
+        View clipboardIcon=icon(R.drawable.ic_shelf_clipboard,"剪贴板");clipboardIcon.setPadding(0,0,0,0);
+        body.addView(clipboardIcon,new LinearLayout.LayoutParams(dp(28),dp(28)));
+        String type=kind.equals("image")?"图片":kind.equals("files")?"文件":"文本";
+        TextView label=label("剪贴板 · "+type,12,listAccent());label.setGravity(Gravity.CENTER);
+        body.addView(label,new LinearLayout.LayoutParams(-1,dp(28)));
+        card.addView(body,new FrameLayout.LayoutParams(-1,-1));
+        TextView ignore=label("×",24,listAccent());ignore.setGravity(Gravity.CENTER);ignore.setContentDescription("忽略剪贴板建议");
+        ignore.setOnClickListener(v -> DockCoordinator.dismissClipboardSuggestion(revision));
+        card.addView(ignore,new FrameLayout.LayoutParams(dp(36),dp(36),Gravity.TOP|Gravity.RIGHT));
+        card.setOnClickListener(v -> withClipboardFocus(() -> {
+            importing++;updateLabels();
+            boolean accepted=DockCoordinator.importClipboardToShelf(content -> {
+                importing--;shelf.add((List<String>)content.get("paths"),(List<String>)content.get("texts"),
+                    (Map<String,String>)content.getOrDefault("directoryNames",java.util.Collections.emptyMap()));
+                if(content.containsKey("error"))android.widget.Toast.makeText(context,"部分剪贴板内容无法读取",android.widget.Toast.LENGTH_SHORT).show();
+                else DockCoordinator.dismissClipboardSuggestion((String)DockCoordinator.clipboardSuggestion().get("revision"));
+            });
+            if(!accepted){importing--;updateLabels();android.widget.Toast.makeText(context,"剪贴板为空",android.widget.Toast.LENGTH_SHORT).show();}
+        }));
+        LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(side,side);size.rightMargin=dp(3);row.addView(card,size);
+    }
+
+    /** A deliberate paste tap may focus this bounded window; never a drag hover. */
+    private void withClipboardFocus(Runnable read) {
+        final View owner=root;
+        if(owner==null)return;
+        final int focusFlags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+        final int prior=layout.flags&focusFlags;
+        class FocusedRead implements ViewTreeObserver.OnWindowFocusChangeListener,Runnable {
+            boolean finished;
+            public void onWindowFocusChanged(boolean focused){if(focused)run();}
+            public void run(){
+                if(finished)return;finished=true;main.removeCallbacks(this);
+                if(owner.getViewTreeObserver().isAlive())owner.getViewTreeObserver().removeOnWindowFocusChangeListener(this);
+                if(root!=owner)return;
+                try {
+                    if(owner.hasWindowFocus())read.run();
+                    else android.widget.Toast.makeText(context,"请在应用内读取剪贴板",android.widget.Toast.LENGTH_SHORT).show();
+                } finally {
+                    if(root==owner){layout.flags=(layout.flags&~focusFlags)|prior;windows.updateViewLayout(owner,layout);}
+                }
+            }
+        }
+        FocusedRead request=new FocusedRead();
+        owner.getViewTreeObserver().addOnWindowFocusChangeListener(request);
+        layout.flags=(layout.flags&~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)|WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+        owner.setFocusableInTouchMode(true);windows.updateViewLayout(owner,layout);owner.requestFocus();
+        main.postDelayed(request,500);
+        if(owner.hasWindowFocus())request.run();
     }
 
     private void appendListTail(int side,boolean hasContent) {
@@ -754,6 +831,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private boolean hitsAction(View view,MotionEvent event) {
         if(view.getVisibility()!=View.VISIBLE || !hits(view,event))return false;
+        if("clipboard-suggestion".equals(view.getTag()))return true;
         if(((view instanceof TextView || view instanceof ImageView) && view.isClickable()) ||
             view==countGroup || view==shelfGroup ||
             "清空当前列表".contentEquals(view.getContentDescription()==null?"":view.getContentDescription()))return true;

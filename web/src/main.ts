@@ -1,4 +1,6 @@
 import './style.css';
+import { clipboardSuggestion } from './clipboard_suggestion';
+import type { ClipboardSuggestionKind } from './clipboard_suggestion';
 import { folderCards, folderMembers, folderRoot, isFolderRoot, summarizeFolder } from './folder_cards';
 import { centeredDragImage } from './drag_image';
 import { digestFile } from './files';
@@ -72,6 +74,9 @@ interface TextView {
 }
 
 class GlobalSend {
+  clipboardSuggestion: ClipboardSuggestionKind | null = null;
+  private clipboardSuggestionDismissed=false;
+  private clipboardSuggestionBusy=false;
   textSelectionRenderPending=false;
   private formComposing:HTMLElement|null=null;
   private workspaceViewKey='';
@@ -352,13 +357,14 @@ class GlobalSend {
     const networkChanged=()=>this.networkChanged();
     window.addEventListener('online',networkChanged);
     window.addEventListener('offline',()=>this.syncProbeMonitor());
-    window.addEventListener('focus',()=>this.resumeDiscovery());
-    window.addEventListener('pageshow',()=>this.resumeDiscovery());
+    window.addEventListener('focus',()=>{this.resumeDiscovery();void this.refreshClipboardSuggestion();});
+    window.addEventListener('blur',()=>{this.clipboardSuggestionDismissed=false;});
+    window.addEventListener('pageshow',()=>{this.resumeDiscovery();void this.refreshClipboardSuggestion();});
     (navigator as Navigator & {connection?:EventTarget}).connection?.addEventListener('change',networkChanged);
     document.addEventListener('visibilitychange',() => {
       this.syncProbeMonitor();
       if(document.visibilityState==='visible' && this.modal==='library')void this.fileLibrary.refresh();
-      if (document.visibilityState === 'visible') this.resumeDiscovery();
+      if (document.visibilityState === 'visible') {this.resumeDiscovery();void this.refreshClipboardSuggestion();}
     });
     window.addEventListener('beforeunload',event => {
       if (this.uploads.size || this.rtcReceives.size || this.busy || this.pendingTexts.length || this.pendingOffer || this.libraryForward || this.stagedTexts.length || this.shared.dirty || [...this.textViews.values()].some(view=>view.busy || view.draft!==view.savedText)) { event.preventDefault(); event.returnValue = ''; }
@@ -589,6 +595,14 @@ class GlobalSend {
     if(existing)existing.text=this.text;else this.stagedTexts.push({id:id(),text:this.text});
     this.editingStagedId='';this.text='';if(this.editorElement)this.editorElement.value='';this.modal=null;this.setMobileView('send');this.render();
   }
+  async refreshClipboardSuggestion(){
+    if(!this.session || document.visibilityState!=='visible' || this.clipboardSuggestionBusy || this.clipboardSuggestionDismissed)return;
+    this.clipboardSuggestionBusy=true;const generation=this.generation;
+    try {
+      const kind=await clipboardSuggestion(navigator);
+      if(generation===this.generation && kind!==this.clipboardSuggestion){this.clipboardSuggestion=kind;this.render();}
+    } finally {this.clipboardSuggestionBusy=false;}
+  }
   async readClipboard(){
     if(!this.session)return;
     const generation=this.generation;
@@ -599,11 +613,16 @@ class GlobalSend {
         for(const value of values){
           const image=value.types.find(type=>type.startsWith('image/'));
           if(image){const blob=await value.getType(image);if(generation!==this.generation)return;this.addFiles([new File([blob],`剪贴板-${Date.now()}.${image.split('/')[1] || 'png'}`,{type:image})]);added++;}
-          else if(value.types.includes('text/plain')){const blob=await value.getType('text/plain'),text=await blob.text();if(generation!==this.generation)return;if(text.trim()){this.stagedTexts.push({id:id(),text});added++;}}
+          else if(value.types.includes('text/plain') || value.types.includes('text/html')){
+            const type=value.types.includes('text/plain')?'text/plain':'text/html',blob=await value.getType(type);
+            let text=await blob.text();if(type==='text/html')text=new DOMParser().parseFromString(text,'text/html').body.textContent || '';
+            if(generation!==this.generation)return;if(text.trim()){this.stagedTexts.push({id:id(),text});added++;}
+          }
         }
         if(!added)return;
       }else if(navigator.clipboard?.readText){const text=await navigator.clipboard.readText();if(generation!==this.generation)return;if(!text.trim())return;this.stagedTexts.push({id:id(),text});}
       else throw new Error('浏览器不支持读取剪贴板，请粘贴到文本框');
+      this.clipboardSuggestion=null;this.clipboardSuggestionDismissed=true;
       this.setMobileView('send');this.render();
     }catch(error){this.toast(error instanceof DOMException && error.name==='NotAllowedError'?'请允许读取剪贴板，或在文本框中粘贴':errorText(error),true);}
   }
@@ -2456,6 +2475,7 @@ class GlobalSend {
       if(action==='clear-failed-sends')this.clearFailedSends();
       if(action==='retry-failed-sends')void this.retryFailedSends();
       if (action==='clipboard') void this.readClipboard();
+      if (action==='dismiss-clipboard-suggestion') {this.clipboardSuggestion=null;this.clipboardSuggestionDismissed=true;this.render();}
       if (action==='send-queue') void this.sendQueue();
       if (action==='multi-send') {if(this.queueSending)return;this.multiSend=!this.multiSend;this.selectedTargets.clear();this.render();}
       if (action==='history') {this.contentView='sent';this.setMobileView('receive');this.render();}

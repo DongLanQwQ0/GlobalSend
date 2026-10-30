@@ -3115,6 +3115,10 @@ class SendController extends ChangeNotifier {
       await DockPlatform.importClipboard();
       return;
     }
+    if (Platform.isIOS) {
+      await FileShareBridge.importClipboard();
+      return;
+    }
     final state = root ?? await stateDirectory();
     final folder = Directory('${state.path}/outgoing-clipboard');
     await folder.create(recursive: true);

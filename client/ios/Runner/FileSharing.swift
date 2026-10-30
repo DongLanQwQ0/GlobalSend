@@ -26,6 +26,14 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
         else { self.dragSources = args }
         self.attachToForegroundScene()
         result(nil)
+      } else if call.method == "clipboardSuggestion" {
+        let clipboard=UIPasteboard.general
+        let kind=clipboard.hasImages ? "image" : clipboard.hasURLs ? "url" : clipboard.hasStrings ? "text" : clipboard.numberOfItems>0 ? "files" : "empty"
+        result(["available":true,"revision":String(clipboard.changeCount),"kind":kind])
+      } else if call.method == "importClipboard" {
+        let items=UIPasteboard.general.itemProviders.map { UIDragItem(itemProvider:$0) }
+        if items.isEmpty { result(nil) }
+        else { self.importItems(items, result: result) }
       } else if call.method == "share" {
         let args = call.arguments as? [String: Any] ?? [:]
         self.share(paths: args["paths"] as? [String] ?? [], text: args["text"] as? String, result: result)
@@ -106,6 +114,9 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
     guard let device = destination(session) else { return }
     endHover(session)
+    importItems(session.items, device: device)
+  }
+  private func importItems(_ items: [UIDragItem], device: String = "", result: FlutterResult? = nil) {
     let id = UUID().uuidString, server = dropRegions["serverKey"] as? String ?? ""
     do {
       let store = try SharedInboxStore(), folder = try store.folder(id)
@@ -113,7 +124,7 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
       var outcomes: [Int: (String?, String?, Error?, Bool)] = [:]
       // Start provider loads in performDrop; copy their temporary URLs before
       // each completion returns. The same loader handles the share extension.
-      for (index, item) in session.items.enumerated() {
+      for (index, item) in items.enumerated() {
         if let local = item.localObject as? [String: String] {
           lock.lock(); outcomes[index] = (local["path"], local["text"], nil, false); lock.unlock()
           continue
@@ -123,7 +134,7 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
           lock.lock(); outcomes[index] = (path, text, error, true); lock.unlock(); group.leave()
         }
       }
-      let count = session.items.count
+      let count = items.count
       group.notify(queue: work) {
         var payload = SharedPayload(batchId: id, paths: [], texts: [], temporaryPaths: [])
         for index in 0..<count {
@@ -135,10 +146,14 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
         if !device.isEmpty { payload.target = SharedSendTarget(serverKey: server, deviceId: device) }
         do {
           try store.commit(payload)
-          DispatchQueue.main.async { self.channel?.invokeMethod("pendingChanged", arguments: nil) }
-        } catch { DispatchQueue.main.async { self.channel?.invokeMethod("importError", arguments: error.localizedDescription) } }
+          DispatchQueue.main.async { self.channel?.invokeMethod("pendingChanged", arguments: nil); result?(nil) }
+        } catch { DispatchQueue.main.async { self.importFailed(error, result: result) } }
       }
-    } catch { channel?.invokeMethod("importError", arguments: error.localizedDescription) }
+    } catch { importFailed(error, result: result) }
+  }
+  private func importFailed(_ error: Error, result: FlutterResult?) {
+    if let result=result { result(FlutterError(code:"CLIPBOARD_IMPORT",message:error.localizedDescription,details:nil)) }
+    else { channel?.invokeMethod("importError", arguments: error.localizedDescription) }
   }
   func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
     guard let view = dragView else { return [] }

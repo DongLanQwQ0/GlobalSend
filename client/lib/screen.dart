@@ -40,6 +40,7 @@ import 'file_share.dart';
 import 'local_ip_menu.dart';
 import 'received_order.dart';
 import 'recent_photos.dart';
+import 'clipboard_suggestions.dart';
 import 'recent_photos_view.dart';
 import 'installed_apps_picker.dart';
 import 'windows_startup_control.dart';
@@ -155,6 +156,7 @@ class _SendScreenState extends State<SendScreen>
     directory: c.stateDirectory,
     suggestInApp: !Platform.isAndroid,
   );
+  final clipboardSuggestions = ClipboardSuggestions();
   bool get loggedIn => c.api?.token.isNotEmpty == true;
   List<Map<String, dynamic>> get peers => c.onlinePeers;
   @override
@@ -163,6 +165,7 @@ class _SendScreenState extends State<SendScreen>
     WidgetsBinding.instance.addObserver(this);
     c.addListener(refresh);
     recentPhotos.addListener(refreshPhotoSuggestions);
+    clipboardSuggestions.addListener(refreshClipboardSuggestion);
     page = ui.page;
     contentTab = ui.contentTab;
     settingsOpen = ui.settingsOpen;
@@ -290,7 +293,14 @@ class _SendScreenState extends State<SendScreen>
 
   @override
   void didChangeViewFocus(ViewFocusEvent event) {
-    if (event.state == ViewFocusState.focused && mounted) refreshDevices();
+    if (event.state == ViewFocusState.focused && mounted) {
+      refreshDevices();
+      unawaited(clipboardSuggestions.refresh());
+    }
+  }
+
+  void refreshClipboardSuggestion() {
+    if (mounted) setState(() {});
   }
 
   KeyEventResult windowPasteKey(KeyEvent event) {
@@ -375,6 +385,10 @@ class _SendScreenState extends State<SendScreen>
   }
 
   void refresh() {
+    clipboardSuggestions.setVisible(
+      loggedIn &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+    );
     if (ui.detailsRequest != _detailsRequest) {
       _detailsRequest = ui.detailsRequest;
       scheduleRequestedDetails();
@@ -687,6 +701,9 @@ class _SendScreenState extends State<SendScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    clipboardSuggestions.setVisible(
+      loggedIn && state == AppLifecycleState.resumed,
+    );
     recentPhotos.setVisible(loggedIn && state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) refreshDevices();
     if (state == AppLifecycleState.resumed && Platform.isAndroid) {
@@ -713,6 +730,8 @@ class _SendScreenState extends State<SendScreen>
     c.removeListener(refresh);
     recentPhotos.removeListener(refreshPhotoSuggestions);
     recentPhotos.dispose();
+    clipboardSuggestions.removeListener(refreshClipboardSuggestion);
+    clipboardSuggestions.dispose();
     ui.routes.unsubscribe(this);
     ui.page = page;
     ui.contentTab = contentTab;
@@ -2141,7 +2160,58 @@ class _SendScreenState extends State<SendScreen>
                           fontSize: 13,
                         ),
                       ),
-                      const Spacer(),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: clipboardSuggestions.item == null
+                              ? const SizedBox.shrink()
+                              : Padding(
+                                  padding: const EdgeInsets.only(left: 6),
+                                  child: Tooltip(
+                                    message:
+                                        '剪贴板建议：${clipboardSuggestions.item!.label}',
+                                    child: InputChip(
+                                      key: const ValueKey(
+                                        'clipboard-suggestion',
+                                      ),
+                                      avatar: const AppIcon(
+                                        Icons.content_paste_rounded,
+                                        size: 14,
+                                      ),
+                                      label: Text(
+                                        clipboardSuggestions.item!.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 11),
+                                      ),
+                                      onPressed: working
+                                          ? null
+                                          : () => perform(() async {
+                                              await c.stageClipboard();
+                                              await clipboardSuggestions
+                                                  .dismiss();
+                                            }),
+                                      onDeleted: () =>
+                                          clipboardSuggestions.dismiss(),
+                                      deleteButtonTooltipMessage: '忽略剪贴板建议',
+                                      deleteIcon: const AppIcon(
+                                        Icons.close,
+                                        size: 14,
+                                      ),
+                                      visualDensity: VisualDensity.compact,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      padding: const EdgeInsets.all(2),
+                                      labelPadding: const EdgeInsets.symmetric(
+                                        horizontal: 2,
+                                      ),
+                                      backgroundColor: Ui.colors(context)
+                                          .softGreen,
+                                    ),
+                                  ),
+                                ),
+                        ),
+                      ),
                       if (count > 0 && recentPhotos.items.isNotEmpty)
                         IconButton(
                           tooltip: '新图片',

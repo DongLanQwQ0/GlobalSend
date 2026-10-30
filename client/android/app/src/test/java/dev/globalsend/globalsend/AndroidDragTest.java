@@ -96,6 +96,34 @@ public class AndroidDragTest {
 
     private long dropCount() { return events.stream().filter(call -> call.method.equals("nativeDrop")).count(); }
 
+    @Test public void clipboardImportForShelfDoesNotBecomeAQueuedSend() throws Exception {
+        activity.getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("fixture","clipboard shelf text"));
+        java.util.concurrent.atomic.AtomicReference<Map<String,Object>> received=new java.util.concurrent.atomic.AtomicReference<>();
+        assertTrue(DockCoordinator.importClipboardToShelf(received::set));
+        long deadline=System.currentTimeMillis()+5000;
+        while(received.get()==null && System.currentTimeMillis()<deadline){Shadows.shadowOf(Looper.getMainLooper()).idle();Thread.sleep(5);}
+        assertNotNull(received.get());assertEquals(List.of("clipboard shelf text"),received.get().get("texts"));
+        assertEquals(0,dropCount());
+        for(Object pending:(java.util.Collection<?>)ReflectionHelpers.getField(coordinator,"pending"))
+            assertNotEquals(List.of("clipboard shelf text"),((Map<?,?>)pending).get("texts"));
+    }
+
+    @Test public void clipboardSuggestionLivesOnlyInShelfAndIsNeverBulkDragged() {
+        ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions(){
+            public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}
+        });
+        try {
+            overlay.show(new ReceiveNotifications.Receipt("received","1","fixture","received text",null,null,0),1,shown -> {});
+            activity.getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("fixture","clipboard text"));
+            ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
+            View row=ReflectionHelpers.getField(overlay,"row");
+            assertNotNull(row.findViewWithTag("clipboard-suggestion"));assertTrue(overlay.bulkDragItems().isEmpty());
+            assertTrue(((TemporaryShelf)ReflectionHelpers.getField(overlay,"shelf")).items.isEmpty());
+            ((View)ReflectionHelpers.getField(overlay,"count")).performClick();
+            assertNull(row.findViewWithTag("clipboard-suggestion"));assertEquals(1,overlay.bulkDragItems().size());
+        } finally {overlay.hide();}
+    }
+
     @Test public void externalAndLocalHoverReportTheDeviceInsteadOfOnlyTheQueue() {
         queueBounds();
         coordinator.updateDeviceDropBounds("center",List.of(
