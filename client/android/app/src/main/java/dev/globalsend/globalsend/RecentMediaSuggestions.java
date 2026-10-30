@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import org.json.JSONObject;
 
 /** Metadata-only media discovery for the persistent dock. Never opens a permission dialog. */
@@ -38,6 +39,8 @@ final class RecentMediaSuggestions {
     private final SharedPreferences state;
     private final Consumer<List<Media>> found;
     private final Runnable disabled;
+    private final Supplier<List<String>> existing;
+    private final Consumer<Set<String>> removed;
     private final Runnable scan=this::scan;
     private boolean started,busy,again;
     private int generation;
@@ -45,7 +48,12 @@ final class RecentMediaSuggestions {
         @Override public void onChange(boolean selfChange) {refresh();}
     };
     RecentMediaSuggestions(Context context,Consumer<List<Media>> found,Runnable disabled) {
+        this(context,found,disabled,List::of,uris -> {});
+    }
+    RecentMediaSuggestions(Context context,Consumer<List<Media>> found,Runnable disabled,
+            Supplier<List<String>> existing,Consumer<Set<String>> removed) {
         this.context=context;this.found=found;this.disabled=disabled;
+        this.existing=existing;this.removed=removed;
         state=context.getSharedPreferences("dock-media-suggestions",Context.MODE_PRIVATE);
     }
     void start() {
@@ -69,8 +77,10 @@ final class RecentMediaSuggestions {
         if(busy) {again=true;return;}
         busy=true;
         final int request=generation;
+        final List<String> current=new ArrayList<>(existing.get());
         io.execute(() -> {
             List<Media> media=new ArrayList<>();
+            Set<String> missing=new HashSet<>();
             Set<String> seen=new LinkedHashSet<>(state.getStringSet("seen",Set.of()));
             boolean enabled=true;
             try {
@@ -89,6 +99,7 @@ final class RecentMediaSuggestions {
                     collect(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,Manifest.permission.READ_MEDIA_IMAGES,since,seen,handled,media);
                     collect(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,Manifest.permission.READ_MEDIA_VIDEO,since,seen,handled,media);
                     media.sort(Comparator.comparingLong((Media m)->m.added).reversed());
+                    for(String uri:current)if(missing(uri))missing.add(uri);
                 }
                 final boolean active=enabled;
                 final long initialSince=since;
@@ -96,11 +107,14 @@ final class RecentMediaSuggestions {
                     busy=false;
                     if(started && generation==request) {
                         if(!active)disabled.run();
-                        else if(!media.isEmpty()) {
-                            found.accept(media);
-                            for(Media item:media)seen.add(item.uri);
-                            while(seen.size()>512)seen.remove(seen.iterator().next());
-                            state.edit().putLong("since",initialSince).putStringSet("seen",seen).apply();
+                        else {
+                            if(!missing.isEmpty())removed.accept(missing);
+                            if(!media.isEmpty()) {
+                                found.accept(media);
+                                for(Media item:media)seen.add(item.uri);
+                                while(seen.size()>512)seen.remove(seen.iterator().next());
+                                state.edit().putLong("since",initialSince).putStringSet("seen",seen).apply();
+                            }
                         }
                     }
                     if(again) {again=false;refresh();}
@@ -111,10 +125,37 @@ final class RecentMediaSuggestions {
             }
         });
     }
-    private void collect(Uri collection,String permission,long since,Set<String> seen,Set<String> handled,List<Media> result) {
+    private boolean missing(String value) {
+        Uri uri=Uri.parse(value);
+        if(!MediaStore.AUTHORITY.equals(uri.getAuthority()))return false;
+        String permission=uri.getPathSegments().contains("video")?Manifest.permission.READ_MEDIA_VIDEO:Manifest.permission.READ_MEDIA_IMAGES;
+        if(!canRead(permission))return false;
+        try {
+            String[] columns=Build.VERSION.SDK_INT>=30?
+                new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.IS_TRASHED}:
+                new String[]{MediaStore.MediaColumns._ID};
+            try(Cursor row=context.getContentResolver().query(uri,columns,null,null,null)) {
+                if(row!=null && (!row.moveToFirst() || Build.VERSION.SDK_INT>=30 && row.getInt(1)!=0))return true;
+            }
+            // No image bytes are read. Also catch missing originals whose
+            // MediaStore row has not expired yet; trash is handled above even
+            // when all-files access still allows opening its descriptor.
+            try(android.os.ParcelFileDescriptor file=context.getContentResolver().openFileDescriptor(uri,"r")) {
+                return false;
+            }
+        } catch(java.io.FileNotFoundException gone) {
+            return true;
+        } catch(java.io.IOException | SecurityException unavailable) {
+            return false;
+        }
+    }
+    private boolean canRead(String permission) {
         boolean granted=context.checkSelfPermission(Build.VERSION.SDK_INT>=33?permission:Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED;
         if(Build.VERSION.SDK_INT>=34)granted|=context.checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)==PackageManager.PERMISSION_GRANTED;
-        if(!granted)return;
+        return granted;
+    }
+    private void collect(Uri collection,String permission,long since,Set<String> seen,Set<String> handled,List<Media> result) {
+        if(!canRead(permission))return;
         String selection=MediaStore.MediaColumns.DATE_ADDED+">=?";
         if(Build.VERSION.SDK_INT>=29)selection+=" AND "+MediaStore.MediaColumns.IS_PENDING+"=0";
         try(Cursor cursor=context.getContentResolver().query(collection,

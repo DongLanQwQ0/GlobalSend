@@ -20,6 +20,22 @@ import org.robolectric.annotation.Config;
 @Config(sdk=34, manifest=Config.NONE)
 public class TemporaryShelfTest {
     private void advance(long millis) { Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(millis)); }
+    @Test public void missingSuggestionsLeaveValidSuggestionsAndExplicitlyStagedReferencesAlone() {
+        TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
+        String gone="content://media/external/images/media/201",promoted="content://media/external/images/media/202",valid="content://media/external/video/media/203";
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media(gone,"gone.jpg",1),
+            new RecentMediaSuggestions.Media(promoted,"promoted.jpg",2),new RecentMediaSuggestions.Media(valid,"valid.mp4",3)));
+        assertEquals(3,shelf.suggestedPaths().size());
+        ReceiveNotifications.Receipt pending=shelf.items.values().stream().filter(item -> item.localPath.equals(gone)).findFirst().get();
+        shelf.exported(List.of(pending),true);
+        // Promotion after an asynchronous scan's snapshot must win.
+        shelf.add(List.of(promoted),List.of("manual text"),Map.of());
+        shelf.removeMissingSuggestions(java.util.Set.of(gone,promoted));
+        assertEquals(3,shelf.items.size());assertFalse(shelf.items.containsKey(pending.id));
+        assertEquals(List.of(valid),shelf.suggestedPaths());assertEquals(0,shelf.removalSeconds());
+        assertTrue(shelf.items.values().stream().anyMatch(item -> item.localPath.equals(promoted)));
+        assertTrue(shelf.items.values().stream().anyMatch(item -> "manual text".equals(item.text)));
+    }
     @Test public void mediaSuggestionBecomesRegularWhenExplicitlyStagedAndKeepsExportGrace() {
         TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
         String uri="content://media/external/video/media/77";

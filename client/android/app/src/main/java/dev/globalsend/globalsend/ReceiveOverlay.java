@@ -153,7 +153,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         placement=context.getSharedPreferences("received-dock-placement",Context.MODE_PRIVATE);
         windows = context.getSystemService(WindowManager.class);
         shelf = new TemporaryShelf(context, this::shelfChanged);
-        mediaSuggestions=new RecentMediaSuggestions(context,this::suggestMedia,shelf::clearSuggestions);
+        mediaSuggestions=new RecentMediaSuggestions(context,this::suggestMedia,shelf::clearSuggestions,
+            shelf::suggestedPaths,shelf::removeMissingSuggestions);
         current = new java.lang.ref.WeakReference<>(this);
         main.post(this::restoreIfEnabled);
     }
@@ -214,6 +215,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void shelfChanged() {
+        mediaSuggestions.refresh();
         if (root == null) return;
         if (DockCoordinator.afterExportFrom(root, this::shelfChanged)) return;
         render();

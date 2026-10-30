@@ -88,6 +88,23 @@ final class TemporaryShelf {
     }
 
     boolean isSuggested(String id) {return suggested.contains(id);}
+    List<String> suggestedPaths() {
+        List<String> paths=new ArrayList<>();
+        for(ReceiveNotifications.Receipt item:items.values())if(suggested.contains(item.id))paths.add(item.localPath);
+        return paths;
+    }
+    void removeMissingSuggestions(java.util.Set<String> missing) {
+        boolean removed=false;
+        for(java.util.Iterator<Map.Entry<String,ReceiveNotifications.Receipt>> it=items.entrySet().iterator();it.hasNext();) {
+            Map.Entry<String,ReceiveNotifications.Receipt> item=it.next();
+            if(suggested.contains(item.getKey()) && missing.contains(item.getValue().localPath)) {
+                it.remove();suggested.remove(item.getKey());pendingRemoval.remove(item.getKey());pendingConsumed.remove(item.getKey());removed=true;
+            }
+        }
+        if(!removed)return;
+        if(pendingRemoval.isEmpty()) {main.removeCallbacks(removeExported);removalDeadline=0;}
+        save();changed.run();
+    }
     void suggest(List<RecentMediaSuggestions.Media> media) {
         LinkedHashMap<String,ReceiveNotifications.Receipt> next=new LinkedHashMap<>();
         for(RecentMediaSuggestions.Media entry:media)if(!contains(entry.uri,null)) {

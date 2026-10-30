@@ -9,6 +9,8 @@ import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.Looper;
+import android.os.ParcelFileDescriptor;
+import android.provider.MediaStore;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -29,9 +31,17 @@ import org.robolectric.shadows.ShadowContentResolver;
 public class RecentMediaSuggestionsTest {
     static class Gallery extends ContentProvider {
         final AtomicInteger reads=new AtomicInteger();
+        final java.util.Set<String> deleted=new java.util.HashSet<>();
+        final java.util.Set<String> trashed=new java.util.HashSet<>();
+        java.io.File original;
         boolean extra;
         public boolean onCreate() {return true;}
         public Cursor query(Uri uri,String[] columns,String selection,String[] args,String sort) {
+            if(selection==null) {
+                MatrixCursor row=new MatrixCursor(columns);Object[] values=new Object[columns.length];
+                for(int i=0;i<columns.length;i++)values[i]=columns[i].equals(MediaStore.MediaColumns._ID)?Long.parseLong(uri.getLastPathSegment()):trashed.contains(uri.getLastPathSegment())?1:0;
+                row.addRow(values);return row;
+            }
             assertTrue(selection.contains("date_added>=?"));assertTrue(selection.contains("is_pending=0"));
             assertEquals("date_added DESC",sort);reads.incrementAndGet();
             MatrixCursor rows=new MatrixCursor(columns);
@@ -43,6 +53,10 @@ public class RecentMediaSuggestionsTest {
             return rows;
         }
         public String getType(Uri uri) {return "image/jpeg";}
+        @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws java.io.FileNotFoundException {
+            if(deleted.contains(uri.getLastPathSegment()))throw new java.io.FileNotFoundException("deleted media");
+            return ParcelFileDescriptor.open(original,ParcelFileDescriptor.MODE_READ_ONLY);
+        }
         public Uri insert(Uri uri,ContentValues values) {return null;}
         public int update(Uri uri,ContentValues values,String where,String[] args) {return 0;}
         public int delete(Uri uri,String where,String[] args) {return 0;}
@@ -51,7 +65,11 @@ public class RecentMediaSuggestionsTest {
     final List<RecentMediaSuggestions.Media> suggested=new ArrayList<>();
     final AtomicInteger batches=new AtomicInteger(),disabled=new AtomicInteger();
     @Before public void setup() throws Exception {
-        context=RuntimeEnvironment.getApplication();gallery=new Gallery();gallery.attachInfo(context,null);
+        context=RuntimeEnvironment.getApplication();gallery=new Gallery();
+        android.content.pm.ProviderInfo info=new android.content.pm.ProviderInfo();info.authority="media";info.exported=true;
+        gallery.attachInfo(context,info);
+        gallery.original=new java.io.File(context.getFilesDir(),"gallery-original.jpg");
+        Files.write(gallery.original.toPath(),new byte[]{1,2,3});
         ShadowContentResolver.registerProviderInternal("media",gallery);
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES,Manifest.permission.READ_MEDIA_VIDEO);
         Files.deleteIfExists(new java.io.File(context.getFilesDir(),"recent-photo-suggestions.json").toPath());
@@ -84,5 +102,35 @@ public class RecentMediaSuggestionsTest {
         Files.write(new java.io.File(context.getFilesDir(),"recent-photo-suggestions.json").toPath(),"{\"enabled\":true,\"handled\":[\"101\"]}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         feed.start();until(() -> batches.get()==1);
         assertEquals(1,suggested.size());assertEquals("camera.mp4",suggested.get(0).name);
+    }
+    @Test public void deletionPrunesSeenAndRestoredSuggestionsEvenWithoutNewMedia() throws Exception {
+        List<String> current=new ArrayList<>();
+        java.util.Set<String> removed=new java.util.HashSet<>();
+        feed=new RecentMediaSuggestions(context,items -> {
+            batches.incrementAndGet();for(RecentMediaSuggestions.Media item:items)current.add(item.uri);
+        },disabled::incrementAndGet,() -> new ArrayList<>(current),missing -> {removed.addAll(missing);current.removeAll(missing);});
+        feed.start();until(() -> current.size()==2);
+        String image=MediaStore.Images.Media.EXTERNAL_CONTENT_URI+"/101",video=MediaStore.Video.Media.EXTERNAL_CONTENT_URI+"/102";
+        gallery.deleted.add("101");
+        context.getContentResolver().notifyChange(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,null);
+        until(() -> removed.contains(image));
+        assertEquals(List.of(video),current);assertEquals(1,batches.get());
+        // A persisted suggestion can be older than the discovery page/lookback.
+        String restored=MediaStore.Images.Media.EXTERNAL_CONTENT_URI+"/999";
+        current.add(restored);gallery.deleted.add("999");feed.stop();feed.start();
+        until(() -> removed.contains(restored));
+        assertEquals(List.of(video),current);assertEquals(1,batches.get());
+        assertTrue(gallery.original.exists());
+    }
+    @Test public void trashPrunesSuggestionEvenWhenOriginalIsStillReadable() throws Exception {
+        List<String> current=new ArrayList<>();
+        feed=new RecentMediaSuggestions(context,items -> {for(RecentMediaSuggestions.Media item:items)current.add(item.uri);},
+            disabled::incrementAndGet,() -> new ArrayList<>(current),current::removeAll);
+        feed.start();until(() -> current.size()==2);
+        gallery.trashed.add("101");
+        context.getContentResolver().notifyChange(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,null);
+        until(() -> current.size()==1);
+        assertEquals(List.of(MediaStore.Video.Media.EXTERNAL_CONTENT_URI+"/102"),current);
+        assertTrue(gallery.original.exists());
     }
 }
