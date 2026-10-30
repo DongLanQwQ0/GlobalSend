@@ -90,19 +90,24 @@ class DropTarget final : public IDropTarget {
   bool Allows(POINTL point) const {
     return !Outgoing() || (callbacks_.local_drop_at && callbacks_.local_drop_at(point));
   }
-  void Hover(bool active) {
-    if (active_ == active) return;
+  void Hover(bool active, POINTL point = {}) {
+    const bool changed = active_ != active;
+    const bool moved = point.x != last_point_.x || point.y != last_point_.y;
     active_ = active;
-    callbacks_.hover(active);
+    last_point_ = point;
+    if (callbacks_.hover_at) {
+      if (changed || (active && moved)) callbacks_.hover_at(active, point);
+    } else if (changed && callbacks_.hover) callbacks_.hover(active);
   }
   void SetEffect(POINTL point, DWORD* effect) {
     const bool copy = supported_ && Allows(point) && (*effect & DROPEFFECT_COPY) != 0;
     *effect = copy ? DROPEFFECT_COPY : DROPEFFECT_NONE;
-    Hover(copy);
+    Hover(copy, point);
   }
   LONG references_ = 1;
   bool supported_ = false;
   bool active_ = false;
+  POINTL last_point_{};
   GlobalSendDropCallbacks callbacks_;
   HWND window_ = nullptr;
   IDropTargetHelper* image_ = nullptr;

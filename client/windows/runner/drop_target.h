@@ -20,6 +20,7 @@ struct GlobalSendDropCallbacks {
   std::function<void(GlobalSendDroppedContent)> drop;
   std::function<bool()> outgoing_drag;
   std::function<bool(POINTL)> local_drop_at;
+  std::function<void(bool, POINTL)> hover_at;
 };
 
 // Reads OLE-owned media into application-owned strings before releasing it.

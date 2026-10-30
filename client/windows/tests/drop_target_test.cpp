@@ -184,6 +184,20 @@ int main() {
   assert(!dropped.back().error.empty() && too_many->releases == 1);
 
   IUnknown* identity = nullptr;
+  std::vector<std::pair<bool, POINTL>> positions;
+  IDropTarget* positioned = CreateGlobalSendDropTarget({{}, {}, {}, {},
+    [&](bool active, POINTL point) { positions.emplace_back(active, point); }});
+  effect = DROPEFFECT_COPY;
+  positioned->DragEnter(data, 0, POINTL{40, 450}, &effect);
+  effect = DROPEFFECT_COPY;
+  positioned->DragOver(0, POINTL{150, 450}, &effect);
+  assert(positions.size() == 2 && positions[0].second.x == 40 && positions[1].second.x == 150);
+  effect = DROPEFFECT_COPY;
+  positioned->DragOver(0, POINTL{150, 450}, &effect);
+  assert(positions.size() == 2);
+  positioned->DragLeave();
+  assert(!positions.back().first);
+  positioned->Release();
   assert(target->QueryInterface(IID_IUnknown, reinterpret_cast<void**>(&identity)) == S_OK);
   assert(identity->Release() == 1);
   assert(target->Release() == 0);

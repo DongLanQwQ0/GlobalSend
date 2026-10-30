@@ -96,6 +96,32 @@ public class AndroidDragTest {
 
     private long dropCount() { return events.stream().filter(call -> call.method.equals("nativeDrop")).count(); }
 
+    @Test public void externalAndLocalHoverReportTheDeviceInsteadOfOnlyTheQueue() {
+        queueBounds();
+        coordinator.updateDeviceDropBounds("center",List.of(
+            Map.of("deviceId","phone","left",20d,"top",400d,"right",100d,"bottom",480d),
+            Map.of("deviceId","tablet","left",120d,"top",400d,"right",200d,"bottom",480d)));
+        for(boolean local:new boolean[]{false,true}) {
+            DockCoordinator.LocalDrag source=new DockCoordinator.LocalDrag(new View(activity),List.of(),List.of("hello"));
+            for(float x:new float[]{50,150}) {
+                DragEvent hover=local?localEvent(DragEvent.ACTION_DRAG_LOCATION,source,x,440):event(DragEvent.ACTION_DRAG_LOCATION,ClipData.newPlainText("external","hello"));
+                ReflectionHelpers.setField(hover,"mX",x);ReflectionHelpers.setField(hover,"mY",440f);
+                assertTrue(coordinator.acceptDrag(hover));
+                Map<?,?> state=(Map<?,?>)events.get(events.size()-1).arguments;
+                assertEquals(x==50?"phone":"tablet",state.get("targetDeviceId"));
+                assertEquals(true,state.get("active"));
+                int published=events.size();
+                ReflectionHelpers.setField(hover,"mX",x+1);
+                coordinator.acceptDrag(hover);
+                assertEquals("Movement within one device must not rebuild Flutter every frame",published,events.size());
+            }
+            DragEvent leave=local?localEvent(DragEvent.ACTION_DRAG_EXITED,source,0,0):event(DragEvent.ACTION_DRAG_EXITED,ClipData.newPlainText("external","hello"));
+            coordinator.acceptDrag(leave);
+            Map<?,?> cleared=(Map<?,?>)events.get(events.size()-1).arguments;
+            assertEquals(false,cleared.get("active"));assertEquals("",cleared.get("targetDeviceId"));
+        }
+    }
+
     @Test public void droppingOnADeviceCarriesOnlyThatDestinationAndOriginalBatch() {
         queueBounds();
         coordinator.updateDeviceDropBounds("center", List.of(Map.of("deviceId","target-uuid", "left",20d,"top",400d,"right",100d,"bottom",480d)));

@@ -83,6 +83,7 @@ final class DockCoordinator {
     private String dropServerKey = "";
     private int queueSurfaceWidth, queueSurfaceHeight;
     private boolean queueDragActive;
+    private String hoveredDeviceId = "";
     private LocalDrag hoveredLocal;
     private LocalDrag receivingLocal;
     private RectF sendNavigationBounds;
@@ -333,6 +334,7 @@ final class DockCoordinator {
         if (disposed) return;
         Map<String, Object> state = new HashMap<>();
         state.put("phase", phase); state.put("active", dragActive); state.put("importing", importCount > 0);
+        state.put("targetDeviceId", dragActive ? hoveredDeviceId : "");
         channel.invokeMethod("nativeDrag", state);
     }
     void updateQueueDropBounds(Map<String, Object> bounds) {
@@ -354,6 +356,11 @@ final class DockCoordinator {
         if(devices != null)for(Map<String,Object> device:devices)deviceDropBounds.put((String)device.get("deviceId"),new RectF(
             ((Number)device.get("left")).floatValue(),((Number)device.get("top")).floatValue(),
             ((Number)device.get("right")).floatValue(),((Number)device.get("bottom")).floatValue()));
+        if(hoveredLocal!=null)localHover(insideQueue(lastDragX,lastDragY),"location");
+        else if(dragActive) {
+            String target=deviceDropAt(lastDragX,lastDragY);
+            if(!hoveredDeviceId.equals(target)){hoveredDeviceId=target;publishDrag("location");}
+        }
     }
     String deviceDropAt(float x,float y) {
         if(dragReceiver != null && (dragReceiver.getWidth()!=queueSurfaceWidth || dragReceiver.getHeight()!=queueSurfaceHeight))return "";
@@ -406,17 +413,22 @@ final class DockCoordinator {
             ? activeExport : null;
     }
     private void localHover(boolean active, String phase) {
-        if (queueDragActive == active && !phase.equals("ended")) return;
+        String target=phase.equals("location")?deviceDropAt(lastDragX,lastDragY):"";
+        active|=!target.isEmpty();
+        if (queueDragActive == active && hoveredDeviceId.equals(target) && !phase.equals("ended")) return;
+        hoveredDeviceId=target;
         queueDragActive = active;
         Map<String, Object> state = new HashMap<>();
         state.put("phase", phase); state.put("local", true); state.put("active", active); state.put("importing", importCount > 0);
         state.put("sessionActive", activeExport != null || receivingLocal != null);
+        state.put("targetDeviceId",target);
         if (!disposed) channel.invokeMethod("nativeDrag", state);
     }
     private void publishLocalSession() {
         Map<String, Object> state = new HashMap<>();
         state.put("local", true); state.put("active", queueDragActive); state.put("importing", importCount > 0);
         state.put("sessionActive", activeExport != null || receivingLocal != null);
+        state.put("targetDeviceId",queueDragActive?hoveredDeviceId:"");
         if (!disposed) channel.invokeMethod("nativeDrag", state);
     }
     private boolean acceptLocalDrag(DragEvent event, LocalDrag local) {
@@ -464,7 +476,12 @@ final class DockCoordinator {
                 if (queueDragActive) localHover(false, "ended");
                 return event.getClipDescription() != null;
             case DragEvent.ACTION_DRAG_ENTERED:
-                dragActive = true; publishDrag("entered"); return true;
+            case DragEvent.ACTION_DRAG_LOCATION:
+                lastDragX=event.getX();lastDragY=event.getY();
+                String hovering=deviceDropAt(lastDragX,lastDragY);
+                boolean changed=!dragActive || !hoveredDeviceId.equals(hovering);
+                hoveredDeviceId=hovering;dragActive=true;
+                if(changed)publishDrag("location");return true;
             case DragEvent.ACTION_DRAG_EXITED:
                 dragActive = false; publishDrag("exited"); return true;
             case DragEvent.ACTION_DRAG_ENDED:

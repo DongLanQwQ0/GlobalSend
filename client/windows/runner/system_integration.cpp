@@ -110,11 +110,19 @@ void CloseDockLater(int64_t expected) {
   PostMessageW(owner, kDestroyReceiveDock, static_cast<WPARAM>(expected), 0);
 }
 
-void PublishDrag(bool active) {
+void PublishDragEvent(bool active, const std::string& target) {
   if (!channel) return;
+  static bool published = false, last_active = false, last_local = false;
+  static std::string last_target;
+  if (published && active == last_active && outgoing_drag == last_local && target == last_target) return;
+  published = true; last_active = active; last_local = outgoing_drag; last_target = target;
   Map event{{Value("active"), Value(active)}, {Value("importing"), Value(false)},
-    {Value("local"), Value(outgoing_drag)}};
+    {Value("local"), Value(outgoing_drag)}, {Value("targetDeviceId"), Value(target)}};
   channel->InvokeMethod("nativeDrag", std::make_unique<Value>(event));
+}
+void PublishDrag(bool active) { PublishDragEvent(active, ""); }
+void PublishDragAt(bool active, POINTL point) {
+  PublishDragEvent(active, active ? DeviceDropAt(point) : std::string());
 }
 
 void PublishDrop(GlobalSendDroppedContent content) {
@@ -583,7 +591,7 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
   });
   if (ole_initialized) {
     drop_target = CreateGlobalSendDropTarget({PublishDrag, PublishDrop,
-      [] { return outgoing_drag; }, LocalDropAt}, window);
+      [] { return outgoing_drag; }, LocalDropAt, PublishDragAt}, window);
     // The registered desktop_drop plugin owns this same Flutter child HWND.
     // It remains installed for its normal lifecycle, but imports are handled
     // here for both Unicode text and files across the complete client area.
