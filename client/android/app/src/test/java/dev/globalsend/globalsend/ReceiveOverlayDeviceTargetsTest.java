@@ -46,6 +46,9 @@ public class ReceiveOverlayDeviceTargetsTest {
         return ReflectionHelpers.getField(owner,name);
     }
     @Before public void setUp() throws Exception {
+        // A continuously reposted frame callback needs the real asynchronous
+        // VSync clock, not Robolectric's immediate recursive VSync default.
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
         activity=Robolectric.buildActivity(Activity.class).setup().get();
         coordinator=new DockCoordinator(activity,new MethodChannel(new BinaryMessenger() {
             public void send(String channel,ByteBuffer message) {send(channel,message,null);}
@@ -114,7 +117,9 @@ public class ReceiveOverlayDeviceTargetsTest {
         View source=new View(activity);((android.widget.FrameLayout)root).addView(source,new android.widget.FrameLayout.LayoutParams(1,1));
         java.lang.reflect.Method export=ReceiveOverlay.class.getDeclaredMethod("export",View.class,List.class);export.setAccessible(true);
         assertTrue((Boolean)export.invoke(overlay,source,all?new ArrayList<>(shelf.items.values()):List.of(shelf.items.values().iterator().next())));
-        drag(DragEvent.ACTION_DRAG_STARTED,25,55,false);
+        Object listeners=ReflectionHelpers.getField(source,"mListenerInfo");
+        assertTrue("root must stay the innermost interested drag target",listeners==null || ReflectionHelpers.getField(listeners,"mOnDragListener")==null);
+        assertTrue(drag(DragEvent.ACTION_DRAG_STARTED,25,55,false));
         drag(DragEvent.ACTION_DRAG_EXITED,-1,55,false);draw();idle(150);
         assertTrue("system drag source stays attached",source.isAttachedToWindow());
         assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());return shelf;
@@ -157,9 +162,9 @@ public class ReceiveOverlayDeviceTargetsTest {
         LinearLayout row=(LinearLayout)field(overlay,"targetRow");assertEquals(8,row.getChildCount());
         capture("device-strip");
         HorizontalScrollView viewport=(HorizontalScrollView)field(overlay,"targetScroll");
-        drag(DragEvent.ACTION_DRAG_LOCATION,root.getWidth()-8,55,false);idle(150);
+        drag(DragEvent.ACTION_DRAG_LOCATION,root.getWidth()-8,55,false);frames(1_000_000_000L,150);
         int right=viewport.getScrollX();assertTrue("hovering right keeps scrolling without new motion",right>0);
-        drag(DragEvent.ACTION_DRAG_LOCATION,8,55,false);idle(80);assertTrue(viewport.getScrollX()<right);
+        drag(DragEvent.ACTION_DRAG_LOCATION,8,55,false);frames(1_150_000_000L,150);assertTrue(viewport.getScrollX()<right);
         viewport.scrollTo(0,0);Rect first=bounds(row.getChildAt(1));
         assertTrue(drag(DragEvent.ACTION_DROP,first.centerX(),first.centerY(),false));assertNotNull(sent);
         assertEquals("id-1",sent.argument("deviceId"));assertEquals("center",sent.argument("serverKey"));
@@ -188,5 +193,28 @@ public class ReceiveOverlayDeviceTargetsTest {
         ByteBuffer success=StandardMethodCodec.INSTANCE.encodeSuccessEnvelope(null);success.flip();reply.reply(success);
         assertEquals(3,shelf.removalSeconds());idle(3100);assertTrue(shelf.items.isEmpty());
         assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
+    }
+    private void frames(long start,int millis) throws Exception {
+        android.view.Choreographer.FrameCallback callback=(android.view.Choreographer.FrameCallback)field(overlay,"targetAutoScroll");
+        for(int i=0;i<=millis;i+=10)callback.doFrame(start+i*1_000_000L);
+    }
+    private int scrollFrames(int hertz,float x) throws Exception {
+        HorizontalScrollView viewport=(HorizontalScrollView)field(overlay,"targetScroll");
+        drag(DragEvent.ACTION_DRAG_LOCATION,root.getWidth()/2f,55,false);viewport.scrollTo(200,0);
+        drag(DragEvent.ACTION_DRAG_LOCATION,x,55,false);
+        android.view.Choreographer.FrameCallback frames=(android.view.Choreographer.FrameCallback)field(overlay,"targetAutoScroll");
+        for(int i=0;i<=hertz/2;i++)frames.doFrame(1_000_000_000L+Math.round(i*1_000_000_000d/hertz));
+        int distance=viewport.getScrollX()-200;
+        drag(DragEvent.ACTION_DRAG_LOCATION,root.getWidth()/2f,55,false);
+        int stopped=viewport.getScrollX();idle(100);assertEquals("leaving the edge stops immediately",stopped,viewport.getScrollX());
+        return distance;
+    }
+    @Test public void edgeScrollUsesVsyncTimeAndDepthInsteadOfFrameCount() throws Exception {
+        targets();org.robolectric.shadows.ShadowChoreographer.setPaused(true);begin();
+        int sixty=scrollFrames(60,root.getWidth()-2),oneTwenty=scrollFrames(120,root.getWidth()-2);
+        assertTrue(sixty>100);assertEquals("same half-second distance at 60 and 120 Hz",sixty,oneTwenty,1);
+        int gentle=scrollFrames(120,root.getWidth()-34);
+        assertTrue("closer to edge scrolls faster",gentle<oneTwenty/2);
+        drag(DragEvent.ACTION_DRAG_ENDED,0,0,false);
     }
 }

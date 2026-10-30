@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.DragEvent;
+import android.view.Choreographer;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -51,12 +52,27 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private View hoveredTarget;
     private int targetScrollDirection;
     private float targetPointerX, targetPointerY;
-    private final Runnable targetAutoScroll = new Runnable() {
-        @Override public void run() {
-            if(forwarding==null || targetScroll.getVisibility()!=View.VISIBLE || targetScrollDirection==0)return;
-            targetScroll.scrollBy(dp(6)*targetScrollDirection,0);
-            highlightTarget(targetPointerX,targetPointerY);
-            main.postDelayed(this,16);
+    private float targetEdgeDepth, targetScrollVelocity, targetScrollOffset;
+    private long targetScrollFrameNanos;
+    private final Choreographer.FrameCallback targetAutoScroll = new Choreographer.FrameCallback() {
+        @Override public void doFrame(long frameTimeNanos) {
+            if(forwarding==null || targetScroll==null || targetScroll.getVisibility()!=View.VISIBLE || targetScrollDirection==0)return;
+            if(targetScrollFrameNanos!=0) {
+                float seconds=Math.min(.032f,(frameTimeNanos-targetScrollFrameNanos)*1e-9f);
+                float ease=targetEdgeDepth*targetEdgeDepth*(3-2*targetEdgeDepth);
+                float desired=targetScrollDirection*(dp(60)+dp(360)*ease);
+                float difference=targetScrollVelocity-desired, decay=(float)Math.exp(-seconds/.04f);
+                // Integrate the easing curve, not a fixed number of pixels per
+                // callback. Motion remains the same on 60/90/120 Hz screens.
+                targetScrollOffset+=desired*seconds+difference*.04f*(1-decay);
+                targetScrollVelocity=desired+difference*decay;
+                int maximum=Math.max(0,targetRow.getWidth()-targetScroll.getWidth()+targetScroll.getPaddingLeft()+targetScroll.getPaddingRight());
+                targetScrollOffset=Math.max(0,Math.min(maximum,targetScrollOffset));
+                int before=targetScroll.getScrollX();targetScroll.scrollTo(Math.round(targetScrollOffset),0);
+                if(targetScroll.getScrollX()!=before)highlightTarget(targetPointerX,targetPointerY);
+            }
+            targetScrollFrameNanos=frameTimeNanos;
+            Choreographer.getInstance().postFrameCallback(this);
         }
     };
     private static final class ForwardDrag {
@@ -306,7 +322,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             private boolean backgroundMove, backgroundMoved;
             private int sizingEdges;
             @Override public boolean dispatchDragEvent(DragEvent event) {
-                DockCoordinator.traceDrag("overlay action="+event.getAction()+" forwarding="+(forwarding!=null));
+                if(event.getAction()!=DragEvent.ACTION_DRAG_LOCATION)
+                    DockCoordinator.traceDrag("overlay action="+event.getAction()+" forwarding="+(forwarding!=null));
                 if(forwarding!=null && event.getAction()==DragEvent.ACTION_DRAG_EXITED)showSendTargets();
                 if(forwarding!=null && targetScroll.getVisibility()==View.VISIBLE &&
                     event.getAction()!=DragEvent.ACTION_DRAG_STARTED && event.getAction()!=DragEvent.ACTION_DRAG_ENDED)
@@ -840,10 +857,16 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if(action==DragEvent.ACTION_DRAG_EXITED) {stopTargetScroll();highlightTarget(-1,-1);return true;}
         if(action==DragEvent.ACTION_DRAG_ENTERED || action==DragEvent.ACTION_DRAG_LOCATION) {
             targetPointerX=event.getX();targetPointerY=event.getY();highlightTarget(targetPointerX,targetPointerY);
-            int direction=targetPointerX<dp(28)?-1:targetPointerX>root.getWidth()-dp(28)?1:0;
-            if(direction!=targetScrollDirection) {
-                stopTargetScroll();targetScrollDirection=direction;
-                if(direction!=0)main.post(targetAutoScroll);
+            int zone=dp(36);
+            int direction=targetPointerX<zone?-1:targetPointerX>root.getWidth()-zone?1:0;
+            targetEdgeDepth=Math.max(0,Math.min(1,direction<0?(zone-targetPointerX)/zone:(targetPointerX-root.getWidth()+zone)/zone));
+            if(direction==0)stopTargetScroll();
+            else {
+                if(targetScrollDirection==0) {
+                    targetScrollOffset=targetScroll.getScrollX();targetScrollFrameNanos=0;
+                    Choreographer.getInstance().postFrameCallback(targetAutoScroll);
+                }
+                targetScrollDirection=direction;
             }
             return true;
         }
@@ -864,7 +887,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
         return true;
     }
-    private void stopTargetScroll() {targetScrollDirection=0;main.removeCallbacks(targetAutoScroll);}
+    private void stopTargetScroll() {
+        targetScrollDirection=0;targetScrollVelocity=0;targetScrollFrameNanos=0;
+        Choreographer.getInstance().removeFrameCallback(targetAutoScroll);
+    }
     private void finishForwarding(ForwardDrag drag) {
         DockCoordinator.traceDrag("finish forwarding current="+(forwarding==drag));
         if(forwarding!=drag)return;

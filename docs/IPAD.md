@@ -4,7 +4,7 @@
 
 工作流仅手动触发，推送源码不构建 IPA。Actions 产物保留 14 天；成功后另发布 IPA 与 iOS 更新清单到 GitHub Release。签名证书、Apple 账号、描述文件和 TestFlight 都不参与这条流水线。安装包不放到 GlobalSend 中心服务器。
 
-若当前版本/构建号已有Windows或Android Release，应选择它的源码Tag运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。Windows与真实手机仍为1.0.50+59。本轮只交付iOS：[1.0.53（62）IPA构建](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/40897159334)已成功，源码`3ffafa8`，移除设置中的系统分享及默认目标，接入系统分享面板第一排的设备建议。普通分享仍保存本批并唤起待发送。
+若当前版本/构建号已有Windows或Android Release，应选择它的源码Tag运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。Windows/Android正在验证1.0.54+64本地候选，本轮不构建新IPA。iOS仍提供：[1.0.53（62）IPA构建](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/40897159334)，源码`3ffafa8`，移除设置中的系统分享及默认目标，接入系统分享面板第一排的设备建议。普通分享仍保存本批并唤起待发送。
 
 本地文件：`artifacts/releases/ios-1.0.53-build62/GlobalSend-iPad-unsigned.ipa`，14,750,103字节。主应用与分享扩展均为1.0.53（62），App Group模板匹配，没有内置字体，`globalsend`URL入口已注册，通用Flutter页面路由关闭以免抢占原生分享入口。也可从[GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.53-build62)下载。Swift共享组、URL调用、设备建议标识和持久化回归检查通过；iPhoneOS主应用与扩展编译通过。51版分享已获用户确认，53版由用户手动安装，实际前台切换、系统建议出现和定向发送待验。
 
