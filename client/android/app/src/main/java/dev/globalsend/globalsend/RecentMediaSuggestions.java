@@ -124,7 +124,11 @@ final class RecentMediaSuggestions {
             int visited=0;
             while(visited++<24 && cursor.moveToNext()) {
                 String id=cursor.getString(0),uri=ContentUris.withAppendedId(collection,Long.parseLong(id)).toString();
-                if(!seen.contains(uri) && !handled.contains(id))result.add(new Media(uri,cursor.getString(1),cursor.getLong(2)));
+                if(!seen.contains(uri) && !handled.contains(id)) {
+                    String name=cursor.getString(1);
+                    if(MediaFileName.needsSuffix(name))name=MediaFileName.withType(name,context.getContentResolver().getType(Uri.parse(uri)));
+                    result.add(new Media(uri,name,cursor.getLong(2)));
+                }
             }
         }
     }

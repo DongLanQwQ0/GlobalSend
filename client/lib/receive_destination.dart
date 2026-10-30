@@ -17,8 +17,10 @@ class ReceiveFileInfo {
     required this.name,
     required this.size,
     required this.exists,
+    this.displayName,
   });
   final String location, name;
+  final String? displayName;
   final int size;
   final bool exists;
   factory ReceiveFileInfo.fromMap(Map<String, dynamic> value) =>
@@ -27,6 +29,7 @@ class ReceiveFileInfo {
         name: value['name'] as String,
         size: (value['size'] as num).toInt(),
         exists: value['exists'] as bool,
+        displayName: value['displayName'] as String?,
       );
 }
 

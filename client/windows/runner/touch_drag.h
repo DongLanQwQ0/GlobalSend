@@ -6,7 +6,7 @@
 #include <vector>
 
 // The native pointer ID is tracked before Flutter maps it to a Dart device ID.
-// Mouse uses OLE directly; touch/pen use the held-contact desktop adapter.
+// Mouse uses OLE directly; touch/pen use Windows' native contact promotion.
 using GlobalSendPointerInfoReader = BOOL (WINAPI*)(UINT32, POINTER_INFO*);
 void RegisterGlobalSendTouchDrag(HWND view, HWND owner,
     GlobalSendPointerInfoReader reader = GetPointerInfo);
@@ -20,17 +20,17 @@ bool GlobalSendHeldTouchPoint(HWND owner, POINT* screen_point);
 // distinguish capabilities/configuration from actual StartAsync failure.
 void StartGlobalSendTouchDrag(std::wstring text, std::vector<std::wstring> paths,
     std::function<void(bool, const std::string&)> completed);
-// Desktop production route: real held touch/pen drives an OLE drag, including
-// its mouse-state adapter. Bitmap is borrowed only for the synchronous runner.
+// Desktop production route: Windows promotes the real held touch/pen contact
+// for OLE. No SendInput fallback. Bitmap is borrowed by the synchronous runner.
 void StartGlobalSendDesktopTouchDrag(std::wstring text,
     std::vector<std::wstring> paths, HWND source_owner,
     std::function<HRESULT(HBITMAP, DWORD*)> run_drag,
     std::function<void(bool, const std::string&)> completed,
     std::function<HBITMAP()> prepare_preview = {});
 bool GlobalSendDesktopTouchDragCancelled();
-// OLE mouse key bits can lag behind promoted right-click input. The real held
-// contact decides touch continuation/drop; mouse drags retain their own keys.
-HRESULT GlobalSendDesktopTouchDragStatus(BOOL escape);
+// Native promotion uses Windows' mouse move/up state. The legacy mock fixture
+// retains its held-contact test; physical mouse drags are unchanged.
+HRESULT GlobalSendDesktopTouchDragStatus(BOOL escape, DWORD mouse_keys = MK_LBUTTON);
 INPUT GlobalSendTouchMouseInput(POINT screen_point, DWORD flags, RECT desktop);
 #ifdef GLOBALSEND_TOUCH_DRAG_TESTING
 // A deterministic cancellation boundary after real asynchronous file loading.
@@ -41,5 +41,6 @@ void SetGlobalSendDesktopTouchTestHooks(
     std::function<bool(HWND)> input_available);
 void GlobalSendDesktopForeignMouseForTest(UINT message, ULONG_PTR marker = 0);
 bool GlobalSendTouchMouseButtonsAvailableForTest(HWND owner, DWORD pressed);
+void SetGlobalSendPointerConversionForTest(std::function<BOOL()> converter);
 #endif
 #endif

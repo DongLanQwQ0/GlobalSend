@@ -262,6 +262,37 @@ void main() {
             await File('${original.path}/sub/a.txt').readAsString(),
             '真实目录正文',
           );
+          // Extensionless gallery files retain their source reference but send
+          // usable image metadata to every receiver, including the Web client.
+          final photo = await File('test/fixtures/extensionless-photo')
+              .copy('${work.path}/1000061883');
+          await source.stageInputs([photo.path], []);
+          await source.sendStaged(target.profile!.deviceId);
+          await until(
+            () => target.dock.any(
+              (item) =>
+                  item.title == '1000061883.jpg' && item.status == 'received',
+            ),
+            () async {
+              await source.reconcile();
+              await target.reconcile();
+            },
+          );
+          final delivered = target.dock.singleWhere(
+            (item) => item.title == '1000061883.jpg',
+          );
+          expect(
+            await File(delivered.localPath).readAsBytes(),
+            await photo.readAsBytes(),
+          );
+          expect(await photo.exists(), true);
+          final photoTransfers =
+              (await source.api!.call('GET', '/transfers'))['transfers']
+                  as List;
+          final metadata = photoTransfers
+              .expand((value) => value['files'] as List)
+              .singleWhere((value) => value['name'] == '1000061883.jpg');
+          expect(metadata['mimeType'], 'image/jpeg');
         } finally {
           for (final controller in controllers) controller.dispose();
           await peer?.close();

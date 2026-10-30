@@ -3,6 +3,7 @@ import 'app_icon.dart';
 import 'package:flutter/material.dart';
 
 import 'content_preview.dart';
+import 'image_kind.dart';
 import 'models.dart';
 import 'saved_files.dart';
 import 'ui_tokens.dart';
@@ -50,22 +51,30 @@ class CompactContentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, bounds) => _buildCard(context, bounds.maxWidth),
+    builder: (context, bounds) => ImageKindBuilder(
+      location: entry.kind == 'file' && !entry.isDirectory
+          ? entry.localPath
+          : '',
+      name: entry.title,
+      builder: (context, image) => _buildCard(context, bounds.maxWidth, image),
+    ),
   );
 
-  Widget _buildCard(BuildContext context, double width) {
+  Widget _buildCard(BuildContext context, double width, bool detectedImage) {
     final receive = IncomingReceiptState(entry);
     final stateLabel = status.isNotEmpty ? status : receive.label;
     final compactAction =
         width < 180 * MediaQuery.textScalerOf(context).scale(1);
     final image =
         entry.kind == 'file' &&
-        savedFileCategory(entry.title) == SavedFileCategory.image &&
+        detectedImage &&
         (!receive.incomingFile || receive.canExport);
     final active =
         ['uploading', 'downloading', 'directSending'].contains(entry.status) ||
         receive.showProgress;
-    final category = savedFileCategory(entry.title);
+    final category = detectedImage
+        ? SavedFileCategory.image
+        : savedFileCategory(entry.title);
     final canPreview =
         entry.kind == 'text' ||
         receive.canExport &&
@@ -79,7 +88,9 @@ class CompactContentCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: Ui.cardRadius,
         side: BorderSide(
-          color: selected ? Ui.colors(context).green : Ui.colors(context).border,
+          color: selected
+              ? Ui.colors(context).green
+              : Ui.colors(context).border,
           width: selected ? 1.5 : 1,
         ),
       ),
@@ -147,7 +158,9 @@ class CompactContentCard extends StatelessWidget {
                     top: 5,
                     child: ContentDragControl(
                       child: Material(
-                        color: menuColor ?? Ui.colors(context).surface.withValues(alpha: .94),
+                        color:
+                            menuColor ??
+                            Ui.colors(context).surface.withValues(alpha: .94),
                         borderRadius: BorderRadius.circular(10),
                         child: SizedBox(width: 36, height: 32, child: menu),
                       ),
@@ -159,7 +172,8 @@ class CompactContentCard extends StatelessWidget {
                     bottom: 6,
                     child: ContentDragControl(
                       child: Material(
-                        color: Ui.colors(context).surface.withValues(alpha: .82),
+                        color: Ui.colors(context).surface
+                            .withValues(alpha: .82),
                         borderRadius: BorderRadius.circular(10),
                         child: TextButton(
                           key: copyKey,
@@ -279,7 +293,10 @@ class CompactContentCard extends StatelessWidget {
                       sender,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: Ui.colors(context).muted),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Ui.colors(context).muted,
+                      ),
                     ),
                   Text(
                     [
@@ -288,7 +305,10 @@ class CompactContentCard extends StatelessWidget {
                     ].where((part) => part.isNotEmpty).join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: Ui.colors(context).muted),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Ui.colors(context).muted,
+                    ),
                   ),
                   if (!selecting && (stateLabel.isNotEmpty || speed.isNotEmpty))
                     Text(
@@ -490,7 +510,11 @@ class _DockFileSummary extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, height: 1.3, color: Ui.colors(context).ink),
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.3,
+                color: Ui.colors(context).ink,
+              ),
             ),
           ),
         ],

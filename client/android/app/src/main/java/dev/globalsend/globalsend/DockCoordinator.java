@@ -534,6 +534,7 @@ final class DockCoordinator {
                     try (Cursor cursor = context.getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
                         if (cursor != null && cursor.moveToFirst()) { String display = cursor.getString(0); if (display != null) name = display; if (!cursor.isNull(1) && cursor.getLong(1) > sizeLimit) throw new IllegalStateException("Dropped file exceeds center limit"); }
                     }
+                    if(MediaFileName.needsSuffix(name))name=MediaFileName.withType(name,context.getContentResolver().getType(uri));
                     StringBuilder safe = new StringBuilder();
                     for (int j = 0; j < name.length(); j++) { char c = name.charAt(j); safe.append(c < 32 || c == 47 || c == 92 || c == 34 || c == 60 || c == 62 || c == 58 || c == 124 || c == 63 || c == 42 ? '_' : c); }
                     name = safe.toString(); if (name.length() > 160) name = name.substring(name.length() - 160);

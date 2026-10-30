@@ -8,23 +8,18 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'received_file_access.dart';
+import 'image_kind.dart';
 import 'ui_tokens.dart';
 
-bool isSavedImage(String path) => const {
-  'png',
-  'jpg',
-  'jpeg',
-  'webp',
-  'gif',
-  'bmp',
-}.contains(path.split('.').last.toLowerCase());
+bool isSavedImage(String path) => knownImageName(path);
 
 Future<bool> showSavedImagePreview(
   BuildContext context, {
   required String path,
   required String title,
 }) async {
-  if (!isSavedImage(title)) return false;
+  if (!await imageAtLocation(path, title)) return false;
+  if (!context.mounted) return true;
   await Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => SavedImagePreview(path: path, title: title),

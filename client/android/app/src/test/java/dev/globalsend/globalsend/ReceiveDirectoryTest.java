@@ -89,6 +89,18 @@ public class ReceiveDirectoryTest {
         GrantedEnvironment.allowed = allowed;
     }
 
+    @Test public void numericMediaNameGetsDisplaySuffixWithoutRenamingProviderFile() throws Exception {
+        Entry original = provider.add("1000061883", new byte[]{(byte)0xff, (byte)0xd8, (byte)0xff});
+        provider.fileMime = "image/jpeg";
+        String uri = DocumentsContract.buildDocumentUriUsingTree(tree, original.id).toString();
+        Map<String, Object> info = directory.stat(uri);
+        assertEquals("1000061883", info.get("name"));
+        assertEquals("1000061883.jpg", info.get("displayName"));
+        assertEquals(uri, info.get("location"));
+        assertTrue(original.file.exists());
+        assertEquals("1000061883", original.name);
+    }
+
     @Test public void selectedExternalDocumentCanBeReadAndSharedWithoutCleanupOwnershipOrCopying() throws Exception {
         byte[] bytes = new byte[]{3, 1, 4, 1, 5, 9};
         Entry original = provider.add("external-original.bin", bytes);
@@ -447,6 +459,7 @@ public class ReceiveDirectoryTest {
         String rootId = "selected";
         File folder; Entry lastOpened; Uri lastCreated; ParcelFileDescriptor lastDescriptor;
         Thread lastQueryThread;
+        String fileMime = "application/octet-stream";
         boolean missingChildThrows, denyDocumentQuery, denyChildrenQuery;
         final Map<String, Entry> documents = new LinkedHashMap<>();
         @Override public boolean onCreate() { return true; }
@@ -487,7 +500,7 @@ public class ReceiveDirectoryTest {
             data.put(DocumentsContract.Document.COLUMN_DOCUMENT_ID, id);
             data.put(DocumentsContract.Document.COLUMN_DISPLAY_NAME, entry == null ? "我的接收目录" : entry.name);
             data.put(DocumentsContract.Document.COLUMN_SIZE, entry == null ? 0 : entry.file.length());
-            data.put(DocumentsContract.Document.COLUMN_MIME_TYPE, entry == null ? DocumentsContract.Document.MIME_TYPE_DIR : "application/octet-stream");
+            data.put(DocumentsContract.Document.COLUMN_MIME_TYPE, entry == null ? DocumentsContract.Document.MIME_TYPE_DIR : fileMime);
             data.put(DocumentsContract.Document.COLUMN_FLAGS, entry == null ? DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE :
                 DocumentsContract.Document.FLAG_SUPPORTS_DELETE | DocumentsContract.Document.FLAG_SUPPORTS_RENAME | DocumentsContract.Document.FLAG_SUPPORTS_WRITE);
             return data;

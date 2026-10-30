@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'received_file_access.dart';
 import 'saved_files.dart';
 import 'saved_image_preview.dart';
+import 'image_kind.dart';
 import 'text_viewer.dart';
 import 'web_links.dart';
 import 'ui_tokens.dart';
@@ -95,7 +96,11 @@ class _ContentPreviewState extends State<ContentPreview> {
           value,
           maxLines: lines,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: font, height: 1.55, color: Ui.colors(context).ink),
+          style: TextStyle(
+            fontSize: font,
+            height: 1.55,
+            color: Ui.colors(context).ink,
+          ),
         ),
       );
     },
@@ -122,8 +127,16 @@ class _ContentPreviewState extends State<ContentPreview> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final category = savedFileCategory(widget.name);
+  Widget build(BuildContext context) => ImageKindBuilder(
+    location: widget.text == null ? widget.location : '',
+    name: widget.name,
+    builder: (context, image) => _buildPreview(context, image),
+  );
+
+  Widget _buildPreview(BuildContext context, bool image) {
+    final category = image
+        ? SavedFileCategory.image
+        : savedFileCategory(widget.name);
     final Widget child;
     if (widget.text != null) {
       child = _text(context, widget.text!);

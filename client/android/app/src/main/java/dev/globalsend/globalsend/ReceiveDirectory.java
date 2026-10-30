@@ -435,6 +435,19 @@ final class ReceiveDirectory {
             while (cause != null && !(cause instanceof FileNotFoundException)) cause = cause.getCause();
             if (cause == null && !missingFromGrantedParent(document)) throw error;
         }
+        if (Boolean.TRUE.equals(value.get("exists"))) {
+            String name = (String) value.get("name");
+            if (MediaFileName.needsSuffix(name)) {
+                // Keep the provider's original name for file operations. This
+                // display hint is independent of the durable content URI.
+                try {
+                    value.put("displayName", MediaFileName.withType(name,
+                        context.getContentResolver().getType(document)));
+                } catch (RuntimeException unavailable) {
+                    // Optional MIME metadata must not invalidate a readable file.
+                }
+            }
+        }
         return value;
     }
 

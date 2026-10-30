@@ -265,6 +265,39 @@ int main() {
   assert(sent.size() == 3);
   DetachGlobalSendTouchDragWindow(dock);
 
+  // Win11 promotion uses only Windows' move/up stream: no SendInput packets or
+  // low-level mouse hook, and OLE's capture transition is not cancellation.
+  for(int scenario=0;scenario<3;++scenario) {
+    sent.clear();Pointer(view,WM_POINTERDOWN);
+    SetGlobalSendPointerConversionForTest([scenario,view]() -> BOOL {
+      SendMessageW(view,WM_POINTERCAPTURECHANGED,MAKEWPARAM(7,0),0);
+      return scenario!=2;
+    });
+    bool finished=false;int runs=0;
+    StartGlobalSendDesktopTouchDrag(L"native",{},owner,[&](HBITMAP bitmap,DWORD* effect) -> HRESULT {
+      ++runs;assert(bitmap && sent.empty());
+      for(int i=0;i<1000;++i)Pointer(view,WM_POINTERUPDATE);
+      assert(sent.empty());assert(GlobalSendDesktopTouchDragStatus(FALSE,MK_LBUTTON)==S_OK);
+      SendMessageW(view,WM_POINTERCAPTURECHANGED,MAKEWPARAM(7,0),0);
+      SendMessageW(view,WM_POINTERLEAVE,MAKEWPARAM(7,0),0);
+      assert(!GlobalSendDesktopTouchDragCancelled());
+      if(scenario==1) {
+        Pointer(view,WM_POINTERUPDATE,7,POINTER_FLAG_CANCELED|POINTER_FLAG_PRIMARY);
+        assert(GlobalSendDesktopTouchDragStatus(FALSE,0)==DRAGDROP_S_CANCEL);
+        return DRAGDROP_S_CANCEL;
+      }
+      Pointer(view,WM_POINTERUPDATE,7,POINTER_FLAG_PRIMARY);
+      assert(!GlobalSendDesktopTouchDragCancelled());
+      assert(GlobalSendDesktopTouchDragStatus(FALSE,0)==DRAGDROP_S_DROP);
+      *effect=DROPEFFECT_COPY;return DRAGDROP_S_DROP;
+    },[&](bool copied,const std::string& error) {
+      assert(copied==(scenario==0));assert(error.empty()==(scenario!=2));finished=true;
+    });
+    Pump(finished);assert(runs==(scenario==2?0:1));assert(sent.empty());
+  }
+  SetGlobalSendPointerConversionForTest({});
+  std::cerr << "native promotion: 1000 moves generate no synthetic input, capture handoff, release/drop and cancel passed\n";
+
   // Destruction while nested OLE is running releases only this adapter's press,
   // cancels the drag, and suppresses the dead engine's completion callback.
   sent.clear(); fail_move = false;

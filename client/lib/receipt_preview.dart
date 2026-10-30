@@ -8,6 +8,7 @@ import 'models.dart';
 import 'ui_tokens.dart';
 import 'received_file_access.dart';
 import 'saved_image_preview.dart';
+import 'image_kind.dart';
 import 'text_viewer.dart';
 import 'web_links.dart';
 import 'text_selection_surface.dart';
@@ -504,8 +505,14 @@ class _ReceivedFileBodyState extends State<_ReceivedFileBody> {
   );
 
   @override
-  Widget build(BuildContext context) {
-    if (isSavedImage(widget.entry.title) && widget.entry.localPath.isNotEmpty) {
+  Widget build(BuildContext context) => ImageKindBuilder(
+    location: widget.entry.localPath,
+    name: widget.entry.title,
+    builder: (context, image) => body(context, image),
+  );
+
+  Widget body(BuildContext context, bool image) {
+    if (image && widget.entry.localPath.isNotEmpty) {
       return Center(
         child: SavedFilePicture(
           location: widget.entry.localPath,

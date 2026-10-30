@@ -12,6 +12,7 @@ import 'api.dart';
 import 'appearance.dart';
 import 'app_updates.dart';
 import 'models.dart';
+import 'image_signature.dart';
 import 'content_groups.dart';
 import 'network_bridge.dart';
 import 'peer.dart';
@@ -280,6 +281,7 @@ class SendController extends ChangeNotifier {
   final Map<String, int> _receiptSequence = {};
   final Map<String, String> _receiptVersions = {};
   final Map<String, String> stagedDirectoryNames = {};
+  final Map<String, String> stagedFileNames = {};
   final Map<String, String> _directorySources = {};
   final Set<String> _temporarySources = {}, _hiddenDockIds = {};
   bool _checkingSentReferences = false;
@@ -595,6 +597,13 @@ class SendController extends ChangeNotifier {
     stagedDirectoryNames
       ..clear()
       ..addAll(directoryNames);
+    final fileNames = {
+      for (final item in stagedFileNames.entries)
+        _relocatedSavedPath(item.key): item.value,
+    };
+    stagedFileNames
+      ..clear()
+      ..addAll(fileNames);
     for (var index = 0; index < stagedFiles.length; index++) {
       stagedFiles[index] = _relocatedSavedPath(stagedFiles[index]);
     }
@@ -1324,6 +1333,7 @@ class SendController extends ChangeNotifier {
       'temporarySources': _temporarySources.toList(),
       'directorySources': Map<String, String>.from(_directorySources),
       'directoryNames': Map<String, String>.from(stagedDirectoryNames),
+      'fileNames': Map<String, String>.from(stagedFileNames),
       'sharedBatchIds': _sharedBatchIds.toList(),
       'autoSharedBatchIds': _autoSharedBatchIds.toList(),
     });
@@ -2825,6 +2835,26 @@ class SendController extends ChangeNotifier {
         _directorySources[path] = path;
         stagedDirectoryNames[path] = entries.first.name;
         prepared.add(path);
+      } else if (ReceivedFileAccess.isContentUri(path)) {
+        final metadata = await ReceiveDestination.stat(path);
+        if (!metadata.exists) throw FileSystemException('文件已不存在', path);
+        var name = metadata.displayName ?? metadata.name;
+        if (!name.contains('.')) {
+          final source = await ReceivedFileAccess.open(path);
+          try {
+            final reader = await source.file.open();
+            try {
+              final media = imageTypeHeader(await reader.read(32));
+              if (media != null) name += '.${media.$2}';
+            } finally {
+              await reader.close();
+            }
+          } finally {
+            await source.close();
+          }
+        }
+        stagedFileNames[path] = name;
+        prepared.add(path);
       } else if (await ReceivedFileAccess.exists(path)) {
         prepared.add(path);
       } else {
@@ -2876,6 +2906,7 @@ class SendController extends ChangeNotifier {
     stagedDirectoryNames.addAll(
       Map<String, String>.from(value['directoryNames'] ?? {}),
     );
+    stagedFileNames.addAll(Map<String, String>.from(value['fileNames'] ?? {}));
     if (restoreQueue) {
       stagedFiles
         ..clear()
@@ -2996,6 +3027,7 @@ class SendController extends ChangeNotifier {
   Future<void> removeStagedFile(String path) async {
     stagedFiles.remove(path);
     stagedDirectoryNames.remove(path);
+    stagedFileNames.remove(path);
     await _releaseTemporarySource(path);
     changed();
   }
@@ -3262,6 +3294,7 @@ class SendController extends ChangeNotifier {
     stagedFiles.clear();
     stagedTexts.clear();
     stagedDirectoryNames.clear();
+    stagedFileNames.clear();
     stagedTargetStates.clear();
     _stagedTargetProgress.clear();
     _stagedBatchFiles = [];
@@ -3345,6 +3378,7 @@ class SendController extends ChangeNotifier {
         }
         for (final path in files) {
           stagedDirectoryNames.remove(path);
+          stagedFileNames.remove(path);
         }
         _stagedBatchFiles = [];
         _stagedBatchTexts = [];
@@ -3643,13 +3677,28 @@ class SendController extends ChangeNotifier {
         if (size > maxFileSize) throw const FormatException('文件超过中心限制');
         final hash = await sha256.bind(file.openRead()).first;
         _requireSession(epoch, a, p);
+        var name = entry.relativePath.isNotEmpty
+            ? entry.name
+            : displayNames?[path] ?? stagedFileNames[path] ?? safeName(path);
+        (String, String)? media;
+        if (!name.contains('.')) {
+          final reader = await file.open();
+          try {
+            media = imageTypeHeader(await reader.read(32));
+          } finally {
+            await reader.close();
+          }
+          // Standalone gallery names may omit their suffix. Directory names
+          // remain byte-for-byte the source tree, including extensionless leaves.
+          if (media != null && entry.relativePath.isEmpty) {
+            name += '.${media.$2}';
+          }
+        }
         files.add({
           'fileId': id,
-          'name': entry.relativePath.isNotEmpty
-              ? entry.name
-              : displayNames?[path] ?? safeName(path),
+          'name': name,
           'size': size,
-          'mimeType': 'application/octet-stream',
+          'mimeType': media?.$1 ?? 'application/octet-stream',
           'sha256': hash.toString(),
           if (entry.relativePath.isNotEmpty) 'relativePath': entry.relativePath,
           if (entry.relativePath.isNotEmpty) 'entryKind': 'file',
@@ -5933,6 +5982,7 @@ class SendController extends ChangeNotifier {
       stagedTargetStates.clear();
       _stagedTargetProgress.clear();
       stagedDirectoryNames.clear();
+      stagedFileNames.clear();
       for (final path in removed) {
         unawaited(_releaseTemporarySource(path));
       }
@@ -5974,7 +6024,8 @@ class SendController extends ChangeNotifier {
 
   @override
   void dispose() {
-    if (Platform.isAndroid && DockPlatform.onSendToDevice == sendDockSelection) {
+    if (Platform.isAndroid &&
+        DockPlatform.onSendToDevice == sendDockSelection) {
       DockPlatform.onSendToDevice = null;
     }
     _restoreTimer?.cancel();

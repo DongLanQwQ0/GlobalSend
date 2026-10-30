@@ -5,11 +5,62 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/controller.dart';
 import 'package:globalsend/file_share.dart';
 import 'package:globalsend/local_ip_addresses.dart';
+import 'package:globalsend/receive_destination.dart';
 
 import 'saved_files_test.dart' show fixtureDirectory;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('local dock URI keeps media display name in queue and durable outbox without copying', () async {
+    final root = await fixtureDirectory();
+    const uri = 'content://media/external/images/media/1000061883';
+    final calls = <String>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(ReceiveDestination.channel, (
+      call,
+    ) async {
+      calls.add(call.method);
+      if (call.method == 'stat') {
+        return {
+          'location': uri,
+          'name': '1000061883',
+          'displayName': '1000061883.jpg',
+          'exists': true,
+          'size': 3606853,
+        };
+      }
+      throw StateError('Unexpected file operation ${call.method}');
+    });
+    addTearDown(
+      () =>
+          messenger.setMockMethodCallHandler(ReceiveDestination.channel, null),
+    );
+    final c = SendController(documentsDirectory: () async => root)..root = root;
+    addTearDown(c.dispose);
+    await c.handleNativeDockEvent({
+      'type': 'nativeDrop',
+      'dropId': 'local-media',
+      'local': true,
+      'paths': [uri],
+      'texts': <String>[],
+    });
+    expect(c.stagedFiles, [uri]);
+    expect(c.stagedFileNames[uri], '1000061883.jpg');
+    expect(calls, ['stat']);
+    await c.save();
+    final saved = jsonDecode(
+      await File('${root.path}/outbox.json').readAsString(),
+    ) as Map;
+    expect(saved['files'], [uri]);
+    expect(saved['fileNames'], {uri: '1000061883.jpg'});
+    await c.removeStagedFile(uri);
+    expect(c.stagedFileNames, isEmpty);
+    await c.stageInputs([uri], []);
+    await c.clearStaged();
+    expect(c.stagedFileNames, isEmpty);
+    expect(calls.every((call) => call == 'stat'), true);
+  });
   test(
     'loopback interfaces are removed without treating VPN tunnels as unusable',
     () {

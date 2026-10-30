@@ -67,6 +67,7 @@ struct Operation {
   uint64_t contact_sequence = 0;
   bool starting = false;
   bool desktop = false;
+  bool system_promoted = false;
   bool synthetic_down = false;
   bool cancelled = false;
   bool input_failed = false;
@@ -82,6 +83,21 @@ struct Operation {
   ~Operation() { if (preview) DeleteObject(preview); }
 };
 std::shared_ptr<Operation> operation;
+using PointerConverter=BOOL(WINAPI*)();
+#ifdef GLOBALSEND_TOUCH_DRAG_TESTING
+std::function<BOOL()> convert_pointer;
+#else
+// Microsoft documents this Win11 API by its User32 ordinal. Resolve it once;
+// Older systems keep physical mouse dragging, not a simulated touch fallback.
+const auto convert_pointer = []() -> PointerConverter {
+  OSVERSIONINFOEXW version{sizeof(OSVERSIONINFOEXW)};
+  version.dwBuildNumber=22000;
+  if(!VerifyVersionInfoW(&version,VER_BUILDNUMBER,
+      VerSetConditionMask(0,VER_BUILDNUMBER,VER_GREATER_EQUAL)))return nullptr;
+  return reinterpret_cast<BOOL(WINAPI*)()>(GetProcAddress(
+      GetModuleHandleW(L"user32.dll"),MAKEINTRESOURCEA(2811)));
+}();
+#endif
 std::function<bool(const INPUT&)> send_mouse = [](const INPUT& input) {
   INPUT copy = input;
   return SendInput(1, &copy, sizeof(copy)) == 1;
@@ -284,8 +300,8 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
       if (operation && operation->desktop && operation->starting &&
           info.pointerId == operation->pointer && contact_sequence == operation->contact_sequence) {
         operation->point = info.ptPixelLocation;
-        if (!contact || (info.pointerFlags & POINTER_FLAG_CANCELED)) CancelDesktop(operation);
-        else if (message == WM_POINTERUPDATE && operation->synthetic_down) {
+        if ((info.pointerFlags & POINTER_FLAG_CANCELED) || (!contact && !operation->system_promoted)) CancelDesktop(operation);
+        else if (!operation->system_promoted && message == WM_POINTERUPDATE && operation->synthetic_down) {
           if (!SendDesktopMouse(operation, MOUSEEVENTF_MOVE)) ReleaseDesktopMouse(operation);
         }
       }
@@ -299,11 +315,13 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
       ReleaseDesktopMouse(operation);
     }
   } else if (message == WM_POINTERCAPTURECHANGED && GET_POINTERID_WPARAM(wparam) == contact &&
+      (!operation || !operation->system_promoted) &&
       (!operation || !operation->starting || operation->desktop) && reinterpret_cast<HWND>(lparam) != view_window &&
       reinterpret_cast<HWND>(lparam) != owner_window) {
     contact = 0;
     CancelDesktop(operation);
   } else if (message == WM_POINTERLEAVE && GET_POINTERID_WPARAM(wparam) == contact &&
+      (!operation || !operation->system_promoted) &&
       !IS_POINTER_INCONTACT_WPARAM(wparam)) {
     contact = 0;
     CancelDesktop(operation);
@@ -354,6 +372,31 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state) {
     }
     state->point = contact_point;
     state->starting = true;
+#ifndef GLOBALSEND_TOUCH_DRAG_TESTING
+    if (!convert_pointer) {
+      if (preview) {DeleteObject(preview);preview=nullptr;}
+      Complete(state,false,"此Windows版本不支持原生触屏拖出，请使用鼠标拖放");
+      return;
+    }
+#endif
+    if (convert_pointer) {
+      // Let Windows own the complete move/up stream. A per-POINTERUPDATE
+      // SendInput loop plus a low-level hook on this OLE thread can stall input,
+      // and a lost source capture previously turned a legitimate drop into cancel.
+      // Conversion can synchronously hand pointer capture over to OLE.
+      state->system_promoted = true;
+      if (!convert_pointer()) {
+        if (preview) {DeleteObject(preview);preview=nullptr;}
+        Complete(state, false, "Windows未能接管触屏拖放，请保持单指接触后重试");
+        return;
+      }
+      DWORD effect = DROPEFFECT_NONE;
+      const HRESULT result = state->run_drag(preview, &effect);
+      copied = result == DRAGDROP_S_DROP && effect == DROPEFFECT_COPY && !state->cancelled;
+      if (preview) {DeleteObject(preview);preview=nullptr;}
+      Complete(state, copied, FAILED(result) ? "Windows原生触屏拖放失败" : "");
+      return;
+    }
     DesktopMouseGuard mouse_guard;
     if (!mouse_guard.Install(state->source_owner)) {
       if (preview) DeleteObject(preview);
@@ -633,8 +676,9 @@ bool GlobalSendDesktopTouchDragCancelled() {
   return !operation || !operation->desktop || operation->cancelled;
 }
 
-HRESULT GlobalSendDesktopTouchDragStatus(BOOL escape) {
+HRESULT GlobalSendDesktopTouchDragStatus(BOOL escape, DWORD mouse_keys) {
   if (escape || GlobalSendDesktopTouchDragCancelled()) return DRAGDROP_S_CANCEL;
+  if (operation->system_promoted) return (mouse_keys & MK_LBUTTON) ? S_OK : DRAGDROP_S_DROP;
   return contact == operation->pointer && contact_sequence == operation->contact_sequence
       ? S_OK : DRAGDROP_S_DROP;
 }
@@ -653,3 +697,8 @@ void UnregisterGlobalSendTouchDrag() {
     if (state->pending) state->pending.Cancel();
   }
 }
+#ifdef GLOBALSEND_TOUCH_DRAG_TESTING
+void SetGlobalSendPointerConversionForTest(std::function<BOOL()> converter) {
+  convert_pointer=std::move(converter);
+}
+#endif

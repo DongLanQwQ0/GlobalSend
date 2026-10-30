@@ -2333,7 +2333,9 @@ class _SendScreenState extends State<SendScreen>
   Widget stagedTile({String? path, int? textIndex}) {
     final isText = textIndex != null;
     final value = isText ? c.stagedTexts[textIndex] : '';
-    final title = isText ? value.replaceAll('\n', ' ') : safeName(path!);
+    final title = isText
+        ? value.replaceAll('\n', ' ')
+        : c.stagedFileNames[path] ?? safeName(path!);
     return Material(
       color: Ui.colors(context).surface,
       borderRadius: Ui.cardRadius,
@@ -2360,7 +2362,7 @@ class _SendScreenState extends State<SendScreen>
                   else
                     ContentPreview(
                       location: path ?? '',
-                      name: isText ? '文本' : safeName(path!),
+                      name: isText ? '文本' : title,
                       text: isText ? value : null,
                       compact: true,
                       maxTextLines: isText ? 4 : 2,
@@ -3114,7 +3116,7 @@ class _SendScreenState extends State<SendScreen>
     DockEntry(
       id: path,
       kind: 'file',
-      title: safeName(path),
+      title: c.stagedFileNames[path] ?? safeName(path),
       source: '',
       localPath: path,
     ),

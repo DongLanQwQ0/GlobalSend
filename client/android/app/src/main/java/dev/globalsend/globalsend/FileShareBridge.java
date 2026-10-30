@@ -106,6 +106,7 @@ final class FileShareBridge {
         }
         String name="shared-file";if("file".equals(uri.getScheme()))name=new File(uri.getPath()).getName();
         else try(Cursor cursor=context.getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(cursor!=null&&cursor.moveToFirst()&&cursor.getString(0)!=null)name=cursor.getString(0);}
+        if(MediaFileName.needsSuffix(name))name=MediaFileName.withType(name,context.getContentResolver().getType(uri));
         name=name.replaceAll("[\\\\/\\x00-\\x1f]","_");if(name.isEmpty()||name.equals(".")||name.equals(".."))name="shared-file";
         File target=new File(part,name);copyBytes(uri,target);return target;
     }

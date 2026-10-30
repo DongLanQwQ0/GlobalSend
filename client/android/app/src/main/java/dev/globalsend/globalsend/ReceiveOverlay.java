@@ -631,7 +631,19 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 text.setPadding(dp(8),dp(8),dp(8),dp(28));
                 text.setMaxLines(3);
                 text.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                content = text;
+                if(receipt.text==null && !receipt.localPath.isEmpty() && !receipt.fileName.contains(".")) {
+                    FrameLayout preview=new FrameLayout(context);
+                    preview.addView(text,new FrameLayout.LayoutParams(-1,-1));
+                    ImageView image=new ImageView(context);image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    image.setVisibility(View.GONE);preview.addView(image,new FrameLayout.LayoutParams(-1,-1));
+                    thumbnails.execute(() -> {
+                        Bitmap bitmap=thumbnail(receipt.localPath,dp(160));
+                        main.post(() -> {if(image.getParent()!=null && bitmap!=null) {
+                            image.setImageBitmap(bitmap);image.setVisibility(View.VISIBLE);text.setVisibility(View.GONE);
+                        }});
+                    });
+                    content=preview;
+                } else content = text;
             }
             card.addView(content,new FrameLayout.LayoutParams(-1,-1));
             View tint=new View(context);tint.setTag("pending-tint");tint.setBackgroundColor(0x33d84c53);
