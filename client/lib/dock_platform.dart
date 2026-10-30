@@ -8,11 +8,16 @@ class DockPlatform {
   static final StreamController<Map<String, dynamic>> _events =
       StreamController.broadcast();
   static bool _installed = false;
+  static Future<void> Function(Map<String, dynamic>)? onSendToDevice;
   static Stream<Map<String, dynamic>> get events {
     if (!_installed) {
       _installed = true;
       channel.setMethodCallHandler((call) async {
-        if (call.method == 'nativeDrop' ||
+        if (call.method == 'sendToDevice') {
+          final send = onSendToDevice;
+          if (send == null) throw StateError('发送服务尚未就绪');
+          await send(Map<String, dynamic>.from(call.arguments as Map));
+        } else if (call.method == 'nativeDrop' ||
             call.method == 'nativeDrag' ||
             call.method == 'dockState') {
           _events.add({
@@ -70,6 +75,14 @@ class DockPlatform {
 
   static Future<void> configure({int? maxFileSize}) =>
       channel.invokeMethod('configure', {'maxFileSize': ?maxFileSize});
+
+  static Future<void> setSendTargets(
+    String serverKey,
+    List<Map<String, dynamic>> devices,
+  ) => channel.invokeMethod('sendTargets', {
+    'serverKey': serverKey,
+    'devices': devices,
+  });
 
   static Future<void> setQueueDropBounds(
     Rect? bounds, {

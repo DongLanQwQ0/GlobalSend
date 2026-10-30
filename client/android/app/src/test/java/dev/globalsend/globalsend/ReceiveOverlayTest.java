@@ -35,7 +35,7 @@ public class ReceiveOverlayTest {
         assertEquals(0, ((View)field(overlay,"expanded")).getPaddingLeft());
         assertEquals(Math.round(1*dp), ((View)field(overlay,"expanded")).getPaddingRight());
         ((View)field(overlay,"shelfTab")).performClick();
-        LinearLayout row=(LinearLayout)field(overlay,"row"); assertEquals(2,row.getChildCount());
+        LinearLayout row=(LinearLayout)field(overlay,"row"); assertEquals(3,row.getChildCount());
         assertEquals("仅暂存",((android.widget.TextView)((android.widget.FrameLayout)row.getChildAt(0)).getChildAt(0)).getText().toString());
         ((View)field(overlay,"count")).performClick();
         assertEquals("remote",((android.widget.TextView)((android.widget.FrameLayout)row.getChildAt(0)).getChildAt(0)).getText().toString());
@@ -91,11 +91,11 @@ public class ReceiveOverlayTest {
         overlay.show(new ReceiveNotifications.Receipt("two","1","手机","第二条",null,null,0), 2, acks::add);
         assertSame(root, field(overlay,"root"));
         LinearLayout row = (LinearLayout) field(overlay,"row");
-        assertEquals(3,row.getChildCount());
+        assertEquals(4,row.getChildCount());
         assertEquals(LinearLayout.HORIZONTAL,row.getOrientation());
         assertEquals(row.getChildAt(0).getLayoutParams().width,row.getChildAt(0).getLayoutParams().height);
         overlay.show(new ReceiveNotifications.Receipt("one","2","电脑","修改第一条",null,null,0),3,acks::add);
-        assertEquals(3,row.getChildCount());
+        assertEquals(4,row.getChildCount());
         overlay.hide();
         assertNull(field(overlay,"root"));
         assertNotEquals(0,((WindowManager.LayoutParams)root.getLayoutParams()).flags & WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
@@ -211,7 +211,7 @@ public class ReceiveOverlayTest {
         assertEquals(before,scroll.getScrollX());
         assertEquals(1f,root.getAlpha(),.001f);
         assertEquals(0f,root.getTranslationX(),.001f);
-        assertEquals(4,((LinearLayout)field(overlay,"row")).getChildCount());
+        assertEquals(5,((LinearLayout)field(overlay,"row")).getChildCount());
         overlay.hide();
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200));
     }
@@ -252,7 +252,7 @@ public class ReceiveOverlayTest {
             assertNotSame(old,current);
             draw(current);
             assertEquals(java.util.List.of(true),received);
-            assertEquals(2,((LinearLayout)field(overlay,"row")).getChildCount());
+        assertEquals(3,((LinearLayout)field(overlay,"row")).getChildCount());
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(250));
             assertFalse(old.isAttachedToWindow());
             assertTrue(current.isAttachedToWindow());

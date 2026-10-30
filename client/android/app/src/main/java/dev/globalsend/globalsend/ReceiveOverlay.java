@@ -45,6 +45,29 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private FrameLayout root, surface;
     private LinearLayout row, expanded, rail;
     private HorizontalScrollView scroll;
+    private HorizontalScrollView targetScroll;
+    private LinearLayout targetRow;
+    private ForwardDrag forwarding;
+    private View hoveredTarget;
+    private int targetScrollDirection;
+    private float targetPointerX, targetPointerY;
+    private final Runnable targetAutoScroll = new Runnable() {
+        @Override public void run() {
+            if(forwarding==null || targetScroll.getVisibility()!=View.VISIBLE || targetScrollDirection==0)return;
+            targetScroll.scrollBy(dp(6)*targetScrollDirection,0);
+            highlightTarget(targetPointerX,targetPointerY);
+            main.postDelayed(this,16);
+        }
+    };
+    private static final class ForwardDrag {
+        final List<String> paths,texts;
+        final List<ReceiveNotifications.Receipt> staged;
+        final String serverKey;
+        boolean sentToDevice;
+        ForwardDrag(List<String> paths,List<String> texts,List<ReceiveNotifications.Receipt> staged) {
+            this.paths=paths;this.texts=texts;this.staged=staged;serverKey=DockCoordinator.sendServerKey();
+        }
+    }
     private TextView count;
     private WindowManager.LayoutParams layout;
     private long generation;
@@ -282,6 +305,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             private boolean cancelTap;
             private boolean backgroundMove, backgroundMoved;
             private int sizingEdges;
+            @Override public boolean dispatchDragEvent(DragEvent event) {
+                if(forwarding!=null && event.getAction()==DragEvent.ACTION_DRAG_EXITED)showSendTargets();
+                if(forwarding!=null && targetScroll.getVisibility()==View.VISIBLE &&
+                    event.getAction()!=DragEvent.ACTION_DRAG_STARTED && event.getAction()!=DragEvent.ACTION_DRAG_ENDED)
+                    return dragOverTargets(event);
+                return super.dispatchDragEvent(event);
+            }
             @Override public boolean dispatchTouchEvent(MotionEvent event) {
                 if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
                     doubleTapGesture=false;
@@ -391,6 +421,15 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         rail=new LinearLayout(context);rail.setOrientation(LinearLayout.VERTICAL);
         rail.addView(header,new LinearLayout.LayoutParams(-1,-1));
         expanded.addView(rail,new LinearLayout.LayoutParams(dp(38),-1));
+        // Keep the native drag source attached underneath the temporary target
+        // strip: rebuilding the content row would terminate a system drag.
+        targetScroll=new HorizontalScrollView(context);
+        targetScroll.setHorizontalScrollBarEnabled(false);
+        targetScroll.setPadding(dp(4),dp(4),dp(4),dp(4));
+        targetRow=new LinearLayout(context);targetRow.setOrientation(LinearLayout.HORIZONTAL);
+        targetScroll.addView(targetRow,new HorizontalScrollView.LayoutParams(-2,-1));
+        targetScroll.setVisibility(View.GONE);
+        surface.addView(targetScroll,new FrameLayout.LayoutParams(-1,-1));
         handle = label("", 10, appearance.accent);
         handle.setGravity(Gravity.CENTER); handle.setContentDescription("展开文件暂存坞");
         handle.setOnClickListener(view -> setCollapsed(false));
@@ -570,7 +609,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             TextView clearLabel=label("清空",12,appearance.muted);clearLabel.setGravity(Gravity.CENTER);
             clear.addView(clearLabel);
             clear.setOnClickListener(view -> clearDisplayed());
-            row.addView(clear,new LinearLayout.LayoutParams(side,side));
+            LinearLayout.LayoutParams clearSize=new LinearLayout.LayoutParams(side,side);clearSize.rightMargin=dp(3);
+            row.addView(clear,clearSize);
+            View openSpace=new View(context);openSpace.setTag("open-app-space");
+            openSpace.setContentDescription("双击打开 GlobalSend");
+            row.addView(openSpace,new LinearLayout.LayoutParams(side,side));
         }
         scroll.scrollTo(0, 0);
         if(animateCards) {
@@ -712,8 +755,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         cancelPendingOpen();
         main.removeCallbacks(countdown); refreshPendingStyles(); updateLabels();
         long started=android.os.SystemClock.uptimeMillis();
+        final ForwardDrag drag=new ForwardDrag(paths,texts,staged);
+        forwarding=drag;
         try {
-            return DockCoordinator.startDrag(source, paths, texts, (paths.size() + texts.size()) + " 项", accepted -> {
+            boolean began=DockCoordinator.startDrag(source, paths, texts, (paths.size() + texts.size()) + " 项", accepted -> {
+                finishForwarding(drag);
+                if(drag.sentToDevice)return; // The transfer callback owns this batch's removal grace period.
                 boolean[] warned={false};
                 shelf.exported(staged, accepted, item -> {
                     // Directory document drags retain their original system
@@ -723,10 +770,104 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     return consumed;
                 });
             });
+            if(!began)finishForwarding(drag);
+            return began;
         } catch (Exception unavailable) {
+            finishForwarding(drag);
             android.util.Log.w("GlobalSend", "Cannot export temporary shelf drag", unavailable);
             android.widget.Toast.makeText(context, "无法拖出，请重试", android.widget.Toast.LENGTH_SHORT).show(); return false;
         }
+    }
+
+    static void refreshSendTargets() {
+        ReceiveOverlay overlay=current.get();
+        if(overlay!=null && overlay.forwarding!=null && overlay.targetScroll!=null &&
+            overlay.targetScroll.getVisibility()==View.VISIBLE)overlay.renderSendTargets();
+    }
+    private void showSendTargets() {
+        if(forwarding==null || root==null || targetScroll.getVisibility()==View.VISIBLE)return;
+        renderSendTargets();
+        styleSurface();
+        expanded.setAlpha(0); // No detach, visibility change, or replacement of the active source.
+        targetScroll.setVisibility(View.VISIBLE);targetScroll.setAlpha(0);
+        targetScroll.animate().alpha(1).setDuration(120).start();
+    }
+    private void renderSendTargets() {
+        targetRow.removeAllViews();hoveredTarget=null;
+        int side=Math.max(1,expandedHeight-dp(8));
+        for(Map<String,String> device:DockCoordinator.sendTargets()) {
+            LinearLayout card=new LinearLayout(context);card.setOrientation(LinearLayout.VERTICAL);card.setGravity(Gravity.CENTER);
+            card.setTag(device.get("deviceId"));card.setContentDescription("发送到 "+device.get("name"));
+            card.setBackground(shape(glass(appearance.soft,0xb3),12));
+            ImageView image=new ImageView(context);
+            String platform=device.get("platform");
+            image.setImageResource("windows".equals(platform)?R.drawable.ic_device_desktop:
+                "web".equals(platform)?R.drawable.ic_device_web:R.drawable.ic_device_mobile);
+            image.setColorFilter(appearance.accent);card.addView(image,new LinearLayout.LayoutParams(dp(26),dp(26)));
+            TextView name=label(device.getOrDefault("name","设备"),12,appearance.ink);
+            name.setGravity(Gravity.CENTER);name.setMaxLines(2);name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams nameSize=new LinearLayout.LayoutParams(-1,-2);nameSize.topMargin=dp(6);
+            card.setPadding(dp(6),dp(6),dp(6),dp(6));card.addView(name,nameSize);
+            LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(side,side);size.rightMargin=dp(3);
+            targetRow.addView(card,size);
+        }
+        if(targetRow.getChildCount()==0) {
+            TextView empty=label("暂无可发送设备",13,appearance.muted);empty.setGravity(Gravity.CENTER);
+            targetRow.addView(empty,new LinearLayout.LayoutParams(expandedWidth-dp(8),side));
+        }
+    }
+    private void highlightTarget(float x,float y) {
+        View next=null;
+        Rect bounds=new Rect();
+        for(int i=0;i<targetRow.getChildCount();i++) {
+            View card=targetRow.getChildAt(i);
+            if(!(card.getTag() instanceof String))continue;
+            card.getDrawingRect(bounds);root.offsetDescendantRectToMyCoords(card,bounds);
+            if(bounds.contains((int)x,(int)y)){next=card;break;}
+        }
+        if(next==hoveredTarget)return;
+        if(hoveredTarget!=null)hoveredTarget.setBackground(shape(glass(appearance.soft,0xb3),12));
+        hoveredTarget=next;
+        if(next!=null) {
+            GradientDrawable background=shape(glass(appearance.soft,0xe6),12);
+            background.setStroke(dp(2),appearance.accent);next.setBackground(background);
+        }
+    }
+    private boolean dragOverTargets(DragEvent event) {
+        int action=event.getAction();
+        if(action==DragEvent.ACTION_DRAG_EXITED) {stopTargetScroll();highlightTarget(-1,-1);return true;}
+        if(action==DragEvent.ACTION_DRAG_ENTERED || action==DragEvent.ACTION_DRAG_LOCATION) {
+            targetPointerX=event.getX();targetPointerY=event.getY();highlightTarget(targetPointerX,targetPointerY);
+            int direction=targetPointerX<dp(28)?-1:targetPointerX>root.getWidth()-dp(28)?1:0;
+            if(direction!=targetScrollDirection) {
+                stopTargetScroll();targetScrollDirection=direction;
+                if(direction!=0)main.post(targetAutoScroll);
+            }
+            return true;
+        }
+        if(action==DragEvent.ACTION_DROP) {
+            stopTargetScroll();highlightTarget(event.getX(),event.getY());
+            if(hoveredTarget==null)return false;
+            ForwardDrag drag=forwarding;
+            drag.sentToDevice=true;
+            boolean accepted=DockCoordinator.sendToDevice(event,drag.serverKey,(String)hoveredTarget.getTag(),drag.paths,drag.texts,success -> {
+                if(success)shelf.exported(drag.staged,true);
+                android.widget.Toast.makeText(context,success?"已开始发送":"发送失败，内容已保留",android.widget.Toast.LENGTH_SHORT).show();
+            });
+            if(!accepted) {
+                drag.sentToDevice=false;
+                android.widget.Toast.makeText(context,"设备已不可用，内容已保留",android.widget.Toast.LENGTH_SHORT).show();
+            }
+            return accepted;
+        }
+        return true;
+    }
+    private void stopTargetScroll() {targetScrollDirection=0;main.removeCallbacks(targetAutoScroll);}
+    private void finishForwarding(ForwardDrag drag) {
+        if(forwarding!=drag)return;
+        stopTargetScroll();forwarding=null;hoveredTarget=null;
+        if(targetScroll!=null) {targetScroll.animate().cancel();targetScroll.setVisibility(View.GONE);}
+        if(expanded!=null)expanded.setAlpha(1);
     }
 
     @SuppressWarnings("unchecked")
@@ -1036,6 +1177,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             savePlacement();
             cancelPendingOpen();
             main.removeCallbacks(countdown);
+            stopTargetScroll();
             if (dragExpand != null) main.removeCallbacks(dragExpand);
             dragExpand = null;
             final View leaving = root;
@@ -1046,6 +1188,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             root = null; surface=null; expanded = null; rail=null; row = null; scroll = null; count = null; layout = null;
             header = null; handle = null; shelfTab = null; contentGestures=null;
             countGroup=null;shelfGroup=null;countIcon=null;shelfIcon=null;
+            targetScroll=null;targetRow=null;forwarding=null;hoveredTarget=null;
             rootAdded = false;
             leaving.animate().cancel();
             leaving.setScaleX(1);leaving.setScaleY(1);

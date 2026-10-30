@@ -309,6 +309,7 @@ class SendController extends ChangeNotifier {
   final Set<String> _sharedBatchIds = {};
   final Set<String> _autoSharedBatchIds = {};
   StreamSubscription<Map<String, dynamic>>? _dockSubscription;
+  String _dockTargetsSnapshot = '';
   bool nativeDragActive = false, nativeImporting = false;
   bool nativeQueueDragActive = false;
   bool nativeLocalDragActive = false;
@@ -1023,6 +1024,7 @@ class SendController extends ChangeNotifier {
       _stagedTargetProgress.clear();
     }
     _updateReachability();
+    _publishDockTargets();
     if (!disposed) notifyListeners();
     if (!disposed) {
       backgroundReceive.update(
@@ -1035,6 +1037,53 @@ class SendController extends ChangeNotifier {
             _sendingRtc.isNotEmpty,
       );
     }
+  }
+
+  void _publishDockTargets() {
+    if (!Platform.isAndroid || disposed) return;
+    final serverKey = profile?.key ?? '';
+    final peers = api?.token.isNotEmpty == true
+        ? [
+            for (final peer in sendablePeers)
+              {
+                'deviceId': peer['deviceId'],
+                'name': peer['name'] ?? '设备',
+                'platform': peer['platform'] ?? 'other',
+              },
+          ]
+        : <Map<String, dynamic>>[];
+    final snapshot = jsonEncode([serverKey, peers]);
+    if (snapshot == _dockTargetsSnapshot) return;
+    _dockTargetsSnapshot = snapshot;
+    unawaited(
+      DockPlatform.setSendTargets(serverKey, peers).catchError((Object error) {
+        if (_dockTargetsSnapshot == snapshot) _dockTargetsSnapshot = '';
+        debugPrint('暂存坞设备列表未更新：$error');
+      }),
+    );
+  }
+
+  Future<void> sendDockSelection(Map<String, dynamic> selection) async {
+    final p = profile, a = api, epoch = generation;
+    final target = selection['deviceId'] as String? ?? '';
+    if (p == null ||
+        a == null ||
+        a.token.isEmpty ||
+        p.key != selection['serverKey']) {
+      throw StateError('请连接原中心后重试');
+    }
+    if (!sendablePeers.any((peer) => peer['deviceId'] == target)) {
+      throw StateError('目标设备已离线，请重试');
+    }
+    final paths = List<String>.from(selection['paths'] ?? []);
+    final texts = List<String>.from(selection['texts'] ?? []);
+    // Use the existing transfer entry points without touching unrelated drafts.
+    if (paths.isNotEmpty) await offer(target, paths);
+    for (final text in texts) {
+      _requireSession(epoch, a, p);
+      await sendText(target, text);
+    }
+    _requireSession(epoch, a, p);
   }
 
   void _updateReachability() {
@@ -1146,6 +1195,7 @@ class SendController extends ChangeNotifier {
       (_) => _pruneEphemeral(),
     );
     if (Platform.isAndroid) {
+      DockPlatform.onSendToDevice = sendDockSelection;
       _dockSubscription = DockPlatform.events.listen(handleNativeDockEvent);
       unawaited(refreshNativeDock().catchError((Object _) {}));
     }
@@ -5924,6 +5974,9 @@ class SendController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (Platform.isAndroid && DockPlatform.onSendToDevice == sendDockSelection) {
+      DockPlatform.onSendToDevice = null;
+    }
     _restoreTimer?.cancel();
     _dockSubscription?.cancel();
     _clipboardSubscription?.cancel();

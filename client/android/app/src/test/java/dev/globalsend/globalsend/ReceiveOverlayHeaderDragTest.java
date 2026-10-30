@@ -167,7 +167,7 @@ public class ReceiveOverlayHeaderDragTest {
         shelf.add(java.util.List.of(),java.util.List.of("one","two"),Map.of());
         ((View)field(overlay,"shelfTab")).performClick();
         LinearLayout row=(LinearLayout)field(overlay,"row");
-        assertEquals(3,row.getChildCount());
+        assertEquals(4,row.getChildCount());
         View card=row.getChildAt(0);
         View remove=card.findViewWithTag("remove-item");
         assertEquals("移除",remove.getContentDescription());
@@ -177,8 +177,9 @@ public class ReceiveOverlayHeaderDragTest {
         assertEquals("已复制",org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
         remove.performClick();
         assertEquals(1,shelf.items.size());
-        assertEquals("清空当前列表",row.getChildAt(row.getChildCount()-1).getContentDescription());
-        row.getChildAt(row.getChildCount()-1).performClick();
+        assertEquals("open-app-space",row.getChildAt(row.getChildCount()-1).getTag());
+        assertEquals("清空当前列表",row.getChildAt(row.getChildCount()-2).getContentDescription());
+        row.getChildAt(row.getChildCount()-2).performClick();
         assertTrue(shelf.items.isEmpty());
         assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
         overlay.hide();

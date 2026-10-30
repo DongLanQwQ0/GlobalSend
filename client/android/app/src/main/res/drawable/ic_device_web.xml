@@ -1,0 +1,5 @@
+<!-- Google Material web_outlined, matching app_icon_paths.dart; CC BY 4.0.
+     Attribution: client/assets/licenses/material-icons.txt. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="26dp" android:height="26dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF000000" android:pathData="M20.0156 3.9844 L3.9844 3.9844 C2.9062 3.9844 2.0156 4.9219 2.0156 6 L2.0156 18 C2.0156 19.0781 2.9062 20.0156 3.9844 20.0156 L20.0156 20.0156 C21.0938 20.0156 21.9844 19.0781 21.9844 18 L21.9844 6 C21.9844 4.9219 21.0938 3.9844 20.0156 3.9844 Z M3.9844 9 L14.4844 9 L14.4844 12.5156 L3.9844 12.5156 L3.9844 9 Z M3.9844 14.4844 L14.4844 14.4844 L14.4844 18 L3.9844 18 L3.9844 14.4844 Z M20.0156 18 L16.5 18 L16.5 9 L20.0156 9 L20.0156 18 Z" />
+</vector>

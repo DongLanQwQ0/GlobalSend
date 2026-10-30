@@ -75,6 +75,8 @@ final class DockCoordinator {
         LocalDrag(View source,List<String> paths,List<String> texts) {this.source=new WeakReference<>(source);this.paths=new ArrayList<>(paths);this.texts=new ArrayList<>(texts);this.path=paths.isEmpty()?null:paths.get(0);this.text=texts.isEmpty()?null:String.join("\n",texts);}
     }
     private static LocalDrag activeExport;
+    private String sendServerKey = "";
+    private final List<Map<String, String>> sendTargets = new ArrayList<>();
     private static final String LOCAL_DRAG_SESSION = "dev.globalsend.localDrag";
     private RectF queueDropBounds;
     private int queueSurfaceWidth, queueSurfaceHeight;
@@ -121,6 +123,9 @@ final class DockCoordinator {
                     case "configure":
                         Number size = call.argument("maxFileSize"); if (size != null) maxFileSize = Math.min(2147483648L, Math.max(0, size.longValue()));
                         result.success(null); break;
+                    case "sendTargets":
+                        updateSendTargets(call.argument("serverKey"), call.argument("devices"));
+                        result.success(null); break;
                     case "queueDropBounds":
                         updateQueueDropBounds(Boolean.TRUE.equals(call.argument("enabled")) ? call.arguments() : null);
                         updateSendNavigationBounds(call.argument("sendNavigation"));
@@ -158,6 +163,40 @@ final class DockCoordinator {
     }
 
     void attach(Activity activity) { attached = new java.lang.ref.WeakReference<>(activity); }
+
+    void updateSendTargets(String serverKey, List<Map<String, String>> devices) {
+        sendServerKey = serverKey == null ? "" : serverKey;
+        sendTargets.clear();
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        if(devices != null) for(Map<String,String> device:devices)
+            if(ids.add(device.get("deviceId"))) sendTargets.add(new HashMap<>(device));
+        ReceiveOverlay.refreshSendTargets();
+    }
+    static String sendServerKey() {
+        DockCoordinator coordinator=current.get();return coordinator==null?"":coordinator.sendServerKey;
+    }
+    static List<Map<String,String>> sendTargets() {
+        DockCoordinator coordinator=current.get();
+        return coordinator==null?java.util.Collections.emptyList():new ArrayList<>(coordinator.sendTargets);
+    }
+    static boolean sendToDevice(DragEvent event, String serverKey, String deviceId,
+            List<String> paths, List<String> texts, java.util.function.Consumer<Boolean> completed) {
+        DockCoordinator coordinator=current.get();
+        LocalDrag session=coordinator==null?null:coordinator.localSession(event);
+        if(coordinator==null || coordinator.disposed || session==null || session!=activeExport || session.dropped ||
+            !coordinator.sendServerKey.equals(serverKey) ||
+            coordinator.sendTargets.stream().noneMatch(device -> deviceId.equals(device.get("deviceId"))))return false;
+        session.dropped=true;session.accepted=true;
+        Map<String,Object> selection=new HashMap<>();
+        selection.put("serverKey",serverKey);selection.put("deviceId",deviceId);
+        selection.put("paths",new ArrayList<>(paths));selection.put("texts",new ArrayList<>(texts));
+        coordinator.channel.invokeMethod("sendToDevice",selection,new MethodChannel.Result() {
+            public void success(Object value) { completed.accept(true); }
+            public void error(String code,String message,Object details) { completed.accept(false); }
+            public void notImplemented() { completed.accept(false); }
+        });
+        return true;
+    }
     void detach(Activity activity) {
         if (attached.get() != activity) return;
         detachDragReceiver(); attached.clear();
