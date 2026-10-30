@@ -10,13 +10,13 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows 最新本地候选版为 **1.0.56+67**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。Android 暂存坞支持拖出后切换设备目标、边缘悬停滚动，以及清空卡片后的整格空白双击打开应用，见[暂存坞说明](docs/TEMPORARY_SHELF.md)。
+Windows / Android 最新本地版为 **1.0.58+73**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`，手机已保留数据覆盖安装。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.56-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.58-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.56+67 arm64 候选 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.56-android-arm64-v8a.apk)已验签、不打包字体，手机已覆盖安装。图片／视频建议放在暂存末尾，清空与建议之间保留双击空白；空列表先留一屏空白，向左滑再看建议。55版[Chrona普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留：iPad等不能远程打开浏览器的设备收到链接后手动点击，不需要升级接收端或中心。实际安装与验收见[短步骤](docs/QUICK_TEST.md)和[本机发布记录](artifacts/releases/latest-local.json)。
+Android [1.0.58+73 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.58-android-arm64-v8a.apk)已验签、不打包字体。图片／视频建议放在暂存末尾，已删除媒体自动移除建议；清空与建议之间保留双击空白。建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留：iPad 等不能远程打开浏览器的设备收到链接后手动点击。实际安装与验收见[短步骤](docs/QUICK_TEST.md)和[本机发布记录](artifacts/releases/latest-local.json)。
 
-iPad / iPhone 的[**1.0.53 (62) 未签名IPA，约14.8 MB**](artifacts/releases/ios-1.0.53-build62/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。53移除设置中的系统分享及默认目标，改为系统分享面板第一排的设备建议；普通分享仍唤起待发送，选指定设备建议才按唯一ID自动发送。建议的显示由iPadOS决定，本版由用户手动安装验收，见[iPad构建说明](docs/IPAD.md)。**中心服务器不托管安装包；[Windows/Android 1.0.50](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iPad 1.0.53](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.53-build62)分别提供对应平台包和更新清单。**
+iPad / iPhone 的[**1.0.58 (73) 未签名 IPA，约14.8 MB**](artifacts/releases/ios-1.0.58-build73/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。接入 UIKit 原生拖入、拖出；普通系统分享唤起待发送，选系统设备建议才按唯一 ID 自动发送本批。由用户用 iloader 手动签名安装，真机拖放待确认，见[iPad说明](docs/IPAD.md)。**中心不托管安装包；[Windows/Android 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iOS 1.0.58+73](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.58-build73)分别提供对应平台包和更新清单。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 
@@ -35,7 +35,7 @@ Web 的“本机文件”两列库支持图片/文本预览、排序、多选、
 - **共享文本**：同组设备实时双向编辑，中文输入期间不打断；并发编辑保留草稿，可选择远端或保留本地。不通知、不唤起、不进入收件页面，与发送草稿和系统剪贴板独立。
 - **轻量阅读器**：原生和 Web 都支持收到文字只读查看/复制、已发消息原位编辑；原生常见 UTF-8 / 带 BOM 的 UTF-16 文件可预览。
 - **新内容与窗口**：单项大预览、多项网格，支持拖出、复制和Esc。多选通过按钮进入，单击选择，长按仅拖放，返回退出多选；右键与更多共用菜单。Windows记住窗口bounds，托盘卸载主界面而保留接收核心；有焦点在主窗接收，失焦使用独立右下接收坞，不改主窗口尺寸位置。新版源码预热并复用坞的 UI-only engine，关闭后释放卡片和图片缓存，避免每次收件重新启动引擎。
-- **Android后台**：保留接收服务；使用独立有界系统悬浮窗，不以 Activity 的全屏透明遮罩模拟小窗。展开约244×156dp，可移动/缩放、圆角，支持细把手及1.5倍透明触控区；双击内容区返回主应用，只在设置中关闭。悬浮窗无法显示时使用通知，文本通知支持复制。按用户选择不新增无障碍权限、不自动检测桌面；实际vivo后台稳定性和跨应用 URI 授权待真机验收。
+- **Android后台**：保留接收服务；使用独立有界系统悬浮窗，不以 Activity 的全屏透明遮罩模拟小窗。默认展开232×116dp，可移动/缩放、圆角，支持细把手及1.5倍透明触控区；双击内容区返回主应用，只在设置中关闭。悬浮窗无法显示时使用通知，文本通知支持复制。按用户选择不新增无障碍权限、不自动检测桌面；长期后台稳定性仍取决于系统调度。
 - **本地文件库**：两列显示本机全部已保存文件，离线、换中心或退出分组后仍可看，按时间、名称或大小排序；通过“多选”或“编辑”进入选择，可重命名、删除或显式转发。目录检查不再作为登录的前置步骤；缺失文件清理引用，暂不可读的目录保留记录。刚掉线的设备在 30 秒内也可尝试发送。图片支持缩略图和缩放预览。
 - **接收与清理**：在“设置 → 存储”选择 Windows 文件夹或 Android 系统目录，直接写入，不再保留第二份永久副本。默认保留 24 小时，可改小时/天，并按类别和大于/小于 MiB 筛选清理。清理会删除本应用接收的文件，包括自选目录内这些文件；不扫描目录中其他文件，不删除原发送文件或另行导出的副本。
 - **连接**：刷新、启动、恢复及获焦点重新发布自身 IPv4/IPv6 与 RTC 能力，中心通知同组。原生 HTTPS 地址对、反向 HTTPS 和可用 RTC 的只读检测并行；实际文件选择优先复用已测通形式，同范围按测量延迟排序，按 LAN→公网→中继回落。连接选择共用约一秒预算，未知形式不独占预算；只让一个文件写入器工作，关闭旧连接后才回落。已连传输不限一秒。保留手动选路、断点与大中继确认；真实蜂窝、校园网络仍需实机验收。
