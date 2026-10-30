@@ -577,6 +577,7 @@ final class DockCoordinator {
     }
     private static void finishExport(LocalDrag session) {
         if (activeExport != session) return;
+        traceDrag("finish export accepted="+session.accepted+" returned="+session.returnedToShelf);
         activeExport = null;
         View source = session.source.get();
         if (source != null) {
@@ -613,6 +614,7 @@ final class DockCoordinator {
     static boolean startDrag(View view,List<String> paths,List<String> texts,String label,
             java.util.function.Consumer<Boolean> completed) throws Exception {
         if (activeExport != null) return false; // A second long press must not re-enter a live system drag.
+        traceDrag("begin export source="+view.getClass().getSimpleName());
         LocalDrag session = new LocalDrag(view, paths,texts);
         session.completed = completed;
         List<ClipData.Item> items=new ArrayList<>();java.util.LinkedHashSet<String> types=new java.util.LinkedHashSet<>();
@@ -636,6 +638,7 @@ final class DockCoordinator {
         };
         view.addOnAttachStateChangeListener(session.detachListener);
         if (!(view instanceof FlutterView)) view.setOnDragListener((source, event) -> {
+            traceDrag("source action="+event.getAction()+" result="+event.getResult());
             if (event.getAction() == DragEvent.ACTION_DRAG_ENDED) {
                 session.accepted |= event.getResult(); finishExport(session);
             }
@@ -649,8 +652,13 @@ final class DockCoordinator {
             }
             DockCoordinator coordinator = current.get();
             if (activeExport == session && coordinator != null) coordinator.publishLocalSession();
+            traceDrag("native start returned active="+(activeExport==session));
             return true;
         } catch (Exception error) { finishExport(session); throw error; }
+    }
+
+    static void traceDrag(String event) {
+        if(android.util.Log.isLoggable("GlobalSendDrag",android.util.Log.DEBUG))android.util.Log.d("GlobalSendDrag",event);
     }
 
     static final class DragPreview extends View {

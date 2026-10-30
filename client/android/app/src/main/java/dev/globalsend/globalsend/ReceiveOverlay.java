@@ -306,6 +306,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             private boolean backgroundMove, backgroundMoved;
             private int sizingEdges;
             @Override public boolean dispatchDragEvent(DragEvent event) {
+                DockCoordinator.traceDrag("overlay action="+event.getAction()+" forwarding="+(forwarding!=null));
                 if(forwarding!=null && event.getAction()==DragEvent.ACTION_DRAG_EXITED)showSendTargets();
                 if(forwarding!=null && targetScroll.getVisibility()==View.VISIBLE &&
                     event.getAction()!=DragEvent.ACTION_DRAG_STARTED && event.getAction()!=DragEvent.ACTION_DRAG_ENDED)
@@ -785,6 +786,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             overlay.targetScroll.getVisibility()==View.VISIBLE)overlay.renderSendTargets();
     }
     private void showSendTargets() {
+        DockCoordinator.traceDrag("show targets requested forwarding="+(forwarding!=null));
         if(forwarding==null || root==null || targetScroll.getVisibility()==View.VISIBLE)return;
         renderSendTargets();
         styleSurface();
@@ -864,6 +866,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private void stopTargetScroll() {targetScrollDirection=0;main.removeCallbacks(targetAutoScroll);}
     private void finishForwarding(ForwardDrag drag) {
+        DockCoordinator.traceDrag("finish forwarding current="+(forwarding==drag));
         if(forwarding!=drag)return;
         stopTargetScroll();forwarding=null;hoveredTarget=null;
         if(targetScroll!=null) {targetScroll.animate().cancel();targetScroll.setVisibility(View.GONE);}
