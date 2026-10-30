@@ -10,11 +10,11 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows 最新本地候选版为 **1.0.55+66**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。Android 暂存坞支持拖出后切换设备目标、边缘悬停滚动，以及清空卡片后的整格空白双击打开应用，见[暂存坞说明](docs/TEMPORARY_SHELF.md)。
+Windows 最新本地候选版为 **1.0.56+67**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。Android 暂存坞支持拖出后切换设备目标、边缘悬停滚动，以及清空卡片后的整格空白双击打开应用，见[暂存坞说明](docs/TEMPORARY_SHELF.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.55-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.56-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.55+66 arm64 候选 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.55-android-arm64-v8a.apk)已验签、不打包字体。手机已USB覆盖安装66版。新增[Chrona普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)：iPad等不能远程打开浏览器的设备也能接收链接，收到后手动点击；接收端和中心无需升级。Chrona调用端需配套更新，实际iPad收件仍待用户确认。54版图标、触感和边缘滚动的用户验收保留。实际安装状态见[本机发布记录](artifacts/releases/latest-local.json)。49的[APK打开与安装](docs/ANDROID_APK_INSTALL.md)以及48的微信图片投放验收保留，见[兼容记录](docs/WECHAT_DRAG_COMPAT.md)。
+Android [1.0.56+67 arm64 候选 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.56-android-arm64-v8a.apk)已验签、不打包字体，手机已覆盖安装。图片／视频建议放在暂存末尾，清空与建议之间保留双击空白；空列表先留一屏空白，向左滑再看建议。55版[Chrona普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留：iPad等不能远程打开浏览器的设备收到链接后手动点击，不需要升级接收端或中心。实际安装与验收见[短步骤](docs/QUICK_TEST.md)和[本机发布记录](artifacts/releases/latest-local.json)。
 
 iPad / iPhone 的[**1.0.53 (62) 未签名IPA，约14.8 MB**](artifacts/releases/ios-1.0.53-build62/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。53移除设置中的系统分享及默认目标，改为系统分享面板第一排的设备建议；普通分享仍唤起待发送，选指定设备建议才按唯一ID自动发送。建议的显示由iPadOS决定，本版由用户手动安装验收，见[iPad构建说明](docs/IPAD.md)。**中心服务器不托管安装包；[Windows/Android 1.0.50](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iPad 1.0.53](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.53-build62)分别提供对应平台包和更新清单。**
 
