@@ -1,4 +1,13 @@
-## 当前交付：Windows / APK 1.0.47+56（2026-10-29 16:40）
+## 当前交付：Windows / Android 1.0.54+64 本地候选（2026-10-30）
+
+- Windows 完整包已更新并重启于 `E:\Programs\GlobalSend`；遵守用户要求，不进行Windows界面测试。
+- Android64版已通过USB安装，用户确认从坞拖出内容后能切换到设备列表。随后改为VSync逐帧边缘滚动，按帧间隔积分、靠近边缘平滑加速、离边立即停止；37项相关原生回归通过。
+- 平滑修订APK为16,300,332字节，已推送至手机 `Download/GlobalSend-latest.apk`。最后读取的安装更新时间仍为10:43:58，即平滑修订前；不把相同版本号当作新版已安装的证据。手机正在使用，覆盖安装和真机流畅度检查等待用户回复。
+- 六个自建接收测试端已停止并退出临时组；手机仍保留自建 `GS54-acceptance` 成员关系，待可操作时只移除此临时组，原分组与暂存项不动。
+- 中心/Web无本轮Android原生改动；不重新部署。IPA仍为1.0.53（62），未启动新构建。54未发布为GitHub Release。
+- 详细证据：[本机发布记录](../artifacts/releases/latest-local.json)、[本轮记录](../artifacts/reports/android54-dock-work.json)、[手动检查入口](UI_ACCEPTANCE.md)。全目标仍未完成验收。
+
+## 历史交付：Windows / APK 1.0.47+56（2026-10-29 16:40）
 
 - Windows 完整包已更新并重启：`E:\Programs\GlobalSend`，进程 17184 响应，文件版本 1.0.47+56。备份 `backups/native-state/20261029-164014-pre-1.0.47`。
 - APK：`artifacts/releases/GlobalSend-1.0.47-android-arm64-v8a.apk`，16,291,796 字节；版本读回 47/code56，签名和无字体检查通过。当前 ADB 列表为空，手机未推送，最后确认43+52。保留待更新，不重复请求端口。

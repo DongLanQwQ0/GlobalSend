@@ -25,4 +25,4 @@
 - 原生真实 TLS 回归覆盖 700 ms 响应头等待、首个已测地址超时后使用第二个已测地址，以及建立流之后的长时传输；见 `artifacts/logs/multi-group-native-tests.log`。
 - 中心真实 HTTP 和原生接收器验证上传未完成时已得到中继字节，末字节等待校验；见 `server-live-relay-regression46-final.log` 和 `native-live-relay46-final.log`。
 - 早期三个同机 Web RTC 客户端曾在 694 ms 内完成三对 nonce/echo；这是浏览器生命周期证据，不是校园网、手机蜂窝或 iPad 公网延迟。
-- Windows 已运行47+56，中心/Web已上线对应选路与流式中继能力；手机目前未连接，最后确认43+52。真实跨网和最新手机版本的验收仍待完成。具体状态见 `PROGRESS.md`。
+- 当前Windows和手机为54+64本地候选，后续边缘滚动平滑修订尚待手机覆盖；中心/Web沿用已上线选路与流式中继能力。54没有修改选路算法，也没有新增真实跨网验收证据。具体安装状态见 `PROGRESS.md`。
