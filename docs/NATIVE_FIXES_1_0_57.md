@@ -15,10 +15,11 @@
 - 同进程 `nativeDrop` 测试确认 URI 不变、待发显示名和 outbox 有后缀、移出及清空释放显示名，不复制媒体。
 - Android 原生媒体命名与 provider stat 检查通过；stat 的原始名称不变，显示提示为 `.jpg`。
 - Windows 隐藏 HWND 的 OLE/输入替身检查通过：1000 次指针移动无模拟输入，转换期间捕获交接、跨窗离开、松手与取消语义符合预期。此检查未操作用户桌面。
+- 57版手机：暂存空白区向左滑出已有图片建议，Android 系统长按拖到待发区成功，显示真实缩略图并可打开内部预览；无障碍完整标题保留`.jpg`。移出本次待发引用后恢复空队列和贴边把手，未向真实设备发送。此次样本本身已有图片后缀，不冒充无后缀数字媒体的实机样本。
 
 ## 留给实机验收
 
 - Windows 触屏拖动的实际流畅度与向桌面/其他应用投放。按用户要求，本轮不进行 Windows 界面自动操作。
-- Android 暂存媒体建议拖入待发区、发送后的文件名和图片预览。新版已安装启动，实际手指拖放尚待验收；手机已交还 Chrona 会话串行使用，本轮不并发触控。
+- Android 无后缀数字媒体的真实来源样本、发送后的目标文件名与预览，以及新拍媒体只建议一次。已有后缀图片建议的系统长按拖入与本地预览已通过；手机已交还 Chrona 会话串行使用，本轮不并发触控。
 
 Windows 系统接口文档：[ConvertPrimaryPointerToMouseDrag](https://learn.microsoft.com/en-us/windows/win32/winmsg/winuser/nf-winuser-convertprimarypointertomousedrag)。本机 Windows 11 的接口导出已只读确认。
