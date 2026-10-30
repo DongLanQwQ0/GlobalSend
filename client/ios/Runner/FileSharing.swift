@@ -1,18 +1,32 @@
 import Flutter
 import UIKit
 import Intents
+import UniformTypeIdentifiers
 
-final class FileSharing {
+final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionDelegate {
   static let shared = FileSharing()
   private let work = DispatchQueue(label: "dev.globalsend.share-inbox")
   private var channel: FlutterMethodChannel?
   private var recentlyOpened: [String: Date] = [:]
+  private weak var dragView: UIView?
+  private var dropRegions: [String: Any] = [:]
+  private var dragSources: [String: Any] = [:]
+  private lazy var dropInteraction = UIDropInteraction(delegate: self)
+  private lazy var dragInteraction: UIDragInteraction = {
+    let value = UIDragInteraction(delegate: self); value.isEnabled = true; return value
+  }()
   func install(_ messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {
     let bridge = FlutterMethodChannel(name: "dev.globalsend/share", binaryMessenger: messenger)
     channel = bridge
     bridge.setMethodCallHandler { [weak self] call, result in
       guard let self = self else { return }
-      if call.method == "share" {
+      if call.method == "setDropRegions" || call.method == "setDragSources" {
+        let args = call.arguments as? [String: Any] ?? [:]
+        if call.method == "setDropRegions" { self.dropRegions = args }
+        else { self.dragSources = args }
+        self.attachToForegroundScene()
+        result(nil)
+      } else if call.method == "share" {
         let args = call.arguments as? [String: Any] ?? [:]
         self.share(paths: args["paths"] as? [String] ?? [], text: args["text"] as? String, result: result)
       } else if call.method == "recordShareTarget" {
@@ -43,6 +57,117 @@ final class FileSharing {
       } else { result(FlutterMethodNotImplemented) }
     }
     return bridge
+  }
+  func attachToForegroundScene() {
+    guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }),
+          let view = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController?.view else { return }
+    guard dragView !== view else { return }
+    dragView?.removeInteraction(dropInteraction); dragView?.removeInteraction(dragInteraction)
+    dragView = view
+    view.addInteraction(dropInteraction); view.addInteraction(dragInteraction)
+  }
+  private func rect(_ value: [String: Any], in view: UIView, surface: [String: Any]) -> CGRect {
+    let width = (surface["surfaceWidth"] as? NSNumber)?.doubleValue ?? 0
+    let height = (surface["surfaceHeight"] as? NSNumber)?.doubleValue ?? 0
+    guard width > 0, height > 0 else { return .null }
+    let x = (value["left"] as? NSNumber)?.doubleValue ?? 0, y = (value["top"] as? NSNumber)?.doubleValue ?? 0
+    let right = (value["right"] as? NSNumber)?.doubleValue ?? x, bottom = (value["bottom"] as? NSNumber)?.doubleValue ?? y
+    let sx = view.bounds.width / CGFloat(width), sy = view.bounds.height / CGFloat(height)
+    return CGRect(x: CGFloat(x) * sx, y: CGFloat(y) * sy, width: CGFloat(right - x) * sx, height: CGFloat(bottom - y) * sy)
+  }
+  /// nil rejects the location, an empty ID stages, a device ID sends that batch.
+  private func destination(_ session: UIDropSession) -> String? {
+    guard dropRegions["enabled"] as? Bool == true, let view = dragView else { return nil }
+    let point = session.location(in: view)
+    for device in dropRegions["devices"] as? [[String: Any]] ?? [] {
+      if rect(device, in: view, surface: dropRegions).contains(point) { return device["deviceId"] as? String }
+    }
+    return rect(dropRegions, in: view, surface: dropRegions).contains(point) ? "" : nil
+  }
+  func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+    session.items.contains { item in
+      let provider = item.itemProvider
+      return provider.hasItemConformingToTypeIdentifier(UTType.item.identifier) || provider.canLoadObject(ofClass: UIImage.self)
+    }
+  }
+  func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
+    let allowed = destination(session) != nil
+    channel?.invokeMethod("nativeDrag", arguments: ["active": allowed, "local": session.localDragSession != nil,
+      "sessionActive": session.localDragSession != nil, "importing": false])
+    return UIDropProposal(operation: allowed ? .copy : .cancel)
+  }
+  func dropInteraction(_ interaction: UIDropInteraction, sessionDidExit session: UIDropSession) { endHover(session) }
+  func dropInteraction(_ interaction: UIDropInteraction, sessionDidEnd session: UIDropSession) { endHover(session, ended: true) }
+  private func endHover(_ session: UIDropSession, ended: Bool = false) {
+    channel?.invokeMethod("nativeDrag", arguments: ["active": false, "local": session.localDragSession != nil,
+      "sessionActive": session.localDragSession != nil && !ended, "importing": false])
+  }
+  func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+    guard let device = destination(session) else { return }
+    endHover(session)
+    let id = UUID().uuidString, server = dropRegions["serverKey"] as? String ?? ""
+    do {
+      let store = try SharedInboxStore(), folder = try store.folder(id)
+      let group = DispatchGroup(), lock = NSLock()
+      var outcomes: [Int: (String?, String?, Error?, Bool)] = [:]
+      // Start provider loads in performDrop; copy their temporary URLs before
+      // each completion returns. The same loader handles the share extension.
+      for (index, item) in session.items.enumerated() {
+        if let local = item.localObject as? [String: String] {
+          lock.lock(); outcomes[index] = (local["path"], local["text"], nil, false); lock.unlock()
+          continue
+        }
+        group.enter()
+        SharedItemLoader.load(item.itemProvider, store: store, folder: folder) { path, text, error in
+          lock.lock(); outcomes[index] = (path, text, error, true); lock.unlock(); group.leave()
+        }
+      }
+      let count = session.items.count
+      group.notify(queue: work) {
+        var payload = SharedPayload(batchId: id, paths: [], texts: [], temporaryPaths: [])
+        for index in 0..<count {
+          guard let (path, text, error, temporary) = outcomes[index] else { continue }
+          if let path = path { payload.paths.append(path); if temporary { payload.temporaryPaths.append(path) } }
+          if let text = text { payload.texts.append(text) }
+          if let error = error { payload.error = error.localizedDescription }
+        }
+        if !device.isEmpty { payload.target = SharedSendTarget(serverKey: server, deviceId: device) }
+        do {
+          try store.commit(payload)
+          DispatchQueue.main.async { self.channel?.invokeMethod("pendingChanged", arguments: nil) }
+        } catch { DispatchQueue.main.async { self.channel?.invokeMethod("importError", arguments: error.localizedDescription) } }
+      }
+    } catch { channel?.invokeMethod("importError", arguments: error.localizedDescription) }
+  }
+  func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
+    guard let view = dragView else { return [] }
+    let point = session.location(in: view)
+    guard let source = (dragSources["sources"] as? [[String: Any]] ?? []).reversed().first(where: { rect($0, in: view, surface: dragSources).contains(point) }) else { return [] }
+    var items = (source["paths"] as? [String] ?? []).compactMap { path -> UIDragItem? in
+      guard let provider = NSItemProvider(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+      provider.suggestedName = URL(fileURLWithPath: path).lastPathComponent
+      let item = UIDragItem(itemProvider: provider); item.localObject = ["path": path]; return item
+    }
+    items += (source["texts"] as? [String] ?? []).map { text in
+      let item = UIDragItem(itemProvider: NSItemProvider(object: text as NSString)); item.localObject = ["text": text]; return item
+    }
+    let area = rect(source, in: view, surface: dragSources)
+    for item in items {
+      item.previewProvider = { [weak view] in
+        guard let snapshot = view?.resizableSnapshotView(from: area, afterScreenUpdates: false, withCapInsets: .zero) else { return nil }
+        let parameters = UIDragPreviewParameters(); parameters.backgroundColor = .clear
+        parameters.visiblePath = UIBezierPath(roundedRect: CGRect(origin: .zero, size: area.size), cornerRadius: 16)
+        return UIDragPreview(view: snapshot, parameters: parameters)
+      }
+    }
+    return items
+  }
+  func dragInteraction(_ interaction: UIDragInteraction, sessionAllowsMoveOperation session: UIDragSession) -> Bool { false }
+  func dragInteraction(_ interaction: UIDragInteraction, sessionWillBegin session: UIDragSession) {
+    channel?.invokeMethod("nativeDrag", arguments: ["active": false, "local": true, "sessionActive": true, "importing": false])
+  }
+  func dragInteraction(_ interaction: UIDragInteraction, sessionDidEnd session: UIDragSession) {
+    channel?.invokeMethod("nativeDrag", arguments: ["active": false, "local": true, "sessionActive": false, "importing": false])
   }
   private func donate(_ target: SharedSendTarget, completed: @escaping (Error?) -> Void) {
     let name = target.name?.isEmpty == false ? target.name! : "设备"

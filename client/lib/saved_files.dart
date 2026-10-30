@@ -173,6 +173,23 @@ class SavedFile {
   bool expiredAt(DateTime now, int retentionHours) =>
       !now.isBefore(expiresAt(retentionHours));
 
+  SavedFile summarized(int totalSize) => SavedFile(
+    id: id,
+    profileKey: profileKey,
+    deviceId: deviceId,
+    groupId: groupId,
+    transferId: transferId,
+    fileId: fileId,
+    path: path,
+    name: name,
+    size: totalSize,
+    receivedAtMillis: receivedAtMillis,
+    managedLocation: managedLocation,
+    directory: directory,
+    relativePath: relativePath,
+    contentDigest: contentDigest,
+  );
+
   SavedFile renamed(String value) => SavedFile(
     id: id,
     profileKey: profileKey,
@@ -258,6 +275,32 @@ class SavedFile {
     relativePath: value['relativePath'] ?? '',
     contentDigest: value['contentDigest'] ?? '',
   );
+}
+
+/// The library exposes a received tree as one folder, while its index retains
+/// every original path for cleanup, relocation and transfer reuse.
+List<SavedFile> folderLibraryCards(Iterable<SavedFile> files) {
+  final values = files.toList();
+  String key(SavedFile file) =>
+      '${file.profileKey}:${file.transferId}:${file.relativePath.split('/').first}';
+  final totals = <String, int>{
+    for (final file in values)
+      if (file.directory &&
+          file.relativePath.isNotEmpty &&
+          !file.relativePath.contains('/'))
+        key(file): 0,
+  };
+  for (final file in values) {
+    if (totals.containsKey(key(file)))
+      totals[key(file)] = totals[key(file)]! + file.size;
+  }
+  return [
+    for (final file in values)
+      if (!totals.containsKey(key(file)))
+        file
+      else if (file.directory && !file.relativePath.contains('/'))
+        file.summarized(totals[key(file)]!),
+  ];
 }
 
 List<SavedFile> sortSavedFiles(Iterable<SavedFile> files, SavedFilesSort sort) {

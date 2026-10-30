@@ -88,26 +88,36 @@ class DockPlatform {
     Rect? bounds, {
     Size? surface,
     Rect? sendNavigation,
-  }) => channel.invokeMethod('queueDropBounds', {
-    'enabled': bounds != null,
-    if (bounds != null) ...{
-      'left': bounds.left,
-      'top': bounds.top,
-      'right': bounds.right,
-      'bottom': bounds.bottom,
-      'surfaceWidth': surface!.width,
-      'surfaceHeight': surface.height,
-    },
-    if (sendNavigation != null)
-      'sendNavigation': {
-        'left': sendNavigation.left,
-        'top': sendNavigation.top,
-        'right': sendNavigation.right,
-        'bottom': sendNavigation.bottom,
+    List<Map<String, Object>> devices = const [],
+    String serverKey = '',
+  }) {
+    bounds ??= devices.isEmpty ? null : Rect.zero;
+    return channel.invokeMethod('queueDropBounds', {
+      'enabled': bounds != null,
+      if (devices.isNotEmpty || serverKey.isNotEmpty) ...{
+        'devices': devices,
+        'serverKey': serverKey,
+      },
+      if (bounds != null) ...{
+        'left': bounds.left,
+        'top': bounds.top,
+        'right': bounds.right,
+        'bottom': bounds.bottom,
         'surfaceWidth': surface!.width,
         'surfaceHeight': surface.height,
       },
-  });
+      if (sendNavigation != null)
+        'sendNavigation': {
+          'left': sendNavigation.left,
+          'top': sendNavigation.top,
+          'right': sendNavigation.right,
+          'bottom': sendNavigation.bottom,
+          'surfaceWidth': surface!.width,
+          'surfaceHeight': surface.height,
+        },
+    });
+  }
+
   static Future<List<Map<String, dynamic>>> pending() async =>
       (await channel.invokeMethod<List<dynamic>>('pending') ?? [])
           .map((e) => Map<String, dynamic>.from(e))

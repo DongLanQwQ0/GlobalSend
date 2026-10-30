@@ -8,6 +8,13 @@ export interface LocalFileEntry {
   entryKind?:'file'|'directory';relativePath?:string;storagePath?:string;transferId?:string;
 }
 export type LibrarySort='received'|'oldest'|'name'|'size';
+export function folderLibraryEntries(entries:LocalFileEntry[]):LocalFileEntry[]{
+  const key=(entry:LocalFileEntry)=>entry.scope+':'+entry.transferId+':'+entry.relativePath?.split('/')[0];
+  const totals=new Map<string,number>();
+  for(const entry of entries)if(entry.entryKind==='directory' && entry.relativePath && !entry.relativePath.includes('/'))totals.set(key(entry),0);
+  for(const entry of entries)if(totals.has(key(entry)))totals.set(key(entry),totals.get(key(entry))!+entry.size);
+  return entries.flatMap(entry=>!totals.has(key(entry))?[entry]:entry.entryKind==='directory' && !entry.relativePath?.includes('/')?[{...entry,size:totals.get(key(entry))!}]:[]);
+}
 /** The current origin's saved files, independent of center/group credentials. */
 export class LocalFileLibrary {
   private storage=new OpfsStorage();

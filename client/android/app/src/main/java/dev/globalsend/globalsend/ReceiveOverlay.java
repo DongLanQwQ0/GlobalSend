@@ -457,7 +457,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         shelfGroup=countTab(shelfTab,shelfIcon,() -> {shelfVisible=true;render();});
         header.addView(shelfGroup, new LinearLayout.LayoutParams(-1, dp(28)));
         View all = icon(R.drawable.ic_drag_all, "全部拖出");
-        all.setOnLongClickListener(view -> export(view, new ArrayList<>(displayed().values())));
+        all.setOnLongClickListener(view -> export(view, bulkDragItems()));
         header.addView(all, new LinearLayout.LayoutParams(-1, dp(28)));
         scroll = new HorizontalScrollView(context);
         scroll.setHorizontalScrollBarEnabled(false);
@@ -828,6 +828,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (remaining > 0) shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项，" + remaining + " 秒后移除，轻点取消");
         else if (importing > 0) shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项，正在导入");
         shelfGroup.setContentDescription(shelfTab.getContentDescription());
+    }
+
+    List<ReceiveNotifications.Receipt> bulkDragItems() {
+        List<ReceiveNotifications.Receipt> selection = new ArrayList<>();
+        for (ReceiveNotifications.Receipt item : displayed().values())
+            if (!shelfVisible || !shelf.isSuggested(item.id)) selection.add(item);
+        return selection;
     }
 
     private boolean export(View source, List<ReceiveNotifications.Receipt> selection) {

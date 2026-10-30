@@ -73,6 +73,14 @@ try{
  for(const file of files.filter(file=>file.entryKind==='file'))assert.deepEqual(before.tree.find(item=>item.path===file.relativePath)?.bytes,[...payloads[file.name]]);
  assert.equal(before.tree.some(item=>/\.zip$/i.test(item.path)),false);assert.equal(before.metadata.filter(item=>item.data.complete).length,5);
  report.checks.push({name:'actual OPFS tree and bytes',...before});
+ assert.equal(await evaluate('window.__client.displayTransfers(false)[0].files.length'),1);
+ assert.equal(await evaluate('window.__client.receiptBatch.size'),1);
+ assert.equal(await evaluate("document.querySelectorAll('.dock-items .file-card').length"),1);
+ await evaluate("if(window.__client.modal==='receipt')window.__client.closeModal()");await delay(260);
+ await page('Emulation.setDeviceMetricsOverride',{width:950,height:650,deviceScaleFactor:1,mobile:false});
+ await delay(100);
+ const picture=await page('Page.captureScreenshot',{format:'jpeg',quality:82});await writeFile(join(run,'folder-card.jpg'),Buffer.from(picture.data,'base64'));
+ report.checks.push({name:'one folder card and one receipt for a nested tree',screenshot:join(run,'folder-card.jpg')});
  report.workerRuntime=await evaluate('({nativeWorker:window.__client.rtcStore.storage.worker instanceof Worker,scope:window.__client.rtcStore.scope})');
  assert.equal(report.workerRuntime.nativeWorker,true);
  await page('Page.reload',{ignoreCache:true});await poll(()=>evaluate('!!window.__client && !window.__client.loading && window.__client.connected'),Boolean);

@@ -47,10 +47,20 @@ class SystemBridge {
   }
 
   /// The active send queue in physical Flutter client pixels, not screen DIPs.
-  static Future<void> setQueueDropBounds(Rect? bounds, {Size? surface}) async {
+  static Future<void> setQueueDropBounds(
+    Rect? bounds, {
+    Size? surface,
+    List<Map<String, Object>> devices = const [],
+    String serverKey = '',
+  }) async {
     if (!Platform.isWindows) return;
+    bounds ??= devices.isEmpty ? null : Rect.zero;
     await channel.invokeMethod<void>('queueDropBounds', {
       'enabled': bounds != null,
+      if (devices.isNotEmpty || serverKey.isNotEmpty) ...{
+        'devices': devices,
+        'serverKey': serverKey,
+      },
       if (bounds != null) ...{
         'left': bounds.left,
         'top': bounds.top,

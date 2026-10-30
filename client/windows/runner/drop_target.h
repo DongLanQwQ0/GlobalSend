@@ -11,6 +11,8 @@ struct GlobalSendDroppedContent {
   std::vector<std::wstring> paths;
   std::wstring text;
   std::string error;
+  POINTL screen_point{};
+  bool has_screen_point = false;
 };
 
 struct GlobalSendDropCallbacks {

@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/api.dart';
 import 'package:globalsend/controller.dart';
+import 'package:globalsend/content_groups.dart';
+import 'package:globalsend/saved_files.dart';
 import 'package:globalsend/folder_transfer.dart';
 import 'package:globalsend/models.dart';
 import 'package:globalsend/peer.dart';
@@ -147,6 +149,10 @@ void main() {
             isTrue,
           );
           expect(target.savedFiles.where((file) => file.directory).length, 3);
+          expect(mergeContentCards(target.historyDock).single.id, folder.id);
+          expect(mergeContentCards(target.historyDock).single.status, 'received');
+          expect(folderLibraryCards(target.savedFiles).single.path, folder.localPath);
+          expect(target.pendingReceipts.keys, [folder.id]);
           expect(
             await File('${original.path}/sub/a.txt').readAsString(),
             '真实目录正文',

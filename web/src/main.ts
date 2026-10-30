@@ -1,4 +1,5 @@
 import './style.css';
+import { folderCards, folderMembers, folderRoot, isFolderRoot, summarizeFolder } from './folder_cards';
 import { centeredDragImage } from './drag_image';
 import { digestFile } from './files';
 import { emptyGroupData, publicSession, validateGroupKey } from './group';
@@ -181,6 +182,7 @@ class GlobalSend {
   receipt:{id:string;version:string;source:string;title:string;text?:string;fileKey?:string;receivedAt?:string}|null=null;
   pendingReceipt:GlobalSend['receipt']=null;
   receiptBatch=new Map<string,NonNullable<GlobalSend['receipt']>>();
+  private folderReceiptRenderQueued=false;
   receiptFocusId='';
   private receiptVersions=new Map<string,string>();
   private receiptsInitialized=false;
@@ -605,14 +607,15 @@ class GlobalSend {
       this.setMobileView('send');this.render();
     }catch(error){this.toast(error instanceof DOMException && error.name==='NotAllowedError'?'请允许读取剪贴板，或在文本框中粘贴':errorText(error),true);}
   }
-  async sendQueue(targets=this.multiSend?[...this.selectedTargets]:[this.target]){
+  async sendQueue(targets=this.multiSend?[...this.selectedTargets]:[this.target],selection?:{files:File[];texts:{id:string;text:string;target?:string}[]}){
     if(this.receiveDirectoryChanging)return;
-    if(this.pendingOffer){await this.sendFiles(this.pendingOffer.targetDeviceId);return;}
-    if(this.queueSending || this.busy || (!this.picked.length && !this.stagedTexts.length))return;
+    if(this.pendingOffer){if(selection){this.toast('拖入内容已保留，请先处理上次发送。');return;}await this.sendFiles(this.pendingOffer.targetDeviceId);return;}
+    const files=selection?.files ?? this.picked,texts=selection?.texts ?? this.stagedTexts;
+    if(this.queueSending || this.busy || (!files.length && !texts.length))return;
     const recipients=[...new Set(targets)].filter(Boolean);if(!recipients.length)return;
     this.multiSend=false;this.selectedTargets.clear();
     const generation=this.generation;
-    if(!this.sendBatch?.matches(this.picked,this.stagedTexts))this.sendBatch=new SendBatch(this.picked,this.stagedTexts,this.rtcEnabled?this.routePreference:'relay');
+    if(!this.sendBatch?.matches(files,texts))this.sendBatch=new SendBatch(files,texts,this.rtcEnabled?this.routePreference:'relay');
     const batch=this.sendBatch;this.queueSending=true;this.contextMenu=null;
     for(const target of recipients){const progress=batch.target(target);if(progress.state!=='sent')progress.state='queued';}
     this.render();
@@ -698,7 +701,8 @@ class GlobalSend {
     });
     const show=(visible:boolean)=>{this.windowDropVisible=visible;document.querySelector('#window-drop')?.classList.toggle('visible',visible);};
     const feedback=new WindowDropFeedback(show);
-    const queue=(event:Event)=>(event.target as Element).closest?.('[data-queue-drop]');
+    const queue=(event:Event)=>(event.target as Element).closest?.('[data-queue-drop],[data-target]');
+    const dropDevice=(event:DragEvent)=>(event.target as Element).closest<HTMLElement>('[data-target]')?.dataset.target || '';
     const external=(event:DragEvent)=>acceptsWindowDrop(event.dataTransfer);
     document.addEventListener('dragstart',event=>{const field=(event.target as Element).closest<HTMLElement>('[data-drag-shared]');if(field)this.beginContentDrag(event,field);});
     document.addEventListener('dragenter',event=>{if(!this.session)return;if(this.isInternalDrag(event)){if(queue(event))event.preventDefault();return;}if(!external(event))return;event.preventDefault();this.endContentDrag();feedback.enter();},true);
@@ -715,20 +719,24 @@ class GlobalSend {
       feedback.reset();
       if(!this.session)return;
       if(this.isInternalDrag(event)){
-        const payload=this.internalPayload,target=queue(event);this.endContentDrag();
+        const payload=this.internalPayload,target=queue(event),device=dropDevice(event);this.endContentDrag();
         if(!target || !payload)return;event.preventDefault();event.stopPropagation();
         if(this.modal==='receipt')this.closeModal();
-        if(payload.libraryId){const entry=this.fileLibrary.entries.find(entry=>entry.id===payload.libraryId);if(entry)void this.run(()=>this.stageLibraryEntry(entry));}
-        else if(payload.receivedKey)void this.run(()=>this.stageReceivedFile(payload.receivedKey!));
-        else if(payload.files)this.addFiles(payload.files);
-        else if(payload.file)this.addFiles([payload.file]);
-        if(payload.text?.trim()){this.stagedTexts.push({id:id(),text:payload.text});this.setMobileView('send');this.render();}
+        void this.run(async()=>{
+          const beforeFiles=this.picked.length,beforeTexts=this.stagedTexts.length;
+          if(payload.libraryId){const entry=this.fileLibrary.entries.find(entry=>entry.id===payload.libraryId);if(entry)await this.stageLibraryEntry(entry);}
+          else if(payload.receivedKey)await this.stageReceivedFile(payload.receivedKey);
+          else if(payload.files)this.addFiles(payload.files);
+          else if(payload.file)this.addFiles([payload.file]);
+          if(payload.text?.trim()){this.stagedTexts.push({id:id(),text:payload.text});this.setMobileView('send');this.render();}
+          if(device)await this.sendQueue([device],{files:this.picked.slice(beforeFiles),texts:this.stagedTexts.slice(beforeTexts)});
+        });
         return;
       }
       if(!external(event))return;
-      event.preventDefault();this.endContentDrag();const transfer=event.dataTransfer!,generation=this.generation;
+      event.preventDefault();this.endContentDrag();const transfer=event.dataTransfer!,generation=this.generation,device=dropDevice(event);
       const files=droppedFiles(transfer),text=droppedText(transfer);
-      void this.run(async()=>{const [content,value]=await Promise.all([files,text]);if(generation!==this.generation)return;if(content.files.length)this.addFiles(content.files);if(content.folders.length)await this.addFolders(content.folders);if(!content.files.length && !content.folders.length && value.trim()){this.stagedTexts.push({id:id(),text:value});this.setMobileView('send');this.render();}});
+      void this.run(async()=>{const [content,value]=await Promise.all([files,text]);if(generation!==this.generation)return;const beforeFiles=this.picked.length,beforeTexts=this.stagedTexts.length;if(content.files.length)this.addFiles(content.files);if(content.folders.length)await this.addFolders(content.folders);if(!content.files.length && !content.folders.length && value.trim()){this.stagedTexts.push({id:id(),text:value});this.setMobileView('send');this.render();}if(device)await this.sendQueue([device],{files:this.picked.slice(beforeFiles),texts:this.stagedTexts.slice(beforeTexts)});});
     },true);
   }
   bulkDragFiles(outgoing:boolean){
@@ -904,7 +912,7 @@ class GlobalSend {
     if(view?.scope.startsWith('local:')){
       if(!this.canEditText(view) || view.composing || !view.draft.trim() || view.draft===view.savedText)return;
       const record=this.localHistory.event(eventId);if(!record)return;
-      record.event.payload={...record.event.payload,text:view.draft,editedAt:new Date().toISOString()};view.event=record.event;view.savedText=view.draft;view.error='';this.localHistory.save();this.render();return;
+      record.event.payload={...record.event.payload,text:view.draft,editedAt:new Date().toISOString()};view.event=record.event;view.savedText=view.draft;view.error='';this.localHistory.save();this.closeModal();return;
     }
     if(!view || !this.session || view.scope!==this.dockKey || !this.canEditText(view) || view.busy || view.composing || !view.draft.trim() || view.draft===view.savedText)return;
     if(localTextDeadline(view.event)<=Date.now()){view.error='文字已过期，无法修改';this.updateTextViewerChrome();return;}
@@ -918,6 +926,7 @@ class GlobalSend {
       view.savedText=original?.payload.text ?? text;
       if(view.draft===text)view.draft=view.savedText;
       view.saved=true;
+      if(this.readingEventId===eventId && view.draft===view.savedText)this.closeModal();
     } catch(error) {
       if(generation!==this.generation || scope!==this.dockKey || this.textViews.get(eventId)!==view)return;
       view.error=error instanceof ApiError && error.code==='NOT_FOUND'?'原消息已不存在，无法保存':
@@ -976,7 +985,7 @@ class GlobalSend {
   }
   displayTransfers(outgoing:boolean){
     const seen=new Set<string>();
-    return this.allDisplayTransfers(outgoing).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(transfer=>({...transfer,files:this.visibleFiles(transfer).filter(file=>{
+    return this.allDisplayTransfers(outgoing).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(transfer=>({...transfer,files:folderCards(this.visibleFiles(transfer),file=>this.uploadProgress.get(fileKey(transfer.transferId,file.fileId)) ?? file.offset).filter(file=>{
       const key=file.entryKind!=='directory' && file.sha256 && (outgoing?['ready','received'].includes(file.status):!!this.localFile(fileKey(transfer.transferId,file.fileId)))?'sha:'+file.sha256+':'+file.size:fileKey(transfer.transferId,file.fileId);
       if(seen.has(key))return false;seen.add(key);return true;
     })}));
@@ -1013,9 +1022,13 @@ class GlobalSend {
   }
   noticeFile(transfer:Transfer,file:TransferFile){
     if(transfer.targetDeviceId!==this.session?.device.deviceId)return;
+    const root=folderRoot(file,transfer.files);
+    if(isFolderRoot(root))file=summarizeFolder(root,folderMembers(root,transfer.files));
     const key=fileKey(transfer.transferId,file.fileId),current=this.receiptBatch.get(key);
     if(['offered','accepted','uploading','ready','received'].includes(file.status))void this.notifications.notify({id:key,revision:'file',kind:'file',phase:file.status==='ready'?'ready':file.status==='received'?'received':'incoming',title:this.deviceLabel(transfer.sourceDeviceId),body:file.name+' · '+(file.status==='received'?'已接收文件':file.status==='ready'?'文件可下载':file.status==='offered'?'收到文件请求，待接收':'正在连接文件传输'),itemId:key});
-    if(current){this.receiptBatch.set(key,{...current,title:file.name});if(this.receipt?.id===key)this.receipt=this.receiptBatch.get(key)!;this.render();return;}
+    if(current){this.receiptBatch.set(key,{...current,title:file.name});if(this.receipt?.id===key)this.receipt=this.receiptBatch.get(key)!;
+      if(isFolderRoot(root)){if(!this.folderReceiptRenderQueued){this.folderReceiptRenderQueued=true;void Promise.resolve().then(()=>{this.folderReceiptRenderQueued=false;this.render();});}}
+      else this.render();return;}
     if(!['offered','accepted','uploading','ready','received'].includes(file.status))return;
     this.showReceipt({id:key,version:'file',source:transfer.sourceDeviceId,title:file.name,fileKey:key});
   }
@@ -1138,6 +1151,11 @@ class GlobalSend {
   hideFile(transferId: string,fileId: string,quiet=false,group=true) {
     const transfer=this.localTransfer(transferId);const file=transfer?.files.find(item=>item.fileId===fileId);
     if(!transfer || !file)return false;
+    if(isFolderRoot(file)){
+      const members=folderMembers(file,transfer.files);
+      if(members.some(member=>this.transfers.includes(transfer) && ['offered','accepted','uploading'].includes(member.status) && Date.parse(transfer.expiresAt)>Date.now())){if(!quiet)this.toast('请先取消传输。');return false;}
+      for(const member of members)if(member.fileId!==fileId)this.hideFile(transferId,member.fileId,true,false);
+    }
     if(this.transfers.includes(transfer) && ['offered','accepted','uploading'].includes(file.status) && Date.parse(transfer.expiresAt)>Date.now()){if(!quiet)this.toast('请先取消传输。');return false;}
     if(group && file.sha256 && file.entryKind!=='directory'){
       const outgoing=transfer.sourceDeviceId===(this.localHistory.transfer(transferId)?.scope.deviceId || this.session?.device.deviceId);
@@ -1667,7 +1685,14 @@ class GlobalSend {
     this.uploads.get(key)?.abort();this.rtcReceives.get(key)?.abort();this.fileRequests.get(key)?.abort();
     return this.rtcChannels.get(key)?.close().catch(()=>{}) || Promise.resolve();
   }
-  pauseFile(key:string){if(this.canceled.has(key))return;this.paused.add(key);this.uploadErrors.delete(key);this.stopFile(key);this.render();}
+  pauseFile(key:string){
+    const [transferId,fileId]=key.split(':'),transfer=this.localTransfer(transferId),root=transfer?.files.find(file=>file.fileId===fileId);
+    for(const file of root && transfer?folderMembers(root,transfer.files):[]){
+      const memberKey=fileKey(transferId,file.fileId);if(this.canceled.has(memberKey) || file.status==='received')continue;
+      this.paused.add(memberKey);this.uploadErrors.delete(memberKey);void this.stopFile(memberKey);
+    }
+    this.render();
+  }
   async reportReceiveError(transfer:Transfer,file:TransferFile,error:unknown,controller:AbortController,generation:number){
     const key=fileKey(transfer.transferId,file.fileId);
     if(!this.fileActive(key,controller,generation))return;
@@ -1715,7 +1740,7 @@ class GlobalSend {
       if (generation === this.generation) { if(this.uploads.get(key)===controller)this.uploads.delete(key); this.uploadProgress.delete(key); this.render(); this.startReadyUploads();void this.selectIncomingRelays(); }
     }
   }
-  paintProgress(key: string,loaded: number,total: number) {
+  paintProgress(key: string,loaded: number,total: number,aggregate=true) {
     const now=Date.now(),previous=this.speedSamples.get(key);
     if(!previous || loaded<previous.bytes)this.speedSamples.set(key,{at:now,bytes:loaded,speed:0});
     else if(now-previous.at>=250)this.speedSamples.set(key,{at:now,bytes:loaded,speed:(loaded-previous.bytes)*1000/(now-previous.at)});
@@ -1726,8 +1751,20 @@ class GlobalSend {
     for(const node of document.querySelectorAll<HTMLElement>('[data-transfer-progress]'))if(node.dataset.transferProgress===key){node.style.width=`${total?Math.min(100,loaded/total*100):0}%`;node.parentElement?.setAttribute('aria-valuenow',String(loaded));}
     for(const node of document.querySelectorAll<HTMLElement>('[data-transfer-bytes]'))if(node.dataset.transferBytes===key)node.textContent=`${formatBytes(loaded)} / ${formatBytes(total)}`;
     for(const node of document.querySelectorAll<HTMLElement>('[data-transfer-speed]'))if(node.dataset.transferSpeed===key)node.textContent=this.transferSpeed(key);
+    if(aggregate){
+      const [transferId,fileId]=key.split(':'),transfer=this.localTransfer(transferId),file=transfer?.files.find(item=>item.fileId===fileId);
+      if(file && transfer){const root=folderRoot(file,transfer.files);if(root.fileId!==fileId){
+        const folder=summarizeFolder(root,folderMembers(root,transfer.files),member=>member.fileId===fileId?loaded:this.uploadProgress.get(fileKey(transferId,member.fileId)) ?? member.offset);
+        this.paintProgress(fileKey(transferId,root.fileId),folder.offset,folder.size,false);
+      }}
+    }
   }
   async retryFile(transferId: string,fileId: string) {
+    const transfer=this.localTransfer(transferId),root=transfer?.files.find(file=>file.fileId===fileId);
+    if(root && transfer && isFolderRoot(root)){
+      for(const member of folderMembers(root,transfer.files))if(member.fileId!==fileId && member.status!=='received' && (this.paused.has(fileKey(transferId,member.fileId)) || member.status==='failed' || this.uploadErrors.has(fileKey(transferId,member.fileId))))await this.retryFile(transferId,member.fileId);
+      if(root.status==='received')return;
+    }
     const generation=this.generation;
     const key = fileKey(transferId,fileId);
     let file = this.transfers.find(item => item.transferId === transferId)?.files.find(item => item.fileId === fileId);
@@ -2183,6 +2220,11 @@ class GlobalSend {
     if(generation===this.generation)this.render();
   }
   async cancelFile(transferId: string,fileId: string) {
+    const transfer=this.localTransfer(transferId),root=transfer?.files.find(file=>file.fileId===fileId);
+    if(root && transfer && isFolderRoot(root)){
+      for(const member of folderMembers(root,transfer.files))if(member.fileId!==fileId && !['received','canceled','rejected','expired'].includes(member.status))await this.cancelFile(transferId,member.fileId);
+      if(root.status==='received')return;
+    }
     const generation=this.generation;
     const key = fileKey(transferId,fileId);
     if(this.cancelRequests.has(key))return;
@@ -2350,7 +2392,7 @@ class GlobalSend {
     return `<article class="dock-item"><div class="item-meta"><label class="dock-checkbox" for="select-${e(event.eventId)}"><input id="select-${e(event.eventId)}" type="checkbox" aria-label="选择 ${e(this.deviceLabel(event.sourceDeviceId))} ${time(event.createdAt)} 的文字" data-select="${e(event.eventId)}" ${this.selected.has(event.eventId)?'checked':''}></label><span>${e(this.deviceLabel(event.sourceDeviceId))}</span>${event.payload.clipboard?'<span class="clipboard-source">剪贴板</span>':''}${duplicate?'<span class="duplicate-label">重复</span>':''}${event.payload.editedAt?'<span class="edited-label">已修改</span>':''}<time class="time" title="${e(event.createdAt)}">${time(event.createdAt)}</time></div><button id="read-${e(event.eventId)}" type="button" data-read="${e(event.eventId)}" aria-label="查看收到的文字" class="text-content text-open ${long?'collapsed':''}">${e(text)}</button><div class="item-actions"><button id="copy-${e(event.eventId)}" class="copy-button" aria-label="复制 ${e(this.deviceLabel(event.sourceDeviceId))} 的文字" data-copy="${e(event.eventId)}">${icon('copy')} 复制</button><button class="quiet" data-hide-text="${e(event.eventId)}" aria-label="从接收坞移除此段文字">移除</button>${this.expiryHtml(localTextDeadline(event))}</div></article>`;
   }
   incomingTransferHtml(transfer: Transfer) {
-    const files=this.visibleFiles(transfer);
+    const files=folderCards(this.visibleFiles(transfer));
     const offered=Date.parse(transfer.expiresAt)>Date.now()?files.filter(file=>file.status==='offered'):[];
     const native=this.requiresNative(transfer),accepting=this.accepting.has(transfer.transferId);
     const large=offered.some(file=>file.size>this.autoAcceptMaxBytes);

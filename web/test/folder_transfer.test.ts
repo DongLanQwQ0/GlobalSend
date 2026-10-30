@@ -90,6 +90,12 @@ test('real Web controller + production OPFS worker + real center transfer a 70-f
     assert.equal(filesUnder(join(received,'资料')).length,71);assert.equal(readdirSync(received).length,1,'same transfer reused its reserved root across worker restart');
     assert.equal(filesUnder(join(receiverRoot.path,'globalsend-received-v1',scope)).filter(path=>path.endsWith('.data')).length,0,'folder payloads are real files, not encoded .data blobs');
     const completed=(await call(base,receiverSession,`/transfers/${transfer.transferId}`)).transfer;assert.ok(completed.files.every((file:any)=>file.status==='received'));
+    restarted.transfers=[completed];
+    const displayed=restarted.displayTransfers(false)[0];
+    assert.equal(displayed.files.length,1,'74 manifest records render as one folder card');
+    assert.equal(displayed.files[0].relativePath,'资料');assert.equal(displayed.files[0].status,'received');
+    for(const file of completed.files)restarted.noticeFile(completed,file);
+    assert.equal(restarted.receiptBatch.size,1,'folder completion produces one received-content entry');
     await restarted.openLibrary();const rootEntry=restarted.fileLibrary.entries.find((entry:any)=>entry.relativePath==='资料');assert.ok(rootEntry);
     const expanded=await restarted.fileLibrary.service.expand([rootEntry.id]);assert.equal(expanded.length,74);assert.equal(expanded.filter((item:any)=>item.entry.entryKind==='directory').length,3);
     await assert.rejects(restarted.download(transfer.transferId,transfer.files.find((file:any)=>file.relativePath==='资料').fileId),/不能导出目录/);

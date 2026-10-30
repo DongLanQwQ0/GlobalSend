@@ -18,6 +18,8 @@ class BulkFileEntry extends DockEntry {
         localPath: paths.first,
       );
   final List<String> paths;
+  @override
+  List<String> get dragPaths => paths;
 }
 
 /// A drag affordance, not an action that opens another menu.

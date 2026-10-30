@@ -172,6 +172,12 @@ void main() {
       await tester.pumpWidget(GlobalSendApp(controller: controller));
       await tester.pumpAndSettle();
       expect(geometry.last['enabled'], true);
+      final device = (geometry.last['devices'] as List).single as Map;
+      final tile = tester.getRect(find.byKey(const ValueKey('target-phone')));
+      expect(device['deviceId'], 'phone');
+      expect(device['left'], tile.left); expect(device['top'], tile.top);
+      expect(device['right'], tile.right); expect(device['bottom'], tile.bottom);
+      expect(geometry.last['serverKey'], controller.profile!.key);
       await tester.tap(find.byKey(const ValueKey('add-text')));
       await tester.pumpAndSettle();
       expect(geometry.last, {'enabled': false});

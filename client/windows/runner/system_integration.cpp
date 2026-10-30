@@ -70,6 +70,9 @@ LRESULT CALLBACK PasteSubclass(HWND window, UINT message, WPARAM key, LPARAM dat
   return DefSubclassProc(window, message, key, data);
 }
 GlobalSendQueueDropRegion queue_drop;
+std::vector<std::pair<std::string, RECT>> device_drop_regions;
+std::string drop_server_key;
+std::string DeviceDropAt(POINTL screen);
 uint64_t drop_sequence = 0;
 uint64_t system_generation = 0;
 constexpr UINT kDestroyReceiveDock = WM_APP + 119;
@@ -122,6 +125,11 @@ void PublishDrop(GlobalSendDroppedContent content) {
   const std::string id = "windows-" + std::to_string(GetCurrentProcessId()) + "-" +
       std::to_string(GetTickCount64()) + "-" + std::to_string(++drop_sequence);
   Map event{{Value("dropId"), Value(id)}, {Value("paths"), Value(paths)}, {Value("texts"), Value(texts)}};
+  const auto target = content.has_screen_point ? DeviceDropAt(content.screen_point) : std::string();
+  if (!target.empty()) {
+    event.emplace(Value("targetDeviceId"), Value(target));
+    event.emplace(Value("serverKey"), Value(drop_server_key));
+  }
   if (!content.error.empty()) event.emplace(Value("error"), Value(content.error));
   channel->InvokeMethod("nativeDrop", std::make_unique<Value>(event));
 }
@@ -149,12 +157,20 @@ double Number(const Map& map, const char* key) {
   if (const auto* value = std::get_if<double>(&found->second)) return *value;
   return static_cast<double>(Integer(map, key));
 }
+std::string DeviceDropAt(POINTL screen) {
+  if (!import_view || !queue_drop.enabled || !IsWindowVisible(import_view)) return {};
+  POINT point{screen.x, screen.y}; RECT client{};
+  if (!ScreenToClient(import_view, &point) || !GetClientRect(import_view, &client) ||
+      client.right != queue_drop.surface.cx || client.bottom != queue_drop.surface.cy) return {};
+  for (const auto& region : device_drop_regions) if (PtInRect(&region.second, point)) return region.first;
+  return {};
+}
 bool LocalDropAt(POINTL screen) {
   if (!import_view || !IsWindowVisible(import_view)) return false;
   POINT point{screen.x, screen.y};
   RECT client{};
   if (!ScreenToClient(import_view, &point) || !GetClientRect(import_view, &client)) return false;
-  return queue_drop.Contains(point, SIZE{client.right, client.bottom});
+  return queue_drop.Contains(point, SIZE{client.right, client.bottom}) || !DeviceDropAt(screen).empty();
 }
 bool ClipboardBytes(UINT format, const void* bytes, size_t count) {
   HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, count);
@@ -502,6 +518,16 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
           integer("width", 950), integer("height", 650), Bool(*arguments, "maximized")});
       result->Success();
     } else if (call.method_name() == "queueDropBounds") {
+      device_drop_regions.clear();
+      drop_server_key = String(*arguments, "serverKey");
+      const auto devices = arguments->find(Value("devices"));
+      if (devices != arguments->end()) if (const auto* values = std::get_if<flutter::EncodableList>(&devices->second)) {
+        for (const auto& value : *values) if (const auto* region = std::get_if<Map>(&value)) {
+          device_drop_regions.emplace_back(String(*region, "deviceId"), RECT{
+            static_cast<LONG>(std::floor(Number(*region, "left"))), static_cast<LONG>(std::floor(Number(*region, "top"))),
+            static_cast<LONG>(std::ceil(Number(*region, "right"))), static_cast<LONG>(std::ceil(Number(*region, "bottom")))});
+        }
+      }
       queue_drop.enabled = Bool(*arguments, "enabled");
       if (queue_drop.enabled) {
         queue_drop.bounds = RECT{

@@ -170,6 +170,9 @@ class DockEntry {
   String sourceLabel;
   String relativePath, entryKind;
   bool get isDirectory => entryKind == 'directory';
+  List<String> get dragPaths => kind == 'file' && localPath.isNotEmpty
+      ? [sourceReference.isNotEmpty ? sourceReference : localPath]
+      : const [];
   double transferBytesPerSecond;
   int? _transferSampleMicros;
   int _transferSampleBytes = 0;

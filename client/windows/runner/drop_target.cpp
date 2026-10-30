@@ -77,6 +77,8 @@ class DropTarget final : public IDropTarget {
     if (!copy) { if (image_) image_->Drop(data, &screen, *effect); return S_OK; }
     GlobalSendDroppedContent content;
     const bool imported = ReadGlobalSendDrop(data, &content);
+    content.screen_point = point;
+    content.has_screen_point = true;
     if (imported || !content.error.empty()) callbacks_.drop(std::move(content));
     if (imported) *effect = DROPEFFECT_COPY;
     if (image_) image_->Drop(data, &screen, *effect);

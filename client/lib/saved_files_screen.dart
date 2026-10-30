@@ -317,7 +317,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
   @override
   Widget build(BuildContext context) {
     final issue = error.isNotEmpty ? error : c.savedFilesIssue;
-    final files = sortSavedFiles(c.savedFiles, sort);
+    final files = sortSavedFiles(folderLibraryCards(c.savedFiles), sort);
     final scheme = Theme.of(context).colorScheme;
     final scaffold = Scaffold(
       backgroundColor: Ui.colors(context).surface,

@@ -4,6 +4,7 @@ import { escapeHtml as e, formatBytes, characterCount, statusLabel, compactTime 
 import { icon, platformIcon } from './icons';
 import { filePreviewKind } from './library';
 import { linkifyHtml } from './web_links';
+import { folderMembers, isFolderRoot, summarizeFolder } from './folder_cards';
 
 const key=(transferId:string,fileId:string)=>transferId+':'+fileId;
 const cardTime=(c:GlobalSend,id:string,fallback:string,outgoing:boolean)=>'<time title="'+(outgoing?'发送时间':c.receivedAt[id]?'接收时间':'邀请时间')+' · '+e(outgoing?fallback:c.receiptTime(id,fallback))+'">'+compactTime(outgoing?fallback:c.receiptTime(id,fallback))+'</time>';
@@ -51,8 +52,10 @@ export function textCard(c:GlobalSend,event:WireEvent,outgoing=false){
  return '<article class="content-card text-card preview-card '+(selected(c,outgoing).has(event.eventId)?'receive-selected':'')+'" '+receiveAttrs(c,event.eventId,outgoing,'文本：'+text.slice(0,80))+' '+(!isSelecting?'tabindex="0" data-open-text="'+e(event.eventId)+'"':'')+' draggable="true" data-drag-text="'+e(event.eventId)+'">'+receiveCheck(c,event.eventId,outgoing)+(isSelecting?'':menu())+'<div id="read-'+e(event.eventId)+'" class="card-text selectable-text" data-read="'+e(event.eventId)+'">'+'<span class="card-text-lines">'+(isSelecting?e(text.slice(0,500)):linkifyHtml(text.slice(0,500)))+'</span></div>'+(isSelecting?'':'<button class="quiet card-copy preview-copy" data-copy="'+e(event.eventId)+'">'+icon('copy')+'复制</button>')+'</article>';
 }
 export function fileCard(c:GlobalSend,transfer:Transfer,file:TransferFile,outgoing:boolean,receiptId?:string){
+ const raw=c.localTransfer(transfer.transferId) || transfer,members=folderMembers(file,raw.files),folder=isFolderRoot(file);
+ if(folder)file=summarizeFolder(file,members,item=>c.uploadProgress.get(key(transfer.transferId,item.fileId)) ?? item.offset);
  const archived=!c.transfers.some(item=>item.transferId===transfer.transferId),fileKey=key(transfer.transferId,file.fileId),expired=file.status==='expired' || Date.parse(transfer.expiresAt)<=Date.now(),active=!archived && !expired && ['accepted','uploading'].includes(file.status),offered=!archived && !expired && file.status==='offered',local=!!c.localFile(fileKey),error=c.uploadErrors.get(fileKey),loaded=c.uploadProgress.get(fileKey) ?? (!outgoing && file.transport==='relay' && file.status!=='received' && !local?0:file.offset),isSelecting=receiptId?false:selecting(c,outgoing),image=filePreviewKind({name:file.name,mimeType:file.mimeType})==='image';
- const canceled=c.canceled.has(fileKey) || file.status==='canceled',paused=c.paused.has(fileKey),receivingRelay=!outgoing && !!file.relativePath && file.status==='ready',controllable=active || receivingRelay;
+ const canceled=c.canceled.has(fileKey) || file.status==='canceled',paused=members.some(item=>c.paused.has(key(transfer.transferId,item.fileId))),receivingRelay=!outgoing && !!file.relativePath && file.status==='ready',controllable=active || receivingRelay;
  const label=canceled?'已取消':paused?'已暂停':error || file.status==='failed'?'传输失败':expired && !local?'已过期':c.rtcReceives.has(fileKey)?loaded>0?'接收中':'连接中':offered?'等待接收':active?outgoing?'发送中':'等待连接':!outgoing && file.status==='ready' && !local?'可下载':'';
  const actions=isSelecting?'':canceled?(error && !c.cancelRequests.has(fileKey)?'<button class="quiet" data-cancel="'+e(fileKey)+'">重试取消</button>':''):
   (offered && !outgoing?'<button class="quiet" data-accept="'+e(transfer.transferId)+'" '+(c.accepting.has(transfer.transferId)?'disabled':'')+'>接收</button>':'')+

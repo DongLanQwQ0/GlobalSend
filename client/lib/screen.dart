@@ -140,6 +140,7 @@ class _SendScreenState extends State<SendScreen>
   bool _receiptPresentedExternally = false;
   bool _shelfPermissionPending = false;
   final _nativeQueueKey = GlobalKey();
+  final _nativeDeviceKeys = <String, GlobalKey>{};
   final _savedFilesKey = GlobalKey<SavedFilesScreenState>();
   bool? _allFilesAccess;
   final _nativeSendNavigationKey = GlobalKey();
@@ -280,7 +281,9 @@ class _SendScreenState extends State<SendScreen>
       final id = ui.detailsId;
       if (!mounted || id == null) return;
       ui.detailsId = null;
-      final entry = c.historyDock.where((entry) => entry.id == id).firstOrNull;
+      final entry = collapseFolderCards(c.historyDock)
+          .where((entry) => entry.id == id)
+          .firstOrNull;
       if (entry != null) unawaited(fileAction('details', entry));
     });
   }
@@ -1188,9 +1191,12 @@ class _SendScreenState extends State<SendScreen>
             : null,
       ),
     );
-    if (!Platform.isAndroid && !Platform.isWindows) return window;
+    if (!Platform.isAndroid && !Platform.isWindows && !Platform.isIOS)
+      return window;
     return NativeQueueDropHost(
       target: _nativeQueueKey,
+      deviceTargets: _nativeDeviceKeys,
+      serverKey: c.profile?.key ?? '',
       enabled:
           loggedIn &&
           !working &&
@@ -2641,163 +2647,169 @@ class _SendScreenState extends State<SendScreen>
                             !sent;
                         final pending = state == 'queued' || state == 'sending';
                         final fullName = device['name'] as String;
-                        return SizedBox(
-                          width: extent,
-                          height: extent,
-                          child: Tooltip(
-                            message: fullName,
-                            child: Semantics(
-                              button: true,
-                              label: fullName,
-                              selected: checked,
-                              value: sent
-                                  ? '已发送'
-                                  : offline
-                                  ? '暂离线'
-                                  : '在线',
-                              child: Material(
-                                color: checked
-                                    ? Ui.colors(context).softGreen
-                                    : Ui.colors(context).input,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: Ui.fieldRadius,
-                                  side: BorderSide(
-                                    color: checked
-                                        ? Ui.colors(context).green
-                                        : Ui.colors(context).border,
-                                    width: checked ? 1.5 : 1,
+                        return deviceDropSurface(
+                          id,
+                          SizedBox(
+                            width: extent,
+                            height: extent,
+                            child: Tooltip(
+                              message: fullName,
+                              child: Semantics(
+                                button: true,
+                                label: fullName,
+                                selected: checked,
+                                value: sent
+                                    ? '已发送'
+                                    : offline
+                                    ? '暂离线'
+                                    : '在线',
+                                child: Material(
+                                  color: checked
+                                      ? Ui.colors(context).softGreen
+                                      : Ui.colors(context).input,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: Ui.fieldRadius,
+                                    side: BorderSide(
+                                      color: checked
+                                          ? Ui.colors(context).green
+                                          : Ui.colors(context).border,
+                                      width: checked ? 1.5 : 1,
+                                    ),
                                   ),
-                                ),
-                                child: InkWell(
-                                  key: ValueKey('target-$id'),
-                                  borderRadius: Ui.fieldRadius,
-                                  onLongPress: () =>
-                                      Navigator.of(context).push<void>(
-                                        MaterialPageRoute(
-                                          builder: (_) => ReachabilityScreen(
-                                            monitor: c.reachability,
-                                            deviceId: id,
-                                            deviceName: fullName,
-                                            onRefresh: () =>
-                                                c.refreshConnectionChecks(
-                                                  deviceId: id,
-                                                ),
-                                          ),
-                                        ),
-                                      ),
-                                  onTap:
-                                      pending ||
-                                          (!ui.multiSend &&
-                                              (sendingTargets || count == 0))
-                                      ? null
-                                      : () {
-                                          if (ui.multiSend) {
-                                            setState(() {
-                                              ui.sendTargets.contains(id)
-                                                  ? ui.sendTargets.remove(id)
-                                                  : ui.sendTargets.add(id);
-                                            });
-                                          } else {
-                                            sendOne(id);
-                                          }
-                                        },
-                                  child: Stack(
-                                    children: [
-                                      Positioned.fill(
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 8,
-                                          ),
-                                          child: Column(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              SizedBox(
-                                                height: 24,
-                                                child: sent
-                                                    ? Text(
-                                                        '已发送',
-                                                        style: TextStyle(
-                                                          fontSize: 13,
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                          color: Ui.colors(
-                                                            context,
-                                                          ).green,
-                                                        ),
-                                                      )
-                                                    : offline
-                                                    ? Text(
-                                                        '暂离线',
-                                                        style: TextStyle(
-                                                          fontSize: 13,
-                                                          color: Ui.colors(
-                                                            context,
-                                                          ).muted,
-                                                        ),
-                                                      )
-                                                    : AppIcon(
-                                                        deviceIcon(device),
-                                                        size: 24,
-                                                        color: checked
-                                                            ? Ui.colors(context)
-                                                                  .green
-                                                            : Ui.colors(context)
-                                                                  .muted,
-                                                      ),
-                                              ),
-                                              const SizedBox(height: 6),
-                                              Text(
-                                                fullName,
-                                                textAlign: TextAlign.center,
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  height: 1.35,
-                                                  fontWeight: checked
-                                                      ? FontWeight.w600
-                                                      : FontWeight.w400,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                      if (pending)
-                                        const Positioned(
-                                          top: 8,
-                                          right: 8,
-                                          child: SizedBox(
-                                            width: 14,
-                                            height: 14,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 1.5,
+                                  child: InkWell(
+                                    key: ValueKey('target-$id'),
+                                    borderRadius: Ui.fieldRadius,
+                                    onLongPress: () =>
+                                        Navigator.of(context).push<void>(
+                                          MaterialPageRoute(
+                                            builder: (_) => ReachabilityScreen(
+                                              monitor: c.reachability,
+                                              deviceId: id,
+                                              deviceName: fullName,
+                                              onRefresh: () =>
+                                                  c.refreshConnectionChecks(
+                                                    deviceId: id,
+                                                  ),
                                             ),
                                           ),
-                                        )
-                                      else if (checked)
-                                        Positioned(
-                                          top: 8,
-                                          right: 8,
-                                          child: AppIcon(
-                                            Icons.check_circle,
-                                            size: 16,
-                                            color: Ui.colors(context).green,
-                                          ),
-                                        )
-                                      else if (state == 'failed')
-                                        const Positioned(
-                                          top: 8,
-                                          right: 8,
-                                          child: AppIcon(
-                                            Icons.error_outline,
-                                            size: 16,
-                                            color: Color(0xffb3553f),
+                                        ),
+                                    onTap:
+                                        pending ||
+                                            (!ui.multiSend &&
+                                                (sendingTargets || count == 0))
+                                        ? null
+                                        : () {
+                                            if (ui.multiSend) {
+                                              setState(() {
+                                                ui.sendTargets.contains(id)
+                                                    ? ui.sendTargets.remove(id)
+                                                    : ui.sendTargets.add(id);
+                                              });
+                                            } else {
+                                              sendOne(id);
+                                            }
+                                          },
+                                    child: Stack(
+                                      children: [
+                                        Positioned.fill(
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 8,
+                                            ),
+                                            child: Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                SizedBox(
+                                                  height: 24,
+                                                  child: sent
+                                                      ? Text(
+                                                          '已发送',
+                                                          style: TextStyle(
+                                                            fontSize: 13,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            color: Ui.colors(
+                                                              context,
+                                                            ).green,
+                                                          ),
+                                                        )
+                                                      : offline
+                                                      ? Text(
+                                                          '暂离线',
+                                                          style: TextStyle(
+                                                            fontSize: 13,
+                                                            color: Ui.colors(
+                                                              context,
+                                                            ).muted,
+                                                          ),
+                                                        )
+                                                      : AppIcon(
+                                                          deviceIcon(device),
+                                                          size: 24,
+                                                          color: checked
+                                                              ? Ui.colors(
+                                                                  context,
+                                                                ).green
+                                                              : Ui.colors(
+                                                                  context,
+                                                                ).muted,
+                                                        ),
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Text(
+                                                  fullName,
+                                                  textAlign: TextAlign.center,
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    height: 1.35,
+                                                    fontWeight: checked
+                                                        ? FontWeight.w600
+                                                        : FontWeight.w400,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ),
-                                    ],
+                                        if (pending)
+                                          const Positioned(
+                                            top: 8,
+                                            right: 8,
+                                            child: SizedBox(
+                                              width: 14,
+                                              height: 14,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 1.5,
+                                              ),
+                                            ),
+                                          )
+                                        else if (checked)
+                                          Positioned(
+                                            top: 8,
+                                            right: 8,
+                                            child: AppIcon(
+                                              Icons.check_circle,
+                                              size: 16,
+                                              color: Ui.colors(context).green,
+                                            ),
+                                          )
+                                        else if (state == 'failed')
+                                          const Positioned(
+                                            top: 8,
+                                            right: 8,
+                                            child: AppIcon(
+                                              Icons.error_outline,
+                                              size: 16,
+                                              color: Color(0xffb3553f),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2812,6 +2824,41 @@ class _SendScreenState extends State<SendScreen>
       ],
     );
   }
+
+  Widget deviceDropSurface(String id, Widget child) => KeyedSubtree(
+    key: _nativeDeviceKeys.putIfAbsent(id, GlobalKey.new),
+    child: DragTarget<DockEntry>(
+      onWillAcceptWithDetails: (_) => !working && !sendingTargets,
+      onAcceptWithDetails: (details) => perform(() async {
+        final item = details.data;
+        final paths = item is BulkFileEntry
+            ? item.paths
+            : item.kind == 'file'
+            ? [
+                item.sourceReference.isNotEmpty
+                    ? item.sourceReference
+                    : item.localPath,
+              ]
+            : <String>[];
+        await c.sendDroppedInputs(
+          id,
+          paths,
+          item.kind == 'text' ? [item.text] : [],
+          directories: item.isDirectory ? paths : const [],
+        );
+        if (mounted) showSentFeedback([id]);
+      }),
+      builder: (_, candidates, _) => DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: Ui.fieldRadius,
+          border: candidates.isNotEmpty
+              ? Border.all(color: Ui.colors(context).green, width: 2)
+              : null,
+        ),
+        child: child,
+      ),
+    ),
+  );
 
   Future<void> sendOne(String id) async {
     if (sendingTargets || working) return;
@@ -2983,7 +3030,7 @@ class _SendScreenState extends State<SendScreen>
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         key: const ValueKey('shared-group-selector'),
-                        icon: const AppIcon(Icons.arrow_drop_down,size:18),
+                        icon: const AppIcon(Icons.arrow_drop_down, size: 18),
                         value: c.profile!.groupId,
                         isDense: true,
                         items: c.joinedGroups
@@ -3318,14 +3365,16 @@ class _SendScreenState extends State<SendScreen>
       (item) =>
           item.relayConfirmationPending || item.offerRoutePreference == 'relay',
     );
-    return section('${sourceName(first.source)} · ${batch.length} 个文件', [
+    return section('${sourceName(first.source)} · ${batch.length} 项', [
       for (final item in batch)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
             children: [
               AppIcon(
-                Icons.description_outlined,
+                item.isDirectory
+                    ? Icons.folder_outlined
+                    : Icons.description_outlined,
                 size: 19,
                 color: Ui.colors(context).muted,
               ),
@@ -3451,7 +3500,10 @@ class _SendScreenState extends State<SendScreen>
         item.kind == 'text' ||
         item.localPath.isNotEmpty &&
             (item.sourceReference.isEmpty ||
-                Theme.of(context).platform == TargetPlatform.windows);
+                [
+                  TargetPlatform.windows,
+                  TargetPlatform.iOS,
+                ].contains(Theme.of(context).platform));
     final localHistory = c.isLocalHistory(item);
     final needsAction =
         !localHistory &&
@@ -3662,7 +3714,10 @@ class _SendScreenState extends State<SendScreen>
     final windows = Theme.of(context).platform == TargetPlatform.windows;
     final draggable =
         item.kind == 'text' ||
-        item.localPath.isNotEmpty && (item.sourceReference.isEmpty || windows);
+        item.localPath.isNotEmpty &&
+            (item.sourceReference.isEmpty ||
+                windows ||
+                Theme.of(context).platform == TargetPlatform.iOS);
     return MouseRegion(
       cursor: draggable ? SystemMouseCursors.grab : SystemMouseCursors.click,
       child: ContentDragSurface(
@@ -3758,6 +3813,7 @@ class _SendScreenState extends State<SendScreen>
           : sourceName(item.source),
       text: item.text,
       editable: item.outgoing,
+      closeAfterSave: item.outgoing,
       initialValue: item.outgoing ? ui.readerDrafts[item.id] : null,
       onDraftChanged: item.outgoing
           ? (value) {

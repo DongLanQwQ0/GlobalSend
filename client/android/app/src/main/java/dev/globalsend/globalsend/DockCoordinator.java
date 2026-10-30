@@ -79,6 +79,8 @@ final class DockCoordinator {
     private final List<Map<String, String>> sendTargets = new ArrayList<>();
     private static final String LOCAL_DRAG_SESSION = "dev.globalsend.localDrag";
     private RectF queueDropBounds;
+    private final Map<String, RectF> deviceDropBounds = new java.util.LinkedHashMap<>();
+    private String dropServerKey = "";
     private int queueSurfaceWidth, queueSurfaceHeight;
     private boolean queueDragActive;
     private LocalDrag hoveredLocal;
@@ -128,6 +130,7 @@ final class DockCoordinator {
                         result.success(null); break;
                     case "queueDropBounds":
                         updateQueueDropBounds(Boolean.TRUE.equals(call.argument("enabled")) ? call.arguments() : null);
+                        updateDeviceDropBounds(call.argument("serverKey"), call.argument("devices"));
                         updateSendNavigationBounds(call.argument("sendNavigation"));
                         result.success(null); break;
                     case "pending": synchronized (pending) { result.success(new ArrayList<>(pending)); pending.clear(); } break;
@@ -346,6 +349,17 @@ final class DockCoordinator {
         return queueDropBounds != null && (dragReceiver == null ||
             (dragReceiver.getWidth() == queueSurfaceWidth && dragReceiver.getHeight() == queueSurfaceHeight)) && queueDropBounds.contains(x, y);
     }
+    void updateDeviceDropBounds(String serverKey, List<Map<String, Object>> devices) {
+        deviceDropBounds.clear(); dropServerKey = serverKey == null ? "" : serverKey;
+        if(devices != null)for(Map<String,Object> device:devices)deviceDropBounds.put((String)device.get("deviceId"),new RectF(
+            ((Number)device.get("left")).floatValue(),((Number)device.get("top")).floatValue(),
+            ((Number)device.get("right")).floatValue(),((Number)device.get("bottom")).floatValue()));
+    }
+    String deviceDropAt(float x,float y) {
+        if(dragReceiver != null && (dragReceiver.getWidth()!=queueSurfaceWidth || dragReceiver.getHeight()!=queueSurfaceHeight))return "";
+        for(Map.Entry<String,RectF> entry:deviceDropBounds.entrySet())if(entry.getValue().contains(x,y))return entry.getKey();
+        return "";
+    }
     void updateSendNavigationBounds(Map<String, Object> bounds) {
         sendNavigationBounds = bounds == null ? null : new RectF(
             ((Number) bounds.get("left")).floatValue(), ((Number) bounds.get("top")).floatValue(),
@@ -425,7 +439,8 @@ final class DockCoordinator {
                 local.accepted |= event.getResult(); finishExport(local); return true;
             case DragEvent.ACTION_DROP:
                 hoveredLocal = null; cancelNavigationHover(); localHover(false, "ended");
-                if (local.dropped || !insideQueue(event.getX(), event.getY())) return false;
+                String target = deviceDropAt(event.getX(), event.getY());
+                if (local.dropped || !insideQueue(event.getX(), event.getY()) && target.isEmpty()) return false;
                 local.dropped = true;
                 local.accepted = true;
                 Map<String, Object> drop = new HashMap<>();
@@ -433,6 +448,7 @@ final class DockCoordinator {
                 drop.put("paths", new ArrayList<>(local.paths));
                 drop.put("texts", new ArrayList<>(local.texts));
                 drop.put("temporaryPaths", new ArrayList<>());
+                if(!target.isEmpty()){drop.put("targetDeviceId",target);drop.put("serverKey",dropServerKey);}
                 synchronized (pending) { pending.add(drop); }
                 channel.invokeMethod("nativeDrop", drop); return true;
             default: return true;
@@ -461,7 +477,7 @@ final class DockCoordinator {
                 }
                 // Retain the grant until every source stream is copied. A null
                 // grant is valid for plain text and already accessible URIs.
-                consume(clip, host().requestDragAndDropPermissions(event)); return true;
+                consume(clip, host().requestDragAndDropPermissions(event), null, deviceDropAt(event.getX(),event.getY()), dropServerKey); return true;
             default:
                 return true;
         }
@@ -513,6 +529,10 @@ final class DockCoordinator {
 
     private void consume(ClipData clip, DragAndDropPermissions permission,
             java.util.function.Consumer<Map<String, Object>> shelf) {
+        consume(clip,permission,shelf,"","");
+    }
+    private void consume(ClipData clip, DragAndDropPermissions permission,
+            java.util.function.Consumer<Map<String, Object>> shelf, String targetDeviceId, String serverKey) {
         importCount++; publishDrag("importing");
         importer.execute(() -> {
             List<String> paths = new ArrayList<>(), texts = new ArrayList<>();
@@ -565,6 +585,7 @@ final class DockCoordinator {
                 }
             }
             Map<String, Object> event = new HashMap<>(); event.put("dropId", UUID.randomUUID().toString()); event.put("paths", paths); event.put("temporaryPaths", new ArrayList<>(paths.stream().filter(path -> !path.startsWith("content://")).collect(java.util.stream.Collectors.toList()))); event.put("directoryNames", directoryNames); event.put("directorySources", directorySources); event.put("texts", texts); if (error != null) event.put("error", error);
+            if(!targetDeviceId.isEmpty()){event.put("targetDeviceId",targetDeviceId);event.put("serverKey",serverKey);}
             if (shelf == null) synchronized (pending) { pending.add(event); }
             main.post(() -> {
                 importCount--;

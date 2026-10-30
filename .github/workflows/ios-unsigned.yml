@@ -3,6 +3,11 @@ name: iPad unsigned IPA
 on:
   # Build IPA only after Windows and Android are accepted as stable.
   workflow_dispatch:
+    inputs:
+      compile_only:
+        description: Compile the iOS targets without packaging or publishing an IPA
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -41,8 +46,10 @@ jobs:
         working-directory: client
         run: flutter build ios --release --no-codesign --no-pub
       - name: Package unsigned IPA
+        if: ${{ !inputs.compile_only }}
         run: bash scripts/package-ios-unsigned.sh
       - name: Downloadable IPA
+        if: ${{ !inputs.compile_only }}
         uses: actions/upload-artifact@v4
         with:
           name: GlobalSend-iPad-unsigned-${{ github.run_number }}
@@ -51,6 +58,7 @@ jobs:
           retention-days: 14
           compression-level: 0
       - name: Publish the iPhone / iPad update lane
+        if: ${{ !inputs.compile_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -78,6 +86,7 @@ jobs:
           fi
           gh release upload "$tag" artifacts/releases/GlobalSend-iPad-unsigned.ipa artifacts/releases/globalsend-update-ios.json --clobber
       - name: Build summary
+        if: ${{ !inputs.compile_only }}
         run: |
           {
             echo '## GlobalSend iPad'
@@ -86,3 +95,6 @@ jobs:
             echo 'Extract the artifact ZIP, then sign the IPA with your own tool before installing.'
             echo 'No Apple signing secrets or TestFlight upload are used by this workflow.'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Compile-only summary
+        if: ${{ inputs.compile_only }}
+        run: echo 'iOS host and share extension compiled. No IPA packaged or published.' >> "$GITHUB_STEP_SUMMARY"

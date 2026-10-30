@@ -6,6 +6,8 @@ import 'package:flutter/rendering.dart';
 
 import 'dock_platform.dart';
 import 'system_bridge.dart';
+import 'file_share.dart';
+import 'ios_drag_source.dart';
 
 /// Native system drag dispatchers cannot see Flutter DragTargets. Publish
 /// only the visible queue rectangle, in FlutterView-local physical pixels.
@@ -17,12 +19,16 @@ class NativeQueueDropHost extends StatefulWidget {
     required this.child,
     this.sendNavigationTarget,
     this.sendNavigationEnabled = false,
+    this.deviceTargets = const {},
+    this.serverKey = '',
   });
   final GlobalKey target;
   final bool enabled;
   final Widget child;
   final GlobalKey? sendNavigationTarget;
   final bool sendNavigationEnabled;
+  final Map<String, GlobalKey> deviceTargets;
+  final String serverKey;
   @override
   State<NativeQueueDropHost> createState() => _NativeQueueDropHostState();
 }
@@ -34,6 +40,7 @@ class _NativeQueueDropHostState extends State<NativeQueueDropHost>
   Rect? lastNavigation;
   Size? lastSurface;
   bool reported = false;
+  String lastDevices = '';
 
   @override
   void initState() {
@@ -56,6 +63,7 @@ class _NativeQueueDropHostState extends State<NativeQueueDropHost>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       scheduled = false;
       if (!mounted) return;
+      if (Platform.isIOS) IOSDragSource.refresh();
       final view = View.of(context), surface = view.physicalSize;
       Rect? boundsFor(GlobalKey? key) {
         final target = key?.currentContext?.findRenderObject();
@@ -95,25 +103,59 @@ class _NativeQueueDropHostState extends State<NativeQueueDropHost>
       final navigation = widget.sendNavigationEnabled
           ? boundsFor(widget.sendNavigationTarget)
           : null;
+      final devices = <Map<String, Object>>[
+        if (widget.enabled)
+          for (final entry in widget.deviceTargets.entries)
+            if (boundsFor(entry.value) case final Rect bounds)
+              {
+                'deviceId': entry.key,
+                'left': bounds.left,
+                'top': bounds.top,
+                'right': bounds.right,
+                'bottom': bounds.bottom,
+              },
+      ];
+      final deviceSignature = '${widget.serverKey}:$devices';
+      final serverKey = widget.enabled ? widget.serverKey : '';
       if (reported &&
           last == area &&
           lastNavigation == navigation &&
-          lastSurface == surface)
+          lastSurface == surface &&
+          lastDevices == deviceSignature)
         return;
       reported = true;
       last = area;
       lastSurface = surface;
       lastNavigation = navigation;
+      lastDevices = deviceSignature;
       if (Platform.isAndroid) {
         unawaited(
           DockPlatform.setQueueDropBounds(
             area,
             surface: surface,
             sendNavigation: navigation,
+            devices: devices,
+            serverKey: serverKey,
           ),
         );
       } else if (Platform.isWindows) {
-        unawaited(SystemBridge.setQueueDropBounds(area, surface: surface));
+        unawaited(
+          SystemBridge.setQueueDropBounds(
+            area,
+            surface: surface,
+            devices: devices,
+            serverKey: serverKey,
+          ),
+        );
+      } else if (Platform.isIOS) {
+        unawaited(
+          FileShareBridge.setDropRegions(
+            area,
+            surface: surface,
+            devices: devices,
+            serverKey: serverKey,
+          ),
+        );
       }
     });
   }
@@ -125,6 +167,8 @@ class _NativeQueueDropHostState extends State<NativeQueueDropHost>
       unawaited(DockPlatform.setQueueDropBounds(null));
     } else if (Platform.isWindows) {
       unawaited(SystemBridge.setQueueDropBounds(null));
+    } else if (Platform.isIOS) {
+      unawaited(FileShareBridge.setDropRegions(null));
     }
     super.dispose();
   }

@@ -892,6 +892,22 @@ test('device click sends and consumes a confirmed queue; multi-select waits for 
   assert.equal(c.stagedTexts.length,0);assert.equal(c.multiSend,false);
 });
 
+test('dropping directly on a device sends that file without consuming unrelated drafts',async()=>{
+  const {c,document,render,Event}=fixture();c.render=render;c.installWindowDrop();
+  const draft=new File(['draft'],'draft.txt');c.picked=[draft];c.stagedTexts=[{id:'draft',text:'keep this draft'}];
+  c.digest=async()=> 'a'.repeat(64);c.render();
+  const calls:any[]=[];c.api.request=async(path:string,body:any)=>{calls.push({path,body});return {transfer:{...transfer(body.transferId),files:body.files}};};
+  const image=new File(['image'],'photo.png',{type:'image/png'});
+  const data={types:['Files'],files:[image],items:[],getData:()=>''};
+  const drop=new Event('drop',{bubbles:true,cancelable:true});Object.assign(drop,{dataTransfer:data});
+  document.querySelector('[data-target="sender"]')!.dispatchEvent(drop);
+  for(let i=0;i<20;i++){await new Promise(resolve=>setImmediate(resolve));if(calls.length && !c.queueSending)break;}
+  assert.equal(drop.defaultPrevented,true);assert.equal(calls.length,1);
+  assert.equal(calls[0].path,'/transfers');assert.equal(calls[0].body.targetDeviceId,'sender');
+  assert.equal(calls[0].body.files.length,1);assert.equal(calls[0].body.files[0].name,'photo.png');
+  assert.equal(c.picked.length,1);assert.equal(c.picked[0],draft);assert.equal(c.stagedTexts[0].text,'keep this draft');
+});
+
 test('multi-recipient retry skips completed recipients and preserves uncertain offer identity',async()=>{
   const {c}=fixture();c.multiSend=true;c.devices.push({deviceId:'tablet',name:'平板',platform:'web',online:true});
   c.stagedTexts=[{id:'one',text:'第一段'},{id:'two',text:'第二段'}];c.picked=[new File(['body'],'notes.txt')];c.digest=async()=> 'a'.repeat(64);
@@ -1020,7 +1036,8 @@ test('sent-message editing patches the original identity after target presence c
   assert.equal(c.text,'另一个未发送草稿');assert.equal(c.pendingTexts.length,0);
   assert.equal(c.events.filter((event:any)=>event.type==='text.created').length,1);
   assert.equal(c.events.find((event:any)=>event.eventId==='outgoing').payload.text,'修改原消息');
-  assert.equal(document.querySelector('#reader-status')!.textContent,'');
+  assert.equal(c.modal,null);
+  assert.equal(document.querySelector('#reader-text'),null);
   assert.equal(JSON.parse(session.get(c.dockKey)!).events[0].payload.text,'修改原消息');
 });
 

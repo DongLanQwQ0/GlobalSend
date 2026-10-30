@@ -1,4 +1,4 @@
-import { LocalFileLibrary, filePreviewKind, readLocalText, sortLocalFiles } from './library';
+import { LocalFileLibrary, filePreviewKind, readLocalText, sortLocalFiles, folderLibraryEntries } from './library';
 import type { LocalFileEntry, LibrarySort } from './library';
 import type { Device } from './model';
 import { escapeHtml as e, formatBytes, compactTime } from './model';
@@ -149,7 +149,9 @@ export class LocalLibraryView {
     this.busy=true;this.error='';this.actions.changed();
     try {
       for(const entry of this.selectedEntries()) {
-        await this.service.remove(entry.id);this.entries=this.entries.filter(item=>item.id!==entry.id);this.selected.delete(entry.id);
+        await this.service.remove(entry.id);
+        const owned=(item:LocalFileEntry)=>item.id===entry.id || entry.entryKind==='directory' && !!entry.relativePath && item.scope===entry.scope && item.transferId===entry.transferId && item.relativePath?.startsWith(entry.relativePath+'/');
+        this.entries=this.entries.filter(item=>!owned(item));this.selected.delete(entry.id);
         const url=this.thumbnails.get(entry.id);if(url)URL.revokeObjectURL(url);this.thumbnails.delete(entry.id);
       }
       this.renameId='';if(!this.entries.length)this.editing=false;
@@ -193,12 +195,12 @@ export class LocalLibraryView {
     return `保留 ${this.cleanup.retentionHours%24===0?`${this.cleanup.retentionHours/24} 天`:`${this.cleanup.retentionHours} 小时`}`;
   }
   fileForDrag(id:string){return this.files.get(id);}
-  filesForBulkDrag(){return this.entries.filter(entry=>entry.entryKind!=='directory' && (!this.editing || this.selected.has(entry.id))).flatMap(entry=>{const file=this.files.get(entry.id);return file?[file]:[];});}
+  filesForBulkDrag(){return folderLibraryEntries(this.entries).filter(entry=>entry.entryKind!=='directory' && (!this.editing || this.selected.has(entry.id))).flatMap(entry=>{const file=this.files.get(entry.id);return file?[file]:[];});}
   private async prepareDragFiles(){
     if(this.dragPreparingToken===this.token || !this.service)return;
     const token=this.token;this.dragPreparingToken=token;
     try{
-      const entries=this.entries.filter(entry=>entry.entryKind!=='directory' && !this.files.has(entry.id));
+      const entries=folderLibraryEntries(this.entries).filter(entry=>entry.entryKind!=='directory' && !this.files.has(entry.id));
       for(let index=0;index<entries.length && token===this.token;index+=4)await Promise.all(entries.slice(index,index+4).map(async entry=>{
         try{const file=await this.service!.get(entry.id);if(token===this.token)this.files.set(entry.id,file);}catch{/* The next inventory reconciles files removed outside the app. */}
       }));
@@ -212,7 +214,7 @@ export class LocalLibraryView {
     return `${embedded?'':'<div class="modal-backdrop">'}<section class="${embedded?'embedded-library':'modal'} file-library-modal" ${embedded?'':'role="dialog" aria-modal="true"'} aria-labelledby="library-title"><div class="${embedded?'library-pane-header':'modal-header'}"><div><h2 id="library-title" ${embedded && !preview?'class="sr-only"':''}>${preview?e(preview.entry.name):'本机文件'}</h2><p class="library-subtitle">${preview?`${formatBytes(preview.entry.size)} · ${this.date(preview.entry.receivedAt)}`:''}</p></div>${embedded?'':`<button class="icon-button quiet" data-library-action="close" aria-label="关闭文件库">${icon('close')}</button>`}</div>
     ${this.error?`<p class="library-error" role="alert">${e(this.error)}</p>`:''}
     ${preview?this.previewHtml(preview):`${this.toolbarHtml(peers,pending)}${this.renameId?`<form id="library-rename-form" class="library-rename-form"><label class="field" for="library-rename-name">文件名<input id="library-rename-name" value="${e(this.renameName)}" maxlength="255" required></label><button class="primary" type="submit" ${this.busy?'disabled':''}>保存</button><button class="quiet" type="button" data-library-action="cancel-rename">取消</button></form>`:''}
-    ${this.loading && !this.entries.length?'<div class="library-empty">读取中…</div>':!this.entries.length?'<div class="library-empty">暂无已保存文件</div>':`<div class="library-grid">${sortLocalFiles(this.entries,this.sort).map(entry=>this.cardHtml(entry)).join('')}</div>`}
+    ${this.loading && !this.entries.length?'<div class="library-empty">读取中…</div>':!this.entries.length?'<div class="library-empty">暂无已保存文件</div>':`<div class="library-grid">${sortLocalFiles(folderLibraryEntries(this.entries),this.sort).map(entry=>this.cardHtml(entry)).join('')}</div>`}
     ${this.cleanupHtml()}`}${this.menuId?`<div class="content-menu" role="menu" style="left:${this.menuPosition.x}px;top:${this.menuPosition.y}px">${[['preview','打开'],['download','下载'],['requeue','加入待发送'],['rename','重命名'],['delete','删除'],['preview','详情']].map(([action,label])=>`<button data-library-command="${action}" role="menuitem">${label}</button>`).join('')}</div>`:''}</section>${embedded?'':'</div>'}`;
   }
   private cleanupHtml() {
@@ -220,9 +222,9 @@ export class LocalLibraryView {
     return `<details class="advanced-join library-cleanup settings-card"><summary>自动清理 <span class="cleanup-value">${this.cleanupLabel()}</span></summary><form id="library-cleanup-form"><label class="library-retention" for="library-retention">保留时长<span><input id="library-retention" type="number" min="1" step="1" inputmode="numeric" value="${e(this.retentionValue)}" required><select id="library-retention-unit" aria-label="保留时长单位"><option value="days" ${this.retentionUnit==='days'?'selected':''}>天</option><option value="hours" ${this.retentionUnit==='hours'?'selected':''}>小时</option></select></span></label><div class="library-categories" aria-label="清理类别">${FILE_CATEGORIES.map((category,index)=>`<label><input type="checkbox" data-library-category="${category}" ${this.cleanupDraft.categories.includes(category)?'checked':''}>${labels[index]}</label>`).join('')}</div><label class="library-cleanup-size" for="library-size-rule">文件大小<span><select id="library-size-rule"><option value="any" ${this.cleanupDraft.sizeRule==='any'?'selected':''}>不限</option><option value="greater" ${this.cleanupDraft.sizeRule==='greater'?'selected':''}>大于</option><option value="smaller" ${this.cleanupDraft.sizeRule==='smaller'?'selected':''}>小于</option><option value="atMost" ${this.cleanupDraft.sizeRule==='atMost'?'selected':''}>不大于</option></select><input id="library-size-mib" type="number" min="0" step="any" inputmode="decimal" aria-label="清理大小 KB" value="${this.cleanupDraft.sizeMiB*1048576/1000}" ${this.cleanupDraft.sizeRule==='any'?'disabled':''}><span>KB</span></span></label><div class="library-cleanup-footer"><p>只清理符合规则的过期文件，不影响下载副本。</p><button class="secondary" type="submit" ${this.busy?'disabled':''} ${this.cleanupDirty?'':'hidden'}>保存</button></div></form></details>`;
   }
   private toolbarHtml(peers:Device[],pending:boolean) {
-    const count=this.selected.size;
+    const count=this.selected.size,total=folderLibraryEntries(this.entries).length;
     const drag=this.filesForBulkDrag().length?`<button class="icon-button quiet" draggable="true" data-drag-all="library" aria-label="全部拖拽" title="拖出 ${this.filesForBulkDrag().length} 个本地文件">${icon('drag')}</button>`:'';
-    return `<div class="library-toolbar content-toolbar">${drag}${this.editing?`<span class="count selection-count">已选 ${count}</span><button class="quiet" data-library-action="select-all">${count===this.entries.length?'取消全选':'全选'}</button><button class="quiet" data-library-action="rename" ${count!==1 || this.busy || pending?'disabled':''}>改名</button><button class="quiet danger" data-library-action="delete" ${!count || this.busy || pending?'disabled':''}>删除</button><button class="quiet" data-library-action="edit" ${this.busy || pending?'disabled':''}>取消</button>`:`<span class="count">${this.entries.length} 项</span><label class="toolbar-field" for="library-sort"><span class="sr-only">排序</span><select id="library-sort" data-library-sort aria-label="文件排序"><option value="received" ${this.sort==='received'?'selected':''}>最新接收</option><option value="oldest" ${this.sort==='oldest'?'selected':''}>最早接收</option><option value="name" ${this.sort==='name'?'selected':''}>名称</option><option value="size" ${this.sort==='size'?'selected':''}>大小</option></select></label><button class="icon-button quiet" data-library-action="refresh" aria-label="刷新文件库" ${this.loading?'disabled':''}>${icon('retry')}</button><button class="quiet selection-action" data-library-action="edit" ${this.busy || pending || !this.entries.length?'disabled':''}>多选</button>`}</div>
+    return `<div class="library-toolbar content-toolbar">${drag}${this.editing?`<span class="count selection-count">已选 ${count}</span><button class="quiet" data-library-action="select-all">${count===total?'取消全选':'全选'}</button><button class="quiet" data-library-action="rename" ${count!==1 || this.busy || pending?'disabled':''}>改名</button><button class="quiet danger" data-library-action="delete" ${!count || this.busy || pending?'disabled':''}>删除</button><button class="quiet" data-library-action="edit" ${this.busy || pending?'disabled':''}>取消</button>`:`<span class="count">${total} 项</span><label class="toolbar-field" for="library-sort"><span class="sr-only">排序</span><select id="library-sort" data-library-sort aria-label="文件排序"><option value="received" ${this.sort==='received'?'selected':''}>最新接收</option><option value="oldest" ${this.sort==='oldest'?'selected':''}>最早接收</option><option value="name" ${this.sort==='name'?'selected':''}>名称</option><option value="size" ${this.sort==='size'?'selected':''}>大小</option></select></label><button class="icon-button quiet" data-library-action="refresh" aria-label="刷新文件库" ${this.loading?'disabled':''}>${icon('retry')}</button><button class="quiet selection-action" data-library-action="edit" ${this.busy || pending || !this.entries.length?'disabled':''}>多选</button>`}</div>
     ${this.editing && this.actions.signedIn()?`<div class="library-forward"><label class="toolbar-field" for="library-target"><span class="sr-only">转发到</span><select id="library-target" data-library-target aria-label="转发到在线设备" ${!peers.length || this.busy || pending?'disabled':''}>${!peers.length?'<option value="">暂无在线设备</option>':peers.map(device=>`<option value="${e(device.deviceId)}" ${this.target===device.deviceId?'selected':''}>${e(device.name)}</option>`).join('')}</select></label><button class="primary" data-library-action="forward" ${!count || !this.target || this.busy?'disabled':''}>${this.busy?'处理中…':pending?'重试转发':'转发'}</button>${pending?'<button class="quiet" data-library-action="discard-forward">取消</button>':''}</div>`:''}`;
   }
   private cardHtml(entry:LocalFileEntry) {
@@ -245,7 +247,7 @@ export class LocalLibraryView {
       if(action==='refresh')void this.refresh();
       if(action==='edit'){this.editing=!this.editing;this.selected.clear();this.renameId='';this.actions.changed();}
       if(action==='rename')this.renameSelected();
-      if(action==='select-all'){this.selected=this.selected.size===this.entries.length?new Set():new Set(this.entries.map(entry=>entry.id));this.actions.changed();}
+      if(action==='select-all'){const entries=folderLibraryEntries(this.entries);this.selected=this.selected.size===entries.length?new Set():new Set(entries.map(entry=>entry.id));this.actions.changed();}
       if(action==='delete')void this.deleteSelected();
       if(action==='forward')void this.forwardSelected();
       if(action==='discard-forward')void this.actions.discardForward().then(()=>{this.error='';this.actions.changed();}).catch(error=>{this.error=error.message;this.actions.changed();});
@@ -285,7 +287,7 @@ export class LocalLibraryView {
     const token=this.token,service=this.service;if(!service || this.previewFile)return;
     let changed=false;
     let missing=false;
-    await Promise.all(this.entries.filter(entry=>!this.files.has(entry.id) && !this.loadingThumbnails.has(entry.id)).map(async entry=>{
+    await Promise.all(folderLibraryEntries(this.entries).filter(entry=>!this.files.has(entry.id) && !this.loadingThumbnails.has(entry.id)).map(async entry=>{
       this.loadingThumbnails.add(entry.id);
       try{const file=await service.get(entry.id),kind=filePreviewKind(entry);const snippet=kind==='text'?(await readLocalText(file.slice(0,4096))).text:undefined;if(token===this.token && this.opened && this.entries.some(item=>item.id===entry.id)){this.files.set(entry.id,file);if(kind==='image')this.thumbnails.set(entry.id,URL.createObjectURL(file));if(snippet!==undefined)this.snippets.set(entry.id,snippet);changed=true;}}
       catch(error){if((error as Error).name==='NotFoundError')missing=true;}

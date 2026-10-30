@@ -59,12 +59,18 @@ abstract final class FileShareBridge {
   static const channel = MethodChannel('dev.globalsend/share');
   static bool get supported => Platform.isAndroid || Platform.isIOS;
   static final _incoming = StreamController<void>.broadcast();
+  static final _dragEvents = StreamController<Map<String, dynamic>>.broadcast();
   static bool _installed = false;
   static void _install() {
     if (_installed) return;
     _installed = true;
     channel.setMethodCallHandler((call) async {
       if (call.method == 'pendingChanged') _incoming.add(null);
+      if (call.method == 'nativeDrag')
+        _dragEvents.add({
+          'type': 'nativeDrag',
+          ...Map<String, dynamic>.from(call.arguments),
+        });
       if (call.method == 'importError')
         _incoming.addError(
           PlatformException(
@@ -79,6 +85,32 @@ abstract final class FileShareBridge {
     _install();
     return _incoming.stream;
   }
+
+  static Stream<Map<String, dynamic>> get dragEvents {
+    _install();
+    return _dragEvents.stream;
+  }
+
+  static Future<void> setDropRegions(
+    Rect? bounds, {
+    Size? surface,
+    List<Map<String, Object>> devices = const [],
+    String serverKey = '',
+  }) => channel.invokeMethod('setDropRegions', {
+    'enabled': bounds != null || devices.isNotEmpty,
+    'devices': devices,
+    'serverKey': serverKey,
+    if (surface != null) ...{
+      'surfaceWidth': surface.width,
+      'surfaceHeight': surface.height,
+    },
+    if (bounds != null) ...{
+      'left': bounds.left,
+      'top': bounds.top,
+      'right': bounds.right,
+      'bottom': bounds.bottom,
+    },
+  });
 
   static Future<void> share({
     List<String> paths = const [],

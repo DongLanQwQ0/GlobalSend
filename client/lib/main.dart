@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'controller.dart';
+import 'folder_cards.dart';
 import 'screen.dart';
 import 'system_bridge.dart';
 import 'ui_session.dart';
@@ -137,7 +138,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   Future<void> dockAction(Map<String, dynamic> action) async {
     try {
       final id = action['id'] as String?;
-      final entry = controller.historyDock
+      final entry = collapseFolderCards(controller.historyDock)
           .where((item) => item.id == id)
           .firstOrNull;
       switch (action['action']) {

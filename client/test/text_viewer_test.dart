@@ -76,6 +76,7 @@ void main() {
     WidgetTester tester, {
     required String text,
     bool editable = false,
+    bool closeAfterSave = false,
     Future<void> Function(String)? onSave,
     Future<void> Function(String)? onCopy,
   }) async {
@@ -89,6 +90,7 @@ void main() {
                 title: '独立文字',
                 text: text,
                 editable: editable,
+                closeAfterSave: closeAfterSave,
                 onSave: onSave,
                 onCopy: onCopy,
               ),
@@ -101,6 +103,19 @@ void main() {
     await tester.tap(find.text('打开'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('sent text saves and closes once; a failed save stays editable', (tester) async {
+    var fail = true;
+    await open(tester, text: 'before', editable: true, closeAfterSave: true,
+      onSave: (_) async { if (fail) throw Exception('save failed'); });
+    await tester.enterText(find.byKey(const ValueKey('text-viewer-input')), 'after');
+    await tester.pump(); await tester.tap(find.text('保存')); await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('text-viewer-input')), findsOneWidget);
+    fail = false; await tester.tap(find.text('保存')); await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('text-viewer-input')), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(Dialog), findsNothing);
+  });
 
   testWidgets(
     'received text viewer has one copy action that copies the whole message',

@@ -9,6 +9,7 @@ import 'package:flutter/rendering.dart';
 import 'app_icon.dart';
 import 'content_preview.dart';
 import 'models.dart';
+import 'ios_drag_source.dart';
 import 'system_bridge.dart';
 import 'text_selection_surface.dart';
 import 'ui_tokens.dart';
@@ -201,6 +202,9 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
 
   @override
   Widget build(BuildContext context) {
+    if (Theme.of(context).platform == TargetPlatform.iOS) {
+      return IOSDragSource(entry: widget.entry, enabled: widget.enabled && widget.touchDrags, child: widget.child);
+    }
     if (Theme.of(context).platform == TargetPlatform.android) {
       return RawGestureDetector(
         behavior: HitTestBehavior.opaque,

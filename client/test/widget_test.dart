@@ -90,7 +90,12 @@ class PreviewController extends SendController {
   }
 
   @override
-  Future<void> sendStagedToMany(List<String> targets) async {
+  Future<void> sendStagedToMany(
+    List<String> targets, {
+    List<String>? onlyFiles,
+    List<String>? onlyTexts,
+    String? expectedServerKey,
+  }) async {
     batchSends.add(targets.toList());
     var failed = false;
     for (final id in targets) {
@@ -104,8 +109,8 @@ class PreviewController extends SendController {
       }
     }
     if (!failed) {
-      stagedFiles.clear();
-      stagedTexts.clear();
+      stagedFiles.removeWhere((onlyFiles ?? stagedFiles.toList()).contains);
+      stagedTexts.removeWhere((onlyTexts ?? stagedTexts.toList()).contains);
     }
     notifyListeners();
     if (failed) throw StateError('设备暂时离线');

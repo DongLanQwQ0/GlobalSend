@@ -15,6 +15,24 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34, manifest=Config.NONE)
 public class ReceiveOverlayTest {
+    @Test public void bulkDragExcludesSuggestionsButKeepsExplicitlyStagedAndReceivedItems() throws Exception {
+        ReceiveOverlay overlay=receiver(); show(overlay,"received",1);
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        String uri="content://media/external/images/media/77";
+        shelf.add(java.util.List.of(),java.util.List.of("staged"),Map.of());
+        shelf.suggest(java.util.List.of(new RecentMediaSuggestions.Media(uri,"photo.jpg",1)));
+        ((View)field(overlay,"shelfTab")).performClick();
+        assertEquals(2,shelf.items.size());
+        assertEquals(1,overlay.bulkDragItems().size());
+        assertEquals("staged",overlay.bulkDragItems().get(0).text);
+        shelf.add(java.util.List.of(uri),java.util.List.of(),Map.of());
+        assertEquals(2,overlay.bulkDragItems().size());
+        ((View)field(overlay,"count")).performClick();
+        assertEquals(1,overlay.bulkDragItems().size());
+        assertEquals("received",overlay.bulkDragItems().get(0).text);
+        overlay.hide();
+    }
+
     @Test public void edgeHandleChangesTheActualWindowAndKeepsShelfSeparateOnForeground() throws Exception {
         ReceiveOverlay overlay = receiver(); show(overlay, "remote", 1);
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();

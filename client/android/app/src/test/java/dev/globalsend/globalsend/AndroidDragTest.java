@@ -96,6 +96,21 @@ public class AndroidDragTest {
 
     private long dropCount() { return events.stream().filter(call -> call.method.equals("nativeDrop")).count(); }
 
+    @Test public void droppingOnADeviceCarriesOnlyThatDestinationAndOriginalBatch() {
+        queueBounds();
+        coordinator.updateDeviceDropBounds("center", List.of(Map.of("deviceId","target-uuid", "left",20d,"top",400d,"right",100d,"bottom",480d)));
+        assertEquals("target-uuid",coordinator.deviceDropAt(50,440));
+        assertEquals("",coordinator.deviceDropAt(200,440));
+        DockCoordinator.LocalDrag source=new DockCoordinator.LocalDrag(new View(activity),List.of("content://media/external/images/media/77"),List.of("hello"));
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_STARTED,source,0,0));
+        assertTrue(coordinator.acceptDrag(localEvent(DragEvent.ACTION_DROP,source,50,440)));
+        Map<?,?> drop=(Map<?,?>)events.stream().filter(call->call.method.equals("nativeDrop")).findFirst().get().arguments;
+        assertEquals("target-uuid",drop.get("targetDeviceId"));assertEquals("center",drop.get("serverKey"));
+        assertEquals(List.of("content://media/external/images/media/77"),drop.get("paths"));
+        assertEquals(List.of("hello"),drop.get("texts"));
+        coordinator.updateDeviceDropBounds("center",List.of());assertEquals("",coordinator.deviceDropAt(50,440));
+    }
+
     @Implements(View.class)
     public static class NativeDragView extends ShadowView {
         static boolean allowed;

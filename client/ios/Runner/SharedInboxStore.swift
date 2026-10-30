@@ -1,5 +1,70 @@
 import Foundation
 
+#if canImport(UIKit) && canImport(UniformTypeIdentifiers)
+import UIKit
+import UniformTypeIdentifiers
+
+enum SharedItemLoader {
+  static func load(_ provider: NSItemProvider, store: SharedInboxStore, folder: URL, completed: @escaping (String?, String?, Error?) -> Void) {
+    if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+      provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+        guard let url = item as? URL else { completed(nil, nil, error ?? CocoaError(.fileReadUnknown)); return }
+        do { completed(try store.copy(url, to: folder), nil, nil) } catch { completed(nil, nil, error) }
+      }
+      return
+    }
+    if provider.hasItemConformingToTypeIdentifier(UTType.folder.identifier) {
+      provider.loadInPlaceFileRepresentation(forTypeIdentifier: UTType.folder.identifier) { url, _, error in
+        guard let url = url else { completed(nil, nil, error ?? CocoaError(.fileReadUnknown)); return }
+        do { completed(try store.copy(url, to: folder, suggestedName: provider.suggestedName), nil, nil) }
+        catch { completed(nil, nil, error) }
+      }
+      return
+    }
+    if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+      provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, error in
+        if let url = item as? URL { completed(nil, url.absoluteString, nil) }
+        else if let text = item as? String { completed(nil, text, nil) }
+        else { completed(nil, nil, error ?? CocoaError(.fileReadUnknown)) }
+      }
+      return
+    }
+    let fileType = provider.registeredTypeIdentifiers.first { identifier in
+      guard let type = UTType(identifier) else { return false }
+      let namedFile = !(provider.suggestedName ?? "").isEmpty
+      return type.conforms(to: .data) && (!type.conforms(to: .plainText) || namedFile)
+    }
+    if let type = fileType {
+      provider.loadFileRepresentation(forTypeIdentifier: type) { url, error in
+        guard let url = url else { completed(nil, nil, error ?? CocoaError(.fileReadUnknown)); return }
+        // The provider deletes this URL when this callback returns.
+        let ext = UTType(type)?.preferredFilenameExtension ?? url.pathExtension
+        var name = provider.suggestedName ?? url.lastPathComponent
+        if (name as NSString).pathExtension.isEmpty && !ext.isEmpty { name += "." + ext }
+        do { completed(try store.copy(url, to: folder, suggestedName: name), nil, nil) } catch { completed(nil, nil, error) }
+      }
+      return
+    }
+    if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+      provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { item, error in
+        if let text = item as? String { completed(nil, text, nil) }
+        else if let data = item as? Data, let text = String(data: data, encoding: .utf8) { completed(nil, text, nil) }
+        else { completed(nil, nil, error ?? CocoaError(.fileReadUnknown)) }
+      }
+      return
+    }
+    if provider.canLoadObject(ofClass: UIImage.self) {
+      _ = provider.loadObject(ofClass: UIImage.self) { item, error in
+        guard let image = item as? UIImage, let data = image.pngData() else { completed(nil, nil, error ?? CocoaError(.fileReadUnknown)); return }
+        do { completed(try store.writeData(data, to: folder, name: "shared-image.png"), nil, nil) } catch { completed(nil, nil, error) }
+      }
+      return
+    }
+    completed(nil, nil, CocoaError(.fileReadUnsupportedScheme))
+  }
+}
+#endif
+
 enum SharedInboxGroup {
   static func hostBundleURL(for bundleURL: URL) -> URL {
     bundleURL.pathExtension == "appex"

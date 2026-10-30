@@ -1,4 +1,6 @@
 import 'models.dart';
+import 'folder_cards.dart';
+export 'folder_cards.dart';
 
 String contentKey(DockEntry entry) {
   if (entry.kind == 'text' && !entry.autoClipboard) return 'text:${entry.text}';
@@ -20,7 +22,7 @@ String contentKey(DockEntry entry) {
 
 /// Group the display, retaining each delivery and external file reference.
 List<DockEntry> mergeContentCards(Iterable<DockEntry> entries) {
-  final ordered = entries.toList()
+  final ordered = collapseFolderCards(entries)
     ..sort(
       (a, b) =>
           (b.receivedAtMillis > 0 ? b.receivedAtMillis : b.createdAtMillis)

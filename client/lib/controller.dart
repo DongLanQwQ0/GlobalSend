@@ -277,6 +277,7 @@ class SendController extends ChangeNotifier {
   bool receiptPresentedExternally = false;
   DockEntry? latestReceipt;
   final Map<String, DockEntry> pendingReceipts = {};
+  final Map<String, List<DockEntry>> _folderReceiptMembers = {};
   final Set<String> nativeDismissedReceiptIds = {};
   final Map<String, int> _receiptSequence = {};
   final Map<String, String> _receiptVersions = {};
@@ -364,7 +365,8 @@ class SendController extends ChangeNotifier {
   List<DockEntry> dock = [];
   LocalHistoryStore? _localHistory;
   Future<void>? _historyLoading;
-  bool isLocalHistory(DockEntry entry) => !dock.contains(entry);
+  bool isLocalHistory(DockEntry entry) =>
+      !dock.contains(entry is FolderCardEntry ? entry.root : entry);
   bool _isHiddenDockId(String id) =>
       _hiddenDockIds.contains(id) ||
       profile != null && _localHistory?.isHidden(profile!.key, id) == true;
@@ -868,6 +870,54 @@ class SendController extends ChangeNotifier {
           as String? ??
       '其他设备';
 
+  DockEntry _folderPresentation(DockEntry item) {
+    final members = _folderReceiptMembers[item.id];
+    if (members == null) return item;
+    final root = members
+        .where(
+          (entry) => entry.isDirectory && !entry.relativePath.contains('/'),
+        )
+        .firstOrNull;
+    return root == null ? item : FolderCardEntry(root, members);
+  }
+
+  Future<void> _folderAction(
+    DockEntry item,
+    Future<void> Function(DockEntry) action, {
+    bool Function(DockEntry)? eligible,
+    bool presentationOnly = false,
+  }) async {
+    final grouped =
+        item.isDirectory && (!presentationOnly || item is FolderCardEntry);
+    final members = grouped
+        ? folderCardMembers(
+            item,
+            historyDock,
+          ).where((entry) => eligible == null || eligible(entry)).toList()
+        : [item];
+    for (var index = 0; index < members.length; index += 4) {
+      await Future.wait(members.skip(index).take(4).map(action));
+    }
+  }
+
+  List<String> expandFolderSelection(
+    String transferId,
+    Iterable<String> selected,
+  ) {
+    final ids = selected.toSet();
+    final entries = dock
+        .where((entry) => entry.transferId == transferId)
+        .toList();
+    for (final members in groupFolderEntries(entries).values) {
+      final root = members.firstWhere(
+        (entry) => entry.isDirectory && !entry.relativePath.contains('/'),
+      );
+      if (ids.contains(root.fileId))
+        ids.addAll(members.map((entry) => entry.fileId));
+    }
+    return ids.toList();
+  }
+
   void _postReceivedNotice(
     DockEntry item,
     String version, {
@@ -876,6 +926,16 @@ class SendController extends ChangeNotifier {
     bool updated = false,
   }) {
     if (item.outgoing) return;
+    final folder = _folderPresentation(item);
+    if (folder is FolderCardEntry) {
+      if (version == 'received' && folder.status != 'received') {
+        changed();
+        return;
+      }
+      item = folder;
+      fileName = version == 'offered' ? '待接收 · ${item.title}' : item.title;
+      if (_receiptVersions[item.id] == version) return;
+    }
     _showReceipt(item, version);
     _enqueueReceivedNotice(
       itemId: item.id,
@@ -894,6 +954,7 @@ class SendController extends ChangeNotifier {
   }
 
   void _showReceipt(DockEntry item, String version) {
+    item = _folderPresentation(item);
     if (item.sourceLabel.isEmpty) item.sourceLabel = _noticeSource(item.source);
     if (_receiptVersions[item.id] == version) return;
     // A Windows receive is presented when offered. Completing that same file
@@ -1026,6 +1087,11 @@ class SendController extends ChangeNotifier {
   }
 
   void changed() {
+    for (final entry in pendingReceipts.entries.toList()) {
+      pendingReceipts[entry.key] = _folderPresentation(entry.value);
+    }
+    if (latestReceipt != null)
+      latestReceipt = _folderPresentation(latestReceipt!);
     if (!_sendingStaged &&
         (!listEquals(stagedFiles, _stagedBatchFiles) ||
             !listEquals(stagedTexts, _stagedBatchTexts))) {
@@ -1208,6 +1274,10 @@ class SendController extends ChangeNotifier {
       _dockSubscription = DockPlatform.events.listen(handleNativeDockEvent);
       unawaited(refreshNativeDock().catchError((Object _) {}));
     }
+    if (Platform.isIOS)
+      _dockSubscription = FileShareBridge.dragEvents.listen(
+        handleNativeDockEvent,
+      );
     try {
       await backgroundReceive.initialize();
       root = await stateDirectory();
@@ -2366,12 +2436,12 @@ class SendController extends ChangeNotifier {
 
   void updateTransfer(Map<String, dynamic> t) {
     final outgoing = t['sourceDeviceId'] == profile!.deviceId;
+    final indexed = {for (final item in dock) item.id: item};
+    final added = <String>{};
     for (final f in t['files']) {
       final id = f['fileId'] as String;
       if (_isHiddenDockId(id)) continue;
-      var item = dock
-          .where((d) => d.id == id && d.transferId == t['transferId'])
-          .firstOrNull;
+      var item = indexed[id];
       if (item == null) {
         item = DockEntry(
           id: id,
@@ -2389,16 +2459,21 @@ class SendController extends ChangeNotifier {
           outgoing: outgoing,
         );
         dock.insert(0, item);
-        if (!outgoing &&
-            Platform.isWindows &&
-            ['offered', 'accepted', 'uploading', 'ready'].contains(f['status']))
-          _showReceipt(item, 'incoming');
-        if (!outgoing &&
-            profile?.autoReceive == false &&
-            f['status'] == 'offered') {
-          _postReceivedNotice(item, 'offered', fileName: '待接收 · ${item.title}');
-        }
+        indexed[id] = item;
+        added.add(id);
       }
+    }
+    for (final members in groupFolderEntries(
+      (t['files'] as List)
+          .map((f) => indexed[f['fileId']])
+          .whereType<DockEntry>(),
+    ).values) {
+      for (final item in members) _folderReceiptMembers[item.id] = members;
+    }
+    for (final f in t['files']) {
+      final id = f['fileId'] as String;
+      final item = indexed[id];
+      if (item == null || _isHiddenDockId(id)) continue;
       item.relativePath = f['relativePath'] ?? item.relativePath;
       item.contentDigest = f['sha256'] ?? item.contentDigest;
       item.entryKind = f['entryKind'] ?? item.entryKind;
@@ -2507,10 +2582,6 @@ class SendController extends ChangeNotifier {
           }
         }
       }
-      if (!outgoing &&
-          Platform.isWindows &&
-          pendingReceipts.containsKey(item.id))
-        changed();
       final requestedPush = f['directPush'];
       final requestedRtc = f['rtc'];
       if (outgoing &&
@@ -2586,6 +2657,27 @@ class SendController extends ChangeNotifier {
               item.isDirectory && f['status'] == 'accepted' ||
               f['status'] == 'accepted' && f['transport'] != 'relay')) {
         unawaited(receive(item, preferDirect: f['status'] == 'accepted'));
+      }
+    }
+    if (!outgoing) {
+      for (final item in collapseFolderCards(
+        (t['files'] as List)
+            .map((f) => indexed[f['fileId']])
+            .whereType<DockEntry>(),
+      )) {
+        if (!added.contains(item.id)) continue;
+        if (Platform.isWindows &&
+            [
+              'offered',
+              'accepted',
+              'uploading',
+              'ready',
+            ].contains(item.status)) {
+          _showReceipt(item, 'incoming');
+        }
+        if (profile?.autoReceive == false && item.status == 'offered') {
+          _postReceivedNotice(item, 'offered', fileName: '待接收 · ${item.title}');
+        }
       }
     }
     unawaited(_releaseCompletedFolderSources());
@@ -3168,6 +3260,12 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> deleteDockEntry(DockEntry item) async {
+    final members = folderCardMembers(item, historyDock).toList()
+      ..sort((a, b) => b.relativePath.length.compareTo(a.relativePath.length));
+    for (final member in members) await _deleteSingleDockEntry(member);
+  }
+
+  Future<void> _deleteSingleDockEntry(DockEntry item) async {
     if (isLocalHistory(item)) {
       final record = _localHistory?.recordFor(item);
       if (record == null) return;
@@ -3287,6 +3385,18 @@ class SendController extends ChangeNotifier {
 
   Future<void> sendStaged(String target) async {
     await sendStagedToMany([target]);
+  }
+
+  Future<void> sendDroppedInputs(
+    String target,
+    List<String> paths,
+    List<String> texts, {
+    List<String> directories = const [],
+  }) async {
+    for (final directory in directories)
+      _directorySources[directory] = directory;
+    await stageInputs(paths, texts);
+    await sendStagedToMany([target], onlyFiles: paths, onlyTexts: texts);
   }
 
   Future<void> clearStaged() async {
@@ -3427,12 +3537,21 @@ class SendController extends ChangeNotifier {
           List<String>.from(event['paths'] ?? []),
           List<String>.from(event['texts'] ?? []),
         );
+        final target = event['targetDeviceId'] as String? ?? '';
+        if (target.isNotEmpty && event['error'] == null) {
+          await sendStagedToMany(
+            [target],
+            onlyFiles: List<String>.from(event['paths'] ?? []),
+            onlyTexts: List<String>.from(event['texts'] ?? []),
+            expectedServerKey: event['serverKey'] as String?,
+          );
+        }
         if (event['error'] != null) message = event['error'];
       } catch (e) {
         for (final path in List<String>.from(event['temporaryPaths'] ?? [])) {
           await _releaseTemporarySource(path);
         }
-        message = '拖入内容暂未加入待发区：$e';
+        message = '拖入操作未完成：$e';
       }
       changed();
     } else if (event['type'] == 'dockState') {
@@ -3492,7 +3611,10 @@ class SendController extends ChangeNotifier {
   void applyTextUpdate(Map<String, dynamic> event) {
     final payload = event['payload'] as Map;
     if (payload['contentId'] is String) {
-      applyTextDocument(Map<String, dynamic>.from(payload), notify: true);
+      applyTextDocument(
+        Map<String, dynamic>.from(payload),
+        notify: event['sourceDeviceId'] != profile?.deviceId,
+      );
       return;
     }
     if (_isHiddenDockId(payload['sourceEventId'] as String) ||
@@ -3769,6 +3891,7 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> approveReceive(DockEntry item, List<String> ids) async {
+    ids = expandFolderSelection(item.transferId, ids);
     final epoch = generation, a = api!, p = profile!;
     for (final entry in dock.where(
       (d) => d.transferId == item.transferId && ids.contains(d.fileId),
@@ -3782,7 +3905,13 @@ class SendController extends ChangeNotifier {
     await acceptSelected(item, ids);
   }
 
-  Future<void> approveRelay(DockEntry item) async {
+  Future<void> approveRelay(DockEntry item) => _folderAction(
+    item,
+    _approveRelayEntry,
+    eligible: (entry) => entry.relayConfirmationPending,
+  );
+
+  Future<void> _approveRelayEntry(DockEntry item) async {
     if (item.locallyCanceled) return;
     final epoch = generation, a = api!, p = profile!;
     item.relayConfirmed = true;
@@ -3881,6 +4010,7 @@ class SendController extends ChangeNotifier {
     List<String> ids, {
     bool reconcileAfter = true,
   }) async {
+    ids = expandFolderSelection(item.transferId, ids);
     final epoch = generation, a = api!, p = profile!;
     final lock = '$epoch:${item.transferId}';
     if (!_acceptingTransfers.add(lock)) return;
@@ -4181,7 +4311,10 @@ class SendController extends ChangeNotifier {
     if (native != null) unawaited(NetworkBridge.cancel(native));
   }
 
-  Future<void> pause(DockEntry item) async {
+  Future<void> pause(DockEntry item) =>
+      _folderAction(item, _pauseEntry, eligible: canControlTransfer);
+
+  Future<void> _pauseEntry(DockEntry item) async {
     if (!canControlTransfer(item) || item.locallyPaused) return;
     item.locallyPaused = true;
     item.status = 'paused';
@@ -4190,7 +4323,10 @@ class SendController extends ChangeNotifier {
     await save();
   }
 
-  Future<void> cancel(DockEntry item) async {
+  Future<void> cancel(DockEntry item) =>
+      _folderAction(item, _cancelEntry, eligible: canControlTransfer);
+
+  Future<void> _cancelEntry(DockEntry item) async {
     final owner = profile, center = api;
     item.status = 'canceled';
     item.locallyCanceled = true;
@@ -4260,7 +4396,13 @@ class SendController extends ChangeNotifier {
     item.receivedBytes = 0;
   }
 
-  Future<void> retry(DockEntry item) async {
+  Future<void> retry(DockEntry item) => _folderAction(
+    item,
+    _retryEntry,
+    eligible: (entry) => entry.status == 'failed' || entry.locallyPaused,
+  );
+
+  Future<void> _retryEntry(DockEntry item) async {
     if (item.locallyPaused) return resume(item);
     return _runFileOperation(item, () async {
       final epoch = generation,
@@ -4311,7 +4453,13 @@ class SendController extends ChangeNotifier {
     });
   }
 
-  Future<void> resume(DockEntry item) async {
+  Future<void> resume(DockEntry item) => _folderAction(
+    item,
+    _resumeEntry,
+    eligible: (entry) => entry.locallyPaused,
+  );
+
+  Future<void> _resumeEntry(DockEntry item) async {
     if (!item.locallyPaused || item.locallyCanceled) return;
     final previous = _fileOperations[item.fileId];
     await previous?.finished.future;
@@ -4436,13 +4584,18 @@ class SendController extends ChangeNotifier {
     DockEntry item, {
     bool preferDirect = false,
     String? routeOverride,
-  }) => _runFileOperation(
+  }) => _folderAction(
     item,
-    () => _receiveFile(
-      item,
-      preferDirect: preferDirect,
-      routeOverride: routeOverride,
+    (member) => _runFileOperation(
+      member,
+      () => _receiveFile(
+        member,
+        preferDirect: preferDirect,
+        routeOverride: routeOverride,
+      ),
     ),
+    eligible: (entry) => !folderMemberComplete(entry),
+    presentationOnly: true,
   );
 
   Future<void> _uploadFile(DockEntry item) async {
@@ -5967,6 +6120,7 @@ class SendController extends ChangeNotifier {
     _groupDocuments.clear();
     latestReceipt = null;
     pendingReceipts.clear();
+    _folderReceiptMembers.clear();
     nativeDismissedReceiptIds.clear();
     _receiptSequence.clear();
     _receiptVersions.clear();

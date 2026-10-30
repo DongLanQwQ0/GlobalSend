@@ -21,6 +21,7 @@ Future<void> showTextViewer(
   required String title,
   required String text,
   bool editable = false,
+  bool closeAfterSave = false,
   Future<void> Function(String)? onSave,
   Future<void> Function(String)? onCopy,
   String copyLabel = '复制',
@@ -44,6 +45,7 @@ Future<void> showTextViewer(
             title: title,
             text: text,
             editable: editable,
+            closeAfterSave: closeAfterSave,
             onSave: onSave,
             onCopy: onCopy,
             copyLabel: copyLabel,
@@ -66,6 +68,7 @@ class _TextViewer extends StatefulWidget {
     required this.title,
     required this.text,
     required this.editable,
+    required this.closeAfterSave,
     required this.copyLabel,
     this.onSave,
     this.onCopy,
@@ -77,7 +80,7 @@ class _TextViewer extends StatefulWidget {
   });
   final String title, text, copyLabel;
   final String? notice;
-  final bool editable;
+  final bool editable, closeAfterSave;
   final TextEditingValue? initialValue;
   final ValueChanged<TextEditingValue>? onDraftChanged;
   final Future<void> Function()? onOpenExternal;
@@ -128,6 +131,7 @@ class _TextViewerState extends State<_TextViewer> {
 
   Future<void> save() async {
     final value = editor.value;
+    final route = ModalRoute.of(context);
     if (saving ||
         widget.onSave == null ||
         value.text.trim().isEmpty ||
@@ -142,6 +146,10 @@ class _TextViewerState extends State<_TextViewer> {
     try {
       await widget.onSave!(value.text);
       if (mounted) {
+        if (widget.closeAfterSave) {
+          if (route?.isCurrent == true) Navigator.of(context).pop();
+          return;
+        }
         setState(() {
           savedText = value.text;
           status = '';
