@@ -28,6 +28,10 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
+Windows和手机当前已更新为 **1.0.55+66**，源码 `beed89f`。55新增本机ABI的普通链接投递，iPad等手动打开设备接收已有文本协议，不需要升级接收端、中心或Web。13项Dart、真实本地中心HTTP/WS、15项原生桥检查通过；Chrona调用端由其owner完成配套构建与UI验收，实际iPad收到仍待确认。55未发布为GitHub Release，也不把包放中心。安装记录见[本机发布记录](../artifacts/releases/latest-local.json)。
+
+以下保留54版用户已验收基线：
+
 2026-10-30本地Windows和Android已更新为 **1.0.54+65**。手机USB安装成功并读回65版，包含增强触感、把手惯性和透明矢量安装图标；用户确认本轮没有问题。左右滚动的146帧无卡顿采样及原生回归证据保留。54尚未发布为GitHub Release，中心无安装包；本轮未进行Windows界面测试，也未构建新IPA。详情以[本机发布记录](../artifacts/releases/latest-local.json)为准。
 
 此前公开版：

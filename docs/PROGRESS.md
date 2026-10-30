@@ -1,4 +1,12 @@
-## 当前交付：Windows / Android 1.0.54+65（2026-10-30）
+## 当前交付：Windows / Android 1.0.55+66（2026-10-30）
+
+- Windows完整包已更新重启；手机USB覆盖安装成功，读回55/code66，安装时间13:27:10，APK16,312,844字节。保留关联和用户数据，未改Chrona、AI或LAN。
+- 新增 `send_link`、`sendLinkV1` 和带 `deliveryMode:link` 的状态查询。普通链接复用已有文本投递，iPad/Web无需新包，旧自动打开合同保持不变。详情见[ABI](INTEGRATION_ABI_V1.md)。
+- 13项Dart、1项真实本地中心HTTP/WS和15项原生检查通过。非自动打开目标收到 `text.created` 链接，未产生打开命令；不把合成接收器记作真实iPad验收。
+- Chrona owner已消费接口与包可用信息，其旧open/新link的竖浅、横暗真触摸各30项通过，补查failed终态并构建调用端中；由该owner完成配套安装和用户实收确认。本轮不使用AVD或测试Windows界面。
+- 中心/Web不重复部署，不构建新IPA，不托管安装包。证据：[交付记录](../artifacts/reports/chrona-link-delivery55.json)。
+
+## 已验收基线：Windows / Android 1.0.54+65（2026-10-30）
 
 - Windows完整包已更新并重启于 `E:\Programs\GlobalSend`；未进行Windows界面测试。
 - 手机USB覆盖安装65版成功，安装时间12:55:01，APK16,310,788字节，源码 `bff0d22`。包含设备目标栏、VSync边缘滚动、把手惯性、展开和进入范围的增强触感、透明矢量安装图标。用户回复“OK”“没有问题了”，本轮停止手机操作。
