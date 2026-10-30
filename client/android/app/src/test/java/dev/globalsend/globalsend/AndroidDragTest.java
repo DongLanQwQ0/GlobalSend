@@ -212,9 +212,9 @@ public class AndroidDragTest {
         Shadows.shadowOf(Looper.getMainLooper()).idle();
         View root = ReflectionHelpers.getField(overlay, "root");
         android.widget.LinearLayout row = ReflectionHelpers.getField(overlay, "row");
-        android.widget.LinearLayout card = (android.widget.LinearLayout) row.getChildAt(0);
+        android.widget.FrameLayout card = (android.widget.FrameLayout) row.getChildAt(0);
         View source = new View(activity);
-        card.addView(source, new android.widget.LinearLayout.LayoutParams(1, 1));
+        card.addView(source, new android.widget.FrameLayout.LayoutParams(1, 1));
         assertTrue(root.isAttachedToWindow());
         assertTrue(DockCoordinator.startDrag(source, null, "回投正文", "文本"));
         assertEquals(true, coordinator.status().get("localSessionActive"));
@@ -243,18 +243,18 @@ public class AndroidDragTest {
         Shadows.shadowOf(Looper.getMainLooper()).idle();
         View root = ReflectionHelpers.getField(overlay, "root");
         android.widget.LinearLayout row = ReflectionHelpers.getField(overlay, "row");
-        android.widget.LinearLayout card = (android.widget.LinearLayout) row.getChildAt(0);
+        android.widget.FrameLayout card = (android.widget.FrameLayout) row.getChildAt(0);
         View source = new View(activity);
-        card.addView(source, new android.widget.LinearLayout.LayoutParams(1, 1));
+        card.addView(source, new android.widget.FrameLayout.LayoutParams(1, 1));
         assertTrue(DockCoordinator.startDrag(source, null, "拖动中", "文本"));
         overlay.show(new ReceiveNotifications.Receipt("two", "1", "手机", "新内容", null, null, 0), 2, shown -> { });
-        assertEquals(1, row.getChildCount());
+        assertEquals(3, row.getChildCount()); // one card, clear, open-app space
         assertSame(card, row.getChildAt(0));
         assertTrue(source.isAttachedToWindow());
         DockCoordinator.LocalDrag local = (DockCoordinator.LocalDrag) NativeDragView.states.get(0);
         coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED, local, 0, 0));
         assertSame(root, ReflectionHelpers.getField(overlay, "root"));
-        assertEquals(2, row.getChildCount());
+        assertEquals(4, row.getChildCount()); // two cards, clear, open-app space
         overlay.hide();
     }
 
