@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +6,16 @@ import 'package:globalsend/content_groups.dart';
 import 'package:globalsend/controller.dart';
 import 'package:globalsend/models.dart';
 import 'package:globalsend/saved_files.dart';
+
+class DeferredFolderSaveController extends SendController {
+  final saveGate = Completer<void>();
+  int saves = 0;
+  @override
+  Future<void> save() {
+    saves++;
+    return saveGate.future;
+  }
+}
 
 DockEntry entry(
   String id,
@@ -28,13 +39,80 @@ DockEntry entry(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  for (final cancel in [false, true]) {
+    test(
+      'folder ${cancel ? 'cancel' : 'pause'} stops every member before persistence',
+      () async {
+        final c = DeferredFolderSaveController();
+        addTearDown(c.dispose);
+        final root = entry('root', '资料', directory: true, status: 'received');
+        final children = [
+          for (var i = 0; i < 2000; i++)
+            entry('child$i', '资料/$i.txt', size: 100, status: 'accepted'),
+        ];
+        final loose = entry('loose', '', status: 'accepted');
+        c.dock.addAll([root, ...children, loose]);
+        final card = mergeContentCards(c.historyDock)
+            .whereType<FolderCardEntry>()
+            .single;
+        var publications = 0;
+        c.addListener(() => publications++);
+        final work = cancel ? c.cancel(card) : c.pause(card);
+        try {
+          expect(
+            children.every(
+              (item) => item.status == (cancel ? 'canceled' : 'paused'),
+            ),
+            isTrue,
+          );
+          expect(root.status, 'received');
+          expect(loose.status, 'accepted');
+          expect(publications, 1);
+          expect(c.saves, lessThanOrEqualTo(1));
+        } finally {
+          c.saveGate.complete();
+          await work;
+        }
+        expect(c.saves, 1);
+      },
+    );
+  }
   test('offered children share one receipt, even when the root is last in the manifest', () {
-    final c = SendController()..profile = ServerProfile(baseUrl: 'https://fixture.invalid', instanceId: 'one', deviceId: 'receiver');
+    final c = SendController()
+      ..profile = ServerProfile(
+        baseUrl: 'https://fixture.invalid',
+        instanceId: 'one',
+        deviceId: 'receiver',
+      );
     c.profile!.autoReceive = false;
     addTearDown(c.dispose);
-    c.updateTransfer({'transferId': 'offered', 'sourceDeviceId': 'sender', 'targetDeviceId': 'receiver',
-      'files': [for (var i = 0; i < 1000; i++) {'fileId': 'f$i', 'name': '$i.txt', 'relativePath': '资料/$i.txt', 'size': 10, 'offset': 0, 'status': 'offered', 'transport': 'relay'},
-        {'fileId': 'root', 'name': '资料', 'relativePath': '资料', 'entryKind': 'directory', 'size': 0, 'offset': 0, 'status': 'offered', 'transport': 'relay'}]});
+    c.updateTransfer({
+      'transferId': 'offered',
+      'sourceDeviceId': 'sender',
+      'targetDeviceId': 'receiver',
+      'files': [
+        for (var i = 0; i < 1000; i++)
+          {
+            'fileId': 'f$i',
+            'name': '$i.txt',
+            'relativePath': '资料/$i.txt',
+            'size': 10,
+            'offset': 0,
+            'status': 'offered',
+            'transport': 'relay',
+          },
+        {
+          'fileId': 'root',
+          'name': '资料',
+          'relativePath': '资料',
+          'entryKind': 'directory',
+          'size': 0,
+          'offset': 0,
+          'status': 'offered',
+          'transport': 'relay',
+        },
+      ],
+    });
     expect(c.dock.length, 1001);
     expect(c.pendingReceipts.length, 1);
     expect(c.pendingReceipts.values.single.id, 'root');

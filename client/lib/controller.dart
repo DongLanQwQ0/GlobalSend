@@ -881,20 +881,32 @@ class SendController extends ChangeNotifier {
     return root == null ? item : FolderCardEntry(root, members);
   }
 
+  List<DockEntry> _folderActionMembers(
+    DockEntry item, {
+    bool Function(DockEntry)? eligible,
+    bool presentationOnly = false,
+  }) {
+    final grouped =
+        item.isDirectory && (!presentationOnly || item is FolderCardEntry);
+    return grouped
+        ? folderCardMembers(
+            item,
+            historyDock,
+          ).where((entry) => eligible == null || eligible(entry)).toList()
+        : [item];
+  }
+
   Future<void> _folderAction(
     DockEntry item,
     Future<void> Function(DockEntry) action, {
     bool Function(DockEntry)? eligible,
     bool presentationOnly = false,
   }) async {
-    final grouped =
-        item.isDirectory && (!presentationOnly || item is FolderCardEntry);
-    final members = grouped
-        ? folderCardMembers(
-            item,
-            historyDock,
-          ).where((entry) => eligible == null || eligible(entry)).toList()
-        : [item];
+    final members = _folderActionMembers(
+      item,
+      eligible: eligible,
+      presentationOnly: presentationOnly,
+    );
     for (var index = 0; index < members.length; index += 4) {
       await Future.wait(members.skip(index).take(4).map(action));
     }
@@ -4318,58 +4330,75 @@ class SendController extends ChangeNotifier {
     if (native != null) unawaited(NetworkBridge.cancel(native));
   }
 
-  Future<void> pause(DockEntry item) =>
-      _folderAction(item, _pauseEntry, eligible: canControlTransfer);
-
-  Future<void> _pauseEntry(DockEntry item) async {
-    if (!canControlTransfer(item) || item.locallyPaused) return;
-    item.locallyPaused = true;
-    item.status = 'paused';
-    _stopFile(item);
+  Future<void> pause(DockEntry item) async {
+    final members = _folderActionMembers(item, eligible: canControlTransfer)
+        .where((entry) => canControlTransfer(entry) && !entry.locallyPaused)
+        .toList();
+    if (members.isEmpty) return;
+    for (final entry in members) {
+      entry.locallyPaused = true;
+      entry.status = 'paused';
+      _stopFile(entry);
+    }
     changed();
     await save();
   }
 
-  Future<void> cancel(DockEntry item) =>
-      _folderAction(item, _cancelEntry, eligible: canControlTransfer);
-
-  Future<void> _cancelEntry(DockEntry item) async {
+  Future<void> cancel(DockEntry item) async {
     final owner = profile, center = api;
-    item.status = 'canceled';
-    item.locallyCanceled = true;
-    item.locallyPaused = false;
-    item.relayConfirmationPending = false;
-    item.relayPendingBeforeAccept = false;
-    _stopFile(item);
+    final members = _folderActionMembers(item, eligible: canControlTransfer);
+    if (members.isEmpty) return;
+    // Stop the entire tree before persistence or per-file cleanup can yield.
+    for (final entry in members) {
+      entry.status = 'canceled';
+      entry.locallyCanceled = true;
+      entry.locallyPaused = false;
+      entry.relayConfirmationPending = false;
+      entry.relayPendingBeforeAccept = false;
+      _stopFile(entry);
+    }
     changed();
-    // Neither a slow center nor transport teardown delays the local action.
-    if (center != null)
-      unawaited(
-        ConnectionWindow(const Duration(seconds: 3))
-            .run(() => center.call('POST', '${fileRoute(item)}/cancel', {}))
-            .catchError((Object _) => <String, dynamic>{}),
-      );
-    Future<void> finishLocalCancel() async {
-      await _fileOperations[item.fileId]?.finished.future;
+    Future<void> discard(DockEntry entry) async {
+      await _fileOperations[entry.fileId]?.finished.future;
+      if (owner != null &&
+          !entry.outgoing &&
+          !busyFiles.contains(entry.fileId)) {
+        await _discardPartial(entry, owner);
+      }
+    }
+
+    Future<void> finishActive(DockEntry entry) async {
       try {
-        if (owner != null &&
-            !item.outgoing &&
-            !busyFiles.contains(item.fileId)) {
-          await _discardPartial(item, owner);
-        }
+        await discard(entry);
       } finally {
         await save();
         if (!disposed) changed();
       }
     }
 
-    if (_fileOperations.containsKey(item.fileId) ||
-        busyFiles.contains(item.fileId)) {
-      unawaited(finishLocalCancel());
-    } else {
-      await finishLocalCancel();
+    final idle = <DockEntry>[];
+    for (final entry in members) {
+      // Neither a slow center nor active transport teardown delays local stop.
+      if (center != null)
+        unawaited(
+          ConnectionWindow(const Duration(seconds: 3))
+              .run(() => center.call('POST', '${fileRoute(entry)}/cancel', {}))
+              .catchError((Object _) => <String, dynamic>{}),
+        );
+      if (_fileOperations.containsKey(entry.fileId) ||
+          busyFiles.contains(entry.fileId)) {
+        unawaited(finishActive(entry));
+      } else {
+        idle.add(entry);
+      }
     }
-    await save();
+    try {
+      for (var index = 0; index < idle.length; index += 4) {
+        await Future.wait(idle.skip(index).take(4).map(discard));
+      }
+    } finally {
+      await save();
+    }
   }
 
   Future<File?> _defaultPartial(DockEntry item, ServerProfile owner) async {
