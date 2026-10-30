@@ -28,7 +28,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows和手机当前已更新为 **1.0.55+66**，源码 `beed89f`。55新增本机ABI的普通链接投递，iPad等手动打开设备接收已有文本协议，不需要升级接收端、中心或Web。13项Dart、真实本地中心HTTP/WS、15项原生桥检查通过；Chrona调用端由其owner完成配套构建与UI验收，实际iPad收到仍待确认。55未发布为GitHub Release，也不把包放中心。安装记录见[本机发布记录](../artifacts/releases/latest-local.json)。
+Windows和手机当前已更新为 **1.0.55+66**，源码 `beed89f`。55新增本机ABI的普通链接投递，iPad等手动打开设备接收已有文本协议，不需要升级接收端、中心或Web。13项Dart、真实本地中心HTTP/WS、15项原生桥检查通过；Chrona已配套安装0.15.70/232，旧open/新link的竖浅、横暗原生检查各32项及UI复审通过。fresh设备列表未出现明确iPad，实际收件由用户后续确认，未向猜测目标发送。55未发布为GitHub Release，也不把包放中心。安装记录见[本机发布记录](../artifacts/releases/latest-local.json)。
 
 以下保留54版用户已验收基线：
 

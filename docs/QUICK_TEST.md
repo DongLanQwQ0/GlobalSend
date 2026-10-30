@@ -5,7 +5,7 @@
 截至 2026-10-30，本地候选与公开发布分别为：
 
 - Windows **1.0.55+66** 本地候选已完整更新并启动于 `E:\Programs\GlobalSend`；本轮不进行Windows界面测试。[开机启动与后台参数](WINDOWS_STARTUP.md)保持默认关闭，登录启动、不抢焦点及托盘恢复仍待手动验收。
-- [Android arm64 候选 APK](../artifacts/releases/GlobalSend-1.0.55-android-arm64-v8a.apk)约16.3 MB。手机已覆盖66版（16,312,844字节），新增Chrona普通链接投递；配套Chrona调用端仍在构建/验收，真实iPad收件不能据本地HTTP检查宣称通过。54版图标与触感的用户验收保留。49的APK打开安装与48的微信图片投放验收保留。
+- [Android arm64 候选 APK](../artifacts/releases/GlobalSend-1.0.55-android-arm64-v8a.apk)约16.3 MB。手机已覆盖66版（16,312,844字节），新增Chrona普通链接投递；配套Chrona已安装0.15.70/232。选择不支持自动打开的iPad时发送普通链接，用户点击打开；fresh列表暂未识别到iPad，真实收件待用户确认。54版图标与触感的用户验收保留。49的APK打开安装与48的微信图片投放验收保留。
 - [Windows 完整候选包](../artifacts/releases/GlobalSend-1.0.55-windows-x64.zip)，不要只复制EXE。[GitHub公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)仍为50版；55尚未发布为Release。中心不托管包。
 - 中心及[网页版](https://123.207.180.163/globalsend/app/)已部署多组连接、流式中继和链接识别，镜像 `globalsend:multi-group-20261029-1620`。iPad另提供53版分享唤起、系统设备建议和唯一ID定向发送，不需要中心升级。
 
