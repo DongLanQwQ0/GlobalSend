@@ -6,9 +6,9 @@
 
 若当前版本/构建号已有 Windows 或 Android Release，应选择它的源码 Tag 运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。
 
-最新为 **1.0.58（74）**，源码 `d51ee61`：[构建记录](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41082221792) / [GitHub 下载](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.58-build74)。本地文件：`artifacts/releases/ios-1.0.58-build74/GlobalSend-iPad-unsigned.ipa`，14,812,295 字节。主应用与分享扩展均为真机 arm64，App Group 模板匹配，无内置字体；未签名，需用原账号手动覆盖安装。
+最新为 **1.0.59（76）**，源码 `0be2951`：[构建记录](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41145352554) / [GitHub 下载](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.59-build76)。本地文件：`artifacts/releases/ios-1.0.59-build76/GlobalSend-iPad-unsigned.ipa`，14,828,084 字节。主应用与分享扩展均为真机 arm64，App Group 模板匹配，无内置字体；未签名，需用原账号手动覆盖安装。
 
-本版补齐 UIKit `UIDragInteraction` / `UIDropInteraction`：文件、媒体、网址和文本可拖入待发区，也可直接投到设备卡片，只发送投下的这一批、不带走其它草稿；收到的内容可系统拖出。文件夹按原目录结构传输、列表只展示根卡片。已发送文本保存成功即关闭。编译和归档检查已通过，实际拖入、拖出、分享建议、右滑返回与缩放仍需 iPad 安装后确认。
+本版保留 UIKit 原生拖入、拖出，并修复直接投到设备时只高亮目标卡片、无后缀图片的文件名补齐。发送页新增剪贴板建议，点击后才导入，图片和文件复用系统提供方导入器，不自动发送。文件夹按原目录结构传输、列表只展示根卡片；已发送文本保存成功即关闭。用户已实测73版文件拖放可用，76版高亮、后缀和剪贴板授权仍需安装后确认。
 
 安装后先分享一张图片，确认打开GlobalSend并显示在待发送。需要直接发给设备时，先在GlobalSend给该设备正常发送一次，再到其他应用打开系统分享面板，选择第一排带GlobalSend标记的设备建议。建议是否显示及顺序由iPadOS决定；点击普通GlobalSend应用图标仍只加入待发送，不读取旧默认目标。指定设备分享应只发送本批，不包含原有草稿。详细入口及接口见[系统分享设备快捷项](MOBILE_SHARING.md#系统分享面板里的设备快捷项ios--ipados-53版)。
 

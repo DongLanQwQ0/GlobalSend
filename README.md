@@ -10,13 +10,13 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows / Android 最新本地版为 **1.0.58+74**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`，手机已保留数据覆盖安装。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
+Windows / Android 最新本地版为 **1.0.59+76**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`；Android 新包已构建，手机断开未安装，最后确认安装的是 1.0.58+74。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.58-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.59-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.58+73 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.58-android-arm64-v8a.apk)已验签、不打包字体。图片／视频建议放在暂存末尾，已删除媒体自动移除建议；清空与建议之间保留双击空白。建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留：iPad 等不能远程打开浏览器的设备收到链接后手动点击。实际安装与验收见[短步骤](docs/QUICK_TEST.md)和[本机发布记录](artifacts/releases/latest-local.json)。
+Android [1.0.59+76 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.59-android-arm64-v8a.apk)已验签、不打包字体。图片／视频建议放在暂存末尾，已删除媒体自动移除建议；清空与建议之间保留双击空白。建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留：iPad 等不能远程打开浏览器的设备收到链接后手动点击。实际安装与验收见[短步骤](docs/QUICK_TEST.md)和[本机发布记录](artifacts/releases/latest-local.json)。
 
-iPad / iPhone 的[**1.0.58 (74) 未签名 IPA，约14.8 MB**](artifacts/releases/ios-1.0.58-build74/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。接入 UIKit 原生拖入、拖出；普通系统分享唤起待发送，选系统设备建议才按唯一 ID 自动发送本批。由用户用 iloader 手动签名安装，真机拖放待确认，见[iPad说明](docs/IPAD.md)。**中心不托管安装包；[Windows/Android 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iOS 1.0.58+73](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.58-build74)分别提供对应平台包和更新清单。**
+iPad / iPhone 的[**1.0.59 (76) 未签名 IPA，约14.8 MB**](artifacts/releases/ios-1.0.59-build76/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。接入 UIKit 原生拖入、拖出；普通系统分享唤起待发送，选系统设备建议才按唯一 ID 自动发送本批。由用户用 iloader 手动签名安装，76版真机交互待确认，见[iPad说明](docs/IPAD.md)。**中心不托管安装包；[Windows/Android 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iOS 1.0.59+76](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.59-build76)分别提供对应平台包和更新清单。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 
@@ -26,7 +26,7 @@ Web 的“本机文件”两列库支持图片/文本预览、排序、多选、
 
 ## 收发工作区
 
-正在构建的 1.0.59 新增[剪贴板建议](docs/CLIPBOARD_SUGGESTIONS.md)：发送页及 Android 暂存坞可点击添加当前剪贴板，不自动发送。已交付包仍以上方版本和本机发布记录为准。
+1.0.59 新增[剪贴板建议](docs/CLIPBOARD_SUGGESTIONS.md)：发送页及 Android 暂存坞可点击添加当前剪贴板，不自动发送；Web 在已有读取权限时显示建议，未授权时保留剪贴板按钮。
 
 - **外观**：设置中可切换亮色、暗色、中性灰或跟随系统，以及绿、蓝、紫、玫瑰、琥珀、石板六种主题色。即时生效、在本机记住，不随分组切换；图片保持原色，Android 系统拖影同步使用当前配色。
 - **Android 暂存坞**：设置“接收与暂存坞”开关控制，接收和暂存分开。可贴边收起、多批拖入、单项或全部系统拖出；成功暂存项标红，3秒后移除引用，轻点或再次拖动取消整批移除。原文件与接收记录不删除，见 [说明](docs/TEMPORARY_SHELF.md)。发送区“应用”可选择本机安装包；拆分应用按目录保留全部 APK。
