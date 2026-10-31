@@ -83,6 +83,8 @@ class SystemBridge {
     required List<Map<String, dynamic>> items,
     required int serial,
     Map<String, String>? appearance,
+    List<Map<String, dynamic>> devices = const [],
+    String serverKey = '',
   }) async {
     if (!Platform.isWindows) {
       return const {'presentation': 'main', 'shown': true};
@@ -90,6 +92,8 @@ class SystemBridge {
     _install();
     final state = Map<String, dynamic>.from(
       await channel.invokeMethod<Map>('presentReceiveDock', {
+            'devices': devices,
+            'serverKey': serverKey,
             'items': items,
             'serial': serial,
             if (appearance != null) 'appearance': appearance,

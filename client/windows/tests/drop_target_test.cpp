@@ -231,6 +231,31 @@ int main() {
   assert(effect == DROPEFFECT_COPY); // external whole-window input is preserved
   excluded->DragLeave();
   excluded->Release();
+  bool ready = false;
+  std::vector<bool> tracking;
+  int receiver_drops = 0;
+  const int before_hover = data->releases;
+  auto* receiver = CreateGlobalSendDropTarget({{}, [&](GlobalSendDroppedContent value) {
+      assert(value.paths == paths); ++receiver_drops;
+    }, [] { return true; }, [&](POINTL) { return ready; }, {}, {},
+    [&](bool active, POINTL) { tracking.push_back(active); }});
+  effect = DROPEFFECT_COPY;
+  receiver->DragEnter(data, 0, POINTL{30,60}, &effect);
+  assert(effect == DROPEFFECT_NONE && tracking.back());
+  effect = DROPEFFECT_COPY;
+  receiver->DragOver(0, POINTL{40,60}, &effect);
+  assert(effect == DROPEFFECT_NONE && tracking.back() && data->releases == before_hover);
+  receiver->DragLeave(); assert(!tracking.back());
+  effect = DROPEFFECT_COPY;
+  receiver->DragEnter(data, 0, POINTL{30,60}, &effect);
+  ready = true; // The UI publishes a selected device after its dwell threshold.
+  effect = DROPEFFECT_COPY;
+  receiver->DragOver(0, POINTL{30,60}, &effect);
+  assert(effect == DROPEFFECT_COPY);
+  effect = DROPEFFECT_COPY;
+  receiver->Drop(data, 0, POINTL{30,60}, &effect);
+  assert(effect == DROPEFFECT_COPY && receiver_drops == 1 && !tracking.back());
+  receiver->Release();
   assert(target->QueryInterface(IID_IUnknown, reinterpret_cast<void**>(&identity)) == S_OK);
   assert(identity->Release() == 1);
   assert(target->Release() == 0);

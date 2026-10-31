@@ -77,6 +77,8 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         .toList();
     final encoded = jsonEncode({
       'items': items,
+      'devices': controller.sendablePeers,
+      'serverKey': controller.profile?.key ?? '',
       'appearance': controller.appearance.value.toJson(),
     });
     if (controller.receiptSerial == receiptSerial &&
@@ -113,6 +115,8 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         items: items,
         serial: serial,
         appearance: controller.appearance.value.toJson(),
+        devices: controller.sendablePeers,
+        serverKey: controller.profile?.key ?? '',
       );
       if (!mounted ||
           request != presentationRequest ||
@@ -142,6 +146,11 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           .where((item) => item.id == id)
           .firstOrNull;
       switch (action['action']) {
+        case 'dropToDevice':
+          await controller.handleNativeDockEvent({
+            ...action,
+            'type': 'nativeDrop',
+          });
         case 'close':
           controller.dismissReceipts(
             List<String>.from(action['itemIds'] ?? []),

@@ -41,6 +41,7 @@ public class ReceiveOverlayDeviceTargetsTest {
     private ReceiveOverlay overlay;
     private View root;
     private MethodCall sent;
+    private MethodCall imported;
     private BinaryMessenger.BinaryReply reply;
     private Object field(Object owner,String name) throws Exception {
         return ReflectionHelpers.getField(owner,name);
@@ -56,6 +57,7 @@ public class ReceiveOverlayDeviceTargetsTest {
                 ByteBuffer copy=message.duplicate();copy.flip();
                 MethodCall call=StandardMethodCodec.INSTANCE.decodeMethodCall(copy);
                 if(call.method.equals("sendToDevice")){sent=call;reply=callback;}
+                if(call.method.equals("nativeDrop"))imported=call;
             }
             public void setMessageHandler(String channel,BinaryMessageHandler handler) { }
         },"dock-test"));
@@ -106,6 +108,115 @@ public class ReceiveOverlayDeviceTargetsTest {
         List<Map<String,String>> devices=new ArrayList<>();
         for(int i=0;i<8;i++)devices.add(Map.of("deviceId","id-"+i,"name",i<2?"同名设备":"设备 "+i,"platform",i%2==0?"windows":"android"));
         devices.add(devices.get(0));coordinator.updateSendTargets("center",devices);
+    }
+    private boolean incoming(int action,ClipData clip,float x,float y) {
+        DragEvent event=ReflectionHelpers.callConstructor(DragEvent.class);
+        ReflectionHelpers.setField(event,"mAction",action);
+        ReflectionHelpers.setField(event,"mX",x);ReflectionHelpers.setField(event,"mY",y);
+        ReflectionHelpers.setField(event,"mClipDescription",clip.getDescription());
+        // Other apps expose the data/grant at DROP, not at hover time.
+        if(action==DragEvent.ACTION_DROP)ReflectionHelpers.setField(event,"mClipData",clip);
+        return root.dispatchDragEvent(event);
+    }
+    private void waitForImport() throws Exception {
+        for(int i=0;i<200 && imported==null;i++){Thread.sleep(5);idle(10);}
+        assertNotNull("dropped payload reaches the existing native importer",imported);
+    }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void incomingHoverWaitsTwoSecondsThenSendsActualTextWithoutStoringInShelf() throws Exception {
+        targets();ClipData clip=ClipData.newPlainText("outside","外部拖入的文本");
+        assertTrue(incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55));
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(1500);
+        Object hover=field(overlay,"sendTargetHover");
+        incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);
+        assertSame("layout re-dispatch does not restart dwell",hover,field(overlay,"sendTargetHover"));
+        incoming(DragEvent.ACTION_DRAG_LOCATION,clip,65,55);idle(499);
+        assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
+        assertNull(imported);assertNull(sent);
+        idle(1);draw();root.getViewTreeObserver().dispatchOnPreDraw();idle(150);
+        assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
+        assertNotNull("stationary pointer is resolved after target layout",field(overlay,"hoveredTarget"));
+        org.robolectric.shadows.ShadowChoreographer.setPaused(false);idle(250);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);draw();
+        capture("incoming-device-mode");
+        Rect target=bounds(((LinearLayout)field(overlay,"targetRow")).getChildAt(0));
+        assertTrue(incoming(DragEvent.ACTION_DROP,clip,target.centerX(),target.centerY()));
+        incoming(DragEvent.ACTION_DRAG_ENDED,clip,0,0);waitForImport();
+        assertEquals("id-0",imported.argument("targetDeviceId"));assertEquals("center",imported.argument("serverKey"));
+        assertEquals(List.of("外部拖入的文本"),imported.argument("texts"));
+        assertTrue(((TemporaryShelf)field(overlay,"shelf")).items.isEmpty());
+        assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
+        assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
+    }
+    @Test public void leavingEndingOrHidingCancelsHoverAndEarlyDropStillStoresContent() throws Exception {
+        targets();ClipData clip=ClipData.newPlainText("outside","快速放入暂存");
+        incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(1900);
+        incoming(DragEvent.ACTION_DRAG_EXITED,clip,-1,55);idle(300);
+        assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(1999);
+        assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
+        incoming(DragEvent.ACTION_DRAG_ENDED,clip,0,0);idle(100);
+        assertNull(field(overlay,"forwarding"));assertNull(field(overlay,"sendTargetHover"));
+        incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(500);
+        assertTrue(incoming(DragEvent.ACTION_DROP,clip,60,55));
+        incoming(DragEvent.ACTION_DRAG_ENDED,clip,0,0);
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        for(int i=0;i<200 && shelf.items.isEmpty();i++){Thread.sleep(5);idle(10);}
+        assertEquals(1,shelf.items.size());assertEquals("快速放入暂存",shelf.items.values().iterator().next().text);
+        idle(2100);assertNull(field(overlay,"forwarding"));assertNull(imported);
+        incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);overlay.hide();idle(2100);
+        assertNull(field(overlay,"root"));assertNull(field(overlay,"sendTargetHover"));
+    }
+    @Test public void incomingFileIsNotReadUntilDroppedOnTheSelectedDevice() throws Exception {
+        targets();java.io.File directory=new java.io.File(activity.getCacheDir(),"hover-fixture");directory.mkdirs();
+        java.io.File source=new java.io.File(directory,"hover.bin");java.nio.file.Files.write(source.toPath(),"real file bytes".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        CountingProvider provider=new CountingProvider();provider.directory=directory;
+        android.content.pm.ProviderInfo info=new android.content.pm.ProviderInfo();info.authority="hover-fixture";
+        provider.attachInfo(activity,info);org.robolectric.shadows.ShadowContentResolver.registerProviderInternal(info.authority,provider);
+        ClipData clip=ClipData.newUri(activity.getContentResolver(),"outside file",android.net.Uri.parse("content://hover-fixture/hover.bin"));
+        incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);
+        idle(2000);draw();root.getViewTreeObserver().dispatchOnPreDraw();idle(150);assertEquals(0,provider.opens);assertNull(imported);
+        assertEquals("inside="+field(overlay,"dragInside")+", dragging="+field(overlay,"suggestionDrag")+", collapsed="+field(overlay,"collapsed"),View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
+        Rect target=bounds(((LinearLayout)field(overlay,"targetRow")).getChildAt(1));
+        assertTrue(incoming(DragEvent.ACTION_DROP,clip,target.centerX(),target.centerY()));
+        incoming(DragEvent.ACTION_DRAG_ENDED,clip,0,0);waitForImport();
+        assertEquals("id-1",imported.argument("targetDeviceId"));assertEquals(1,provider.opens);
+        List<String> paths=imported.argument("paths");assertEquals(1,paths.size());
+        assertTrue(paths.get(0).endsWith("hover.bin"));
+        assertEquals("real file bytes",new String(java.nio.file.Files.readAllBytes(new java.io.File(paths.get(0)).toPath()),java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue(((TemporaryShelf)field(overlay,"shelf")).items.isEmpty());
+    }
+    public static class CountingProvider extends AndroidDragTest.FixtureProvider {
+        int opens;
+        @Override public android.os.ParcelFileDescriptor openFile(android.net.Uri uri,String mode) throws java.io.FileNotFoundException {
+            opens++;return super.openFile(uri,mode);
+        }
+    }
+    @Test public void collapsedHandleExpandsAndEntersDeviceModeWithoutFurtherPointerMotion() throws Exception {
+        targets();overlay.setCollapsed(true);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(false);idle(400);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);draw();
+        ClipData clip=ClipData.newPlainText("outside","停留在把手");
+        incoming(DragEvent.ACTION_DRAG_STARTED,clip,8,25);
+        long entered=android.os.SystemClock.uptimeMillis();
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,8,25);
+        Object hover=field(overlay,"sendTargetHover");
+        idle(249);
+        assertTrue((Boolean)field(overlay,"collapsed"));
+        // Drain window traversals during the morph: pausing VSync across a
+        // relayout leaves Android's synchronization barrier blocking Handler.
+        org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+        idle(1);assertFalse((Boolean)field(overlay,"collapsed"));idle(300);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        long remaining=entered+2001-android.os.SystemClock.uptimeMillis();
+        if(remaining>0)idle(remaining);
+        draw();root.getViewTreeObserver().dispatchOnPreDraw();
+        assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
+        incoming(DragEvent.ACTION_DRAG_ENDED,clip,0,0);idle(200);
+        assertNull(field(overlay,"forwarding"));assertNull(sent);assertNull(imported);
     }
     private TemporaryShelf begin() throws Exception {return begin(false);}
     private TemporaryShelf begin(boolean all) throws Exception {

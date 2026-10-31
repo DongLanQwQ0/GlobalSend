@@ -64,6 +64,7 @@ class DropTarget final : public IDropTarget {
   HRESULT STDMETHODCALLTYPE DragLeave() override {
     supported_ = false;
     Hover(false);
+    if (callbacks_.tracking_at) callbacks_.tracking_at(false, last_point_);
     if (image_) image_->DragLeave();
     return S_OK;
   }
@@ -74,13 +75,18 @@ class DropTarget final : public IDropTarget {
     supported_ = false;
     Hover(false);
     POINT screen{point.x, point.y};
-    if (!copy) { if (image_) image_->Drop(data, &screen, *effect); return S_OK; }
+    if (!copy) {
+      if (callbacks_.tracking_at) callbacks_.tracking_at(false, point);
+      if (image_) image_->Drop(data, &screen, *effect);
+      return S_OK;
+    }
     GlobalSendDroppedContent content;
     const bool imported = ReadGlobalSendDrop(data, &content);
     content.screen_point = point;
     content.has_screen_point = true;
     if (imported || !content.error.empty()) callbacks_.drop(std::move(content));
     if (imported) *effect = DROPEFFECT_COPY;
+    if (callbacks_.tracking_at) callbacks_.tracking_at(false, point);
     if (image_) image_->Drop(data, &screen, *effect);
     return S_OK;
   }
@@ -101,6 +107,7 @@ class DropTarget final : public IDropTarget {
     } else if (changed && callbacks_.hover) callbacks_.hover(active);
   }
   void SetEffect(POINTL point, DWORD* effect) {
+    if (callbacks_.tracking_at) callbacks_.tracking_at(supported_, point);
     const bool copy = supported_ && Allows(point) && (*effect & DROPEFFECT_COPY) != 0;
     *effect = copy ? DROPEFFECT_COPY : DROPEFFECT_NONE;
     Hover(copy, point);

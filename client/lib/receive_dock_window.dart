@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'compact_content_card.dart';
 import 'bulk_file_drag.dart';
@@ -18,6 +19,7 @@ import 'ui_tokens.dart';
 import 'appearance.dart';
 import 'received_order.dart';
 import 'incoming_receipt_state.dart';
+import 'android_queue_drop_host.dart';
 
 final _batchDragMarker = Object();
 final _dockContentMarker = Object();
@@ -37,12 +39,177 @@ class ReceiveDockApp extends StatefulWidget {
 }
 
 class _ReceiveDockAppState extends State<ReceiveDockApp>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   Map<String, dynamic> payload = {};
   int revision = 0;
   bool presented = false;
   String error = '';
   final scroll = ScrollController();
+  final deviceScroll = ScrollController();
+  final deviceKeys = <String, GlobalKey>{};
+  final dropQueueKey = GlobalKey();
+  Timer? hoverTimer;
+  bool dropInside = false, deviceMode = false;
+  String hoverDevice = '';
+  Offset dropPointer = Offset.zero;
+  late final Ticker edgeTicker;
+  Duration lastEdgeFrame = Duration.zero;
+
+  void dropHover(Map event) {
+    final active = event['active'] == true;
+    dropPointer =
+        Offset(
+          (event['x'] as num? ?? 0).toDouble(),
+          (event['y'] as num? ?? 0).toDouble(),
+        ) /
+        View.of(context).devicePixelRatio;
+    if (!active) {
+      hoverTimer?.cancel();
+      hoverTimer = null;
+      edgeTicker.stop();
+      dropInside = false;
+      if (deviceMode || hoverDevice.isNotEmpty)
+        setState(() {
+          deviceMode = false;
+          hoverDevice = '';
+        });
+      return;
+    }
+    if (!dropInside) {
+      dropInside = true;
+      hoverTimer = Timer(const Duration(seconds: 2), () {
+        hoverTimer = null;
+        if (!mounted || !dropInside) return;
+        setState(() => deviceMode = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) updateEdgeScroll();
+        });
+      });
+    }
+    final target = event['targetDeviceId'] as String? ?? '';
+    if (target != hoverDevice) setState(() => hoverDevice = target);
+    updateEdgeScroll();
+  }
+
+  double get edgeDirection {
+    final width =
+        View.of(context).physicalSize.width / View.of(context).devicePixelRatio;
+    if (dropPointer.dx < 36)
+      return -((36 - dropPointer.dx) / 36).clamp(0.0, 1.0);
+    if (dropPointer.dx > width - 36)
+      return ((dropPointer.dx - width + 36) / 36).clamp(0.0, 1.0);
+    return 0;
+  }
+
+  void updateEdgeScroll() {
+    if (!deviceMode ||
+        !dropInside ||
+        edgeDirection == 0 ||
+        !deviceScroll.hasClients ||
+        deviceScroll.position.maxScrollExtent == 0) {
+      edgeTicker.stop();
+      return;
+    }
+    if (!edgeTicker.isActive) {
+      lastEdgeFrame = Duration.zero;
+      edgeTicker.start();
+    }
+  }
+
+  void scrollDeviceEdge(Duration elapsed) {
+    final seconds = (elapsed - lastEdgeFrame).inMicroseconds / 1000000;
+    lastEdgeFrame = elapsed;
+    if (!deviceMode ||
+        !dropInside ||
+        !deviceScroll.hasClients ||
+        edgeDirection == 0) {
+      edgeTicker.stop();
+      return;
+    }
+    final direction = edgeDirection;
+    final distance =
+        direction.sign *
+        (60 + 360 * direction.abs()) *
+        seconds.clamp(0.0, .032);
+    final next = (deviceScroll.offset + distance).clamp(
+      0.0,
+      deviceScroll.position.maxScrollExtent,
+    );
+    if (next == deviceScroll.offset && seconds > 0) {
+      edgeTicker.stop();
+      return;
+    }
+    deviceScroll.jumpTo(next);
+  }
+
+  Widget sendDevices() {
+    final seen = <String>{};
+    final devices = [
+      for (final value in payload['devices'] as List? ?? const [])
+        if (value is Map &&
+            value['deviceId'] is String &&
+            seen.add(value['deviceId'] as String))
+          Map<String, dynamic>.from(value),
+    ];
+    deviceKeys.removeWhere((id, _) => !seen.contains(id));
+    return LayoutBuilder(
+      builder: (context, bounds) {
+        if (devices.isEmpty) return const Center(child: Text('暂无可发送设备'));
+        return ListView.separated(
+          key: const ValueKey('dock-device-strip'),
+          controller: deviceScroll,
+          scrollDirection: Axis.horizontal,
+          itemCount: devices.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
+          itemBuilder: (context, index) {
+            final device = devices[index], id = device['deviceId'] as String;
+            final colors = Ui.colors(context), selected = hoverDevice == id;
+            return SizedBox(
+              key: deviceKeys.putIfAbsent(id, GlobalKey.new),
+              width: bounds.maxHeight,
+              child: DecoratedBox(
+                key: ValueKey('dock-device-$id'),
+                decoration: BoxDecoration(
+                  color: selected ? colors.accentSoft : colors.surfaceMuted,
+                  borderRadius: Ui.cardRadius,
+                  border: Border.all(
+                    color: selected ? colors.accent : colors.line,
+                    width: selected ? 2 : 1,
+                  ),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AppIcon(
+                      device['platform'] == 'windows'
+                          ? Icons.computer_outlined
+                          : device['platform'] == 'web'
+                          ? Icons.web_outlined
+                          : Icons.phone_android_outlined,
+                      size: 26,
+                      color: selected ? colors.accent : colors.textSecondary,
+                    ),
+                    const SizedBox(height: 6),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text(
+                        device['name'] as String? ?? '设备',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: Ui.textXs),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   List<String> order = [];
   Set<String> entering = {};
   List<DockEntry> exportableFiles = [];
@@ -70,12 +237,15 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    edgeTicker = createTicker(scrollDeviceEdge);
     ReceiveDockApp.channel.setMethodCallHandler((call) async {
       if (call.method == 'content') {
         revision++;
         apply(Map<String, dynamic>.from(call.arguments));
       } else if (call.method == 'interactionEnded') {
         setPointerHeld(false);
+      } else if (call.method == 'dropHover') {
+        dropHover(call.arguments as Map);
       }
     });
     unawaited(initialize());
@@ -380,6 +550,9 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     scroll.dispose();
+    hoverTimer?.cancel();
+    edgeTicker.dispose();
+    deviceScroll.dispose();
     ReceiveDockApp.channel.setMethodCallHandler(null);
     super.dispose();
   }
@@ -407,9 +580,15 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
       // Keep labels out of the compact content strip; buttons retain semantics.
       // One opacity layer includes routes (menus), images and controls. Painting
       // individual translucent layers over each other made cards almost opaque.
-      builder: (_, child) => Opacity(
-        opacity: .7,
-        child: TooltipVisibility(visible: false, child: child!),
+      builder: (_, child) => NativeQueueDropHost(
+        target: dropQueueKey,
+        enabled: deviceMode,
+        deviceTargets: deviceKeys,
+        serverKey: payload['serverKey'] as String? ?? '',
+        child: Opacity(
+          opacity: .7,
+          child: TooltipVisibility(visible: false, child: child!),
+        ),
       ),
       home: CallbackShortcuts(
         bindings: {
@@ -480,7 +659,9 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                           vertical: Ui.space0,
                                         ),
                                         child: Text(
-                                          '收到 ${items.length} 项',
+                                          deviceMode
+                                              ? '发送至设备'
+                                              : '收到 ${items.length} 项',
                                           style: const TextStyle(
                                             fontSize: Ui.text2xs,
                                             fontWeight: Ui.weightLabel,
@@ -550,100 +731,133 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                         ),
                         const SizedBox(height: Ui.space0),
                         Expanded(
-                          child: LayoutBuilder(
-                            key: const ValueKey('dock-content-strip'),
-                            builder: (context, bounds) {
-                              final edge = bounds.maxHeight;
-                              final values = {
-                                for (final item in items)
-                                  item['id'] as String: item,
-                              };
-                              return Listener(
-                                onPointerSignal: (event) {
-                                  if (event is PointerScrollEvent &&
-                                      scroll.hasClients) {
-                                    GestureBinding
-                                        .instance
-                                        .pointerSignalResolver
-                                        .register(event, (_) {
-                                          scroll.jumpTo(
-                                            (scroll.offset +
-                                                    event.scrollDelta.dy +
-                                                    event.scrollDelta.dx)
-                                                .clamp(
-                                                  0.0,
-                                                  scroll
-                                                      .position
-                                                      .maxScrollExtent,
-                                                ),
-                                          );
-                                        });
-                                  }
-                                },
-                                child: SingleChildScrollView(
-                                  key: const ValueKey('dock-horizontal-scroll'),
-                                  controller: scroll,
-                                  scrollDirection: Axis.horizontal,
-                                  child: SizedBox(
-                                    width: ((edge + 10) * order.length - 10)
-                                        .clamp(
-                                          bounds.maxWidth,
-                                          double.infinity,
-                                        ),
-                                    height: edge,
-                                    child: Stack(
-                                      children: [
-                                        for (var i = 0; i < order.length; i++)
-                                          AnimatedPositioned(
-                                            key: ValueKey(
-                                              'dock-tile-${order[i]}',
-                                            ),
-                                            duration: Ui.durationSlow,
-                                            curve: Ui.ease,
-                                            left: i * (edge + 10),
-                                            top: 0,
-                                            width: edge,
-                                            height: edge,
-                                            child:
-                                                TweenAnimationBuilder<double>(
-                                                  key: ValueKey(
-                                                    'dock-arrival-${order[i]}',
-                                                  ),
-                                                  tween: Tween(
-                                                    begin:
-                                                        entering.contains(
-                                                          order[i],
-                                                        )
-                                                        ? 1
-                                                        : 0,
-                                                    end: 0,
-                                                  ),
-                                                  duration: Ui.durationSlow,
-                                                  curve: Ui.ease,
-                                                  builder: (_, value, child) =>
-                                                      Transform.translate(
-                                                        offset: Offset(
-                                                          0,
-                                                          -edge * value,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              IgnorePointer(
+                                ignoring: deviceMode,
+                                child: AnimatedOpacity(
+                                  opacity: deviceMode ? 0 : 1,
+                                  duration: Ui.durationFast,
+                                  child: LayoutBuilder(
+                                    key: const ValueKey('dock-content-strip'),
+                                    builder: (context, bounds) {
+                                      final edge = bounds.maxHeight;
+                                      final values = {
+                                        for (final item in items)
+                                          item['id'] as String: item,
+                                      };
+                                      return Listener(
+                                        onPointerSignal: (event) {
+                                          if (event is PointerScrollEvent &&
+                                              scroll.hasClients) {
+                                            GestureBinding
+                                                .instance
+                                                .pointerSignalResolver
+                                                .register(event, (_) {
+                                                  scroll.jumpTo(
+                                                    (scroll.offset +
+                                                            event
+                                                                .scrollDelta
+                                                                .dy +
+                                                            event
+                                                                .scrollDelta
+                                                                .dx)
+                                                        .clamp(
+                                                          0.0,
+                                                          scroll
+                                                              .position
+                                                              .maxScrollExtent,
                                                         ),
-                                                        child: Opacity(
-                                                          opacity: 1 - value,
-                                                          child: child,
+                                                  );
+                                                });
+                                          }
+                                        },
+                                        child: SingleChildScrollView(
+                                          key: const ValueKey(
+                                            'dock-horizontal-scroll',
+                                          ),
+                                          controller: scroll,
+                                          scrollDirection: Axis.horizontal,
+                                          child: SizedBox(
+                                            width:
+                                                ((edge + 10) * order.length -
+                                                        10)
+                                                    .clamp(
+                                                      bounds.maxWidth,
+                                                      double.infinity,
+                                                    ),
+                                            height: edge,
+                                            child: Stack(
+                                              children: [
+                                                for (
+                                                  var i = 0;
+                                                  i < order.length;
+                                                  i++
+                                                )
+                                                  AnimatedPositioned(
+                                                    key: ValueKey(
+                                                      'dock-tile-${order[i]}',
+                                                    ),
+                                                    duration: Ui.durationSlow,
+                                                    curve: Ui.ease,
+                                                    left: i * (edge + 10),
+                                                    top: 0,
+                                                    width: edge,
+                                                    height: edge,
+                                                    child: TweenAnimationBuilder<double>(
+                                                      key: ValueKey(
+                                                        'dock-arrival-${order[i]}',
+                                                      ),
+                                                      tween: Tween(
+                                                        begin:
+                                                            entering.contains(
+                                                              order[i],
+                                                            )
+                                                            ? 1
+                                                            : 0,
+                                                        end: 0,
+                                                      ),
+                                                      duration: Ui.durationSlow,
+                                                      curve: Ui.ease,
+                                                      builder:
+                                                          (_, value, child) =>
+                                                              Transform.translate(
+                                                                offset: Offset(
+                                                                  0,
+                                                                  -edge * value,
+                                                                ),
+                                                                child: Opacity(
+                                                                  opacity:
+                                                                      1 - value,
+                                                                  child: child,
+                                                                ),
+                                                              ),
+                                                      child: SizedBox.expand(
+                                                        child: card(
+                                                          values[order[i]]!,
                                                         ),
                                                       ),
-                                                  child: SizedBox.expand(
-                                                    child: card(
-                                                      values[order[i]]!,
                                                     ),
                                                   ),
-                                                ),
+                                              ],
+                                            ),
                                           ),
-                                      ],
-                                    ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
-                              );
-                            },
+                              ),
+                              IgnorePointer(
+                                ignoring: !deviceMode,
+                                child: AnimatedOpacity(
+                                  opacity: deviceMode ? 1 : 0,
+                                  duration: Ui.durationFast,
+                                  child: sendDevices(),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         if (error.isNotEmpty)

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <utility>
 #include <vector>
+#include <string>
 #include <oleidl.h>
 
 // Native touch export completes asynchronously. Hold the source window until
@@ -64,7 +65,7 @@ class GlobalSendReceiveDock final : public Win32Window {
   bool Shown() const { return shown_; }
   bool Ready() const { return ready_; }
   bool ClosingFinished() const { return closing_finished_; }
-  bool Interacting() const { return dragging_ || moving_; }
+  bool Interacting() const { return dragging_ || moving_ || hovering_drop_; }
   int64_t Generation() const;
  protected:
   bool OnCreate() override;
@@ -77,6 +78,9 @@ class GlobalSendReceiveDock final : public Win32Window {
   void BeginMove(const Map& args);
   void TickMove();
   void EndMove();
+  void TrackDrop(bool active, POINTL point);
+  std::string DropDeviceAt(POINTL point) const;
+  void SetDropRegions(const Map& regions);
   Map payload_;
   Action action_;
   Drag drag_;
@@ -93,6 +97,11 @@ class GlobalSendReceiveDock final : public Win32Window {
   bool closing_ = false;
   bool closing_finished_ = false;
   bool dragging_ = false, moving_ = false;
+  bool hovering_drop_ = false;
+  POINTL drop_pointer_{};
+  SIZE drop_surface_{};
+  std::string drop_server_key_;
+  std::vector<std::pair<std::string, RECT>> drop_devices_;
   bool moving_touch_ = false;
   RECT move_start_{};
   POINT move_anchor_{};

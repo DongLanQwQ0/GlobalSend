@@ -228,6 +228,23 @@ final class DockCoordinator {
         });
         return true;
     }
+    /** Resolve the real payload only at DROP, when Android grants URI access. */
+    static boolean forwardDropToDevice(DragEvent event, String serverKey, String deviceId,
+            java.util.function.Consumer<Boolean> completed) {
+        DockCoordinator coordinator=current.get();
+        if(coordinator==null || coordinator.disposed)return false;
+        LocalDrag local=coordinator.localSession(event);
+        if(local!=null)return sendToDevice(event,serverKey,deviceId,local.paths,local.texts,completed);
+        if(!coordinator.sendServerKey.equals(serverKey) ||
+            coordinator.sendTargets.stream().noneMatch(device -> deviceId.equals(device.get("deviceId"))))return false;
+        ClipData clip=event.getClipData();
+        if(clip==null || clip.getItemCount()==0)return false;
+        Activity activity=coordinator.attached.get();
+        DragAndDropPermissions permission=activity==null?null:activity.requestDragAndDropPermissions(event);
+        coordinator.consume(clip,permission,null,deviceId,serverKey);
+        completed.accept(true);
+        return true;
+    }
     void detach(Activity activity) {
         if (attached.get() != activity) return;
         detachDragReceiver(); attached.clear();

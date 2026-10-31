@@ -2,10 +2,12 @@
 #include "touch_drag.h"
 #include "drop_target.h"
 #include "shell_file.h"
+#include "utils.h"
 #include <flutter/standard_method_codec.h>
 #include <flutter_windows.h>
 #include <dwmapi.h>
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace {
@@ -38,6 +40,7 @@ int64_t Number(const flutter::EncodableMap& map, const char* key) {
   if (found == map.end()) return 0;
   if (const auto* value = std::get_if<int64_t>(&found->second)) return *value;
   if (const auto* value = std::get_if<int>(&found->second)) return *value;
+  if (const auto* value = std::get_if<double>(&found->second)) return std::lround(*value);
   return 0;
 }
 }
@@ -91,6 +94,10 @@ bool GlobalSendReceiveDock::OnCreate() {
       controller_->engine()->messenger(), "dev.globalsend/system",
       &flutter::StandardMethodCodec::GetInstance());
   system_channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    if (call.method_name() == "queueDropBounds") {
+      if (call.arguments()) if (const auto* args = std::get_if<Map>(call.arguments())) SetDropRegions(*args);
+      result->Success(); return;
+    }
     if (call.method_name() != "openWebUrl") { result->NotImplemented(); return; }
     const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
     const auto found = args ? args->find(Value("url")) : Map::const_iterator{};
@@ -154,10 +161,19 @@ bool GlobalSendReceiveDock::OnCreate() {
   const HWND view = controller_->view()->GetNativeWindow();
   SetChildContent(view, false);
   AttachGlobalSendTouchDragWindow(view, window);
-  // A native export may re-enter this display-only surface. Keep the Shell
-  // drag image alive there, while reserving actual local drops for main's queue.
-  drop_target_ = CreateGlobalSendDropTarget({[](bool) {}, [](GlobalSendDroppedContent) {},
-      [] { return true; }, [](POINTL) { return false; }}, window);
+  drop_target_ = CreateGlobalSendDropTarget({{}, [this](GlobalSendDroppedContent content) {
+      const auto target = DropDeviceAt(content.screen_point);
+      if (target.empty()) return;
+      flutter::EncodableList paths, texts;
+      for (const auto& path : content.paths) paths.emplace_back(Utf8FromUtf16(path.c_str()));
+      if (!content.text.empty()) texts.emplace_back(Utf8FromUtf16(content.text.c_str()));
+      Map action{{Value("action"),Value("dropToDevice")}, {Value("targetDeviceId"),Value(target)},
+        {Value("serverKey"),Value(drop_server_key_)}, {Value("paths"),Value(paths)}, {Value("texts"),Value(texts)},
+        {Value("dropId"),Value("receiver-"+std::to_string(GetTickCount64()))}};
+      if (!content.error.empty()) action[Value("error")] = Value(content.error);
+      if (action_) action_(action);
+    }, [] { return true; }, [this](POINTL point) { return !DropDeviceAt(point).empty(); }, {}, {},
+    [this](bool active, POINTL point) { TrackDrop(active, point); }}, window);
   for (const HWND target : {view, window}) {
     if (SUCCEEDED(RegisterDragDrop(target, drop_target_))) drop_windows_.push_back(target);
   }
@@ -188,12 +204,54 @@ void GlobalSendReceiveDock::Update(Map payload) {
 
 void GlobalSendReceiveDock::HideAnimated() {
   if (!GetHandle() || closing_) return;
+  TrackDrop(false, {});
   if (moving_) EndMove();
   if (shown_) Animate(true);
   else {
     closing_finished_ = true;
     if (closed_) closed_(Generation());
   }
+}
+
+void GlobalSendReceiveDock::SetDropRegions(const Map& regions) {
+  drop_devices_.clear();
+  if (!hovering_drop_) return;
+  const auto server = regions.find(Value("serverKey"));
+  const auto* key = server == regions.end() ? nullptr : std::get_if<std::string>(&server->second);
+  drop_server_key_ = key ? *key : "";
+  drop_surface_ = {static_cast<LONG>(Number(regions,"surfaceWidth")), static_cast<LONG>(Number(regions,"surfaceHeight"))};
+  const auto found = regions.find(Value("devices"));
+  if (found != regions.end()) if (const auto* devices = std::get_if<flutter::EncodableList>(&found->second)) {
+    for (const auto& value : *devices) if (const auto* device = std::get_if<Map>(&value)) {
+      const auto id = device->find(Value("deviceId"));
+      if (id != device->end()) if (const auto* name = std::get_if<std::string>(&id->second))
+        drop_devices_.emplace_back(*name, RECT{static_cast<LONG>(Number(*device,"left")),static_cast<LONG>(Number(*device,"top")),
+          static_cast<LONG>(Number(*device,"right")),static_cast<LONG>(Number(*device,"bottom"))});
+    }
+  }
+  if (hovering_drop_) TrackDrop(true, drop_pointer_);
+}
+
+std::string GlobalSendReceiveDock::DropDeviceAt(POINTL screen) const {
+  if (!hovering_drop_ || !controller_ || closing_) return {};
+  const HWND view = controller_->view()->GetNativeWindow();
+  POINT point{screen.x,screen.y}; RECT bounds{};
+  if (!ScreenToClient(view,&point) || !GetClientRect(view,&bounds) ||
+      bounds.right != drop_surface_.cx || bounds.bottom != drop_surface_.cy) return {};
+  for (const auto& device : drop_devices_) if (PtInRect(&device.second,point)) return device.first;
+  return {};
+}
+
+void GlobalSendReceiveDock::TrackDrop(bool active, POINTL screen) {
+  const bool changed = hovering_drop_ != active;
+  hovering_drop_ = active; drop_pointer_ = screen;
+  if (!active) drop_devices_.clear();
+  if (!channel_ || !controller_ || (!active && !changed)) return;
+  POINT point{screen.x,screen.y};
+  ScreenToClient(controller_->view()->GetNativeWindow(),&point);
+  channel_->InvokeMethod("dropHover",std::make_unique<Value>(Map{
+    {Value("active"),Value(active)}, {Value("x"),Value(point.x)}, {Value("y"),Value(point.y)},
+    {Value("targetDeviceId"),Value(active ? DropDeviceAt(screen) : "")}}));
 }
 
 void GlobalSendReceiveDock::ClearContent() {
