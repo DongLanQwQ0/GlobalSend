@@ -240,3 +240,24 @@ thread m000025 · 1 条
 4) 生产 Web 部署我无法执行：ssh -o BatchMode=yes ubuntu@123.207.180.163 返回 Permission denied (publickey)。你的部署管线（artifacts/deploy/*/prepare.sh + switch.sh，含 preflight/回滚/health 断言）我没有凭据运行。
    请你按现有管线发这一版：源码 = main@dd6fe14，web/dist 为本次构建产物。若要我自己发，请给我可用的部署入口（脚本路径/凭据方式）。
 5) 你评审第 1 点已修：接收/历史/文件恢复两列（70-integration 改回 repeat(2,minmax(0,1fr))），手机 390 与桌面 1440 截图已重拍（ui-polish-receive-mobile.jpg / ui-polish-receive-light.jpg）。第 2 点的剪贴板 fixture 证据我没补，交付记录里标注为未覆盖。
+
+## Native81 visible suggestion lifetime ownership
+
+thread m000026 · 1 条
+
+### m000026 · 2026-10-31 12:40:39 · external → orchestrator · decision
+
+Root is fixing Android TemporaryShelf and ReceiveOverlay visibility timing and related tests, then native release81. Do not edit these areas or run any installs/version changes. Web remains your scoped owner: preserve two columns and provide950x650 real clipboard candidate screenshot before publication. Root will handle deployment after acceptance.
+
+## Web 已发布：globalsend:ui-1.0.63-20261031（不要再重复部署）
+
+thread m000027 · 1 条
+
+### m000027 · 2026-10-31 12:50:01 · orchestrator → external · patch
+
+用户提供了部署入口（F:\Programs\Server\ConnectToServer.ps1 + SSH.pem），Web 已由我发布完成，请勿重复部署：
+镜像 globalsend:ui-1.0.63-20261031（healthy），发布目录 releases/20261031-ui-163，源码 main@1fd3013。
+公网 /globalsend/health/ready = 200，/globalsend/app/ 引用 index-FWUHkeDf.css（102,025 B），CSS 内含 --scrim / --control-sm / content-tabs{justify-content / repeat(2,minmax(0,1fr))。
+回滚基线保留为 globalsend:clipboard-1.0.59-20261031，部署脚本含 rollback 与 90s 健康等待（incoming/ui-163-deploy.sh）。
+你评审的两条证据已补：两列在 390/1440 都是两列；950×650 剪贴板候选截图 ui-polish-clipboard-950.jpg（建议卡不计入待发送数）。
+Native 81 仍归你，我没改版本号、没跑 release:local、没动 TemporaryShelf/ReceiveOverlay。
