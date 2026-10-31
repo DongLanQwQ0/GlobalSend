@@ -18,7 +18,7 @@ import org.json.JSONObject;
 
 /** Installation-local references, deliberately separate from received messages. */
 final class TemporaryShelf {
-    private static final long SUGGESTION_DURATION_MS=8000;
+    private static final long SUGGESTION_DURATION_MS=30_000;
     final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
     private final Map<String,Long> suggested = new LinkedHashMap<>();
     private final Map<String,Long> suggestionRemaining = new LinkedHashMap<>();
@@ -50,6 +50,9 @@ final class TemporaryShelf {
                         if (!path.isEmpty() && !path.startsWith("content://") && !new File(path).exists()) continue;
                         long offeredAt=record.optLong("suggestedAt",file.lastModified());
                         long remaining=record.optLong("suggestionRemainingMs",SUGGESTION_DURATION_MS);
+                        // Version 81 stored an eight-second budget without its duration.
+                        long duration=record.optLong("suggestionDurationMs",record.has("suggestionRemainingMs")?8000:SUGGESTION_DURATION_MS);
+                        remaining+=SUGGESTION_DURATION_MS-duration;
                         if(record.optBoolean("suggested") && remaining<=0)continue;
                         restored.add(new ReceiveNotifications.Receipt(record.getString("id"), "1", "暂存",
                             record.has("text") ? record.getString("text") : null, record.optString("name"), path, 0));
@@ -176,9 +179,15 @@ final class TemporaryShelf {
     }
     void exported(List<ReceiveNotifications.Receipt> exported,boolean accepted,java.util.function.Predicate<ReceiveNotifications.Receipt> consumed) {
         if (!accepted) return;
+        boolean suggestionsRemoved=false;
         for (ReceiveNotifications.Receipt item : exported)
-            if (items.get(item.id) == item) {pendingRemoval.put(item.id, item);pendingConsumed.put(item.id,consumed);}
-        if (pendingRemoval.isEmpty()) return;
+            if (items.get(item.id) == item) {
+                if(isSuggested(item.id)) {
+                    items.remove(item.id);forgetSuggestion(item.id);suggestionsRemoved=true;
+                } else {pendingRemoval.put(item.id, item);pendingConsumed.put(item.id,consumed);}
+            }
+        if(suggestionsRemoved)save();
+        if (pendingRemoval.isEmpty()) {if(suggestionsRemoved)changed.run();return;}
         removalDeadline = android.os.SystemClock.uptimeMillis() + 3000;
         main.removeCallbacks(removeExported); main.postDelayed(removeExported, 3000);
         changed.run();
@@ -222,6 +231,7 @@ final class TemporaryShelf {
                 if(suggested.containsKey(item.id)) {
                     record.put("suggested",true);record.put("suggestedAt",suggested.get(item.id));
                     record.put("suggestionRemainingMs",suggestionRemaining.get(item.id));
+                    record.put("suggestionDurationMs",SUGGESTION_DURATION_MS);
                 }
                 if (item.text != null) record.put("text", item.text);
                 records.put(record);

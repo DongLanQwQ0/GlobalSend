@@ -74,6 +74,7 @@ void main() {
   });
   tearDown(() async {
     photos.dispose();
+    await photos.pendingWrites;
     final root = Directory('${Directory.current.path}/../artifacts/tmp')
         .absolute
         .path;
@@ -81,6 +82,10 @@ void main() {
       throw StateError('Unexpected fixture path');
     }
     await folder.delete(recursive: true);
+  });
+
+  test('media suggestion default is thirty seconds', () {
+    expect(photos.suggestionDuration, const Duration(seconds: 30));
   });
 
   test(

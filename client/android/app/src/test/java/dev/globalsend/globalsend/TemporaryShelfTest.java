@@ -30,7 +30,7 @@ public class TemporaryShelfTest {
         advance(4000);shelf.setVisibleSuggestions(java.util.Set.of());
         advance(60_000);assertEquals("Collapsed, offscreen and operating time is excluded",3,shelf.items.size());
         shelf.setVisibleSuggestions(java.util.Set.of(id));
-        advance(3999);assertEquals(3,shelf.items.size());
+        advance(25_999);assertEquals(3,shelf.items.size());
         advance(1);assertEquals(2,shelf.items.size());
         assertTrue(shelf.suggestedPaths().isEmpty());
         assertTrue(shelf.items.values().stream().anyMatch(item -> "content://fixture/two".equals(item.localPath)));
@@ -42,27 +42,41 @@ public class TemporaryShelfTest {
             new RecentMediaSuggestions.Media("content://fixture/later","later.jpg",2)));
         String first=shelf.items.values().stream().filter(item -> "first.jpg".equals(item.fileName)).findFirst().get().id;
         String later=shelf.items.values().stream().filter(item -> "later.jpg".equals(item.fileName)).findFirst().get().id;
-        shelf.setVisibleSuggestions(java.util.Set.of(first));advance(7999);
+        shelf.setVisibleSuggestions(java.util.Set.of(first));advance(29_999);
         shelf.add(List.of("content://fixture/first"),List.of(),Map.of());advance(20_000);
         assertEquals(2,shelf.items.size());assertFalse(shelf.isSuggested(first));
-        shelf.setVisibleSuggestions(java.util.Set.of(later));advance(7999);assertTrue(shelf.items.containsKey(later));
+        shelf.setVisibleSuggestions(java.util.Set.of(later));advance(29_999);assertTrue(shelf.items.containsKey(later));
         advance(1);assertFalse(shelf.items.containsKey(later));assertTrue(shelf.items.containsKey(first));
     }
     @Test public void restoredSuggestionsKeepRemainingVisibleBudgetNotWallClockAge() throws Exception {
         Context context=RuntimeEnvironment.getApplication();
         org.json.JSONArray records=new org.json.JSONArray().put(new org.json.JSONObject()
             .put("id","saved").put("path","content://fixture/saved").put("name","saved.jpg")
-            .put("suggested",true).put("suggestedAt",1).put("suggestionRemainingMs",3000))
+            .put("suggested",true).put("suggestedAt",1).put("suggestionRemainingMs",3000).put("suggestionDurationMs",30_000))
+            .put(new org.json.JSONObject().put("id","old-eight").put("path","content://fixture/old-eight")
+                .put("name","eight.jpg").put("suggested",true).put("suggestedAt",1).put("suggestionRemainingMs",3000))
             .put(new org.json.JSONObject().put("id","legacy").put("path","content://fixture/legacy")
                 .put("name","legacy.jpg").put("suggested",true).put("suggestedAt",1));
         Files.write(new File(context.getFilesDir(),"temporary-shelf.json").toPath(),records.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         TemporaryShelf shelf=new TemporaryShelf(context,() -> {});
         java.util.concurrent.ExecutorService io=org.robolectric.util.ReflectionHelpers.getField(shelf,"io");
         io.submit(() -> {}).get(5,java.util.concurrent.TimeUnit.SECONDS);advance(60_000);
-        assertEquals(2,shelf.items.size());
-        shelf.setVisibleSuggestions(java.util.Set.of("saved","legacy"));advance(2999);assertEquals(2,shelf.items.size());
+        assertEquals(3,shelf.items.size());
+        shelf.setVisibleSuggestions(java.util.Set.of("saved","legacy","old-eight"));advance(2999);assertEquals(3,shelf.items.size());
         advance(1);assertFalse(shelf.items.containsKey("saved"));assertTrue(shelf.items.containsKey("legacy"));
+        advance(21_999);assertTrue(shelf.items.containsKey("old-eight"));advance(1);assertFalse(shelf.items.containsKey("old-eight"));
         advance(4999);assertTrue(shelf.items.containsKey("legacy"));advance(1);assertTrue(shelf.items.isEmpty());
+    }
+    @Test public void directlyDroppedSuggestionDisappearsOnSuccessButStagedItemKeepsGrace() {
+        TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/direct","direct.jpg",1)));
+        ReceiveNotifications.Receipt suggestion=shelf.items.values().iterator().next();
+        shelf.exported(List.of(suggestion),false);assertTrue(shelf.isSuggested(suggestion.id));
+        shelf.exported(List.of(suggestion),true);assertTrue(shelf.items.isEmpty());assertEquals(0,shelf.removalSeconds());
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/staged","staged.jpg",2)));
+        ReceiveNotifications.Receipt staged=shelf.items.values().iterator().next();
+        shelf.add(List.of(staged.localPath),List.of(),Map.of());shelf.exported(List.of(staged),true);
+        advance(2999);assertTrue(shelf.items.containsKey(staged.id));advance(1);assertFalse(shelf.items.containsKey(staged.id));
     }
     private void advance(long millis) { Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(millis)); }
     @Test public void missingSuggestionsLeaveValidSuggestionsAndExplicitlyStagedReferencesAlone() {

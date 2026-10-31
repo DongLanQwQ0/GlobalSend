@@ -752,7 +752,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 card.addView(control("复制", "复制", () -> copy(receipt)),copySize);
             }
             styleCard(card,pending);
-            card.setOnClickListener(view -> queueOpen(receipt));
+            card.setOnClickListener(view -> {
+                if(shelfVisible && shelf.isSuggested(receipt.id))
+                    shelf.add(List.of(receipt.localPath),List.of(),Map.of(receipt.localPath,receipt.fileName));
+                else queueOpen(receipt);
+            });
             card.setOnLongClickListener(view -> {
                 return export(view, java.util.Collections.singletonList(receipt));
             });

@@ -86,7 +86,7 @@ class RecentPhotos extends ChangeNotifier {
     Future<Directory> Function()? directory,
     bool? supported,
     DateTime Function()? now,
-    this.suggestionDuration = const Duration(seconds: 8),
+    this.suggestionDuration = const Duration(seconds: 30),
     this.suggestInApp = true,
   }) : library = library ?? DevicePhotoLibrary(),
        directory = directory ?? appDataDirectory,
@@ -111,6 +111,9 @@ class RecentPhotos extends ChangeNotifier {
   Timer? _suggestionTimer;
   bool _suggestedThisRun = false;
   Future<void> _writes = Future.value();
+
+  @visibleForTesting
+  Future<void> get pendingWrites => _writes;
 
   Future<void> openSettings() => PhotoManager.openSetting();
 
@@ -197,7 +200,7 @@ class RecentPhotos extends ChangeNotifier {
       }
       // Android's persistent native dock owns discovery and presentation. Keep
       // this object for the existing switch/permission flow, without consuming
-      // new media IDs or showing a competing eight-second main-page prompt.
+      // new media IDs or showing a competing main-page prompt.
       if (!suggestInApp) {
         items = [];
         problem = null;
