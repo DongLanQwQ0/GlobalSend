@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'recent_photos.dart';
 import 'ui_tokens.dart';
+import 'text_selection_surface.dart';
 
 class RecentPhotoTile extends StatelessWidget {
   const RecentPhotoTile({
@@ -26,6 +27,14 @@ class RecentPhotoTile extends StatelessWidget {
           color: Colors.transparent,
           child: InkWell(
             key: ValueKey('suggested-photo-${photo.id}'),
+            overlayColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.pressed))
+                return Ui.colors(context).accent.withValues(alpha: .12);
+              if (states.contains(WidgetState.hovered) ||
+                  states.contains(WidgetState.focused))
+                return Ui.colors(context).accent.withValues(alpha: .06);
+              return null;
+            }),
             onTap: onAdd,
             onLongPress: onDrag,
             child: Align(
@@ -49,12 +58,14 @@ class RecentPhotoTile extends StatelessWidget {
           Positioned(
             top: 0,
             right: 0,
-            child: IconButton(
-              tooltip: '忽略此媒体建议',
-              onPressed: onDismiss,
-              icon: const AppIcon(Icons.close, size: 19),
-              style: IconButton.styleFrom(
-                foregroundColor: Ui.colors(context).accent,
+            child: ContentDragControl(
+              child: IconButton(
+                tooltip: '忽略此媒体建议',
+                onPressed: onDismiss,
+                icon: const AppIcon(Icons.close, size: 19),
+                style: IconButton.styleFrom(
+                  foregroundColor: Ui.colors(context).accent,
+                ),
               ),
             ),
           ),

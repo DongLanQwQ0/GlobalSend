@@ -3122,12 +3122,7 @@ class SendController extends ChangeNotifier {
       await FileShareBridge.importClipboard();
       return;
     }
-    final state = root ?? await stateDirectory();
-    final folder = Directory('${state.path}/outgoing-clipboard');
-    await folder.create(recursive: true);
-    final data = await SystemBridge.readClipboard(
-      '${folder.path}/clipboard-${newId()}.bmp',
-    );
+    final data = await _readDesktopClipboard();
     final paths = List<String>.from(data['paths'] ?? []);
     final texts = List<String>.from(data['texts'] ?? []);
     if (paths.isEmpty && texts.every((text) => text.isEmpty)) return;
@@ -3141,6 +3136,58 @@ class SendController extends ChangeNotifier {
         if (await File(path).exists()) await File(path).delete();
       }
       rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> _readDesktopClipboard({
+    bool forDrag = false,
+  }) async {
+    final state = root ?? await stateDirectory();
+    final folder = Directory('${state.path}/outgoing-clipboard');
+    await folder.create(recursive: true);
+    return SystemBridge.readClipboard(
+      '${folder.path}/${forDrag ? 'drag-' : ''}clipboard-${newId()}.bmp',
+    );
+  }
+
+  /// Export a recommendation without confirming it or changing the send queue.
+  Future<bool> dragClipboard({String pointerKind = 'auto'}) async {
+    final state = root ?? await stateDirectory();
+    final prefix = File('${state.path}/outgoing-clipboard/drag-clipboard-')
+        .absolute
+        .path;
+    for (final path
+        in _temporarySources
+            .where((path) => File(path).absolute.path.startsWith(prefix))
+            .toList()) {
+      try {
+        await _releaseTemporarySource(path);
+      } on FileSystemException {
+        _temporarySources.add(path);
+      } // A prior target may still be reading its bitmap.
+    }
+    final data = await _readDesktopClipboard(forDrag: true);
+    final paths = List<String>.from(data['paths'] ?? []);
+    final texts = List<String>.from(data['texts'] ?? []);
+    if (paths.isEmpty && texts.every((text) => text.isEmpty)) return false;
+    final generated = List<String>.from(data['temporaryPaths'] ?? []);
+    _temporarySources.addAll(generated);
+    var accepted = false;
+    try {
+      accepted = await SystemBridge.dragOut(
+        pointerKind: pointerKind,
+        paths: paths.isEmpty ? null : paths,
+        text: paths.isEmpty ? texts.join('\n') : null,
+      );
+      return accepted;
+    } finally {
+      // Successful file drops can be consumed asynchronously. Keep one owned
+      // snapshot until the next drag; referenced drafts/history retain it.
+      if (!accepted)
+        for (final path in generated) {
+          await _releaseTemporarySource(path);
+        }
+      await save();
     }
   }
 

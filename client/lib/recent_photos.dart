@@ -357,9 +357,7 @@ class RecentPhotos extends ChangeNotifier {
   }
 
   Future<void> add(String id, Future<void> Function(String) stage) async {
-    final path =
-        items.where((item) => item.id == id).firstOrNull?.path ??
-        (feed == null ? await library.filePath(id) : null);
+    final path = await sourcePath(id);
     if (path == null) {
       await dismiss([id]);
       return;
@@ -369,6 +367,10 @@ class RecentPhotos extends ChangeNotifier {
     await stage(path);
     await dismiss([id]);
   }
+
+  Future<String?> sourcePath(String id) async =>
+      items.where((item) => item.id == id).firstOrNull?.path ??
+      (feed == null ? await library.filePath(id) : null);
 
   void setShowing(Set<String> ids, {bool interacting = false}) {
     if (feed == null || setEquals(ids, _showing) && interacting == _interacting)

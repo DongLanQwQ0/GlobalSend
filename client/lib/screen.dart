@@ -887,9 +887,8 @@ class _SendScreenState extends State<SendScreen>
       );
   }
 
-  Widget photoSuggestionTile(SuggestedPhoto photo) => KeyedSubtree(
-    key: _photoKeys.putIfAbsent(photo.id, GlobalKey.new),
-    child: RecentPhotoTile(
+  Widget photoSuggestionTile(SuggestedPhoto photo) {
+    final tile = RecentPhotoTile(
       photo: photo,
       onAdd: working
           ? null
@@ -905,8 +904,34 @@ class _SendScreenState extends State<SendScreen>
       onDrag: working || !Platform.isAndroid
           ? null
           : () => perform(() => recentPhotos.drag(photo.id)),
-    ),
-  );
+    );
+    return KeyedSubtree(
+      key: _photoKeys.putIfAbsent(photo.id, GlobalKey.new),
+      child: Theme.of(context).platform != TargetPlatform.windows
+          ? tile
+          : ContentDragSurface(
+              entry: DockEntry(
+                id: 'suggested-photo-${photo.id}',
+                kind: 'file',
+                title: photo.name,
+                source: '',
+                localPath: photo.path ?? '',
+              ),
+              nativeOnly: true,
+              enabled: !working,
+              onExport: (kind) => perform(() async {
+                final path = await recentPhotos.sourcePath(photo.id);
+                if (path == null) {
+                  await recentPhotos.dismiss([photo.id]);
+                  return;
+                }
+                if (await SystemBridge.exportFiles([path], pointerKind: kind))
+                  await recentPhotos.dismiss([photo.id]);
+              }),
+              child: tile,
+            ),
+    );
+  }
 
   void notice(String value) => ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(content: Text(value), duration: const Duration(seconds: 2)),
@@ -2556,88 +2581,130 @@ class _SendScreenState extends State<SendScreen>
   }
 
   VoidCallback? clipboardDragAction([String? revision]) =>
-      working || Theme.of(context).platform != TargetPlatform.android
+      working ||
+          ![
+            TargetPlatform.android,
+            TargetPlatform.windows,
+          ].contains(Theme.of(context).platform)
       ? null
       : () => perform(() async {
+          if (Theme.of(context).platform == TargetPlatform.windows) {
+            await exportClipboardSuggestion(
+              revision ?? clipboardSuggestions.item?.revision,
+            );
+            return;
+          }
           await DockPlatform.dragClipboardSuggestion(
             revision ?? clipboardSuggestions.item?.revision ?? '',
           );
           await clipboardSuggestions.refresh();
         });
 
-  Widget clipboardSuggestionTile(ClipboardSuggestion suggestion) => Material(
-    key: const ValueKey('clipboard-suggestion'),
-    color: Ui.colors(context).accentSoft,
-    borderRadius: Ui.cardRadius,
-    clipBehavior: Clip.antiAlias,
-    child: CustomPaint(
-      foregroundPainter: _DashedDropBorder(
-        Ui.colors(context).selectedLine,
-        radius: Ui.radiusCard,
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: InkWell(
-              onLongPress: clipboardDragAction(suggestion.revision),
-              onTap: working
-                  ? null
-                  : () => perform(() async {
-                      await c.stageClipboard();
-                      await clipboardSuggestions.dismissRevision(
-                        suggestion.revision,
-                      );
-                    }),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  AppIcon(
-                    Icons.content_paste_rounded,
-                    size: 26,
-                    color: Ui.colors(context).accent,
-                  ),
-                  const SizedBox(height: Ui.space0),
-                  const Text(
-                    '剪贴板',
-                    style: TextStyle(
-                      fontSize: Ui.textXs,
-                      fontWeight: Ui.weightLabel,
-                    ),
-                  ),
-                  const SizedBox(height: Ui.space0),
-                  Text(
-                    '${suggestion.label} · 点按添加',
-                    style: TextStyle(
-                      fontSize: Ui.text2xs,
-                      color: Ui.colors(context).textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            top: 2,
-            right: 2,
-            child: SizedBox(
-              width: 28,
-              height: 28,
-              child: IconButton(
-                tooltip: '忽略剪贴板建议',
-                padding: EdgeInsets.zero,
-                onPressed: working
+  Future<void> exportClipboardSuggestion(
+    String? revision, {
+    String pointerKind = 'auto',
+  }) async {
+    final accepted = await c.dragClipboard(pointerKind: pointerKind);
+    if (accepted && revision != null)
+      await clipboardSuggestions.dismissRevision(revision);
+  }
+
+  Widget clipboardSuggestionTile(ClipboardSuggestion suggestion) {
+    final tile = Material(
+      key: const ValueKey('clipboard-suggestion'),
+      color: Ui.colors(context).accentSoft,
+      borderRadius: Ui.cardRadius,
+      clipBehavior: Clip.antiAlias,
+      child: CustomPaint(
+        foregroundPainter: _DashedDropBorder(
+          Ui.colors(context).selectedLine,
+          radius: Ui.radiusCard,
+        ),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InkWell(
+                onLongPress:
+                    Theme.of(context).platform == TargetPlatform.windows
                     ? null
-                    : () => clipboardSuggestions.dismissRevision(
-                        suggestion.revision,
+                    : clipboardDragAction(suggestion.revision),
+                onTap: working
+                    ? null
+                    : () => perform(() async {
+                        await c.stageClipboard();
+                        await clipboardSuggestions.dismissRevision(
+                          suggestion.revision,
+                        );
+                      }),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AppIcon(
+                      Icons.content_paste_rounded,
+                      size: 26,
+                      color: Ui.colors(context).accent,
+                    ),
+                    const SizedBox(height: Ui.space0),
+                    const Text(
+                      '剪贴板',
+                      style: TextStyle(
+                        fontSize: Ui.textXs,
+                        fontWeight: Ui.weightLabel,
                       ),
-                icon: const AppIcon(Icons.close, size: 16),
+                    ),
+                    const SizedBox(height: Ui.space0),
+                    Text(
+                      '${suggestion.label} · 点按添加',
+                      style: TextStyle(
+                        fontSize: Ui.text2xs,
+                        color: Ui.colors(context).textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+            Positioned(
+              top: 2,
+              right: 2,
+              child: ContentDragControl(
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: IconButton(
+                    tooltip: '忽略剪贴板建议',
+                    padding: EdgeInsets.zero,
+                    onPressed: working
+                        ? null
+                        : () => clipboardSuggestions.dismissRevision(
+                            suggestion.revision,
+                          ),
+                    icon: const AppIcon(Icons.close, size: 16),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+    if (Theme.of(context).platform != TargetPlatform.windows) return tile;
+    return ContentDragSurface(
+      entry: DockEntry(
+        id: 'clipboard-${suggestion.revision}',
+        kind: 'text',
+        title: '剪贴板',
+        source: '',
+        text: suggestion.label,
+      ),
+      nativeOnly: true,
+      enabled: !working,
+      onExport: (kind) => perform(
+        () => exportClipboardSuggestion(suggestion.revision, pointerKind: kind),
+      ),
+      child: tile,
+    );
+  }
 
   Widget stagedTile({String? path, int? textIndex}) {
     final isText = textIndex != null;

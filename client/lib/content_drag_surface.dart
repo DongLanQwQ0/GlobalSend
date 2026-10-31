@@ -27,12 +27,17 @@ class ContentDragSurface extends StatefulWidget {
     this.selectedText = false,
     this.touchDrags = true,
     this.itemCount,
+    this.nativeOnly = false,
   });
   final DockEntry entry;
   final Widget child;
   final Future<void> Function(String kind) onExport;
   final bool enabled, selectedText, touchDrags;
   final int? itemCount;
+
+  /// Content resolved on demand (for example clipboard recommendations) must
+  /// use the native drop target, not a placeholder Flutter drag payload.
+  final bool nativeOnly;
 
   /// Windows long-press touch/pen belongs to drag, not the mouse context menu.
   /// Real mouse/trackpad secondary clicks and other platforms retain menus.
@@ -212,10 +217,15 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   @override
   Widget build(BuildContext context) {
     if (Theme.of(context).platform == TargetPlatform.iOS) {
-      return IOSDragSource(entry: widget.entry, enabled: widget.enabled && widget.touchDrags, child: widget.child);
+      return IOSDragSource(
+        entry: widget.entry,
+        enabled: widget.enabled && widget.touchDrags,
+        child: widget.child,
+      );
     }
-    if (Theme.of(context).platform == TargetPlatform.android) {
-      return RawGestureDetector(
+    if (Theme.of(context).platform == TargetPlatform.android ||
+        widget.nativeOnly) {
+      final gestures = RawGestureDetector(
         behavior: HitTestBehavior.opaque,
         gestures: {
           if (widget.enabled && widget.touchDrags)
@@ -237,6 +247,20 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
                 }),
         },
         child: widget.child,
+      );
+      if (!widget.nativeOnly) return gestures;
+      return Listener(
+        onPointerDown: (event) => sourcePointer ??= event.pointer,
+        onPointerUp: (event) {
+          if (sourcePointer == event.pointer) sourcePointer = null;
+        },
+        onPointerCancel: (event) {
+          if (sourcePointer == event.pointer) sourcePointer = null;
+        },
+        child: MouseRegion(
+          cursor: widget.enabled ? SystemMouseCursors.grab : MouseCursor.defer,
+          child: RepaintBoundary(key: previewKey, child: gestures),
+        ),
       );
     }
     Widget draggable(bool delayed, Widget child) => _ContentDraggable(
@@ -284,7 +308,17 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
     if (nativePending) return;
     nativePending = true;
     try {
-      await widget.onExport(kind);
+      if (widget.nativeOnly) {
+        final preview = await capturePreview();
+        if (!mounted || sourcePointer == null) return;
+        GestureBinding.instance.cancelPointer(sourcePointer!);
+        await SystemBridge.withDragPreview(
+          preview,
+          () => widget.onExport(kind),
+        );
+      } else {
+        await widget.onExport(kind);
+      }
     } finally {
       nativePending = false;
     }
