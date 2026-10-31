@@ -120,6 +120,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private boolean doubleTapGesture;
     private boolean collapsed, shelfVisible, edgeRight = true;
     private boolean appForeground;
+    private boolean mainMediaActive, mainMediaDragging,mainMediaInteracting;
     private boolean suggestionTouch, suggestionDrag, suggestionScrolling, screenOff;
     private final Runnable suggestionScrollIdle=() -> {
         suggestionScrolling=false;updateSuggestionVisibility();
@@ -229,6 +230,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
 
     private void shelfChanged() {
         mediaSuggestions.refresh();
+        DockCoordinator.mediaSuggestionsChanged();
         if (root == null) return;
         if (DockCoordinator.afterExportFrom(root, this::shelfChanged)) return;
         renderKeepingScroll();
@@ -245,6 +247,66 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             HorizontalScrollView owner=overlay.scroll;
             owner.post(() -> {if(overlay.scroll==owner)owner.scrollTo(offset,0);});
         }
+    }
+
+    static void mainMediaActive(boolean active) {
+        ReceiveOverlay overlay=current.get();if(overlay==null)return;
+        overlay.mainMediaActive=active;
+        overlay.shelf.suggestionInteraction("main",overlay.mainMediaDragging || active && overlay.mainMediaInteracting);
+        if(active) {overlay.mediaSuggestions.start();overlay.mediaSuggestions.refresh();}
+        else {
+            overlay.shelf.setVisibleSuggestions("main",java.util.Collections.emptySet());
+            if(overlay.root==null)overlay.mediaSuggestions.stop();
+        }
+    }
+    static void mainMediaShowing(List<String> ids) {
+        mainMediaShowing(ids,false);
+    }
+    static void mainMediaShowing(List<String> ids,boolean interacting) {
+        ReceiveOverlay overlay=current.get();if(overlay==null)return;
+        overlay.mainMediaInteracting=interacting;
+        overlay.shelf.suggestionInteraction("main",overlay.mainMediaDragging || overlay.mainMediaActive && interacting);
+        overlay.shelf.setVisibleSuggestions("main",overlay.mainMediaActive && !overlay.mainMediaDragging?
+            new java.util.HashSet<>(ids):java.util.Collections.emptySet());
+    }
+    static String mediaSuggestionPath(String id) {
+        ReceiveOverlay overlay=current.get();
+        if(overlay==null || !overlay.shelf.isSuggested(id))return null;
+        return overlay.shelf.items.get(id).localPath;
+    }
+    static void dismissMediaSuggestions(List<String> ids) {
+        ReceiveOverlay overlay=current.get();if(overlay!=null)overlay.shelf.dismissSuggestions(new java.util.HashSet<>(ids));
+    }
+    static void mainMediaDrag(boolean dragging) {
+        ReceiveOverlay overlay=current.get();if(overlay==null)return;
+        overlay.mainMediaDragging=dragging;
+        overlay.shelf.suggestionInteraction("main",dragging || overlay.mainMediaActive && overlay.mainMediaInteracting);
+        if(dragging)overlay.shelf.setVisibleSuggestions("main",java.util.Collections.emptySet());
+        else DockCoordinator.mediaSuggestionsChanged();
+    }
+    static void mediaSuggestionSnapshot(java.util.function.Consumer<List<Map<String,Object>>> completed) {
+        ReceiveOverlay overlay=current.get();
+        if(overlay==null) {completed.accept(List.of());return;}
+        List<ReceiveNotifications.Receipt> snapshot=new ArrayList<>();
+        Map<String,Long> offered=new LinkedHashMap<>();
+        for(ReceiveNotifications.Receipt item:overlay.shelf.items.values())if(overlay.shelf.isSuggested(item.id))snapshot.add(item);
+        for(ReceiveNotifications.Receipt item:snapshot)offered.put(item.id,overlay.shelf.suggestedAt(item.id));
+        snapshot.sort(java.util.Comparator.comparingLong((ReceiveNotifications.Receipt item) -> overlay.shelf.suggestedAt(item.id)).reversed());
+        thumbnails.execute(() -> {
+            List<Map<String,Object>> result=new ArrayList<>();
+            for(ReceiveNotifications.Receipt item:snapshot) {
+                Bitmap image=overlay.thumbnail(item.localPath,180);
+                if(image==null)continue;
+                java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
+                image.compress(Bitmap.CompressFormat.JPEG,85,bytes);image.recycle();
+                Map<String,Object> value=new LinkedHashMap<>();
+                value.put("id",item.id);value.put("path",item.localPath);value.put("name",item.fileName);value.put("suggestedAt",offered.get(item.id));value.put("thumbnail",bytes.toByteArray());result.add(value);
+            }
+            overlay.main.post(() -> {
+                result.removeIf(value -> !overlay.shelf.isSuggested((String)value.get("id")));
+                completed.accept(result);
+            });
+        });
     }
 
     private void configurationChanged() {
@@ -602,10 +664,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void render() {render(true);}
     private void waitForSuggestionScroll() {
         suggestionScrolling=true;
+        shelf.suggestionInteraction("overlay",true);
         shelf.setVisibleSuggestions(java.util.Collections.emptySet());
         main.removeCallbacks(suggestionScrollIdle);main.postDelayed(suggestionScrollIdle,150);
     }
     private void updateSuggestionVisibility() {
+        shelf.suggestionInteraction("overlay",root!=null && !screenOff && !collapsed && (suggestionTouch || suggestionDrag || suggestionScrolling || forwarding!=null || geometry!=null));
         java.util.Set<String> visible=new java.util.HashSet<>();
         if(root!=null && rootAdded && shelfVisible && !collapsed && geometry==null && !screenOff &&
                 !suggestionTouch && !suggestionDrag && !suggestionScrolling && forwarding==null &&
@@ -1499,7 +1563,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             hideWhenReady(request);
         })) return;
         if (root != null) {
-            mediaSuggestions.stop();
+            if(!mainMediaActive)mediaSuggestions.stop();
             context.unregisterComponentCallbacks(configurationChanges);
             context.unregisterReceiver(screenChanges);
             if (appearanceChanges != null) { appearanceChanges.stopWatching(); appearanceChanges = null; }
@@ -1521,6 +1585,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             countGroup=null;shelfGroup=null;countIcon=null;shelfIcon=null;
             targetScroll=null;targetRow=null;forwarding=null;hoveredTarget=null;
             suggestionTouch=false;suggestionDrag=false;suggestionScrolling=false;
+            shelf.suggestionInteraction("overlay",false);
             rootAdded = false;
             leaving.animate().cancel();
             leaving.setScaleX(1);leaving.setScaleY(1);

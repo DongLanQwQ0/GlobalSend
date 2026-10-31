@@ -5,6 +5,64 @@ import 'package:flutter/material.dart';
 import 'recent_photos.dart';
 import 'ui_tokens.dart';
 
+class RecentPhotoTile extends StatelessWidget {
+  const RecentPhotoTile({
+    super.key,
+    required this.photo,
+    required this.onAdd,
+    this.onDismiss,
+    this.onDrag,
+  });
+  final SuggestedPhoto photo;
+  final VoidCallback? onAdd, onDismiss, onDrag;
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: Ui.cardRadius,
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.memory(photo.thumbnail, fit: BoxFit.cover),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: ValueKey('suggested-photo-${photo.id}'),
+            onTap: onAdd,
+            onLongPress: onDrag,
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: Padding(
+                padding: EdgeInsets.all(Ui.space0),
+                child: CircleAvatar(
+                  radius: 12,
+                  backgroundColor: Ui.colors(context).surface,
+                  child: AppIcon(
+                    Icons.add_rounded,
+                    size: Ui.iconSm,
+                    color: Ui.colors(context).accent,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (onDismiss != null)
+          Positioned(
+            top: 0,
+            right: 0,
+            child: IconButton(
+              tooltip: '忽略此媒体建议',
+              onPressed: onDismiss,
+              icon: const AppIcon(Icons.close, size: 19),
+              style: IconButton.styleFrom(
+                foregroundColor: Ui.colors(context).accent,
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 class RecentPhotosView extends StatelessWidget {
   const RecentPhotosView({
     super.key,
@@ -60,36 +118,9 @@ class RecentPhotosView extends StatelessWidget {
             final photo = photos[index];
             return AspectRatio(
               aspectRatio: 1,
-              child: ClipRRect(
-                borderRadius: Ui.cardRadius,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.memory(photo.thumbnail, fit: BoxFit.cover),
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        key: ValueKey('suggested-photo-${photo.id}'),
-                        onTap: enabled ? () => onAdd(photo.id) : null,
-                        child: Align(
-                          alignment: Alignment.bottomRight,
-                          child: Padding(
-                            padding: EdgeInsets.all(Ui.space0),
-                            child: CircleAvatar(
-                              radius: 12,
-                              backgroundColor: Ui.colors(context).surface,
-                              child: AppIcon(
-                                Icons.add_rounded,
-                                size: Ui.iconSm,
-                                color: Ui.colors(context).accent,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              child: RecentPhotoTile(
+                photo: photo,
+                onAdd: enabled ? () => onAdd(photo.id) : null,
               ),
             );
           },

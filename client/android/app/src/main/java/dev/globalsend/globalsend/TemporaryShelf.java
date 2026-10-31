@@ -23,6 +23,8 @@ final class TemporaryShelf {
     private final Map<String,Long> suggested = new LinkedHashMap<>();
     private final Map<String,Long> suggestionRemaining = new LinkedHashMap<>();
     private final java.util.Set<String> visibleSuggestions = new java.util.HashSet<>();
+    private final Map<String,java.util.Set<String>> suggestionSurfaces = new LinkedHashMap<>();
+    private final java.util.Set<String> suggestionInteractions=new java.util.HashSet<>();
     private long suggestionClock;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -129,7 +131,12 @@ final class TemporaryShelf {
     }
     /** Only the overlay's actually visible, idle cards spend their display budget. */
     void setVisibleSuggestions(java.util.Set<String> ids) {
-        java.util.Set<String> next=new java.util.HashSet<>(ids);
+        setVisibleSuggestions("overlay",ids);
+    }
+    void setVisibleSuggestions(String surface,java.util.Set<String> ids) {
+        suggestionSurfaces.put(surface,new java.util.HashSet<>(ids));
+        java.util.Set<String> next=new java.util.HashSet<>();
+        for(java.util.Set<String> showing:suggestionSurfaces.values())next.addAll(showing);
         next.retainAll(suggested.keySet());
         if(next.equals(visibleSuggestions))return;
         spendVisibleTime();
@@ -139,12 +146,13 @@ final class TemporaryShelf {
     private void spendVisibleTime() {
         long now=android.os.SystemClock.uptimeMillis();
         long elapsed=now-suggestionClock;
-        for(String id:visibleSuggestions)
+        if(suggestionInteractions.isEmpty())for(String id:visibleSuggestions)
             suggestionRemaining.computeIfPresent(id,(key,left) -> Math.max(0,left-elapsed));
         suggestionClock=now;
     }
     private void scheduleSuggestionExpiry() {
         main.removeCallbacks(expireVisibleSuggestions);
+        if(!suggestionInteractions.isEmpty())return;
         long delay=Long.MAX_VALUE;
         for(String id:visibleSuggestions)delay=Math.min(delay,suggestionRemaining.get(id));
         if(delay!=Long.MAX_VALUE)main.postDelayed(expireVisibleSuggestions,delay);
@@ -154,7 +162,14 @@ final class TemporaryShelf {
         removeSuggestions(item -> visibleSuggestions.contains(item.id) && suggestionRemaining.get(item.id)<=0);
         scheduleSuggestionExpiry();
     };
+    void suggestionInteraction(String surface,boolean interacting) {
+        if(suggestionInteractions.contains(surface)==interacting)return;
+        spendVisibleTime();
+        if(interacting)suggestionInteractions.add(surface);else suggestionInteractions.remove(surface);
+        scheduleSuggestionExpiry();save();
+    }
     private void forgetSuggestion(String id) {
+        for(java.util.Set<String> showing:suggestionSurfaces.values())showing.remove(id);
         suggested.remove(id);suggestionRemaining.remove(id);visibleSuggestions.remove(id);
         if(visibleSuggestions.isEmpty())main.removeCallbacks(expireVisibleSuggestions);
     }
@@ -171,8 +186,9 @@ final class TemporaryShelf {
     void clearSuggestions() {
         if(suggested.isEmpty())return;
         for(String id:suggested.keySet())items.remove(id);
-        suggested.clear();suggestionRemaining.clear();visibleSuggestions.clear();main.removeCallbacks(expireVisibleSuggestions);save();changed.run();
+        suggested.clear();suggestionRemaining.clear();visibleSuggestions.clear();suggestionSurfaces.clear();main.removeCallbacks(expireVisibleSuggestions);save();changed.run();
     }
+    void dismissSuggestions(java.util.Set<String> ids) {removeSuggestions(item -> ids.contains(item.id));}
 
     void exported(List<ReceiveNotifications.Receipt> exported, boolean accepted) {
         exported(exported,accepted,item -> true);
@@ -215,7 +231,7 @@ final class TemporaryShelf {
     }
     boolean pendingRemoval(String id) { return pendingRemoval.containsKey(id); }
     void clear() {
-        cancelRemoval(); items.clear(); suggested.clear();suggestionRemaining.clear();visibleSuggestions.clear();main.removeCallbacks(expireVisibleSuggestions);save(); changed.run();
+        cancelRemoval(); items.clear(); suggested.clear();suggestionRemaining.clear();visibleSuggestions.clear();suggestionSurfaces.clear();main.removeCallbacks(expireVisibleSuggestions);save(); changed.run();
     }
     void remove(String id) {
         pendingRemoval.remove(id);pendingConsumed.remove(id); items.remove(id);forgetSuggestion(id); save(); changed.run();

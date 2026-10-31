@@ -46,6 +46,45 @@ class Gallery extends RecentPhotoLibrary {
   }
 }
 
+class SharedPhotoFeed implements RecentPhotoFeed {
+  final updates = StreamController<void>.broadcast();
+  final candidates = <SuggestedPhoto>[
+    SuggestedPhoto(
+      'shared',
+      Uint8List(0),
+      path: 'content://media/external/images/media/42',
+      name: 'photo.jpg',
+    ),
+  ];
+  final showing = <Set<String>>[];
+  final active = <bool>[];
+  final dragged = <String>[];
+  @override
+  Stream<void> get changes => updates.stream;
+  @override
+  Future<List<SuggestedPhoto>> read() async => List.of(candidates);
+  @override
+  Future<void> setActive(bool value) async {
+    active.add(value);
+  }
+
+  @override
+  Future<void> setShowing(Set<String> ids, {bool interacting = false}) async {
+    showing.add(Set.of(ids));
+  }
+
+  @override
+  Future<void> dismiss(Iterable<String> ids) async {
+    candidates.removeWhere((item) => ids.contains(item.id));
+    updates.add(null);
+  }
+
+  @override
+  Future<void> drag(String id) async {
+    dragged.add(id);
+  }
+}
+
 Future<void> until(bool Function() condition) async {
   for (var i = 0; i < 200; i++) {
     if (condition()) return;
@@ -87,6 +126,40 @@ void main() {
   test('media suggestion default is thirty seconds', () {
     expect(photos.suggestionDuration, const Duration(seconds: 30));
   });
+  test(
+    'main page observes native candidates without consuming them at discovery',
+    () async {
+      photos.dispose();
+      final feed = SharedPhotoFeed();
+      photos = RecentPhotos(
+        library: gallery,
+        directory: () async => folder,
+        supported: true,
+        feed: feed,
+      );
+      photos.setVisible(true);
+      await until(() => photos.items.isNotEmpty);
+      expect(gallery.reads, 0);
+      expect(gallery.fullFiles, 0);
+      final state = jsonDecode(
+        await File('${folder.path}/recent-photo-suggestions.json')
+            .readAsString(),
+      ) as Map;
+      expect(state['handled'], isEmpty);
+      photos.setShowing({'shared'});
+      await photos.drag('shared');
+      expect(feed.dragged, ['shared']);
+      expect(photos.items.single.id, 'shared');
+      final paths = <String>[];
+      await photos.add('shared', (path) async => paths.add(path));
+      expect(paths, ['content://media/external/images/media/42']);
+      expect(feed.candidates, isEmpty);
+      expect(gallery.fullFiles, 0);
+      photos.setVisible(false);
+      await until(() => feed.active.last == false);
+      await feed.updates.close();
+    },
+  );
 
   test(
     'foreground finds photos; no full image is loaded until explicitly added',

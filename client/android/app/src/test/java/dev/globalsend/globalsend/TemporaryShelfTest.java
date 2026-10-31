@@ -19,6 +19,19 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34, manifest=Config.NONE)
 public class TemporaryShelfTest {
+    @Test public void mainPageAndOverlayShareOneVisibleTimeBudget() {
+        TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/shared","shared.jpg",1)));
+        String id=shelf.items.keySet().iterator().next();
+        shelf.setVisibleSuggestions("main",java.util.Set.of(id));advance(10_000);
+        shelf.suggestionInteraction("overlay",true);advance(60_000);
+        shelf.suggestionInteraction("overlay",false);
+        shelf.setVisibleSuggestions(java.util.Set.of(id));advance(10_000);
+        shelf.setVisibleSuggestions("main",java.util.Set.of());advance(5000);
+        shelf.setVisibleSuggestions(java.util.Set.of());advance(60_000);assertTrue(shelf.items.containsKey(id));
+        shelf.setVisibleSuggestions("main",java.util.Set.of(id));advance(4999);assertTrue(shelf.items.containsKey(id));
+        advance(1);assertFalse(shelf.items.containsKey(id));
+    }
     @Test public void mediaSuggestionsSpendOnlyVisibleTimeAndConfirmedContentRemains() {
         TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
         shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/one","one.jpg",1),

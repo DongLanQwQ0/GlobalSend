@@ -19,7 +19,8 @@ class DockPlatform {
           await send(Map<String, dynamic>.from(call.arguments as Map));
         } else if (call.method == 'nativeDrop' ||
             call.method == 'nativeDrag' ||
-            call.method == 'dockState') {
+            call.method == 'dockState' ||
+            call.method == 'mediaSuggestionsChanged') {
           _events.add({
             'type': call.method,
             ...Map<String, dynamic>.from(call.arguments),

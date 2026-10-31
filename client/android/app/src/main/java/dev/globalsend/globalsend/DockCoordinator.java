@@ -114,6 +114,22 @@ final class DockCoordinator {
                         result.success(clipboardSuggestions.refresh(attached.get()!=null && attached.get().hasWindowFocus()));break;
                     case "dismissClipboardSuggestion":
                         clipboardSuggestions.dismiss(call.argument("revision"));result.success(null);break;
+                    case "mediaSuggestions": ReceiveOverlay.mediaSuggestionSnapshot(result::success);break;
+                    case "mainMediaActive": ReceiveOverlay.mainMediaActive(Boolean.TRUE.equals(call.argument("active")));result.success(null);break;
+                    case "mainMediaShowing": ReceiveOverlay.mainMediaShowing(call.argument("ids"),Boolean.TRUE.equals(call.argument("interacting")));result.success(null);break;
+                    case "dismissMediaSuggestions": ReceiveOverlay.dismissMediaSuggestions(call.argument("ids"));result.success(null);break;
+                    case "dragMediaSuggestion":
+                        String suggestionId=call.argument("id"),suggestedPath=ReceiveOverlay.mediaSuggestionPath(suggestionId);
+                        if(suggestedPath==null) {result.success(false);break;}
+                        View suggestionSource=findFlutterView(host().findViewById(android.R.id.content));
+                        if(suggestionSource==null || !host().hasWindowFocus())throw new IllegalStateException("请在发送页长按媒体建议");
+                        ReceiveOverlay.mainMediaDrag(true);
+                        boolean started=startDrag(suggestionSource,List.of(suggestedPath),List.of(),"媒体",accepted -> {
+                            if(accepted)ReceiveOverlay.dismissMediaSuggestions(List.of(suggestionId));
+                            ReceiveOverlay.mainMediaDrag(false);
+                        },false);
+                        if(!started)ReceiveOverlay.mainMediaDrag(false);
+                        result.success(started);break;
                     case "status": result.success(status()); break;
                     case "showShelf": ReceiveOverlay.openShelf(); result.success(null); break;
                     case "hideShelf": ReceiveOverlay.closeShelf(); result.success(null); break;
@@ -165,6 +181,7 @@ final class DockCoordinator {
                     default: result.notImplemented();
                 }
             } catch (Exception e) {
+                if("dragMediaSuggestion".equals(call.method))ReceiveOverlay.mainMediaDrag(false);
                 if (directoryPicker == result) directoryPicker = null;
                 if (mediaPicker == result) mediaPicker = null;
                 result.error("DOCK_UNAVAILABLE", e.getMessage(), null);
@@ -531,6 +548,10 @@ final class DockCoordinator {
     static Map<String,Object> clipboardSuggestion() {
         DockCoordinator coordinator=current.get();
         return coordinator==null?java.util.Collections.emptyMap():coordinator.clipboardSuggestions.snapshot();
+    }
+    static void mediaSuggestionsChanged() {
+        DockCoordinator coordinator=current.get();
+        if(coordinator!=null && !coordinator.disposed)coordinator.channel.invokeMethod("mediaSuggestionsChanged",Map.of());
     }
     static void dismissClipboardSuggestion(String revision) {
         DockCoordinator coordinator=current.get();

@@ -34,8 +34,9 @@ abstract final class ClipboardSuggestionBridge {
 }
 
 class ClipboardSuggestion {
-  const ClipboardSuggestion(this.revision, this.kind);
+  const ClipboardSuggestion(this.revision, this.kind, {this.suggestedAt = 0});
   final String revision, kind;
+  final int suggestedAt;
   String get label => switch (kind) {
     'image' => '图片',
     'files' => '文件',
@@ -78,7 +79,11 @@ class ClipboardSuggestions extends ChangeNotifier {
       final next =
           revision.isEmpty || kind == 'empty' || _handledRevision == revision
           ? null
-          : ClipboardSuggestion(revision, kind);
+          : ClipboardSuggestion(
+              revision,
+              kind,
+              suggestedAt: status['suggestedAt'] as int? ?? 0,
+            );
       if (item?.revision != next?.revision || item?.kind != next?.kind) {
         item = next;
         notifyListeners();

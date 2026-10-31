@@ -10,6 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
 
 import 'controller.dart';
 import 'ui_tokens.dart';
@@ -154,8 +155,10 @@ class _SendScreenState extends State<SendScreen>
   SendController get c => widget.controller;
   late final recentPhotos = RecentPhotos(
     directory: c.stateDirectory,
-    suggestInApp: !Platform.isAndroid,
+    feed: Platform.isAndroid ? AndroidRecentPhotoFeed() : null,
   );
+  final _photoKeys = <String, GlobalKey>{};
+  bool _photoTouch = false, _photoScrolling = false;
   final clipboardSuggestions = ClipboardSuggestions();
   bool get loggedIn => c.api?.token.isNotEmpty == true;
   List<Map<String, dynamic>> get peers => c.onlinePeers;
@@ -813,36 +816,94 @@ class _SendScreenState extends State<SendScreen>
   }
 
   void refreshPhotoSuggestions() {
+    if (recentPhotos.items.isEmpty) {
+      _photoTouch = false;
+      _photoScrolling = false;
+    }
     if (mounted) setState(() {});
   }
 
-  Widget photoSuggestions() => RecentPhotosView(
-    photos: recentPhotos.items,
-    enabled: !working,
-    onAdd: (id) => perform(
-      () => recentPhotos.add(id, (path) => c.stageInputs([path], [])),
-    ),
-    onDismiss: () => perform(
-      () => recentPhotos.dismiss(
-        recentPhotos.items.map((item) => item.id).toList(),
-      ),
-    ),
-  );
+  void reportPhotoVisibility() {
+    if (!mounted) return;
+    final ids = recentPhotos.items.map((item) => item.id).toSet();
+    _photoKeys.removeWhere(
+      (id, key) => !ids.contains(id) && key.currentContext == null,
+    );
+    final showing = <String>{};
+    final size = MediaQuery.sizeOf(context);
+    final scopeVisible =
+        loggedIn &&
+        !settingsOpen &&
+        _queueRouteVisible &&
+        !_receiptOpen &&
+        (size.width >= 900 || page == 1) &&
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    if (!scopeVisible) {
+      _photoTouch = false;
+      _photoScrolling = false;
+    }
+    if (scopeVisible && !working && !_photoTouch && !_photoScrolling) {
+      for (final photo in recentPhotos.items) {
+        final box = _photoKeys[photo.id]?.currentContext?.findRenderObject();
+        if (box is! RenderBox || !box.attached || !box.hasSize) continue;
+        var visible = box.localToGlobal(Offset.zero) & box.size;
+        final viewport = RenderAbstractViewport.maybeOf(box);
+        if (viewport != null && viewport is RenderBox) {
+          final viewportBox = viewport as RenderBox;
+          visible = visible.intersect(
+            viewportBox.localToGlobal(Offset.zero) & viewportBox.size,
+          );
+        }
+        visible = visible.intersect(
+          Rect.fromLTWH(
+            0,
+            0,
+            size.width,
+            size.height - MediaQuery.viewInsetsOf(context).bottom,
+          ),
+        );
+        if (!visible.isEmpty &&
+            visible.width * visible.height * 2 >=
+                box.size.width * box.size.height)
+          showing.add(photo.id);
+      }
+    }
+    recentPhotos.setShowing(
+      showing,
+      interacting:
+          scopeVisible &&
+          (_photoTouch || _photoScrolling || c.nativeLocalDragActive),
+    );
+  }
 
-  Future<void> showPhotoSuggestions() => showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (_) => SafeArea(
-      top: false,
-      child: SizedBox(
-        height: 190,
-        child: AnimatedBuilder(
-          animation: recentPhotos,
-          builder: (_, _) => recentPhotos.items.isEmpty
-              ? const Center(child: Text('没有新图片'))
-              : photoSuggestions(),
-        ),
-      ),
+  void photoInteraction(bool touching) {
+    _photoTouch = touching;
+    if (touching)
+      recentPhotos.setShowing({}, interacting: true);
+    else
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => reportPhotoVisibility(),
+      );
+  }
+
+  Widget photoSuggestionTile(SuggestedPhoto photo) => KeyedSubtree(
+    key: _photoKeys.putIfAbsent(photo.id, GlobalKey.new),
+    child: RecentPhotoTile(
+      photo: photo,
+      onAdd: working
+          ? null
+          : () => perform(
+              () => recentPhotos.add(
+                photo.id,
+                (path) => c.stageInputs([path], []),
+              ),
+            ),
+      onDismiss: working
+          ? null
+          : () => perform(() => recentPhotos.dismiss([photo.id])),
+      onDrag: working || !Platform.isAndroid
+          ? null
+          : () => perform(() => recentPhotos.drag(photo.id)),
     ),
   );
 
@@ -935,6 +996,9 @@ class _SendScreenState extends State<SendScreen>
 
   @override
   Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => reportPhotoVisibility(),
+    );
     if (!peers.any((d) => d['deviceId'] == target)) {
       target = peers.firstOrNull?['deviceId'];
     }
@@ -2164,6 +2228,15 @@ class _SendScreenState extends State<SendScreen>
   Widget queuePanel() {
     final count = c.stagedFiles.length + c.stagedTexts.length;
     final clipboardSuggestion = clipboardSuggestions.item;
+    final suggestions = <({int at, Widget tile})>[
+      if (clipboardSuggestion != null)
+        (
+          at: clipboardSuggestion.suggestedAt,
+          tile: clipboardSuggestionTile(clipboardSuggestion),
+        ),
+      for (final photo in recentPhotos.items)
+        (at: photo.suggestedAt, tile: photoSuggestionTile(photo)),
+    ]..sort((a, b) => b.at.compareTo(a.at));
     final failed = c.failedOutgoingFiles;
     final active = c.dock
         .where(
@@ -2227,18 +2300,6 @@ class _SendScreenState extends State<SendScreen>
                         ),
                       ),
                       const Spacer(),
-                      if (count > 0 && recentPhotos.items.isNotEmpty)
-                        IconButton(
-                          tooltip: '新图片',
-                          onPressed: working ? null : showPhotoSuggestions,
-                          icon: Badge.count(
-                            count: recentPhotos.items.length,
-                            child: const AppIcon(
-                              Icons.add_photo_alternate_outlined,
-                              size: 19,
-                            ),
-                          ),
-                        ),
                       if (count > 0)
                         IconButton(
                           key: const ValueKey('clear-staged'),
@@ -2319,26 +2380,24 @@ class _SendScreenState extends State<SendScreen>
                     children: [
                       Positioned.fill(
                         child:
-                            count == 0 &&
-                                active.isEmpty &&
-                                clipboardSuggestion == null
-                            ? recentPhotos.items.isNotEmpty
-                                  ? photoSuggestions()
-                                  : Center(
-                                      child: Padding(
-                                        padding: Ui.insetField,
-                                        child: Text(
-                                          '点击输入文本，或拖入文件',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            color: Ui.colors(context)
-                                                .textSecondary,
-                                            fontSize: Ui.textSm,
-                                          ),
-                                        ),
-                                      ),
-                                    )
+                            count == 0 && active.isEmpty && suggestions.isEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: Ui.insetField,
+                                  child: Text(
+                                    '点击输入文本，或拖入文件',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Ui.colors(context).textSecondary,
+                                      fontSize: Ui.textSm,
+                                    ),
+                                  ),
+                                ),
+                              )
                             : Listener(
+                                onPointerDown: (_) => photoInteraction(true),
+                                onPointerUp: (_) => photoInteraction(false),
+                                onPointerCancel: (_) => photoInteraction(false),
                                 onPointerSignal: (event) {
                                   if (event is PointerScrollEvent &&
                                       event.scrollDelta.dx == 0 &&
@@ -2362,47 +2421,69 @@ class _SendScreenState extends State<SendScreen>
                                         );
                                   }
                                 },
-                                child: Scrollbar(
-                                  controller: queueScroll,
-                                  thumbVisibility: true,
-                                  child: ListView.separated(
-                                    key: const ValueKey('send-queue-list'),
-                                    controller: queueScroll,
-                                    scrollDirection: Axis.horizontal,
-                                    padding: const EdgeInsets.fromLTRB(
-                                      Ui.space1,
-                                      0,
-                                      Ui.space1,
-                                      Ui.space1,
-                                    ),
-                                    separatorBuilder: (_, _) =>
-                                        const SizedBox(width: Ui.space1),
-                                    itemCount:
-                                        count +
-                                        active.length +
-                                        (clipboardSuggestion == null ? 0 : 1),
-                                    itemBuilder: (_, index) {
-                                      final tile = index < c.stagedFiles.length
-                                          ? stagedTile(
-                                              path: c.stagedFiles[index],
-                                            )
-                                          : index < count
-                                          ? stagedTile(
-                                              textIndex:
-                                                  index - c.stagedFiles.length,
-                                            )
-                                          : index < count + active.length
-                                          ? activeTransferTile(
-                                              active[index - count],
-                                            )
-                                          : clipboardSuggestionTile(
-                                              clipboardSuggestion!,
-                                            );
-                                      return AspectRatio(
-                                        aspectRatio: 1,
-                                        child: tile,
+                                child: NotificationListener<ScrollNotification>(
+                                  onNotification: (event) {
+                                    if (event is ScrollStartNotification) {
+                                      _photoScrolling = true;
+                                      recentPhotos.setShowing(
+                                        {},
+                                        interacting: true,
                                       );
-                                    },
+                                    }
+                                    if (event is ScrollEndNotification) {
+                                      _photoScrolling = false;
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback(
+                                            (_) => reportPhotoVisibility(),
+                                          );
+                                    }
+                                    return false;
+                                  },
+                                  child: Scrollbar(
+                                    controller: queueScroll,
+                                    thumbVisibility: true,
+                                    child: ListView.separated(
+                                      key: const ValueKey('send-queue-list'),
+                                      controller: queueScroll,
+                                      scrollDirection: Axis.horizontal,
+                                      padding: const EdgeInsets.fromLTRB(
+                                        Ui.space1,
+                                        0,
+                                        Ui.space1,
+                                        Ui.space1,
+                                      ),
+                                      separatorBuilder: (_, _) =>
+                                          const SizedBox(width: Ui.space1),
+                                      itemCount:
+                                          count +
+                                          active.length +
+                                          suggestions.length,
+                                      itemBuilder: (_, index) {
+                                        final tile =
+                                            index < c.stagedFiles.length
+                                            ? stagedTile(
+                                                path: c.stagedFiles[index],
+                                              )
+                                            : index < count
+                                            ? stagedTile(
+                                                textIndex:
+                                                    index -
+                                                    c.stagedFiles.length,
+                                              )
+                                            : index < count + active.length
+                                            ? activeTransferTile(
+                                                active[index - count],
+                                              )
+                                            : suggestions[index -
+                                                      count -
+                                                      active.length]
+                                                  .tile;
+                                        return AspectRatio(
+                                          aspectRatio: 1,
+                                          child: tile,
+                                        );
+                                      },
+                                    ),
                                   ),
                                 ),
                               ),

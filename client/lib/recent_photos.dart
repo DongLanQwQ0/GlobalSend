@@ -6,11 +6,68 @@ import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'directories.dart';
+import 'dock_platform.dart';
 
 class SuggestedPhoto {
-  const SuggestedPhoto(this.id, this.thumbnail);
+  const SuggestedPhoto(
+    this.id,
+    this.thumbnail, {
+    this.path,
+    this.name = '',
+    this.suggestedAt = 0,
+  });
   final String id;
   final Uint8List thumbnail;
+  final String? path;
+  final String name;
+  final int suggestedAt;
+}
+
+abstract class RecentPhotoFeed {
+  Stream<void> get changes;
+  Future<List<SuggestedPhoto>> read();
+  Future<void> setActive(bool active);
+  Future<void> setShowing(Set<String> ids, {bool interacting = false});
+  Future<void> dismiss(Iterable<String> ids);
+  Future<void> drag(String id);
+}
+
+/// Android's sending page and floating shelf observe the same native candidates.
+class AndroidRecentPhotoFeed implements RecentPhotoFeed {
+  @override
+  Stream<void> get changes => DockPlatform.events
+      .where((event) => event['type'] == 'mediaSuggestionsChanged')
+      .map((_) {});
+  @override
+  Future<List<SuggestedPhoto>> read() async =>
+      (await DockPlatform.channel.invokeListMethod<Map>('mediaSuggestions') ??
+              [])
+          .map(
+            (item) => SuggestedPhoto(
+              item['id'] as String,
+              item['thumbnail'] as Uint8List,
+              path: item['path'] as String,
+              name: item['name'] as String,
+              suggestedAt: item['suggestedAt'] as int? ?? 0,
+            ),
+          )
+          .toList();
+  @override
+  Future<void> setActive(bool active) =>
+      DockPlatform.channel.invokeMethod('mainMediaActive', {'active': active});
+  @override
+  Future<void> setShowing(Set<String> ids, {bool interacting = false}) =>
+      DockPlatform.channel.invokeMethod('mainMediaShowing', {
+        'ids': ids.toList(),
+        'interacting': interacting,
+      });
+  @override
+  Future<void> dismiss(Iterable<String> ids) => DockPlatform.channel
+      .invokeMethod('dismissMediaSuggestions', {'ids': ids.toList()});
+  @override
+  Future<void> drag(String id) async {
+    await DockPlatform.channel.invokeMethod('dragMediaSuggestion', {'id': id});
+  }
 }
 
 abstract class RecentPhotoLibrary {
@@ -64,7 +121,13 @@ class DevicePhotoLibrary implements RecentPhotoLibrary {
         const ThumbnailSize(180, 180),
       );
       if (thumbnail != null) {
-        suggestions.add(SuggestedPhoto(asset.id, thumbnail));
+        suggestions.add(
+          SuggestedPhoto(
+            asset.id,
+            thumbnail,
+            suggestedAt: DateTime.now().millisecondsSinceEpoch,
+          ),
+        );
       }
       if (suggestions.length == 6) break;
     }
@@ -88,6 +151,7 @@ class RecentPhotos extends ChangeNotifier {
     DateTime Function()? now,
     this.suggestionDuration = const Duration(seconds: 30),
     this.suggestInApp = true,
+    this.feed,
   }) : library = library ?? DevicePhotoLibrary(),
        directory = directory ?? appDataDirectory,
        supported = supported ?? (Platform.isAndroid || Platform.isIOS),
@@ -99,6 +163,10 @@ class RecentPhotos extends ChangeNotifier {
   final DateTime Function() now;
   final Duration suggestionDuration;
   final bool suggestInApp;
+  final RecentPhotoFeed? feed;
+  StreamSubscription<void>? _feedChanges;
+  Set<String> _showing = {};
+  bool _interacting = false;
   bool enabled = true, permissionGranted = false;
   String? problem;
   List<SuggestedPhoto> items = [];
@@ -121,6 +189,18 @@ class RecentPhotos extends ChangeNotifier {
     if (!supported || _disposed || _visible == visible) return;
     _visible = visible;
     _timer?.cancel();
+    if (feed != null) {
+      if (visible) {
+        _feedChanges = feed!.changes.listen((_) => unawaited(refresh()));
+        unawaited(refresh());
+      } else {
+        unawaited(_feedChanges?.cancel());
+        _feedChanges = null;
+        setShowing({});
+        unawaited(_deactivateFeed());
+      }
+      return;
+    }
     if (visible) {
       unawaited(refresh());
       _timer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -138,7 +218,8 @@ class RecentPhotos extends ChangeNotifier {
       final state = jsonDecode(await file.readAsString()) as Map;
       enabled = state['enabled'] as bool;
       _asked = state['asked'] as bool;
-      if (!suggestInApp && (state['mediaPermissionVersion'] as int? ?? 1) < 2) {
+      if ((feed != null || !suggestInApp) &&
+          (state['mediaPermissionVersion'] as int? ?? 1) < 2) {
         _asked = false; // Upgrade the old image-only permission request once.
       }
       _since = DateTime.parse(state['since'] as String);
@@ -167,6 +248,10 @@ class RecentPhotos extends ChangeNotifier {
     await (_loaded ??= _load());
     enabled = value;
     if (!value) {
+      if (feed != null) {
+        await feed!.dismiss(items.map((item) => item.id));
+        await _deactivateFeed();
+      }
       items = [];
       problem = null;
     }
@@ -176,7 +261,11 @@ class RecentPhotos extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
-    if (!supported || !_visible || _disposed || _suggestedThisRun) return;
+    if (!supported ||
+        !_visible ||
+        _disposed ||
+        feed == null && _suggestedThisRun)
+      return;
     if (_busy) {
       _again = true;
       return;
@@ -184,7 +273,11 @@ class RecentPhotos extends ChangeNotifier {
     _busy = true;
     try {
       await (_loaded ??= _load());
-      if (!enabled || !_visible || _disposed || _suggestedThisRun) return;
+      if (!enabled ||
+          !_visible ||
+          _disposed ||
+          feed == null && _suggestedThisRun)
+        return;
       final request = !_asked;
       if (request) {
         await _save();
@@ -198,9 +291,16 @@ class RecentPhotos extends ChangeNotifier {
         problem = '未获得照片访问权限';
         return;
       }
-      // Android's persistent native dock owns discovery and presentation. Keep
-      // this object for the existing switch/permission flow, without consuming
-      // new media IDs or showing a competing main-page prompt.
+      if (feed != null && _visible && enabled && !_disposed) {
+        await feed!.setActive(true);
+        final found = await feed!.read();
+        if (_visible && enabled && !_disposed) {
+          items = found;
+          problem = null;
+        }
+        return;
+      }
+      // Keep the permission/settings flow for callers that explicitly hide suggestions.
       if (!suggestInApp) {
         items = [];
         problem = null;
@@ -241,6 +341,12 @@ class RecentPhotos extends ChangeNotifier {
 
   Future<void> dismiss(Iterable<String> ids) async {
     final dismissed = ids.toSet();
+    if (feed != null) {
+      await feed!.dismiss(dismissed);
+      items.removeWhere((item) => dismissed.contains(item.id));
+      _changed();
+      return;
+    }
     _handled.addAll(dismissed);
     while (_handled.length > 256) {
       _handled.remove(_handled.first);
@@ -251,7 +357,9 @@ class RecentPhotos extends ChangeNotifier {
   }
 
   Future<void> add(String id, Future<void> Function(String) stage) async {
-    final path = await library.filePath(id);
+    final path =
+        items.where((item) => item.id == id).firstOrNull?.path ??
+        (feed == null ? await library.filePath(id) : null);
     if (path == null) {
       await dismiss([id]);
       return;
@@ -260,6 +368,36 @@ class RecentPhotos extends ChangeNotifier {
     // transfer file, or remove it when clearing the pending-send list.
     await stage(path);
     await dismiss([id]);
+  }
+
+  void setShowing(Set<String> ids, {bool interacting = false}) {
+    if (feed == null || setEquals(ids, _showing) && interacting == _interacting)
+      return;
+    _showing = Set.of(ids);
+    _interacting = interacting;
+    unawaited(_reportShowing());
+  }
+
+  Future<void> _reportShowing() async {
+    try {
+      await feed!.setShowing(_showing, interacting: _interacting);
+    } catch (_) {
+      problem = '无法更新媒体建议';
+      _changed();
+    }
+  }
+
+  Future<void> _deactivateFeed() async {
+    try {
+      await feed!.setActive(false);
+    } catch (_) {
+      problem = '无法更新媒体建议';
+      _changed();
+    }
+  }
+
+  Future<void> drag(String id) async {
+    if (feed != null) await feed!.drag(id);
   }
 
   void _changed() {
@@ -271,6 +409,8 @@ class RecentPhotos extends ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     _suggestionTimer?.cancel();
+    unawaited(_feedChanges?.cancel());
+    if (feed != null) unawaited(_deactivateFeed());
     super.dispose();
   }
 }

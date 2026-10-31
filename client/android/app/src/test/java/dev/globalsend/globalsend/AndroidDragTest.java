@@ -295,6 +295,39 @@ public class AndroidDragTest {
         } finally {overlay.hide();}
     }
 
+    @Test public void sendingPageCanReadSharedSuggestionsWithoutAnOverlayWindow() throws Exception {
+        activity.getSharedPreferences("received-popup-settings",Context.MODE_PRIVATE).edit().putBoolean("enabled",false).commit();
+        ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions(){
+            public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}
+        });
+        try {
+            TemporaryShelf shelf=ReflectionHelpers.getField(overlay,"shelf");
+            File original=new File(activity.getCacheDir(),"main-suggestion.jpg");
+            android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(8,8,android.graphics.Bitmap.Config.ARGB_8888);
+            image.eraseColor(android.graphics.Color.BLUE);
+            try(java.io.FileOutputStream output=new java.io.FileOutputStream(original)) {image.compress(android.graphics.Bitmap.CompressFormat.JPEG,90,output);}image.recycle();
+            ReceiveOverlay.mainMediaActive(true);
+            shelf.suggest(List.of(new RecentMediaSuggestions.Media(original.getPath(),original.getName(),1)));
+            assertNull(ReflectionHelpers.getField(overlay,"root"));
+            java.util.concurrent.atomic.AtomicReference<List<Map<String,Object>>> snapshot=new java.util.concurrent.atomic.AtomicReference<>();
+            ReceiveOverlay.mediaSuggestionSnapshot(snapshot::set);
+            long deadline=System.currentTimeMillis()+5000;
+            while(snapshot.get()==null && System.currentTimeMillis()<deadline) {Shadows.shadowOf(Looper.getMainLooper()).idle();Thread.sleep(5);}
+            assertNotNull(snapshot.get());assertEquals(1,snapshot.get().size());
+            Map<String,Object> photo=snapshot.get().get(0);String id=(String)photo.get("id");
+            assertEquals(original.getPath(),photo.get("path"));assertTrue(((byte[])photo.get("thumbnail")).length>0);
+            assertTrue(events.stream().anyMatch(event -> event.method.equals("mediaSuggestionsChanged")));
+            ReceiveOverlay.mainMediaShowing(List.of(id));
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(5));
+            ReceiveOverlay.mainMediaActive(false);
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(40));
+            assertTrue(shelf.isSuggested(id));
+            // A stale main-page dismissal may remove a suggestion, never a promoted shelf item.
+            shelf.add(List.of(original.getPath()),List.of(),Map.of());
+            ReceiveOverlay.dismissMediaSuggestions(List.of(id));assertTrue(shelf.items.containsKey(id));assertTrue(original.isFile());
+        } finally {ReceiveOverlay.mainMediaActive(false);overlay.hide();}
+    }
+
     private void swipeOverlay(View root,float from,float to,float y) {
         long down=android.os.SystemClock.uptimeMillis();
         for(int step=0;step<=6;step++) {
