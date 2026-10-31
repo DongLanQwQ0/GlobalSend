@@ -10,11 +10,11 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows / Android 最新本地版为 **1.0.60+77**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`；手机已保留数据覆盖安装并读回77版。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
+Windows / Android 最新本地版为 **1.0.61+78**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`；手机已保留数据覆盖安装并读回78版。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.60-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.61-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.60+77 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.60-android-arm64-v8a.apk)已验签、不打包字体。77版补齐[接收后的系统文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)，使共享目录中的新文件无需移动即可被文件选择器发现。图片／视频建议放在暂存末尾，已删除媒体自动移除建议；清空与建议之间保留双击空白。建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留：iPad 等不能远程打开浏览器的设备收到链接后手动点击。实际安装与验收见[短步骤](docs/QUICK_TEST.md)和[本机发布记录](artifacts/releases/latest-local.json)。
+Android [1.0.61+78 arm64 APK，约16.3 MB](artifacts/releases/GlobalSend-1.0.61-android-arm64-v8a.apk)已验签、不打包字体。78修复在本应用内点击暂存坞把手后立即收回；77版的[接收文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)已由用户确认，文件选择器与最近文件均可见。图片／视频建议放在暂存末尾，已删除媒体自动移除建议；清空与建议之间保留双击空白。建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留：iPad 等不能远程打开浏览器的设备收到链接后手动点击。实际安装与验收见[短步骤](docs/QUICK_TEST.md)和[本机发布记录](artifacts/releases/latest-local.json)。
 
 iPad / iPhone 的[**1.0.59 (76) 未签名 IPA，约14.8 MB**](artifacts/releases/ios-1.0.59-build76/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。接入 UIKit 原生拖入、拖出；普通系统分享唤起待发送，选系统设备建议才按唯一 ID 自动发送本批。由用户用 iloader 手动签名安装，76版真机交互待确认，见[iPad说明](docs/IPAD.md)。**中心不托管安装包；[Windows/Android 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iOS 1.0.59+76](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.59-build76)分别提供对应平台包和更新清单。**
 
