@@ -15,6 +15,37 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34, manifest=Config.NONE)
 public class ReceiveOverlayTest {
+    @Test public void handleTapKeepsHostFocusWhenAppIsAlreadyForeground() throws Exception {
+        ReceiveOverlay overlay=receiver();
+        try {
+            show(overlay,"tap fixture",1);overlay.foreground();
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(300));
+            View root=(View)field(overlay,"root");draw(root);
+            WindowManager.LayoutParams layout=(WindowManager.LayoutParams)root.getLayoutParams();
+            assertTrue((layout.flags&WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)!=0);
+            ((View)field(overlay,"handle")).performClick();
+            assertTrue("Metadata check must not take focus away from the foreground host",
+                (layout.flags&WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)!=0);
+        } finally {overlay.hide();}
+    }
+
+    @Test public void foregroundRefreshDoesNotUndoDeliberateHandleExpansion() throws Exception {
+        ReceiveOverlay overlay=receiver();
+        try {
+            show(overlay,"tap fixture",1);overlay.foreground();
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(300));
+            View root=(View)field(overlay,"root");draw(root);
+            ((View)field(overlay,"handle")).performClick();
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(600));
+            overlay.foreground();
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(300));
+            assertFalse("An already-foreground refresh must not collapse the user's open dock",(Boolean)field(overlay,"collapsed"));
+            overlay.background();overlay.foreground();
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(300));
+            assertTrue("Actually returning to the app still collapses once",(Boolean)field(overlay,"collapsed"));
+        } finally {overlay.hide();}
+    }
+
     @Test public void bulkDragExcludesSuggestionsButKeepsExplicitlyStagedAndReceivedItems() throws Exception {
         ReceiveOverlay overlay=receiver(); show(overlay,"received",1);
         TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");

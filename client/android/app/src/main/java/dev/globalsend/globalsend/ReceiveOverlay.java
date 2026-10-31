@@ -194,11 +194,14 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     @Override public void foreground() {
+        boolean entering=!appForeground;
         appForeground=true;
         mediaSuggestions.refresh();
         // A persistent shelf stays reachable while the user moves between apps.
         // Received records are still shown in the main app, not duplicated there.
-        if (root != null) setCollapsed(true);
+        // Focus/lifecycle refreshes are not a new app entry. Keep a dock that
+        // the user explicitly opened while already in GlobalSend expanded.
+        if (entering && root != null) setCollapsed(true);
     }
     @Override public void background() {appForeground=false;mediaSuggestions.refresh();}
 
@@ -753,6 +756,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void withClipboardFocus(Runnable read) {
         final View owner=root;
         if(owner==null)return;
+        // The foreground app already has clipboard access. Taking focus here
+        // makes Flutter inactive/resumed and used to immediately fold the dock.
+        if(appForeground){read.run();return;}
         final int focusFlags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
         final int prior=layout.flags&focusFlags;
         class FocusedRead implements ViewTreeObserver.OnWindowFocusChangeListener,Runnable {
