@@ -23,4 +23,12 @@ Android 的普通路径与 SAF URI 现在统一进入现有 `ReceiveDestination 
 - Dart 文件引用、SAF 描述符读取、文本预览和图片缩略图四项回归通过。
 - 证据：`artifacts/tmp/android-open-haptics90/accepted.log`、`open-accepted.xml`、`controls-accepted.xml`、`handle-haptics.log`、`read-regression.log`。
 
-构建交付待补充；未获恢复手机操作授权前，不自动安装或启动手机应用。
+## 本地交付：1.0.73+90
+
+- 源码：`2496075d6924c2332fe753363f2012e62f3ab814`。
+- 完整构建成功；Windows 已替换并重启于 `E:\Programs\GlobalSend`，实际文件版本 `1.0.73+90`、PID 10668。
+- Android：`artifacts/releases/GlobalSend-1.0.73-android-arm64-v8a.apk`，16,368,972 字节，包元数据为 `versionName=1.0.73 / versionCode=90`。本轮未推送、安装或启动手机应用。
+- Windows：`artifacts/releases/GlobalSend-1.0.73-windows-x64.zip`，22,420,661 字节。两个产物均通过无字体文件检查。
+- 已核对实际 APK 的 FileProvider authority、`exported=false`、URI 授权及 `FILE_PROVIDER_PATHS` 资源。资源压缩后实际路径为 `res/oS.xml`，文件/缓存/外部存储等原有路径配置存在，不是仅检查源清单。
+- 证据：上述任务目录中的 `release-build.log`、`delivery.json`、`apk-version.txt`、`file-provider.txt`、`file-provider-paths.txt`。
+- 手机操作暂停保持，触感与真实系统查看器仍需新包实机验收。未操作真实 Windows 桌面做功能测试，未更新 Web/服务器或构建 IPA，安装包未上传中心服务器。
