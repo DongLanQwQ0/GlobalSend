@@ -7,6 +7,7 @@ import { join } from 'node:path';
 // permits run-as to read only synthetic acceptance state; never ship this APK.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const center = process.argv[2];
+const publication = process.argv.includes('--publication');
 if (!/^http:\/\/10\.0\.2\.2:\d+$/.test(center || '')) throw new Error('Provide the isolated host-center URL for the emulator.');
 const project = join(root, 'client/build/background-android-probe');
 const sdk = process.env.FLUTTER_ROOT || 'E:/Programs/flutter';
@@ -32,7 +33,7 @@ await cp(join(root, 'client/android/app/src/main/res'), join(project, 'android/a
 for (const path of ['build.gradle.kts', 'settings.gradle.kts', 'gradle.properties'])
   await copyFile(join(root, 'client/android', path), join(project, 'android', path));
 let gradle = await readFile(join(root, 'client/android/app/build.gradle.kts'), 'utf8');
-gradle = gradle.replace('applicationId = "dev.globalsend.globalsend"', 'applicationId = "dev.globalsend.backgroundprobe"');
+gradle = gradle.replace('applicationId = "dev.globalsend.globalsend"', `applicationId = "dev.globalsend.${publication ? 'publicationprobe' : 'backgroundprobe'}"`);
 await writeFile(join(project, 'android/app/build.gradle.kts'), gradle);
 let manifest = await readFile(join(root, 'client/android/app/src/main/AndroidManifest.xml'), 'utf8');
 manifest = manifest.replace('android:label="GlobalSend"', 'android:label="GlobalSend 后台验收"').replaceAll(/android:name="\.(\w+)"/g, 'android:name="dev.globalsend.globalsend.$1"');
@@ -47,5 +48,6 @@ await writeFile(join(project, 'production-snapshot.json'), JSON.stringify({ cent
 await flutter(['pub', 'get', '--offline']);
 await flutter(['build', 'apk', '--debug', '--no-pub', '--target-platform=android-x64',
   '--dart-define=GLOBALSEND_BACKGROUND_FIXTURE_CENTER=' + center,
+  ...(publication ? ['--dart-define=GLOBALSEND_PUBLICATION_FIXTURE=true'] : []),
   '--android-project-arg=globalsendAbi=x86_64', '--android-project-arg=disable-abi-filtering=true', '--android-project-arg=globalsendCompressNative=true']);
 console.log('Background acceptance APK:', join(project, 'build/app/outputs/flutter-apk/app-debug.apk'));

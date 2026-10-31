@@ -80,6 +80,10 @@ final class ReceiveDirectory {
                 case "openLocalRead": submit(result, () -> openLocalRead(call.argument("path"))); break;
                 case "localExists": submit(result, () -> localExists(call.argument("path"))); break;
                 case "localStat": submit(result, () -> localStat(call.argument("path"))); break;
+                case "publish": submit(result, () -> {
+                    ReceivedFilePublication.publish(context, call.argument("location"), null);
+                    return null;
+                }); break;
                 case "readDescriptor": submit(result, () -> readDescriptor(call.argument("handle"), ((Number)call.argument("offset")).longValue(), ((Number)call.argument("length")).intValue())); break;
                 case "close": submit(result, () -> { close(call.argument("handle"), call.argument("error")); return null; }); break;
                 case "isOwned": result.success(isOwned(context, call.argument("location"))); break;

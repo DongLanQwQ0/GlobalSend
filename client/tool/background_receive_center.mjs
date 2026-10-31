@@ -37,10 +37,11 @@ app.post('/fixture/text', async request => {
 });
 app.post('/fixture/file', async request => {
   const size = request.body?.size || 1048576, delayMs = request.body?.delayMs ?? 120;
-  const bytes = Buffer.alloc(size); for (let i = 0; i < size; i++) bytes[i] = i % 251;
-  const transferId = randomUUID(), fileId = randomUUID(), name = `后台文件-${++ordinal}.bin`;
+  const bytes = request.body?.text ? Buffer.from(request.body.text, 'utf8') : Buffer.alloc(size);
+  if (!request.body?.text) for (let i = 0; i < size; i++) bytes[i] = i % 251;
+  const transferId = randomUUID(), fileId = randomUUID(), name = request.body?.name || `后台文件-${++ordinal}.bin`;
   await call('POST', '/transfers', { transferId, targetDeviceId: await target(), routePreference: 'relay', files: [
-    { fileId, name, size, mimeType: 'application/octet-stream', sha256: createHash('sha256').update(bytes).digest('hex') },
+    { fileId, name, size: bytes.length, mimeType: request.body?.mimeType || 'application/octet-stream', sha256: createHash('sha256').update(bytes).digest('hex') },
   ] }, sender.deviceToken);
   const job = { transferId, sent: 0, error: '' }; jobs.set(transferId, job);
   void (async () => {
@@ -58,7 +59,7 @@ app.post('/fixture/file', async request => {
       await call('POST', `/transfers/${transferId}/files/${fileId}/complete`, {}, sender.deviceToken);
     } catch (error) { job.error = String(error); }
   })();
-  return { transferId, fileId, name, size };
+  return { transferId, fileId, name, size: bytes.length };
 });
 await app.listen({ host: '127.0.0.1', port: 0 });
 sender = await call('POST', '/devices/enroll', { name: '后台验收电脑', platform: 'other', groupKey: 'background-ui-fixture' });

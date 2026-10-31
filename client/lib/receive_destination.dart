@@ -246,6 +246,17 @@ class ReceiveDestination {
     }
   }
 
+  /// Index the final shared-storage file, not its receiving .part. System
+  /// publication runs asynchronously and must not invalidate a delivered file.
+  static Future<void> publish(String location) async {
+    if (!Platform.isAndroid || location.isEmpty) return;
+    try {
+      await channel.invokeMethod<void>('publish', {'location': location});
+    } on PlatformException catch (error) {
+      debugPrint('接收文件系统索引更新失败：${error.message}');
+    }
+  }
+
   static Future<bool> isOwned(String location) async {
     if (location.startsWith('content://')) {
       return (await channel.invokeMethod<bool>('isOwned', {
@@ -296,7 +307,8 @@ class ReceiveDestination {
       _requireOwned(owned, location);
       final file = File(location);
       final type = await FileSystemEntity.type(location);
-      if (Platform.isAndroid && type == FileSystemEntityType.notFound &&
+      if (Platform.isAndroid &&
+          type == FileSystemEntityType.notFound &&
           (await stat(location)).exists) {
         throw FileSystemException('文件仍在，但暂时没有删除权限；请重新授权所在文件夹', location);
       }

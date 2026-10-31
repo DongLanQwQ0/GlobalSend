@@ -738,6 +738,9 @@ class SendController extends ChangeNotifier {
     final savedOwner = ServerProfile.fromJson(owner.toJson());
     final store = await _savedStore();
     if (store == null) return;
+    if (!entry.outgoing && entry.kind == 'file' && !entry.isDirectory) {
+      unawaited(ReceiveDestination.publish(entry.localPath));
+    }
     await store.register(
       profile: savedOwner,
       entry: entry,

@@ -17,6 +17,13 @@ class BackgroundProbeController extends SendController {
     if (initialized) return;
     initialized = true;
     await super.init();
+    if (const bool.fromEnvironment('GLOBALSEND_PUBLICATION_FIXTURE')) {
+      final folder = Directory(
+        '/storage/emulated/0/Download/GlobalSend-publication77-receive',
+      );
+      await folder.create(recursive: true);
+      await changeReceiveDirectory(folder.path, folder.path);
+    }
     if (api?.token.isNotEmpty != true) {
       await connect(
         const String.fromEnvironment('GLOBALSEND_BACKGROUND_FIXTURE_CENTER'),

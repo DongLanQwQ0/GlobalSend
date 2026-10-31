@@ -883,6 +883,9 @@ class SavedFilesStore {
     }
     await ReceiveDestination.relocateFolderRoots(relocatedLocations);
     await onCommitted?.call();
+    for (final item in moved.where((item) => !item.directory)) {
+      unawaited(ReceiveDestination.publish(item.path));
+    }
     await _finishMigrationCleanup();
     if (_obsoleteLocations.any(
       (item) => !item.directory && !item.path.startsWith('content://'),

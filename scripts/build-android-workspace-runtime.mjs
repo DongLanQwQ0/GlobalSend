@@ -19,7 +19,7 @@ const classes=join(build,'classes'),dex=join(build,'dex');
 for(const path of [source,classes,dex])await mkdir(path,{recursive:true});
 const snapshots=[];
 const reuse=process.argv.includes('--reuse-production') ? JSON.parse(await readFile(join(build,'production-snapshot.json'),'utf8')).sources : null;
-for(const name of ['DockCoordinator','DockShareProvider','ReceiveDirectory','SendFolderArchive','ReceiveNotifications','ReceiveNotificationCopyReceiver']){
+for(const name of ['DockCoordinator','DockShareProvider','ReceiveDirectory','ReceivedFilePublication','SendFolderArchive','ReceiveNotifications','ReceiveNotificationCopyReceiver']){
   const path=`client/android/app/src/main/java/dev/globalsend/globalsend/${name}.java`;
   if(reuse){snapshots.push(reuse.find(item=>item.source===path));}
   else {await copyFile(join(root,path),join(source,name+'.java'));
