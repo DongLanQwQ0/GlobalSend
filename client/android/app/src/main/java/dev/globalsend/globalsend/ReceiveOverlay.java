@@ -120,6 +120,16 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private boolean doubleTapGesture;
     private boolean collapsed, shelfVisible, edgeRight = true;
     private boolean appForeground;
+    private boolean suggestionTouch, suggestionDrag, suggestionScrolling, screenOff;
+    private final Runnable suggestionScrollIdle=() -> {
+        suggestionScrolling=false;updateSuggestionVisibility();
+    };
+    private final android.content.BroadcastReceiver screenChanges=new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context context,android.content.Intent intent) {
+            screenOff=android.content.Intent.ACTION_SCREEN_OFF.equals(intent.getAction());
+            updateSuggestionVisibility();
+        }
+    };
     private int expandedWidth, expandedHeight;
     private int preferredWidth, preferredHeight;
     private Rect lastBounds;
@@ -221,7 +231,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         mediaSuggestions.refresh();
         if (root == null) return;
         if (DockCoordinator.afterExportFrom(root, this::shelfChanged)) return;
-        render();
+        renderKeepingScroll();
         main.removeCallbacks(countdown);
         if (shelf.removalSeconds() > 0) main.post(countdown);
     }
@@ -368,7 +378,18 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             private boolean cancelTap;
             private boolean backgroundMove, backgroundMoved;
             private int sizingEdges;
+            @Override protected void onWindowVisibilityChanged(int visibility) {
+                super.onWindowVisibilityChanged(visibility);
+                if(visibility!=View.VISIBLE)shelf.setVisibleSuggestions(java.util.Collections.emptySet());
+                else post(ReceiveOverlay.this::updateSuggestionVisibility);
+            }
             @Override public boolean dispatchDragEvent(DragEvent event) {
+                if(event.getAction()==DragEvent.ACTION_DRAG_STARTED) {
+                    suggestionTouch=false;suggestionDrag=event.getClipDescription()!=null;
+                    updateSuggestionVisibility();
+                } else if(event.getAction()==DragEvent.ACTION_DRAG_ENDED) {
+                    suggestionDrag=false;post(ReceiveOverlay.this::updateSuggestionVisibility);
+                }
                 if(event.getAction()!=DragEvent.ACTION_DRAG_LOCATION)
                     DockCoordinator.traceDrag("overlay action="+event.getAction()+" forwarding="+(forwarding!=null));
                 if(forwarding!=null && event.getAction()==DragEvent.ACTION_DRAG_EXITED)showSendTargets();
@@ -378,6 +399,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 return super.dispatchDragEvent(event);
             }
             @Override public boolean dispatchTouchEvent(MotionEvent event) {
+                if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
+                    suggestionTouch=true;updateSuggestionVisibility();
+                } else if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL) {
+                    suggestionTouch=false;waitForSuggestionScroll();
+                }
                 if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
                     doubleTapGesture=false;
                     sizingEdges=collapsed || geometry!=null || hitsAction(surface,event)?0:
@@ -479,6 +505,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         scroll.setHorizontalScrollBarEnabled(false);
         scroll.setPadding(dp(4),0,0,0);
         scroll.setClipToPadding(false);
+        scroll.setOnScrollChangeListener((view,x,y,oldX,oldY) -> waitForSuggestionScroll());
         row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         scroll.addView(row, new HorizontalScrollView.LayoutParams(-2, -1));
@@ -552,10 +579,16 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 if(geometry!=null && !geometry.isStarted() && root.getWidth()==layout.width && root.getHeight()==layout.height)
                     geometry.start();
             }
+            if(root==owner)updateSuggestionVisibility();
             return true;
         });
         rootAdded = true;
         context.registerComponentCallbacks(configurationChanges);
+        screenOff=!context.getSystemService(android.os.PowerManager.class).isInteractive();
+        android.content.IntentFilter screenFilter=new android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF);
+        screenFilter.addAction(android.content.Intent.ACTION_SCREEN_ON);
+        if(Build.VERSION.SDK_INT>=33)context.registerReceiver(screenChanges,screenFilter,Context.RECEIVER_NOT_EXPORTED);
+        else context.registerReceiver(screenChanges,screenFilter);
         appearanceChanges = new android.os.FileObserver(context.getFilesDir().getPath(), android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
             @Override public void onEvent(int event, String path) {
                 if ("appearance.json".equals(path)) main.post(() -> shelfChanged());
@@ -567,6 +600,30 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void render() {render(true);}
+    private void waitForSuggestionScroll() {
+        suggestionScrolling=true;
+        shelf.setVisibleSuggestions(java.util.Collections.emptySet());
+        main.removeCallbacks(suggestionScrollIdle);main.postDelayed(suggestionScrollIdle,150);
+    }
+    private void updateSuggestionVisibility() {
+        java.util.Set<String> visible=new java.util.HashSet<>();
+        if(root!=null && rootAdded && shelfVisible && !collapsed && geometry==null && !screenOff &&
+                !suggestionTouch && !suggestionDrag && !suggestionScrolling && forwarding==null &&
+                importing==0 && root.isShown() && root.getAlpha()>=.99f && scroll.isShown()) {
+            Rect viewport=new Rect();
+            if(scroll.getGlobalVisibleRect(viewport))for(int i=0;i<row.getChildCount();i++) {
+                View card=row.getChildAt(i);
+                if(!(card.getTag() instanceof ReceiveNotifications.Receipt) || card.getAlpha()<.99f)continue;
+                ReceiveNotifications.Receipt item=(ReceiveNotifications.Receipt)card.getTag();
+                if(!shelf.isSuggested(item.id))continue;
+                Rect exposed=new Rect();
+                // A clipped sliver at the edge is not a viewed suggestion.
+                if(card.getGlobalVisibleRect(exposed) && exposed.intersect(viewport) &&
+                        (long)exposed.width()*exposed.height()*2>=(long)card.getWidth()*card.getHeight())visible.add(item.id);
+            }
+        }
+        shelf.setVisibleSuggestions(visible);
+    }
     private void placeControlRail() {
         // The controls stay on the attached edge; the viewport opens inward.
         // Reorder the existing views so gestures, content and scroll survive.
@@ -579,6 +636,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         scroll.setPadding(edgeRight?dp(4):0,0,edgeRight?0:dp(4),0);
     }
     private void render(boolean animateChanges) {
+        shelf.setVisibleSuggestions(java.util.Collections.emptySet());
         placeControlRail();
         appearance = ReceiveAppearance.load(context);
         if(geometry==null) {
@@ -951,6 +1009,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         long started=android.os.SystemClock.uptimeMillis();
         final ForwardDrag drag=new ForwardDrag(paths,texts,staged);
         forwarding=drag;
+        updateSuggestionVisibility();
         try {
             boolean began=DockCoordinator.startDrag(source, paths, texts, (paths.size() + texts.size()) + " 项", accepted -> {
                 finishForwarding(drag);
@@ -1074,6 +1133,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         stopTargetScroll();forwarding=null;hoveredTarget=null;
         if(targetScroll!=null) {targetScroll.animate().cancel();targetScroll.setVisibility(View.GONE);}
         if(expanded!=null)expanded.setAlpha(1);
+        updateSuggestionVisibility();
     }
 
     private void feedbackDragEntry() {
@@ -1322,6 +1382,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
         placeControlRail();
         collapsed = value;
+        shelf.setVisibleSuggestions(java.util.Collections.emptySet());
         styleHandle();
         int width = value ? dp(18) : expandedWidth, height = value ? dp(72) : expandedHeight;
         int x = edgeRight ? bounds.right - width : bounds.left;
@@ -1421,6 +1482,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         actions.dismiss(versions, closedGeneration);
     }
     @Override public void hide() {
+        shelf.setVisibleSuggestions(java.util.Collections.emptySet());
+        main.removeCallbacks(suggestionScrollIdle);
         lastHideRevision = ++visibilityRevision;
         hideWhenReady(lastHideRevision);
     }
@@ -1434,6 +1497,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (root != null) {
             mediaSuggestions.stop();
             context.unregisterComponentCallbacks(configurationChanges);
+            context.unregisterReceiver(screenChanges);
             if (appearanceChanges != null) { appearanceChanges.stopWatching(); appearanceChanges = null; }
             stopGeometry();
             releaseHandleVelocity();
@@ -1452,6 +1516,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             header = null; handle = null; shelfTab = null; contentGestures=null;
             countGroup=null;shelfGroup=null;countIcon=null;shelfIcon=null;
             targetScroll=null;targetRow=null;forwarding=null;hoveredTarget=null;
+            suggestionTouch=false;suggestionDrag=false;suggestionScrolling=false;
             rootAdded = false;
             leaving.animate().cancel();
             leaving.setScaleX(1);leaving.setScaleY(1);

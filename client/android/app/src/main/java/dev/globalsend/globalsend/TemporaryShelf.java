@@ -21,6 +21,9 @@ final class TemporaryShelf {
     private static final long SUGGESTION_DURATION_MS=8000;
     final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
     private final Map<String,Long> suggested = new LinkedHashMap<>();
+    private final Map<String,Long> suggestionRemaining = new LinkedHashMap<>();
+    private final java.util.Set<String> visibleSuggestions = new java.util.HashSet<>();
+    private long suggestionClock;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final File file;
@@ -36,6 +39,7 @@ final class TemporaryShelf {
         io.execute(() -> {
             List<ReceiveNotifications.Receipt> restored = new ArrayList<>();
             Map<String,Long> restoredSuggested=new LinkedHashMap<>();
+            Map<String,Long> restoredRemaining=new LinkedHashMap<>();
             try {
                 if (file.isFile()) {
                     JSONArray records = new JSONArray(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
@@ -45,28 +49,29 @@ final class TemporaryShelf {
                         // External originals may have been removed while the app was stopped.
                         if (!path.isEmpty() && !path.startsWith("content://") && !new File(path).exists()) continue;
                         long offeredAt=record.optLong("suggestedAt",file.lastModified());
-                        if(record.optBoolean("suggested") && offeredAt+SUGGESTION_DURATION_MS<=System.currentTimeMillis())continue;
+                        long remaining=record.optLong("suggestionRemainingMs",SUGGESTION_DURATION_MS);
+                        if(record.optBoolean("suggested") && remaining<=0)continue;
                         restored.add(new ReceiveNotifications.Receipt(record.getString("id"), "1", "暂存",
                             record.has("text") ? record.getString("text") : null, record.optString("name"), path, 0));
-                        if(record.optBoolean("suggested"))restoredSuggested.put(record.getString("id"),offeredAt);
+                        if(record.optBoolean("suggested")) {
+                            restoredSuggested.put(record.getString("id"),offeredAt);
+                            restoredRemaining.put(record.getString("id"),remaining);
+                        }
                     }
                 }
             } catch (java.io.IOException | org.json.JSONException unavailable) {
                 android.util.Log.w("GlobalSend", "Cannot restore temporary shelf", unavailable);
             }
             main.post(() -> {
-                Map<Long,List<String>> expiryBatches=new LinkedHashMap<>();
                 for (ReceiveNotifications.Receipt receipt : restored)
                     if (!contains(receipt.localPath, receipt.text)) {
                         items.put(receipt.id, receipt);
                         if(restoredSuggested.containsKey(receipt.id)) {
                             long offeredAt=restoredSuggested.get(receipt.id);
                             suggested.put(receipt.id,offeredAt);
-                            expiryBatches.computeIfAbsent(offeredAt,at -> new ArrayList<>()).add(receipt.id);
+                            suggestionRemaining.put(receipt.id,restoredRemaining.get(receipt.id));
                         }
                     }
-                for(Map.Entry<Long,List<String>> batch:expiryBatches.entrySet())
-                    expireAfter(batch.getValue(),Math.max(0,batch.getKey()+SUGGESTION_DURATION_MS-System.currentTimeMillis()));
                 loaded = true;
                 save(); changed.run();
             });
@@ -82,7 +87,7 @@ final class TemporaryShelf {
     void add(List<String> paths, List<String> texts, Map<String, String> names) {
         cancelRemoval();
         for(ReceiveNotifications.Receipt item:items.values())
-            if(paths.contains(item.localPath))suggested.remove(item.id);
+            if(paths.contains(item.localPath))forgetSuggestion(item.id);
         List<ReceiveNotifications.Receipt> added = new ArrayList<>();
         java.util.Set<String> batchPaths = new java.util.HashSet<>(), batchTexts = new java.util.HashSet<>();
         for (String path : paths) if (batchPaths.add(path) && !contains(path, null)) {
@@ -112,31 +117,58 @@ final class TemporaryShelf {
         for(java.util.Iterator<Map.Entry<String,ReceiveNotifications.Receipt>> it=items.entrySet().iterator();it.hasNext();) {
             Map.Entry<String,ReceiveNotifications.Receipt> item=it.next();
             if(suggested.containsKey(item.getKey()) && matches.test(item.getValue())) {
-                it.remove();suggested.remove(item.getKey());pendingRemoval.remove(item.getKey());pendingConsumed.remove(item.getKey());removed=true;
+                it.remove();forgetSuggestion(item.getKey());pendingRemoval.remove(item.getKey());pendingConsumed.remove(item.getKey());removed=true;
             }
         }
         if(!removed)return;
         if(pendingRemoval.isEmpty()) {main.removeCallbacks(removeExported);removalDeadline=0;}
         save();changed.run();
     }
-    private void expireAfter(List<String> ids,long delay) {
-        main.postDelayed(() -> removeSuggestions(item -> ids.contains(item.id)),delay);
+    /** Only the overlay's actually visible, idle cards spend their display budget. */
+    void setVisibleSuggestions(java.util.Set<String> ids) {
+        java.util.Set<String> next=new java.util.HashSet<>(ids);
+        next.retainAll(suggested.keySet());
+        if(next.equals(visibleSuggestions))return;
+        spendVisibleTime();
+        visibleSuggestions.clear();visibleSuggestions.addAll(next);
+        scheduleSuggestionExpiry();save();
+    }
+    private void spendVisibleTime() {
+        long now=android.os.SystemClock.uptimeMillis();
+        long elapsed=now-suggestionClock;
+        for(String id:visibleSuggestions)
+            suggestionRemaining.computeIfPresent(id,(key,left) -> Math.max(0,left-elapsed));
+        suggestionClock=now;
+    }
+    private void scheduleSuggestionExpiry() {
+        main.removeCallbacks(expireVisibleSuggestions);
+        long delay=Long.MAX_VALUE;
+        for(String id:visibleSuggestions)delay=Math.min(delay,suggestionRemaining.get(id));
+        if(delay!=Long.MAX_VALUE)main.postDelayed(expireVisibleSuggestions,delay);
+    }
+    private final Runnable expireVisibleSuggestions=() -> {
+        spendVisibleTime();
+        removeSuggestions(item -> visibleSuggestions.contains(item.id) && suggestionRemaining.get(item.id)<=0);
+        scheduleSuggestionExpiry();
+    };
+    private void forgetSuggestion(String id) {
+        suggested.remove(id);suggestionRemaining.remove(id);visibleSuggestions.remove(id);
+        if(visibleSuggestions.isEmpty())main.removeCallbacks(expireVisibleSuggestions);
     }
     void suggest(List<RecentMediaSuggestions.Media> media) {
         LinkedHashMap<String,ReceiveNotifications.Receipt> next=new LinkedHashMap<>();
         long now=System.currentTimeMillis();
         for(RecentMediaSuggestions.Media entry:media)if(!contains(entry.uri,null)) {
-            String id="shelf:"+UUID.randomUUID();suggested.put(id,now);
+            String id="shelf:"+UUID.randomUUID();suggested.put(id,now);suggestionRemaining.put(id,SUGGESTION_DURATION_MS);
             next.put(id,new ReceiveNotifications.Receipt(id,"1","暂存",null,entry.name,entry.uri,0));
         }
         if(next.isEmpty())return;
-        expireAfter(new ArrayList<>(next.keySet()),SUGGESTION_DURATION_MS);
         next.putAll(items);items.clear();items.putAll(next);save();changed.run();
     }
     void clearSuggestions() {
         if(suggested.isEmpty())return;
         for(String id:suggested.keySet())items.remove(id);
-        suggested.clear();save();changed.run();
+        suggested.clear();suggestionRemaining.clear();visibleSuggestions.clear();main.removeCallbacks(expireVisibleSuggestions);save();changed.run();
     }
 
     void exported(List<ReceiveNotifications.Receipt> exported, boolean accepted) {
@@ -156,7 +188,7 @@ final class TemporaryShelf {
     private void removeExported() {
         for (Map.Entry<String, ReceiveNotifications.Receipt> entry : pendingRemoval.entrySet())
             if(pendingConsumed.get(entry.getKey()).test(entry.getValue())) {
-                items.remove(entry.getKey(), entry.getValue());suggested.remove(entry.getKey());
+                items.remove(entry.getKey(), entry.getValue());forgetSuggestion(entry.getKey());
             }
         pendingRemoval.clear();pendingConsumed.clear(); removalDeadline = 0;
         // Only references disappear. Original files and a target's in-progress
@@ -174,13 +206,14 @@ final class TemporaryShelf {
     }
     boolean pendingRemoval(String id) { return pendingRemoval.containsKey(id); }
     void clear() {
-        cancelRemoval(); items.clear(); suggested.clear(); save(); changed.run();
+        cancelRemoval(); items.clear(); suggested.clear();suggestionRemaining.clear();visibleSuggestions.clear();main.removeCallbacks(expireVisibleSuggestions);save(); changed.run();
     }
     void remove(String id) {
-        pendingRemoval.remove(id);pendingConsumed.remove(id); items.remove(id);suggested.remove(id); save(); changed.run();
+        pendingRemoval.remove(id);pendingConsumed.remove(id); items.remove(id);forgetSuggestion(id); save(); changed.run();
     }
     private void save() {
         if (!loaded) return; // Loading merges any drops received during startup before the first write.
+        spendVisibleTime();
         JSONArray records = new JSONArray();
         for (ReceiveNotifications.Receipt item : items.values()) {
             JSONObject record = new JSONObject();
@@ -188,6 +221,7 @@ final class TemporaryShelf {
                 record.put("id", item.id); record.put("path", item.localPath); record.put("name", item.fileName);
                 if(suggested.containsKey(item.id)) {
                     record.put("suggested",true);record.put("suggestedAt",suggested.get(item.id));
+                    record.put("suggestionRemainingMs",suggestionRemaining.get(item.id));
                 }
                 if (item.text != null) record.put("text", item.text);
                 records.put(record);

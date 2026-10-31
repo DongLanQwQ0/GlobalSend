@@ -201,6 +201,79 @@ public class AndroidDragTest {
         } finally {overlay.hide();}
     }
 
+    @Test public void mediaExpiryFollowsTheRealViewportAndPausesDuringTouchAndNativeDrag() throws Exception {
+        ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions(){
+            public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}
+        });
+        try {
+            overlay.show(new ReceiveNotifications.Receipt("received","1","fixture","received text",null,null,0),1,shown -> {});
+            ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
+            TemporaryShelf shelf=ReflectionHelpers.getField(overlay,"shelf");
+            shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/visible","visible.jpg",1)));
+            ReflectionHelpers.callInstanceMethod(overlay,"render",ReflectionHelpers.ClassParameter.from(boolean.class,false));
+            View root=ReflectionHelpers.getField(overlay,"root");
+            android.view.WindowManager.LayoutParams size=(android.view.WindowManager.LayoutParams)root.getLayoutParams();
+            root.measure(View.MeasureSpec.makeMeasureSpec(size.width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(size.height,View.MeasureSpec.EXACTLY));
+            root.layout(0,0,size.width,size.height);root.getViewTreeObserver().dispatchOnPreDraw();
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(12));
+            assertEquals("The blank opening space must not spend the unseen card's budget",1,shelf.items.size());
+            android.widget.HorizontalScrollView scroll=ReflectionHelpers.getField(overlay,"scroll");
+            android.widget.LinearLayout row=ReflectionHelpers.getField(overlay,"row");
+            String id=shelf.items.keySet().iterator().next();
+            View card=row.getChildAt(row.getChildCount()-1);
+            scroll.scrollTo(card.getLeft()-scroll.getWidth()+2,0);
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(10));
+            assertEquals("A two-pixel sliver is not a viewed card",1,shelf.items.size());
+            scroll.scrollTo(card.getLeft(),0);
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(150));
+            java.util.Set<String> visible=ReflectionHelpers.getField(shelf,"visibleSuggestions");
+            assertTrue("The actual scrolled card must start its own budget",visible.contains(id));
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(3000));
+            long down=android.os.SystemClock.uptimeMillis();
+            MotionEvent pressed=MotionEvent.obtain(down,down,MotionEvent.ACTION_DOWN,2,2,0);
+            root.dispatchTouchEvent(pressed);pressed.recycle();
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(12));
+            assertEquals("A held touch must not remove the card",1,shelf.items.size());
+            MotionEvent released=MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),MotionEvent.ACTION_CANCEL,2,2,0);
+            root.dispatchTouchEvent(released);released.recycle();
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(150));
+            ClipData clip=ClipData.newPlainText("fixture","native drag");
+            root.dispatchDragEvent(event(DragEvent.ACTION_DRAG_STARTED,clip));
+            Map<String,Long> remaining=ReflectionHelpers.getField(shelf,"suggestionRemaining");
+            long left=remaining.get(id);
+            assertTrue("About three of the eight visible seconds were used",left>=4900 && left<=5000);
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(12));
+            assertEquals("The entire system drag remains protected",1,shelf.items.size());
+            activity.sendBroadcast(new Intent(Intent.ACTION_SCREEN_OFF));Shadows.shadowOf(Looper.getMainLooper()).idle();
+            root.dispatchDragEvent(event(DragEvent.ACTION_DRAG_ENDED,clip));
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(12));
+            assertEquals("Screen-off time must not consume the remainder",1,shelf.items.size());
+            activity.sendBroadcast(new Intent(Intent.ACTION_SCREEN_ON));Shadows.shadowOf(Looper.getMainLooper()).idle();
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(left-1));assertEquals(1,shelf.items.size());
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(1));assertTrue(shelf.items.isEmpty());
+        } finally {overlay.hide();}
+    }
+
+    @Test public void collapsedDockDoesNotCountItsLaidOutSuggestionCards() {
+        ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions(){
+            public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}
+        });
+        try {
+            overlay.show(new ReceiveNotifications.Receipt("received","1","fixture","received text",null,null,0),1,shown -> {});
+            ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
+            TemporaryShelf shelf=ReflectionHelpers.getField(overlay,"shelf");
+            shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/collapsed","collapsed.jpg",1)));
+            overlay.setCollapsed(true);
+            View root=ReflectionHelpers.getField(overlay,"root");
+            android.view.WindowManager.LayoutParams size=(android.view.WindowManager.LayoutParams)root.getLayoutParams();
+            root.measure(View.MeasureSpec.makeMeasureSpec(size.width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(size.height,View.MeasureSpec.EXACTLY));
+            root.layout(0,0,size.width,size.height);root.getViewTreeObserver().dispatchOnPreDraw();
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(20));
+            assertEquals(1,shelf.items.size());
+            java.util.Set<String> visible=ReflectionHelpers.getField(shelf,"visibleSuggestions");assertTrue(visible.isEmpty());
+        } finally {overlay.hide();}
+    }
+
     private void swipeOverlay(View root,float from,float to,float y) {
         long down=android.os.SystemClock.uptimeMillis();
         for(int step=0;step<=6;step++) {
