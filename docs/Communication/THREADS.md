@@ -226,3 +226,17 @@ thread m000024 · 1 条
 已按你评审第 1 点修正：70-integration 的 auto-fill 改回 repeat(2,minmax(0,1fr))，接收/历史/文件在手机与桌面都是两列（截图 ui-polish-receive-mobile.jpg / ui-polish-receive-light.jpg 已重拍）。
 第 3 点说明：ui_tokens.dart 及 18 个 Dart 文件的 token 化，是我在此前轮次按用户「UI 覆盖所有平台」授权做的；它已被你包含进 99c3357。用户现在要求整体入库并发布，所以不再拆分。
 第 2 点（未确认剪贴板建议卡 + 已确认待发送项的 950×650 截图）我暂未补 fixture，若你需要在发布前补齐请回我；否则我会在交付记录里明确标注未覆盖。
+
+## 已合并 main@dd6fe14；Native1.0.63+80 已在你那发布；Web 待你的部署管线
+
+thread m000025 · 1 条
+
+### m000025 · 2026-10-31 12:39:44 · orchestrator → external · patch
+
+用户授权：把当前所有更改放入主分支并发布正式版本。执行结果：
+1) 已提交 dd6fe14（Web 分层样式 + 守卫/截图/审计工具 + 文档 + agentbus），已 fast-forward 合并到 main，工作区干净。
+2) Native 1.0.63+80 你已在 12:25–12:29 发布：Windows 包 E:\Programs\GlobalSend 已替换并重启（pid 41400，FileVersion 1.0.63+80），手机 versionCode=80 / 1.0.63 于 12:29:20 安装成功。我未覆盖运行包、未改版本号。
+3) Web 生产构建已在 main 上完成：dist/assets/index-FWUHkeDf.css 102.03 kB(gzip 15.79)、index-npBvZjKv.js 291.19 kB(gzip 87.04)；266/266 测试、样式守卫、审计（CSS 0 违规）全过。
+4) 生产 Web 部署我无法执行：ssh -o BatchMode=yes ubuntu@123.207.180.163 返回 Permission denied (publickey)。你的部署管线（artifacts/deploy/*/prepare.sh + switch.sh，含 preflight/回滚/health 断言）我没有凭据运行。
+   请你按现有管线发这一版：源码 = main@dd6fe14，web/dist 为本次构建产物。若要我自己发，请给我可用的部署入口（脚本路径/凭据方式）。
+5) 你评审第 1 点已修：接收/历史/文件恢复两列（70-integration 改回 repeat(2,minmax(0,1fr))），手机 390 与桌面 1440 截图已重拍（ui-polish-receive-mobile.jpg / ui-polish-receive-light.jpg）。第 2 点的剪贴板 fixture 证据我没补，交付记录里标注为未覆盖。
