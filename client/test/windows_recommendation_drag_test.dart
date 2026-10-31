@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -26,6 +27,8 @@ class RecommendationController extends PreviewController {
   final exports = <String>[];
   final previews = <Map<String, Object>>[];
   bool accepted = false;
+  Completer<bool>? exportGate;
+  final delivered = <Map<String, Object?>>[];
   @override
   Future<Directory> Function() get stateDirectory =>
       () async => folder;
@@ -33,7 +36,35 @@ class RecommendationController extends PreviewController {
   Future<bool> dragClipboard({String pointerKind = 'auto'}) async {
     exports.add(pointerKind);
     previews.add(SystemBridge.dragPreviewArguments);
-    return accepted;
+    return exportGate == null ? accepted : await exportGate!.future;
+  }
+
+  @override
+  Future<void> stageInputs(List<String> paths, List<String> texts) async {
+    stagedFiles.addAll(paths);
+    stagedTexts.addAll(texts);
+    changed();
+  }
+
+  @override
+  Future<void> sendStagedToMany(
+    List<String> targets, {
+    List<String>? onlyFiles,
+    List<String>? onlyTexts,
+    String? expectedServerKey,
+  }) async {
+    delivered.add({
+      'targets': targets.toList(),
+      'paths': onlyFiles?.toList(),
+      'texts': onlyTexts?.toList(),
+      'serverKey': expectedServerKey,
+    });
+    await super.sendStagedToMany(
+      targets,
+      onlyFiles: onlyFiles,
+      onlyTexts: onlyTexts,
+      expectedServerKey: expectedServerKey,
+    );
   }
 }
 
@@ -41,14 +72,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadSystemTestFonts);
   testWidgets(
-    'Windows recommendations use native mouse and touch drag without staging placeholders',
+    'Windows recommendations retain live device targets and send only the dropped content during native export',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(950, 650);
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.view.resetPhysicalSize);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      final folder = Directory('../artifacts/tmp/windows-suggestions86/widget')
+      final folder = Directory('../artifacts/tmp/windows-suggestions87/widget')
           .absolute;
       await tester.runAsync(() => folder.create(recursive: true));
       final c = RecommendationController(folder)
@@ -60,11 +91,14 @@ void main() {
         )
         ..devices = [
           {'deviceId': 'phone', 'name': '手机', 'online': true},
+          {'deviceId': 'other', 'name': '另一台设备', 'online': true},
         ]
         ..connected = true;
+      c.stagedTexts.add('保留原有草稿');
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       final fileExports = <Map>[];
+      final bounds = <Map>[];
       messenger.setMockMethodCallHandler(SystemBridge.channel, (call) async {
         if (call.method == 'clipboardSuggestion')
           return {
@@ -73,9 +107,10 @@ void main() {
             'kind': 'image',
           };
         if (call.method == 'windowVisible') return true;
+        if (call.method == 'queueDropBounds') bounds.add(call.arguments as Map);
         if (call.method == 'dragOut') {
           fileExports.add(call.arguments as Map);
-          return c.accepted;
+          return c.exportGate?.future ?? c.accepted;
         }
         return null;
       });
@@ -136,8 +171,10 @@ void main() {
         );
         image.dispose();
       });
+      final clipboard = find.byKey(const ValueKey('clipboard-suggestion'));
       Future<void> drag(Finder source, PointerDeviceKind kind) async {
         final before = c.exports.length + fileExports.length;
+        c.exportGate = Completer<bool>();
         await tester.ensureVisible(source);
         await tester.pumpAndSettle();
         final gesture = await tester.startGesture(
@@ -155,6 +192,101 @@ void main() {
         ) {
           await pumpNativeDrag(tester);
         }
+        await tester.pump(const Duration(milliseconds: 32));
+        debugPrint(
+          'held native export: $kind, count=${c.exports.length + fileExports.length}, bounds=${bounds.last['enabled']}',
+        );
+        expect(
+          bounds.last['enabled'],
+          isTrue,
+          reason:
+              'A held native export must not unregister its own drop targets',
+        );
+        final devices = (bounds.last['devices'] as List).cast<Map>();
+        final device = devices.singleWhere(
+          (region) => region['deviceId'] == 'phone',
+        );
+        expect(bounds.last['serverKey'], c.profile!.key);
+        final target = tester.getRect(
+          find.byKey(const ValueKey('target-phone')),
+        );
+        expect(
+          Rect.fromLTRB(
+            device['left'] as double,
+            device['top'] as double,
+            device['right'] as double,
+            device['bottom'] as double,
+          ).contains(target.center),
+          isTrue,
+        );
+        await c.handleNativeDockEvent({
+          'type': 'nativeDrag',
+          'active': true,
+          'local': true,
+          'targetDeviceId': 'phone',
+        });
+        await tester.pump(const Duration(milliseconds: 32));
+        BoxBorder? border(String id) =>
+            (tester
+                        .widget<DecoratedBox>(
+                          find.byKey(ValueKey('device-drop-$id')),
+                        )
+                        .decoration
+                    as BoxDecoration)
+                .border;
+        expect(border('phone'), isNotNull);
+        expect(border('other'), isNull);
+        debugPrint('device-only hover accepted');
+        if (before == 0)
+          await tester.runAsync(() async {
+            final image =
+                await (capture.currentContext!.findRenderObject()
+                        as RenderRepaintBoundary)
+                    .toImage();
+            final data = await image.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            );
+            await File('${folder.parent.path}/device-hover.rgba')
+                .writeAsBytes(data!.buffer.asUint8List());
+            await File('${folder.parent.path}/device-hover.json').writeAsString(
+              jsonEncode({'width': image.width, 'height': image.height}),
+            );
+            image.dispose();
+          });
+        expect(
+          find.byKey(const ValueKey('native-drop-feedback')),
+          findsNothing,
+        );
+        await c.handleNativeDockEvent({
+          'type': 'nativeDrag',
+          'active': false,
+          'local': true,
+        });
+        if (c.accepted) {
+          c.stagedTargetStates.remove('phone');
+          final paths = source == clipboard
+              ? <String>[]
+              : (fileExports.last['paths'] as List).cast<String>();
+          await c.handleNativeDockEvent({
+            'type': 'nativeDrop',
+            'dropId': 'recommendation-$before',
+            'targetDeviceId': device['deviceId'],
+            'serverKey': bounds.last['serverKey'],
+            'paths': paths,
+            'texts': paths.isEmpty ? ['剪贴板实际文本'] : <String>[],
+          });
+          expect(c.delivered.last, {
+            'targets': ['phone'],
+            'paths': paths,
+            'texts': paths.isEmpty ? ['剪贴板实际文本'] : <String>[],
+            'serverKey': c.profile!.key,
+          });
+          debugPrint('native drop delivered: ${c.delivered.last}');
+          expect(c.stagedTexts, ['保留原有草稿']);
+          expect(c.stagedFiles, isEmpty);
+        }
+        c.exportGate!.complete(c.accepted);
+        await tester.pump();
         await settleModelIO(tester, photos.pendingWrites);
         await tester.pumpAndSettle();
         await gesture.up();
@@ -164,7 +296,6 @@ void main() {
         );
       }
 
-      final clipboard = find.byKey(const ValueKey('clipboard-suggestion'));
       expect(
         Theme.of(tester.element(clipboard)).platform,
         TargetPlatform.windows,
@@ -196,7 +327,7 @@ void main() {
         );
       });
       expect(clipboard, findsOneWidget);
-      expect(c.stagedTexts, isEmpty);
+      expect(c.stagedTexts, ['保留原有草稿']);
       expect(c.stagedFiles, isEmpty);
       expect(c.clipboardReads, 0);
       c.accepted = true;
@@ -246,7 +377,7 @@ void main() {
       });
       expect(photos.items, isEmpty);
       expect(c.stagedFiles, isEmpty);
-      expect(c.stagedSends, isEmpty);
+      expect(c.stagedSends, ['phone', 'phone']);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await settleModelIO(tester, photos.pendingWrites);

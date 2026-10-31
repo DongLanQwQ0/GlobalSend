@@ -109,6 +109,7 @@ class _SendScreenState extends State<SendScreen>
       selecting = false,
       renaming = false;
   bool _addressEdited = false, _initialCenterApplied = false;
+  bool _nativeExportActive = false;
   bool _nameEdited = false;
   String? clipboardChoice;
   int page = 1;
@@ -786,6 +787,17 @@ class _SendScreenState extends State<SendScreen>
     }
   }
 
+  /// Awaiting a native drop must keep the visible queue/device destinations registered.
+  Future<void> performExport(Future<void> Function() action) async {
+    if (working) return;
+    _nativeExportActive = true;
+    try {
+      await perform(action);
+    } finally {
+      _nativeExportActive = false;
+    }
+  }
+
   Future<void> requestShelfPermission() async {
     _shelfPermissionPending = true;
     await c.openReceivePopupSettings();
@@ -919,7 +931,7 @@ class _SendScreenState extends State<SendScreen>
               ),
               nativeOnly: true,
               enabled: !working,
-              onExport: (kind) => perform(() async {
+              onExport: (kind) => performExport(() async {
                 final path = await recentPhotos.sourcePath(photo.id);
                 if (path == null) {
                   await recentPhotos.dismiss([photo.id]);
@@ -1341,7 +1353,7 @@ class _SendScreenState extends State<SendScreen>
       serverKey: c.profile?.key ?? '',
       enabled:
           loggedIn &&
-          !working &&
+          (!working || _nativeExportActive) &&
           !settingsOpen &&
           _queueRouteVisible &&
           !_receiptOpen &&
@@ -2587,7 +2599,7 @@ class _SendScreenState extends State<SendScreen>
             TargetPlatform.windows,
           ].contains(Theme.of(context).platform)
       ? null
-      : () => perform(() async {
+      : () => performExport(() async {
           if (Theme.of(context).platform == TargetPlatform.windows) {
             await exportClipboardSuggestion(
               revision ?? clipboardSuggestions.item?.revision,
@@ -2699,7 +2711,7 @@ class _SendScreenState extends State<SendScreen>
       ),
       nativeOnly: true,
       enabled: !working,
-      onExport: (kind) => perform(
+      onExport: (kind) => performExport(
         () => exportClipboardSuggestion(suggestion.revision, pointerKind: kind),
       ),
       child: tile,
@@ -3310,7 +3322,7 @@ class _SendScreenState extends State<SendScreen>
           enabled: value.text.isNotEmpty,
           selectedText: selectedText,
           onExport: (kind) =>
-              perform(() => c.dragOut(entry, pointerKind: kind)),
+              performExport(() => c.dragOut(entry, pointerKind: kind)),
           child: EditableTextSelectionSurface(
             onBlankTap: (point) {
               final editable = sharedFocus.context
@@ -4038,7 +4050,7 @@ class _SendScreenState extends State<SendScreen>
         : surface;
   }
 
-  Future<void> dragContentSelection(DockEntry item) => perform(() async {
+  Future<void> dragContentSelection(DockEntry item) => performExport(() async {
     final entries =
         mergeContentCards(
               c.historyDock.where((entry) => entry.outgoing == item.outgoing),
@@ -4150,7 +4162,7 @@ class _SendScreenState extends State<SendScreen>
         enabled: draggable && !working,
         onExport:
             onExport ??
-            (kind) => perform(() => c.dragOut(item, pointerKind: kind)),
+            (kind) => performExport(() => c.dragOut(item, pointerKind: kind)),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: contextual
