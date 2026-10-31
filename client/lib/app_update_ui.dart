@@ -43,10 +43,13 @@ class UpdateCheckControl extends StatelessWidget {
               child: Text(
                 updates.status,
                 key: const ValueKey('update-status'),
-                style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
+                style: TextStyle(
+                  fontSize: Ui.textXs,
+                  color: Ui.colors(context).textSecondary,
+                ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: Ui.space2),
             TextButton(
               key: const ValueKey('check-updates'),
               onPressed: updates.busy
@@ -115,9 +118,9 @@ class AppUpdateNotice extends StatelessWidget {
           child,
           if (visible)
             Positioned(
-              top: 8,
-              left: 16,
-              right: 16,
+              top: Ui.space1,
+              left: Ui.space3,
+              right: Ui.space3,
               child: SafeArea(
                 child: Center(
                   child: ConstrainedBox(
@@ -125,19 +128,24 @@ class AppUpdateNotice extends StatelessWidget {
                     child: Material(
                       key: const ValueKey('update-notice'),
                       color: Ui.colors(context).surface,
-                      elevation: 6,
+                      elevation: Ui.elevationModal,
                       shape: RoundedRectangleBorder(
                         borderRadius: Ui.cardRadius,
-                        side: BorderSide(color: Ui.colors(context).border),
+                        side: BorderSide(color: Ui.colors(context).line),
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+                        padding: const EdgeInsets.fromLTRB(
+                          Ui.space3,
+                          Ui.space1,
+                          Ui.space1,
+                          Ui.space1,
+                        ),
                         child: Row(
                           children: [
                             Expanded(
                               child: Text(
                                 'GlobalSend ${offer.version.display} 可更新',
-                                style: const TextStyle(fontSize: 14),
+                                style: const TextStyle(fontSize: Ui.textSm),
                               ),
                             ),
                             TextButton(

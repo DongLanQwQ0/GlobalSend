@@ -36,9 +36,12 @@ Future<void> showTextViewer(
     builder: (_) => Dialog(
       backgroundColor: Ui.colors(context).surface,
       clipBehavior: Clip.antiAlias,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: Ui.space3,
+        vertical: Ui.space4,
+      ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680),
+        constraints: const BoxConstraints(maxWidth: Ui.editorMaxWidth),
         child: SizedBox(
           height: Ui.editorSize(context).height,
           child: _TextViewer(
@@ -208,7 +211,12 @@ class _TextViewerState extends State<_TextViewer> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                padding: const EdgeInsets.fromLTRB(
+                  Ui.space4,
+                  Ui.space3,
+                  Ui.space2,
+                  Ui.space1,
+                ),
                 child: Row(
                   children: [
                     Expanded(
@@ -217,8 +225,9 @@ class _TextViewerState extends State<_TextViewer> {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
+                          fontSize: Ui.textLg,
+                          height: Ui.leadingTight,
+                          fontWeight: Ui.weightLabel,
                         ),
                       ),
                     ),
@@ -234,12 +243,18 @@ class _TextViewerState extends State<_TextViewer> {
               ),
               if (widget.notice != null)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space4,
+                    0,
+                    Ui.space4,
+                    Ui.space1,
+                  ),
                   child: Text(
                     widget.notice!,
                     style: TextStyle(
-                      fontSize: 13,
-                      color: Ui.colors(context).muted,
+                      fontSize: Ui.textXs,
+                      height: Ui.leadingCompact,
+                      color: Ui.colors(context).textSecondary,
                     ),
                   ),
                 ),
@@ -267,10 +282,18 @@ class _TextViewerState extends State<_TextViewer> {
                         },
                         child: SingleChildScrollView(
                           key: const ValueKey('text-viewer-input'),
-                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                          padding: const EdgeInsets.fromLTRB(
+                            Ui.space4,
+                            Ui.space2,
+                            Ui.space4,
+                            Ui.space3,
+                          ),
                           child: WebLinkText(
                             value.text,
-                            style: const TextStyle(fontSize: 16, height: 1.55),
+                            style: const TextStyle(
+                              fontSize: Ui.textBase,
+                              height: Ui.leadingRelaxed,
+                            ),
                           ),
                         ),
                       )
@@ -299,14 +322,22 @@ class _TextViewerState extends State<_TextViewer> {
                           keyboardType: TextInputType.multiline,
                           textInputAction: TextInputAction.newline,
                           textAlignVertical: TextAlignVertical.top,
-                          style: const TextStyle(fontSize: 16, height: 1.55),
+                          style: const TextStyle(
+                            fontSize: Ui.textBase,
+                            height: Ui.leadingRelaxed,
+                          ),
                           decoration: const InputDecoration(
                             hintText: '暂无内容',
                             filled: false,
                             border: InputBorder.none,
                             enabledBorder: InputBorder.none,
                             focusedBorder: InputBorder.none,
-                            contentPadding: EdgeInsets.fromLTRB(20, 12, 20, 16),
+                            contentPadding: EdgeInsets.fromLTRB(
+                              Ui.space4,
+                              Ui.space2,
+                              Ui.space4,
+                              Ui.space3,
+                            ),
                           ),
                         ),
                       ),
@@ -314,7 +345,7 @@ class _TextViewerState extends State<_TextViewer> {
               if (widget.editable && findWebLinks(value.text).isNotEmpty)
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: Ui.space2),
                   child: Row(
                     children: [
                       for (final link in {
@@ -334,22 +365,30 @@ class _TextViewerState extends State<_TextViewer> {
               if (status.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 4,
+                    horizontal: Ui.space4,
+                    vertical: Ui.space0,
                   ),
                   child: Text(
                     status,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12),
+                    style: const TextStyle(
+                      fontSize: Ui.text2xs,
+                      height: Ui.leadingCompact,
+                    ),
                   ),
                 ),
               Container(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                padding: const EdgeInsets.fromLTRB(
+                  Ui.space4,
+                  Ui.space1,
+                  Ui.space4,
+                  Ui.space4,
+                ),
                 child: Wrap(
                   alignment: WrapAlignment.end,
                   crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 12,
+                  spacing: Ui.space2,
                   children: [
                     ContentDragControl(
                       child: TextButton.icon(

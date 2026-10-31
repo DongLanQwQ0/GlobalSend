@@ -59,23 +59,32 @@ void main() {
         ),
         findsOneWidget,
       );
-      for (final size in [const Size(390, 844), const Size(950, 650)]) {
+      for (final size in [
+        const Size(390, 844),
+        const Size(900, 650),
+        const Size(950, 650),
+      ]) {
         tester.view.physicalSize = size;
         await tester.pumpAndSettle();
         final card = tester.getSize(
           find.byKey(const ValueKey('clipboard-suggestion')),
         );
         expect(card.width, closeTo(card.height, .1));
-        expect(tester.takeException(), isNull);
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: '${size.width}×${size.height}',
+        );
         await tester.runAsync(() async {
           final boundary =
               capture.currentContext!.findRenderObject()
                   as RenderRepaintBoundary;
           final image = await boundary.toImage();
           final bytes = await image.toByteData(format: ImageByteFormat.png);
-          final file = File(
-            '../artifacts/screenshots/clipboard79-${size.width.toInt()}.png',
-          );
+          final prefix =
+              Platform.environment['GLOBALSEND_CLIPBOARD_CAPTURE_PREFIX'] ??
+              '../artifacts/screenshots/clipboard';
+          final file = File('$prefix-${size.width.toInt()}.png');
           await file.parent.create(recursive: true);
           await file.writeAsBytes(bytes!.buffer.asUint8List());
           image.dispose();

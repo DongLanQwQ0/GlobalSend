@@ -99,7 +99,8 @@ final class RecentMediaSuggestions {
                     collect(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,Manifest.permission.READ_MEDIA_IMAGES,since,seen,handled,media);
                     collect(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,Manifest.permission.READ_MEDIA_VIDEO,since,seen,handled,media);
                     media.sort(Comparator.comparingLong((Media m)->m.added).reversed());
-                    for(String uri:current)if(missing(uri))missing.add(uri);
+                    for(String uri:current)
+                        if(handled.contains(Uri.parse(uri).getLastPathSegment()) || missing(uri))missing.add(uri);
                 }
                 final boolean active=enabled;
                 final long initialSince=since;
@@ -118,10 +119,15 @@ final class RecentMediaSuggestions {
                         }
                     }
                     if(again) {again=false;refresh();}
+                    else if(started && generation==request)main.postDelayed(scan,5000);
                 });
             } catch(java.io.IOException | org.json.JSONException | RuntimeException unavailable) {
                 android.util.Log.w("GlobalSend","Cannot check recent media",unavailable);
-                main.post(() -> {busy=false;if(again) {again=false;refresh();}});
+                main.post(() -> {
+                    busy=false;
+                    if(again) {again=false;refresh();}
+                    else if(started && generation==request)main.postDelayed(scan,5000);
+                });
             }
         });
     }

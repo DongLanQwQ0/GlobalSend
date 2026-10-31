@@ -45,16 +45,16 @@ class BulkFileDrag extends StatelessWidget {
         label: '全部拖拽',
         child: Theme.of(context).platform == TargetPlatform.windows
             ? SizedBox.square(
-                dimension: 44,
+                dimension: Ui.touch,
                 child: Center(
                   child: AppIcon(
                     Icons.drag_indicator,
                     size: 20,
-                    color: Ui.colors(context).green,
+                    color: Ui.colors(context).accent,
                   ),
                 ),
               )
-            : BulkDragHandle(paths: files, size: 44, onError: onError),
+            : BulkDragHandle(paths: files, size: Ui.touch, onError: onError),
       ),
     );
     if (Theme.of(context).platform != TargetPlatform.windows) return handle;

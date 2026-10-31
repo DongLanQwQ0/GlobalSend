@@ -427,6 +427,11 @@ class _GlobalSendAppState extends State<GlobalSendApp>
                     : controller.appearance.value.mode == AppearanceMode.dark
                     ? ThemeMode.dark
                     : ThemeMode.light,
+                // One shell-level motion for appearance changes: same 170ms
+                // step and ease as the web token layer, so switching theme
+                // never snaps between palettes.
+                themeAnimationDuration: Ui.durationNormal,
+                themeAnimationCurve: Ui.ease,
                 builder: (context, navigator) => AnimatedBuilder(
                   animation: controller,
                   child: navigator,

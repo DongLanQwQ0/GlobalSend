@@ -939,6 +939,12 @@ class _SendScreenState extends State<SendScreen>
       target = peers.firstOrNull?['deviceId'];
     }
     final wide = MediaQuery.sizeOf(context).width >= 900;
+    final headerActionStyle = TextButton.styleFrom(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Ui.space0,
+        vertical: Ui.space1,
+      ),
+    );
     final window = PopScope(
       canPop:
           !settingsOpen &&
@@ -957,8 +963,8 @@ class _SendScreenState extends State<SendScreen>
       },
       child: Scaffold(
         appBar: AppBar(
-          toolbarHeight: wide ? kToolbarHeight : 48,
-          titleSpacing: wide ? 20 : 16,
+          toolbarHeight: wide ? kToolbarHeight : Ui.controlHeight,
+          titleSpacing: wide ? Ui.space4 : Ui.space3,
           leading: settingsOpen
               ? BackButton(
                   onPressed: () => setState(() => settingsOpen = false),
@@ -969,7 +975,10 @@ class _SendScreenState extends State<SendScreen>
               if (settingsOpen)
                 const Text(
                   '设置',
-                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: Ui.textXl,
+                    fontWeight: Ui.weightLabel,
+                  ),
                 )
               else
                 TextButton(
@@ -977,28 +986,33 @@ class _SendScreenState extends State<SendScreen>
                   onPressed: working ? null : chooseLocalIp,
                   style: TextButton.styleFrom(
                     padding: EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: wide ? 8 : 4,
+                      horizontal: Ui.space0,
+                      vertical: wide ? Ui.space1 : Ui.space0,
                     ),
-                    minimumSize: const Size(0, 40),
-                    foregroundColor: Ui.colors(context).ink,
+                    minimumSize: const Size(0, Ui.rowHeight),
+                    foregroundColor: Ui.colors(context).textPrimary,
                   ),
                   child: const Text(
                     'GlobalSend',
-                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: Ui.textXl,
+                      fontWeight: Ui.weightLabel,
+                    ),
                   ),
                 ),
               if (wide && loggedIn && !settingsOpen) ...[
-                const SizedBox(width: 12),
+                const SizedBox(width: Ui.space1),
                 TextButton.icon(
                   key: const ValueKey('add-text'),
+                  style: headerActionStyle,
                   onPressed: working ? null : composeText,
                   icon: const AppIcon(Icons.notes_rounded, size: 19),
                   label: const Text('文本'),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: Ui.space0),
                 TextButton.icon(
                   key: const ValueKey('add-clipboard'),
+                  style: headerActionStyle,
                   onPressed: working ? null : () => perform(c.stageClipboard),
                   icon: const AppIcon(Icons.content_paste_rounded, size: 19),
                   label: const Text('剪贴板'),
@@ -1021,7 +1035,7 @@ class _SendScreenState extends State<SendScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           AppearancePicker(),
-                          SizedBox(height: 16),
+                          SizedBox(height: Ui.space3),
                           UpdateCheckControl(),
                         ],
                       ),
@@ -1037,14 +1051,14 @@ class _SendScreenState extends State<SendScreen>
               ),
             if (wide && loggedIn && !settingsOpen)
               Padding(
-                padding: const EdgeInsets.only(right: 20),
+                padding: const EdgeInsets.only(right: Ui.space4),
                 child: SizedBox(
                   key: const ValueKey('desktop-content-navigation'),
                   width: (MediaQuery.sizeOf(context).width - 56) * 11 / 21,
                   child: Row(
                     children: [
                       Expanded(child: desktopContentTabs()),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: Ui.space1),
                       Tooltip(
                         message: c.connection,
                         child: connectionBadge(compact: true),
@@ -1052,10 +1066,10 @@ class _SendScreenState extends State<SendScreen>
                       IconButton(
                         tooltip: '设置',
                         constraints: const BoxConstraints.tightFor(
-                          width: 44,
-                          height: 44,
+                          width: Ui.touch,
+                          height: Ui.touch,
                         ),
-                        padding: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.all(Ui.space1),
                         onPressed: openSettings,
                         icon: const AppIcon(Icons.settings_outlined, size: 20),
                       ),
@@ -1077,7 +1091,7 @@ class _SendScreenState extends State<SendScreen>
               ),
             if (!wide && loggedIn && !settingsOpen)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.only(right: Ui.space1),
                 child: Tooltip(message: c.connection, child: connectionBadge()),
               ),
             if (!wide && loggedIn && !settingsOpen)
@@ -1094,13 +1108,28 @@ class _SendScreenState extends State<SendScreen>
               top: false,
               child: Column(
                 children: [
-                  if (working) const LinearProgressIndicator(minHeight: 2),
+                  // Always mounted at a fixed height so the 2px bar never
+                  // pushes the workspace down; only its opacity animates.
+                  SizedBox(
+                    height: 2,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(end: working ? 1 : 0),
+                      duration: Ui.durationFast,
+                      curve: Ui.ease,
+                      builder: (context, appear, child) => appear <= 0
+                          ? const SizedBox.shrink()
+                          : Opacity(opacity: appear, child: child),
+                      child: const LinearProgressIndicator(minHeight: 2),
+                    ),
+                  ),
                   Expanded(
                     child: AnimatedSwitcher(
                       // A breakpoint reparents the same native drop targets;
                       // do not keep a second keyed workspace alive while fading.
                       key: ValueKey(wide),
-                      duration: const Duration(milliseconds: 180),
+                      duration: Ui.durationNormal,
+                      switchInCurve: Ui.ease,
+                      switchOutCurve: Ui.ease,
                       layoutBuilder: (currentChild, previousChildren) => Stack(
                         fit: StackFit.expand,
                         children: [
@@ -1145,10 +1174,10 @@ class _SendScreenState extends State<SendScreen>
                             : wide
                             ? Padding(
                                 padding: const EdgeInsets.fromLTRB(
-                                  20,
+                                  Ui.space4,
                                   0,
-                                  20,
-                                  20,
+                                  Ui.space4,
+                                  Ui.space4,
                                 ),
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1157,7 +1186,7 @@ class _SendScreenState extends State<SendScreen>
                                       flex: 10,
                                       child: workspacePane(sendPage()),
                                     ),
-                                    const SizedBox(width: 16),
+                                    const SizedBox(width: Ui.space3),
                                     Expanded(
                                       flex: 11,
                                       child: workspacePane(
@@ -1241,77 +1270,87 @@ class _SendScreenState extends State<SendScreen>
   }
 
   Widget connectionBadge({bool compact = false}) {
-    if (c.connected)
-      return Semantics(
-        label: '已连接',
-        child: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Ui.colors(context).softGreen,
-            borderRadius: Ui.fieldRadius,
-          ),
-          child: AppIcon(
-            Icons.link_rounded,
-            size: 20,
-            color: Ui.colors(context).green,
-          ),
-        ),
-      );
+    final connected = c.connected;
     final reconnecting =
         c.connection.contains('重连') ||
         c.connection.contains('连接中') ||
         c.connection.startsWith('正在');
-    final color = c.connected
-        ? Ui.colors(context).green
-        : const Color(0xff9a6b20);
-    if (compact)
-      return Semantics(
-        label: reconnecting ? '连接中' : '未连接',
-        child: SizedBox.square(
-          dimension: 44,
-          child: Center(
-            child: AppIcon(
-              reconnecting ? Icons.sync_rounded : Icons.cloud_off_outlined,
-              size: 20,
-              color: color,
+    final color = connected
+        ? Ui.colors(context).accent
+        : Ui.colors(context).warning;
+    // The badge swaps its own nodes per state; keeping one tween above them
+    // lets the tint travel between accent and warning instead of snapping.
+    return TweenAnimationBuilder<Color?>(
+      tween: ColorTween(end: color),
+      duration: Ui.durationNormal,
+      curve: Ui.ease,
+      builder: (context, tint, _) {
+        final state = tint ?? color;
+        if (connected)
+          return Semantics(
+            label: '已连接',
+            child: Container(
+              padding: const EdgeInsets.all(Ui.space1),
+              decoration: BoxDecoration(
+                color: Ui.colors(context).accentSoft,
+                borderRadius: Ui.fieldRadius,
+              ),
+              child: AppIcon(Icons.link_rounded, size: 20, color: state),
             ),
-          ),
-        ),
-      );
-    return Container(
-      key: const ValueKey('connection-badge'),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .09),
-        borderRadius: BorderRadius.circular(30),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AppIcon(
-            c.connected
-                ? Icons.cloud_done_outlined
-                : reconnecting
-                ? Icons.sync_rounded
-                : Icons.cloud_off_outlined,
-            size: 16,
-            color: color,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            c.connected
-                ? '已连接'
-                : reconnecting
-                ? '连接中'
-                : '未连接',
-            style: TextStyle(
-              fontSize: 12,
-              color: color,
-              fontWeight: FontWeight.w600,
+          );
+        if (compact)
+          return Semantics(
+            label: reconnecting ? '连接中' : '未连接',
+            child: SizedBox.square(
+              dimension: Ui.touch,
+              child: Center(
+                child: AppIcon(
+                  reconnecting ? Icons.sync_rounded : Icons.cloud_off_outlined,
+                  size: 20,
+                  color: state,
+                ),
+              ),
             ),
+          );
+        return Container(
+          key: const ValueKey('connection-badge'),
+          padding: const EdgeInsets.symmetric(
+            horizontal: Ui.space1,
+            vertical: Ui.space0,
           ),
-        ],
-      ),
+          decoration: BoxDecoration(
+            color: state.withValues(alpha: .09),
+            borderRadius: Ui.pillRadius,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppIcon(
+                connected
+                    ? Icons.cloud_done_outlined
+                    : reconnecting
+                    ? Icons.sync_rounded
+                    : Icons.cloud_off_outlined,
+                size: 16,
+                color: state,
+              ),
+              const SizedBox(width: Ui.space0),
+              Text(
+                connected
+                    ? '已连接'
+                    : reconnecting
+                    ? '连接中'
+                    : '未连接',
+                style: TextStyle(
+                  fontSize: Ui.text2xs,
+                  color: state,
+                  fontWeight: Ui.weightLabel,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1359,9 +1398,9 @@ class _SendScreenState extends State<SendScreen>
       );
       Widget recoveryNotice() => Container(
         key: const ValueKey('credential-recovery-notice'),
-        padding: const EdgeInsets.all(16),
+        padding: Ui.insetField,
         decoration: BoxDecoration(
-          color: Ui.colors(context).softGreen,
+          color: Ui.colors(context).accentSoft,
           borderRadius: Ui.cardRadius,
         ),
         child: Column(
@@ -1369,21 +1408,24 @@ class _SendScreenState extends State<SendScreen>
           children: [
             AppIcon(
               Icons.key_off_outlined,
-              color: Ui.colors(context).green,
+              color: Ui.colors(context).accent,
               size: 24,
             ),
-            SizedBox(height: 12),
+            SizedBox(height: Ui.space2),
             Text(
               '连接暂不可用',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                fontSize: Ui.textBase,
+                fontWeight: Ui.weightLabel,
+              ),
             ),
-            SizedBox(height: 8),
+            SizedBox(height: Ui.space1),
             Text(
               '本机文件和记录已保留。',
               style: TextStyle(
-                fontSize: 14,
-                color: Ui.colors(context).muted,
-                height: 1.5,
+                fontSize: Ui.textSm,
+                color: Ui.colors(context).textSecondary,
+                height: Ui.leadingNormal,
               ),
             ),
           ],
@@ -1391,13 +1433,18 @@ class _SendScreenState extends State<SendScreen>
       );
       return SingleChildScrollView(
         key: const ValueKey('connection-scroll'),
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+        padding: const EdgeInsets.fromLTRB(
+          Ui.space3,
+          Ui.space4,
+          Ui.space3,
+          Ui.space5,
+        ),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 640),
             child: Card(
               child: Padding(
-                padding: EdgeInsets.all(split ? 32 : 24),
+                padding: EdgeInsets.all(split ? Ui.space5 : Ui.space4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -1405,7 +1452,7 @@ class _SendScreenState extends State<SendScreen>
                       blocked ? '恢复连接' : '连接设备',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: Ui.space4),
                     UiField(
                       label: '服务器',
                       child: TextField(
@@ -1418,7 +1465,7 @@ class _SendScreenState extends State<SendScreen>
                         decoration: const InputDecoration(),
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: Ui.space4),
                     if (split)
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1426,21 +1473,24 @@ class _SendScreenState extends State<SendScreen>
                           Expanded(
                             child: blocked ? recoveryNotice() : deviceName(),
                           ),
-                          const SizedBox(width: 24),
+                          const SizedBox(width: Ui.space4),
                           Expanded(child: blocked ? deviceName() : password()),
                         ],
                       )
                     else ...[
                       if (blocked) ...[
                         recoveryNotice(),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: Ui.space4),
                       ],
                       deviceName(),
-                      if (!blocked) ...[const SizedBox(height: 16), password()],
+                      if (!blocked) ...[
+                        const SizedBox(height: Ui.space3),
+                        password(),
+                      ],
                     ],
                     if (!blocked &&
                         address.text.trim().startsWith('http:')) ...[
-                      const SizedBox(height: 16),
+                      const SizedBox(height: Ui.space3),
                       SwitchListTile.adaptive(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('允许 HTTP'),
@@ -1452,16 +1502,16 @@ class _SendScreenState extends State<SendScreen>
                     if (!blocked &&
                         c.message.isNotEmpty &&
                         RegExp('失败|失效|错误|不兼容').hasMatch(c.message)) ...[
-                      const SizedBox(height: 16),
+                      const SizedBox(height: Ui.space3),
                       Text(
                         shortError(c.message),
                         style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                          fontSize: 14,
+                          color: Ui.colors(context).danger,
+                          fontSize: Ui.textSm,
                         ),
                       ),
                     ],
-                    const SizedBox(height: 24),
+                    const SizedBox(height: Ui.space4),
                     Row(
                       children: [
                         Expanded(
@@ -1476,7 +1526,7 @@ class _SendScreenState extends State<SendScreen>
                           ),
                         ),
                         if (blocked) ...[
-                          const SizedBox(width: 12),
+                          const SizedBox(width: Ui.space2),
                           Expanded(
                             child: OutlinedButton(
                               key: const ValueKey('credential-reenroll'),
@@ -1489,10 +1539,10 @@ class _SendScreenState extends State<SendScreen>
                         ],
                       ],
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: Ui.space4),
                     Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
+                      spacing: Ui.space2,
+                      runSpacing: Ui.space1,
                       children: [
                         TextButton.icon(
                           key: const ValueKey('setup-server-settings'),
@@ -1548,9 +1598,12 @@ class _SendScreenState extends State<SendScreen>
               children: [
                 SelectableText(
                   c.credentialProblem!.diagnostic,
-                  style: const TextStyle(fontSize: 14, height: 1.55),
+                  style: const TextStyle(
+                    fontSize: Ui.textSm,
+                    height: Ui.leadingNormal,
+                  ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: Ui.space4),
                 const Text('登录信息暂不可用。可以重试连接，或重新输入组密码。'),
               ],
             ),
@@ -1612,7 +1665,7 @@ class _SendScreenState extends State<SendScreen>
                                 },
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: Ui.space4),
                     ],
                     SwitchListTile.adaptive(
                       contentPadding: EdgeInsets.zero,
@@ -1731,8 +1784,8 @@ class _SendScreenState extends State<SendScreen>
   }
 
   Widget section(String title, List<Widget> children) => Padding(
-    padding: const EdgeInsets.only(bottom: 16),
-    child: UiSection(title: title, children: children, padding: 16),
+    padding: const EdgeInsets.only(bottom: Ui.space3),
+    child: UiSection(title: title, children: children, padding: Ui.space3),
   );
   Widget targetPicker() => UiField(
     label: '发送到',
@@ -1749,7 +1802,7 @@ class _SendScreenState extends State<SendScreen>
               child: Row(
                 children: [
                   AppIcon(deviceIcon(d), size: 19),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: Ui.space1),
                   Expanded(
                     child: Text(d['name'], overflow: TextOverflow.ellipsis),
                   ),
@@ -1757,7 +1810,7 @@ class _SendScreenState extends State<SendScreen>
                     AppIcon(
                       Icons.circle,
                       size: 6,
-                      color: Ui.colors(context).green,
+                      color: Ui.colors(context).accent,
                     ),
                 ],
               ),
@@ -1779,21 +1832,21 @@ class _SendScreenState extends State<SendScreen>
       final tools = Row(
         children: [
           actionTile('文本', Icons.notes_rounded, composeText, key: 'add-text'),
-          const SizedBox(width: 8),
+          const SizedBox(width: Ui.space1),
           actionTile(
             '剪贴板',
             Icons.content_paste_rounded,
             () => perform(c.stageClipboard),
             key: 'add-clipboard',
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: Ui.space0),
           actionTile(
             '文件',
             Icons.insert_drive_file_outlined,
             pickFiles,
             key: 'add-file',
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: Ui.space0),
           actionTile(
             '媒体',
             Icons.photo_library_outlined,
@@ -1803,7 +1856,7 @@ class _SendScreenState extends State<SendScreen>
             key: 'add-media',
           ),
           if (Theme.of(context).platform == TargetPlatform.android) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: Ui.space0),
             actionTile('应用', Icons.apps, () async {
               final package = await pickInstalledApp(context);
               if (package == null || !mounted) return;
@@ -1823,7 +1876,7 @@ class _SendScreenState extends State<SendScreen>
       );
       if (desktop) {
         return Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(Ui.space2),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1831,9 +1884,9 @@ class _SendScreenState extends State<SendScreen>
                 height: c.failedOutgoingFiles.isEmpty ? 180 : 212,
                 child: queuePanel(),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: Ui.space1),
               targetDevices(),
-              const SizedBox(height: 10),
+              const SizedBox(height: Ui.space1),
               Expanded(flex: 5, child: shared),
             ],
           ),
@@ -1842,19 +1895,19 @@ class _SendScreenState extends State<SendScreen>
       // This element tree does not change when Android's keyboard resizes it.
       return SingleChildScrollView(
         key: const ValueKey('send-workspace-scroll'),
-        padding: const EdgeInsets.all(16),
+        padding: Ui.insetField,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             tools,
-            const SizedBox(height: 12),
+            const SizedBox(height: Ui.space2),
             SizedBox(
               height: c.failedOutgoingFiles.isEmpty ? 180 : 212,
               child: queuePanel(),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: Ui.space2),
             targetDevices(),
-            const SizedBox(height: 12),
+            const SizedBox(height: Ui.space2),
             shared,
           ],
         ),
@@ -1868,7 +1921,7 @@ class _SendScreenState extends State<SendScreen>
     child: Align(
       alignment: Alignment.bottomCenter,
       child: SizedBox(
-        height: 44,
+        height: Ui.touch,
         child: Row(
           children: [
             for (final (index, label) in const ['接收', '已发送', '文件库'].indexed)
@@ -1891,22 +1944,22 @@ class _SendScreenState extends State<SendScreen>
                       selected.clear();
                     }),
                     borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(12),
+                      top: Radius.circular(Ui.radiusControl),
                     ),
                     child: Container(
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: contentTab == index
-                            ? Ui.colors(context).softGreen
+                            ? Ui.colors(context).accentSoft
                             : Colors.transparent,
                         borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(12),
+                          top: Radius.circular(Ui.radiusControl),
                         ),
                         border: contentTab == index
                             ? Border(
                                 bottom: BorderSide(
-                                  color: Ui.colors(context).green,
-                                  width: 2,
+                                  color: Ui.colors(context).accent,
+                                  width: Ui.strokeFocus,
                                 ),
                               )
                             : null,
@@ -1914,13 +1967,13 @@ class _SendScreenState extends State<SendScreen>
                       child: Text(
                         label,
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: Ui.textSm,
                           fontWeight: contentTab == index
-                              ? FontWeight.w600
-                              : FontWeight.w400,
+                              ? Ui.weightLabel
+                              : Ui.weightBody,
                           color: contentTab == index
-                              ? Ui.colors(context).green
-                              : Ui.colors(context).muted,
+                              ? Ui.colors(context).accent
+                              : Ui.colors(context).textSecondary,
                         ),
                       ),
                     ),
@@ -1949,7 +2002,9 @@ class _SendScreenState extends State<SendScreen>
     };
     if (compact) return content;
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 180),
+      duration: Ui.durationNormal,
+      switchInCurve: Ui.ease,
+      switchOutCurve: Ui.ease,
       transitionBuilder: (child, animation) => FadeTransition(
         opacity: animation,
         child: SlideTransition(
@@ -1980,8 +2035,8 @@ class _SendScreenState extends State<SendScreen>
                         ? '${selected.length}/${items.length} 项'
                         : '${items.length} 项',
                     style: TextStyle(
-                      fontSize: 12,
-                      color: Ui.colors(context).muted,
+                      fontSize: Ui.text2xs,
+                      color: Ui.colors(context).textSecondary,
                     ),
                   ),
                   BulkFileDrag(
@@ -2035,7 +2090,7 @@ class _SendScreenState extends State<SendScreen>
               Expanded(
                 child: GridView.builder(
                   key: const ValueKey('sent-grid'),
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(Ui.space2),
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
                     crossAxisSpacing: 12,
@@ -2057,15 +2112,15 @@ class _SendScreenState extends State<SendScreen>
     key: joined ? const ValueKey('desktop-content-pane') : null,
     decoration: BoxDecoration(
       color: Ui.colors(context).surface,
-      border: Border.all(color: Ui.colors(context).border),
+      border: Border.all(color: Ui.colors(context).line),
       borderRadius: joined
-          ? const BorderRadius.vertical(bottom: Radius.circular(20))
-          : BorderRadius.circular(20),
+          ? const BorderRadius.vertical(bottom: Radius.circular(Ui.radiusPanel))
+          : Ui.panelRadius,
     ),
     child: ClipRRect(
       borderRadius: joined
-          ? const BorderRadius.vertical(bottom: Radius.circular(20))
-          : BorderRadius.circular(20),
+          ? const BorderRadius.vertical(bottom: Radius.circular(Ui.radiusPanel))
+          : Ui.panelRadius,
       child: child,
     ),
   );
@@ -2080,11 +2135,11 @@ class _SendScreenState extends State<SendScreen>
     child: TextButton(
       key: ValueKey(key),
       style: TextButton.styleFrom(
-        minimumSize: const Size(0, 44),
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        minimumSize: const Size(0, Ui.touch),
+        padding: const EdgeInsets.symmetric(horizontal: Ui.space0),
         backgroundColor: quiet
-            ? Ui.colors(context).background
-            : Ui.colors(context).softGreen,
+            ? Ui.colors(context).canvas
+            : Ui.colors(context).accentSoft,
         shape: const RoundedRectangleBorder(borderRadius: Ui.fieldRadius),
       ),
       onPressed: working ? null : onTap,
@@ -2092,13 +2147,13 @@ class _SendScreenState extends State<SendScreen>
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           AppIcon(icon, size: 16),
-          const SizedBox(width: 4),
+          const SizedBox(width: Ui.space0),
           Flexible(
             child: Text(
               label,
               maxLines: 1,
               softWrap: false,
-              style: const TextStyle(fontSize: 13),
+              style: const TextStyle(fontSize: Ui.textXs),
             ),
           ),
         ],
@@ -2141,27 +2196,34 @@ class _SendScreenState extends State<SendScreen>
           child: Container(
             key: const ValueKey('send-queue'),
             decoration: BoxDecoration(
-              color: Ui.colors(context).input,
+              color: Ui.colors(context).surfaceMuted,
               borderRadius: Ui.fieldRadius,
               border: Border.all(
                 color: candidates.isNotEmpty || c.nativeQueueDragActive
-                    ? Ui.colors(context).green
-                    : Ui.colors(context).border,
-                width: candidates.isNotEmpty || c.nativeQueueDragActive ? 2 : 1,
+                    ? Ui.colors(context).accent
+                    : Ui.colors(context).line,
+                width: candidates.isNotEmpty || c.nativeQueueDragActive
+                    ? Ui.strokeFocus
+                    : Ui.stroke,
               ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space2,
+                    Ui.space0,
+                    Ui.space0,
+                    Ui.space0,
+                  ),
                   child: Row(
                     children: [
                       Text(
                         '待发送${count == 0 ? '' : ' · $count'}',
                         style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
+                          fontWeight: Ui.weightLabel,
+                          fontSize: Ui.textXs,
                         ),
                       ),
                       const Spacer(),
@@ -2192,8 +2254,10 @@ class _SendScreenState extends State<SendScreen>
                       TextButton.icon(
                         key: const ValueKey('add-files-visible'),
                         style: TextButton.styleFrom(
-                          minimumSize: const Size(40, 36),
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          minimumSize: const Size(Ui.rowHeight, 36),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: Ui.space0,
+                          ),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         onPressed: working ? null : pickFiles,
@@ -2219,14 +2283,16 @@ class _SendScreenState extends State<SendScreen>
                 ),
                 if (failed.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: Ui.space1),
                     child: Row(
                       children: [
                         TextButton(
                           key: const ValueKey('clear-failed-outgoing'),
                           style: TextButton.styleFrom(
-                            minimumSize: const Size(40, 32),
-                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            minimumSize: const Size(Ui.rowHeight, 32),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: Ui.space0,
+                            ),
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           onPressed: () => failedQueueAction(retry: false),
@@ -2236,8 +2302,10 @@ class _SendScreenState extends State<SendScreen>
                         TextButton(
                           key: const ValueKey('retry-failed-outgoing'),
                           style: TextButton.styleFrom(
-                            minimumSize: const Size(40, 32),
-                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            minimumSize: const Size(Ui.rowHeight, 32),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: Ui.space0,
+                            ),
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           onPressed: () => failedQueueAction(retry: true),
@@ -2258,13 +2326,14 @@ class _SendScreenState extends State<SendScreen>
                                   ? photoSuggestions()
                                   : Center(
                                       child: Padding(
-                                        padding: EdgeInsets.all(16),
+                                        padding: Ui.insetField,
                                         child: Text(
                                           '点击输入文本，或拖入文件',
                                           textAlign: TextAlign.center,
                                           style: TextStyle(
-                                            color: Ui.colors(context).muted,
-                                            fontSize: 14,
+                                            color: Ui.colors(context)
+                                                .textSecondary,
+                                            fontSize: Ui.textSm,
                                           ),
                                         ),
                                       ),
@@ -2301,13 +2370,13 @@ class _SendScreenState extends State<SendScreen>
                                     controller: queueScroll,
                                     scrollDirection: Axis.horizontal,
                                     padding: const EdgeInsets.fromLTRB(
-                                      10,
+                                      Ui.space1,
                                       0,
-                                      10,
-                                      10,
+                                      Ui.space1,
+                                      Ui.space1,
                                     ),
                                     separatorBuilder: (_, _) =>
-                                        const SizedBox(width: 8),
+                                        const SizedBox(width: Ui.space1),
                                     itemCount:
                                         count +
                                         active.length +
@@ -2344,15 +2413,15 @@ class _SendScreenState extends State<SendScreen>
                             child: Container(
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: Ui.colors(context).softGreen
+                                color: Ui.colors(context).accentSoft
                                     .withValues(alpha: .92),
                                 borderRadius: Ui.fieldRadius,
                               ),
                               child: Text(
                                 '松手，加入待发',
                                 style: TextStyle(
-                                  color: Ui.colors(context).green,
-                                  fontSize: 16,
+                                  color: Ui.colors(context).accent,
+                                  fontSize: Ui.textBase,
                                 ),
                               ),
                             ),
@@ -2371,13 +2440,13 @@ class _SendScreenState extends State<SendScreen>
 
   Widget clipboardSuggestionTile(ClipboardSuggestion suggestion) => Material(
     key: const ValueKey('clipboard-suggestion'),
-    color: Ui.colors(context).softGreen.withValues(alpha: .45),
+    color: Ui.colors(context).accentSoft,
     borderRadius: Ui.cardRadius,
     clipBehavior: Clip.antiAlias,
     child: CustomPaint(
       foregroundPainter: _DashedDropBorder(
-        Ui.colors(context).green.withValues(alpha: .55),
-        radius: 16,
+        Ui.colors(context).selectedLine,
+        radius: Ui.radiusCard,
       ),
       child: Stack(
         children: [
@@ -2397,19 +2466,22 @@ class _SendScreenState extends State<SendScreen>
                   AppIcon(
                     Icons.content_paste_rounded,
                     size: 26,
-                    color: Ui.colors(context).green,
+                    color: Ui.colors(context).accent,
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: Ui.space0),
                   const Text(
                     '剪贴板',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: Ui.textXs,
+                      fontWeight: Ui.weightLabel,
+                    ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: Ui.space0),
                   Text(
                     '${suggestion.label} · 点按添加',
                     style: TextStyle(
-                      fontSize: 11,
-                      color: Ui.colors(context).muted,
+                      fontSize: Ui.text2xs,
+                      color: Ui.colors(context).textSecondary,
                     ),
                   ),
                 ],
@@ -2465,7 +2537,7 @@ class _SendScreenState extends State<SendScreen>
                       child: AppIcon(
                         Icons.folder_outlined,
                         size: 36,
-                        color: Ui.colors(context).green,
+                        color: Ui.colors(context).accent,
                       ),
                     )
                   else
@@ -2509,12 +2581,18 @@ class _SendScreenState extends State<SendScreen>
             ),
             if (!isText)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: Ui.space1,
+                  vertical: Ui.space0,
+                ),
                 child: Text(
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, height: 1.4),
+                  style: const TextStyle(
+                    fontSize: Ui.text2xs,
+                    height: Ui.leadingCompact,
+                  ),
                 ),
               ),
           ],
@@ -2543,34 +2621,34 @@ class _SendScreenState extends State<SendScreen>
       child: Stack(
         children: [
           Padding(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(Ui.space1),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 AppIcon(
                   Icons.north_east,
                   size: 22,
-                  color: Ui.colors(context).green,
+                  color: Ui.colors(context).accent,
                 ),
                 const Spacer(),
                 Text(
                   item.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
+                  style: const TextStyle(fontSize: Ui.text2xs),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: Ui.space0),
                 Text(
                   item.transferBytesPerSecond > 0
                       ? '${formatSize(item.transferBytesPerSecond.round())}/s'
                       : statusLabel(item),
                   maxLines: 1,
                   style: TextStyle(
-                    fontSize: 11,
-                    color: Ui.colors(context).muted,
+                    fontSize: Ui.text2xs,
+                    color: Ui.colors(context).textSecondary,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: Ui.space0),
                 LinearProgressIndicator(
                   value: item.progress.clamp(0, 1),
                   minHeight: 3,
@@ -2610,8 +2688,8 @@ class _SendScreenState extends State<SendScreen>
     final selectedCount = selectedIds.length;
     final summary = selectedIds.map(sourceName).join('、');
     final toolStyle = TextButton.styleFrom(
-      minimumSize: const Size(48, 40),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      minimumSize: const Size(Ui.touch, Ui.rowHeight),
+      padding: const EdgeInsets.symmetric(horizontal: Ui.space1),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
     return Column(
@@ -2630,8 +2708,8 @@ class _SendScreenState extends State<SendScreen>
                           child: Text(
                             '目标：$summary',
                             style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
+                              fontSize: Ui.textSm,
+                              fontWeight: Ui.weightLabel,
                             ),
                           ),
                         ),
@@ -2640,8 +2718,8 @@ class _SendScreenState extends State<SendScreen>
                   : Text(
                       '设备 ' + peers.length.toString(),
                       style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                        fontSize: Ui.textSm,
+                        fontWeight: Ui.weightLabel,
                       ),
                     ),
             ),
@@ -2649,7 +2727,7 @@ class _SendScreenState extends State<SendScreen>
               key: const ValueKey('refresh-devices'),
               tooltip: '刷新设备',
               style: IconButton.styleFrom(
-                minimumSize: const Size(40, 40),
+                minimumSize: const Size(Ui.rowHeight, Ui.rowHeight),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: refreshingDevices
@@ -2680,8 +2758,8 @@ class _SendScreenState extends State<SendScreen>
                 child: FilledButton(
                   key: const ValueKey('send-selected'),
                   style: FilledButton.styleFrom(
-                    minimumSize: const Size(72, 40),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    minimumSize: const Size(72, Ui.rowHeight),
+                    padding: const EdgeInsets.symmetric(horizontal: Ui.space2),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   onPressed: count == 0 || sendingTargets ? null : sendSelected,
@@ -2690,22 +2768,22 @@ class _SendScreenState extends State<SendScreen>
               ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: Ui.space1),
         SizedBox(
           height: extent + 8,
           child: peers.isEmpty
               ? Container(
                   alignment: Alignment.center,
-                  padding: const EdgeInsets.all(16),
+                  padding: Ui.insetField,
                   decoration: BoxDecoration(
-                    color: Ui.colors(context).input,
+                    color: Ui.colors(context).surfaceMuted,
                     borderRadius: Ui.fieldRadius,
                   ),
                   child: Text(
                     '暂无其他设备',
                     style: TextStyle(
-                      fontSize: 14,
-                      color: Ui.colors(context).muted,
+                      fontSize: Ui.textSm,
+                      color: Ui.colors(context).textSecondary,
                     ),
                   ),
                 )
@@ -2732,10 +2810,11 @@ class _SendScreenState extends State<SendScreen>
                     child: ListView.separated(
                       key: const ValueKey('target-devices'),
                       controller: targetScroll,
-                      padding: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.only(bottom: Ui.space1),
                       scrollDirection: Axis.horizontal,
                       itemCount: peers.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 12),
+                      separatorBuilder: (_, _) =>
+                          const SizedBox(width: Ui.space2),
                       itemBuilder: (_, index) {
                         final device = peers[index],
                             id = device['deviceId'] as String;
@@ -2768,14 +2847,14 @@ class _SendScreenState extends State<SendScreen>
                                     : '在线',
                                 child: Material(
                                   color: checked
-                                      ? Ui.colors(context).softGreen
-                                      : Ui.colors(context).input,
+                                      ? Ui.colors(context).accentSoft
+                                      : Ui.colors(context).surfaceMuted,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: Ui.fieldRadius,
                                     side: BorderSide(
                                       color: checked
-                                          ? Ui.colors(context).green
-                                          : Ui.colors(context).border,
+                                          ? Ui.colors(context).accent
+                                          : Ui.colors(context).line,
                                       width: checked ? 1.5 : 1,
                                     ),
                                   ),
@@ -2817,8 +2896,8 @@ class _SendScreenState extends State<SendScreen>
                                         Positioned.fill(
                                           child: Padding(
                                             padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 8,
+                                              horizontal: Ui.space1,
+                                              vertical: Ui.space1,
                                             ),
                                             child: Column(
                                               mainAxisAlignment:
@@ -2830,22 +2909,22 @@ class _SendScreenState extends State<SendScreen>
                                                       ? Text(
                                                           '已发送',
                                                           style: TextStyle(
-                                                            fontSize: 13,
+                                                            fontSize: Ui.textXs,
                                                             fontWeight:
-                                                                FontWeight.w600,
+                                                                Ui.weightLabel,
                                                             color: Ui.colors(
                                                               context,
-                                                            ).green,
+                                                            ).accent,
                                                           ),
                                                         )
                                                       : offline
                                                       ? Text(
                                                           '暂离线',
                                                           style: TextStyle(
-                                                            fontSize: 13,
+                                                            fontSize: Ui.textXs,
                                                             color: Ui.colors(
                                                               context,
-                                                            ).muted,
+                                                            ).textSecondary,
                                                           ),
                                                         )
                                                       : AppIcon(
@@ -2854,13 +2933,15 @@ class _SendScreenState extends State<SendScreen>
                                                           color: checked
                                                               ? Ui.colors(
                                                                   context,
-                                                                ).green
+                                                                ).accent
                                                               : Ui.colors(
                                                                   context,
-                                                                ).muted,
+                                                                ).textSecondary,
                                                         ),
                                                 ),
-                                                const SizedBox(height: 6),
+                                                const SizedBox(
+                                                  height: Ui.space0,
+                                                ),
                                                 Text(
                                                   fullName,
                                                   textAlign: TextAlign.center,
@@ -2868,11 +2949,11 @@ class _SendScreenState extends State<SendScreen>
                                                   overflow:
                                                       TextOverflow.ellipsis,
                                                   style: TextStyle(
-                                                    fontSize: 12,
-                                                    height: 1.35,
+                                                    fontSize: Ui.text2xs,
+                                                    height: Ui.leadingTight,
                                                     fontWeight: checked
-                                                        ? FontWeight.w600
-                                                        : FontWeight.w400,
+                                                        ? Ui.weightLabel
+                                                        : Ui.weightBody,
                                                   ),
                                                 ),
                                               ],
@@ -2898,17 +2979,17 @@ class _SendScreenState extends State<SendScreen>
                                             child: AppIcon(
                                               Icons.check_circle,
                                               size: 16,
-                                              color: Ui.colors(context).green,
+                                              color: Ui.colors(context).accent,
                                             ),
                                           )
                                         else if (state == 'failed')
-                                          const Positioned(
+                                          Positioned(
                                             top: 8,
                                             right: 8,
                                             child: AppIcon(
                                               Icons.error_outline,
                                               size: 16,
-                                              color: Color(0xffb3553f),
+                                              color: Ui.colors(context).danger,
                                             ),
                                           ),
                                       ],
@@ -2957,7 +3038,10 @@ class _SendScreenState extends State<SendScreen>
         decoration: BoxDecoration(
           borderRadius: Ui.fieldRadius,
           border: candidates.isNotEmpty || c.nativeHoveredDeviceId == id
-              ? Border.all(color: Ui.colors(context).green, width: 2)
+              ? Border.all(
+                  color: Ui.colors(context).accent,
+                  width: Ui.strokeFocus,
+                )
               : null,
         ),
         child: child,
@@ -3080,19 +3164,27 @@ class _SendScreenState extends State<SendScreen>
                   maxLines: null,
                   keyboardType: TextInputType.multiline,
                   textAlignVertical: TextAlignVertical.top,
-                  style: const TextStyle(fontSize: 14, height: 1.5),
+                  style: const TextStyle(
+                    fontSize: Ui.textSm,
+                    height: Ui.leadingNormal,
+                  ),
                   enabled: c.sharedTextSupported,
                   decoration: InputDecoration(
                     hintText: '组内共同编辑',
                     hintStyle: TextStyle(
-                      fontSize: 14,
-                      color: Ui.colors(context).muted,
+                      fontSize: Ui.textSm,
+                      color: Ui.colors(context).textSecondary,
                     ),
                     filled: false,
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
-                    contentPadding: EdgeInsets.fromLTRB(14, 8, 14, 12),
+                    contentPadding: EdgeInsets.fromLTRB(
+                      Ui.space2,
+                      Ui.space1,
+                      Ui.space2,
+                      Ui.space2,
+                    ),
                   ),
                 ),
               ),
@@ -3104,33 +3196,41 @@ class _SendScreenState extends State<SendScreen>
     return Container(
       key: const ValueKey('shared-text-panel'),
       decoration: BoxDecoration(
-        color: Ui.colors(context).input,
+        color: Ui.colors(context).surfaceMuted,
         borderRadius: Ui.fieldRadius,
         border: Border.all(
           color: unsynced || c.sharedTextConflict
-              ? Theme.of(context).colorScheme.error
-              : Ui.colors(context).border,
+              ? Ui.colors(context).danger
+              : Ui.colors(context).line,
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 10, 0),
+            padding: const EdgeInsets.fromLTRB(
+              Ui.space2,
+              Ui.space1,
+              Ui.space1,
+              0,
+            ),
             child: Row(
               children: [
                 AppIcon(
                   Icons.edit_note_rounded,
                   size: 18,
-                  color: Ui.colors(context).muted,
+                  color: Ui.colors(context).textSecondary,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: Ui.space0),
                 const Text(
                   '组内共享',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: Ui.textXs,
+                    fontWeight: Ui.weightLabel,
+                  ),
                 ),
                 if (c.joinedGroups.length > 1) ...[
-                  const SizedBox(width: 8),
+                  const SizedBox(width: Ui.space1),
                   Flexible(
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
@@ -3145,7 +3245,7 @@ class _SendScreenState extends State<SendScreen>
                                 child: Text(
                                   g['name'] as String,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12),
+                                  style: const TextStyle(fontSize: Ui.text2xs),
                                 ),
                               ),
                             )
@@ -3183,8 +3283,8 @@ class _SendScreenState extends State<SendScreen>
                   Text(
                     '未同步',
                     style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.error,
+                      fontSize: Ui.text2xs,
+                      color: Ui.colors(context).danger,
                     ),
                   ),
               ],
@@ -3196,13 +3296,21 @@ class _SendScreenState extends State<SendScreen>
             SizedBox(height: 140, child: field),
           if (c.sharedTextConflict)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              padding: const EdgeInsets.fromLTRB(
+                Ui.space2,
+                0,
+                Ui.space2,
+                Ui.space1,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('其他设备也在编辑', style: TextStyle(fontSize: 12)),
+                  const Text(
+                    '其他设备也在编辑',
+                    style: TextStyle(fontSize: Ui.text2xs),
+                  ),
                   Wrap(
-                    spacing: 8,
+                    spacing: Ui.space1,
                     children: [
                       TextButton(
                         onPressed: c.useRemoteSharedText,
@@ -3338,7 +3446,10 @@ class _SendScreenState extends State<SendScreen>
               selecting
                   ? '${selected.length}/${items.length} 项'
                   : '${items.length} 项',
-              style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
+              style: TextStyle(
+                fontSize: Ui.text2xs,
+                color: Ui.colors(context).textSecondary,
+              ),
             ),
             BulkFileDrag(
               key: const ValueKey('receive-drag-all'),
@@ -3421,12 +3532,14 @@ class _SendScreenState extends State<SendScreen>
                           AppIcon(
                             Icons.inbox_outlined,
                             size: 44,
-                            color: Ui.colors(context).muted,
+                            color: Ui.colors(context).textSecondary,
                           ),
-                          SizedBox(height: 14),
+                          SizedBox(height: Ui.space2),
                           Text(
                             '暂无接收',
-                            style: TextStyle(color: Ui.colors(context).muted),
+                            style: TextStyle(
+                              color: Ui.colors(context).textSecondary,
+                            ),
                           ),
                         ],
                       ),
@@ -3434,13 +3547,18 @@ class _SendScreenState extends State<SendScreen>
                   ),
                 if (batches.isNotEmpty)
                   SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    padding: const EdgeInsets.symmetric(horizontal: Ui.space3),
                     sliver: SliverList.list(
                       children: batches.values.map(offerCard).toList(),
                     ),
                   ),
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space3,
+                    0,
+                    Ui.space3,
+                    Ui.space3,
+                  ),
                   sliver: SliverGrid(
                     key: const ValueKey('receive-grid'),
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -3473,7 +3591,7 @@ class _SendScreenState extends State<SendScreen>
     return section('${sourceName(first.source)} · ${batch.length} 项', [
       for (final item in batch)
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: Ui.space1),
           child: Row(
             children: [
               AppIcon(
@@ -3481,9 +3599,9 @@ class _SendScreenState extends State<SendScreen>
                     ? Icons.folder_outlined
                     : Icons.description_outlined,
                 size: 19,
-                color: Ui.colors(context).muted,
+                color: Ui.colors(context).textSecondary,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: Ui.space1),
               Expanded(
                 child: Text(
                   item.title,
@@ -3491,20 +3609,26 @@ class _SendScreenState extends State<SendScreen>
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: Ui.space1),
               Text(
                 formatSize(item.size),
-                style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
+                style: TextStyle(
+                  fontSize: Ui.text2xs,
+                  color: Ui.colors(context).textSecondary,
+                ),
               ),
             ],
           ),
         ),
-      const SizedBox(height: 6),
+      const SizedBox(height: Ui.space0),
       Text(
         '${relay ? '需中继 · ' : ''}${formatSize(size)}',
-        style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
+        style: TextStyle(
+          fontSize: Ui.textXs,
+          color: Ui.colors(context).textSecondary,
+        ),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: Ui.space2),
       Row(
         children: [
           FilledButton(
@@ -3563,8 +3687,8 @@ class _SendScreenState extends State<SendScreen>
   Widget transferControls(DockEntry item) => TextButtonTheme(
     data: TextButtonThemeData(
       style: TextButton.styleFrom(
-        minimumSize: const Size(40, 36),
-        padding: const EdgeInsets.symmetric(horizontal: 5),
+        minimumSize: const Size(Ui.rowHeight, 36),
+        padding: const EdgeInsets.symmetric(horizontal: Ui.space0),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     ),
@@ -3679,7 +3803,7 @@ class _SendScreenState extends State<SendScreen>
           ? TextButton(
               style: TextButton.styleFrom(
                 minimumSize: const Size(36, 32),
-                padding: const EdgeInsets.symmetric(horizontal: 5),
+                padding: const EdgeInsets.symmetric(horizontal: Ui.space0),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: working
@@ -4060,15 +4184,15 @@ class _SendScreenState extends State<SendScreen>
                           : '${item.localPath}\n'}${item.routeDetail}${item.error.isEmpty ? '' : '\n${item.error}'}',
                     ),
                     if (item.receiveFailure && !item.outgoing) ...[
-                      const SizedBox(height: 16),
+                      const SizedBox(height: Ui.space3),
                       Text(
                         '接收目录',
                         style: TextStyle(
-                          fontSize: 13,
-                          color: Ui.colors(context).muted,
+                          fontSize: Ui.textXs,
+                          color: Ui.colors(context).textSecondary,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: Ui.space0),
                       Text(
                         c.receiveDirectoryLabel.isEmpty
                             ? '默认目录'
@@ -4077,7 +4201,7 @@ class _SendScreenState extends State<SendScreen>
                         overflow: TextOverflow.ellipsis,
                       ),
                       Wrap(
-                        spacing: 8,
+                        spacing: Ui.space1,
                         children: [
                           TextButton(
                             onPressed: () => perform(c.chooseReceiveDirectory),
@@ -4102,7 +4226,7 @@ class _SendScreenState extends State<SendScreen>
                   key: const ValueKey('transfer-details-cancel'),
                   onPressed: () => transferControl('cancel', item),
                   style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.error,
+                    foregroundColor: Ui.colors(context).danger,
                   ),
                   child: const Text('取消传输'),
                 ),
@@ -4156,17 +4280,17 @@ class _SendScreenState extends State<SendScreen>
       context: context,
       useSafeArea: true,
       builder: (sheet) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: Ui.space2),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(Ui.space2),
               child: Text(
                 '重新发送 · ${formatSize(item.size)}',
                 style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
+                  fontSize: Ui.textLg,
+                  fontWeight: Ui.weightLabel,
                 ),
               ),
             ),
@@ -4190,15 +4314,23 @@ class _SendScreenState extends State<SendScreen>
       useSafeArea: true,
       builder: (sheet) => StatefulBuilder(
         builder: (sheet, update) => Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          padding: const EdgeInsets.fromLTRB(
+            Ui.space3,
+            Ui.space2,
+            Ui.space3,
+            Ui.space4,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
                 '选择文件',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontSize: Ui.textLg,
+                  fontWeight: Ui.weightLabel,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: Ui.space2),
               Flexible(
                 child: ListView(
                   shrinkWrap: true,
@@ -4218,7 +4350,7 @@ class _SendScreenState extends State<SendScreen>
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: Ui.space2),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
@@ -4226,10 +4358,13 @@ class _SendScreenState extends State<SendScreen>
                   child: Text('接收 ${checked.length} 项'),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: Ui.space1),
               Text(
                 '未选文件将拒绝',
-                style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
+                style: TextStyle(
+                  fontSize: Ui.text2xs,
+                  color: Ui.colors(context).textSecondary,
+                ),
               ),
             ],
           ),
@@ -4276,7 +4411,7 @@ class _SendScreenState extends State<SendScreen>
       };
 
   Widget settingsSection(String title, List<Widget> children) => Padding(
-    padding: const EdgeInsets.only(bottom: 24),
+    padding: const EdgeInsets.only(bottom: Ui.space4),
     child: UiSection(title: title, children: children),
   );
 
@@ -4305,7 +4440,7 @@ class _SendScreenState extends State<SendScreen>
         SwitchListTile.adaptive(
           key: const ValueKey('clipboard-sync'),
           contentPadding: EdgeInsets.zero,
-          hoverColor: Colors.transparent,
+          hoverColor: Ui.colors(context).hovered,
           tileColor: Colors.transparent,
           title: const Text('同步剪贴板'),
           value: c.clipboardEnabled,
@@ -4375,15 +4510,18 @@ class _SendScreenState extends State<SendScreen>
     builder: (_, value, child) => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 18),
+        const SizedBox(height: Ui.space3),
         Text(
           '清理类别',
-          style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
+          style: TextStyle(
+            fontSize: Ui.textXs,
+            color: Ui.colors(context).textSecondary,
+          ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: Ui.space1),
         Wrap(
-          spacing: 6,
-          runSpacing: 4,
+          spacing: Ui.space0,
+          runSpacing: Ui.space0,
           children: [
             for (final category in SavedFileCategory.values)
               FilterChip(
@@ -4408,7 +4546,7 @@ class _SendScreenState extends State<SendScreen>
               ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: Ui.space2),
         Row(
           children: [
             Expanded(
@@ -4445,7 +4583,7 @@ class _SendScreenState extends State<SendScreen>
               ),
             ),
             if (cleanupSizeRule != SavedFileSizeRule.any) ...[
-              const SizedBox(width: 10),
+              const SizedBox(width: Ui.space1),
               Expanded(
                 child: UiField(
                   label: '大小',
@@ -4470,7 +4608,7 @@ class _SendScreenState extends State<SendScreen>
             child: TextButton(
               key: const ValueKey('save-cleanup-filter'),
               style: TextButton.styleFrom(
-                disabledForegroundColor: Ui.colors(context).muted,
+                disabledForegroundColor: Ui.colors(context).disabledInk,
               ),
               onPressed: working || !cleanupFilterChanged
                   ? null
@@ -4486,7 +4624,12 @@ class _SendScreenState extends State<SendScreen>
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        padding: const EdgeInsets.fromLTRB(
+          Ui.space4,
+          Ui.space3,
+          Ui.space4,
+          Ui.space5,
+        ),
         children: [
           settingsSection('外观', [const AppearancePicker()]),
           if (Platform.isWindows)
@@ -4510,7 +4653,8 @@ class _SendScreenState extends State<SendScreen>
                         ? TextButton(
                             key: const ValueKey('save-device-name'),
                             style: TextButton.styleFrom(
-                              disabledForegroundColor: Ui.colors(context).muted,
+                              disabledForegroundColor: Ui.colors(context)
+                                  .disabledInk,
                             ),
                             onPressed:
                                 working ||
@@ -4556,7 +4700,7 @@ class _SendScreenState extends State<SendScreen>
                 decoration: const InputDecoration(),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: Ui.space1),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
@@ -4566,7 +4710,7 @@ class _SendScreenState extends State<SendScreen>
             ),
             if (c.profiles.length > 1)
               Padding(
-                padding: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.only(top: Ui.space2),
                 child: UiField(
                   label: '已保存服务器',
                   child: DropdownButtonFormField<String>(
@@ -4711,7 +4855,7 @@ class _SendScreenState extends State<SendScreen>
               ),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              hoverColor: Colors.transparent,
+              hoverColor: Ui.colors(context).hovered,
               tileColor: Colors.transparent,
               title: const Text('自动接收'),
               value: c.profile!.autoReceive,
@@ -4743,11 +4887,11 @@ class _SendScreenState extends State<SendScreen>
                   child: const Text('照片权限'),
                 ),
               ),
-            const SizedBox(height: 12),
+            const SizedBox(height: Ui.space2),
             routePicker(true),
-            const SizedBox(height: 16),
+            const SizedBox(height: Ui.space3),
             routePicker(false),
-            const SizedBox(height: 16),
+            const SizedBox(height: Ui.space3),
             UiField(
               label: '传输并发数',
               child: DropdownButtonFormField<int>(
@@ -4768,7 +4912,7 @@ class _SendScreenState extends State<SendScreen>
                           perform(() => c.setTransferConcurrency(value!)),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: Ui.space3),
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: relayLimit,
               builder: (_, value, child) => UiField(
@@ -4784,7 +4928,8 @@ class _SendScreenState extends State<SendScreen>
                         ? TextButton(
                             key: const ValueKey('save-relay-limit'),
                             style: TextButton.styleFrom(
-                              disabledForegroundColor: Ui.colors(context).muted,
+                              disabledForegroundColor: Ui.colors(context)
+                                  .disabledInk,
                             ),
                             onPressed:
                                 working ||
@@ -4803,7 +4948,7 @@ class _SendScreenState extends State<SendScreen>
             if (Platform.isAndroid)
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
-                hoverColor: Colors.transparent,
+                hoverColor: Ui.colors(context).hovered,
                 tileColor: Colors.transparent,
                 title: const Text('允许蜂窝传输'),
                 value: c.cellularUploads,
@@ -4846,8 +4991,8 @@ class _SendScreenState extends State<SendScreen>
               ),
             if (Platform.isAndroid)
               Wrap(
-                spacing: 8,
-                runSpacing: 4,
+                spacing: Ui.space1,
+                runSpacing: Ui.space0,
                 children: [
                   TextButton(
                     key: const ValueKey('receive-downloads-directory'),
@@ -4875,7 +5020,7 @@ class _SendScreenState extends State<SendScreen>
                     : () => perform(c.finishReceiveDirectoryCleanup),
                 child: Text('清理旧位置剩余文件（${c.receiveDirectoryCleanupPending}）'),
               ),
-            const SizedBox(height: 12),
+            const SizedBox(height: Ui.space2),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -4898,9 +5043,9 @@ class _SendScreenState extends State<SendScreen>
                                 ? TextButton(
                                     key: const ValueKey('save-file-retention'),
                                     style: TextButton.styleFrom(
-                                      disabledForegroundColor: const Color(
-                                        0xff738176,
-                                      ),
+                                      disabledForegroundColor: Ui.colors(
+                                        context,
+                                      ).disabledInk,
                                     ),
                                     onPressed:
                                         working ||
@@ -4918,7 +5063,7 @@ class _SendScreenState extends State<SendScreen>
                     },
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: Ui.space1),
                 SizedBox(
                   width: 120,
                   child: UiField(
@@ -4941,10 +5086,13 @@ class _SendScreenState extends State<SendScreen>
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: Ui.space1),
             Text(
               '到期后删除收到的文件',
-              style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
+              style: TextStyle(
+                fontSize: Ui.text2xs,
+                color: Ui.colors(context).textSecondary,
+              ),
             ),
             cleanupFilterFields(),
           ]),
@@ -4957,13 +5105,13 @@ class _SendScreenState extends State<SendScreen>
                   leading: Container(
                     width: 20,
                     height: 20,
-                    padding: const EdgeInsets.all(4),
+                    padding: const EdgeInsets.all(Ui.space0),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: group['groupId'] == c.profile!.groupId
-                            ? Theme.of(context).colorScheme.primary
-                            : Ui.colors(context).muted,
+                            ? Ui.colors(context).accent
+                            : Ui.colors(context).textSecondary,
                         width: 1.5,
                       ),
                     ),
@@ -4971,7 +5119,7 @@ class _SendScreenState extends State<SendScreen>
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: group['groupId'] == c.profile!.groupId
-                            ? Theme.of(context).colorScheme.primary
+                            ? Ui.colors(context).accent
                             : Colors.transparent,
                       ),
                     ),
@@ -5014,29 +5162,32 @@ class _SendScreenState extends State<SendScreen>
           Material(
             color: Ui.colors(context).surface,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: Ui.colors(context).border),
+              borderRadius: Ui.cardRadius,
+              side: BorderSide(color: Ui.colors(context).line),
             ),
             clipBehavior: Clip.antiAlias,
             child: AppExpansionTile(
               key: const ValueKey('settings-more'),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: Ui.cardRadius),
               collapsedShape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: Ui.cardRadius,
               ),
               tilePadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 4,
+                horizontal: Ui.space4,
+                vertical: Ui.space0,
               ),
-              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              childrenPadding: const EdgeInsets.fromLTRB(
+                Ui.space3,
+                0,
+                Ui.space3,
+                Ui.space3,
+              ),
               title: Text(
                 '关于与诊断',
                 style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: Ui.textBase,
+                  fontWeight: Ui.weightLabel,
+                  color: Ui.colors(context).textPrimary,
                 ),
               ),
               children: [
@@ -5229,7 +5380,7 @@ class _SendScreenState extends State<SendScreen>
                 label: '名称（可选）',
                 child: TextField(controller: label, autofocus: true),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: Ui.space3),
               UiField(
                 label: '组密码',
                 child: TextField(
@@ -5284,11 +5435,11 @@ class NativeDropFeedback extends StatelessWidget {
           child: IgnorePointer(
             child: Container(
               key: const ValueKey('native-drop-feedback'),
-              padding: const EdgeInsets.all(20),
+              padding: Ui.insetPanel,
               alignment: Alignment.center,
-              color: Ui.colors(context).input.withValues(alpha: .91),
+              color: Ui.colors(context).surfaceMuted.withValues(alpha: .91),
               child: CustomPaint(
-                painter: _DashedDropBorder(Ui.colors(context).muted),
+                painter: _DashedDropBorder(Ui.colors(context).textSecondary),
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -5300,17 +5451,17 @@ class NativeDropFeedback extends StatelessWidget {
                         AppIcon(
                           Icons.file_download_outlined,
                           size: 38,
-                          color: Ui.colors(context).muted,
+                          color: Ui.colors(context).textSecondary,
                         ),
-                      if (importing) const SizedBox(height: 14),
-                      if (!importing) const SizedBox(height: 14),
+                      if (importing) const SizedBox(height: Ui.space2),
+                      if (!importing) const SizedBox(height: Ui.space2),
                       Text(
                         importing ? '正在添加…' : '松手',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           decoration: TextDecoration.none,
-                          color: Ui.colors(context).ink,
-                          fontSize: 21,
-                          fontWeight: FontWeight.w600,
+                          color: Ui.colors(context).textPrimary,
+                          fontSize: Ui.textXl,
+                          fontWeight: Ui.weightLabel,
                         ),
                       ),
                     ],
@@ -5325,7 +5476,7 @@ class NativeDropFeedback extends StatelessWidget {
 }
 
 class _DashedDropBorder extends CustomPainter {
-  const _DashedDropBorder(this.color, {this.radius = 20});
+  const _DashedDropBorder(this.color, {this.radius = Ui.radiusPanel});
   final Color color;
   final double radius;
   @override
@@ -5378,9 +5529,12 @@ class _ComposeTextDialogState extends State<_ComposeTextDialog> {
   @override
   Widget build(BuildContext context) => Dialog(
     backgroundColor: Ui.colors(context).surface,
-    insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+    insetPadding: const EdgeInsets.symmetric(
+      horizontal: Ui.space3,
+      vertical: Ui.space4,
+    ),
     child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 680),
+      constraints: const BoxConstraints(maxWidth: Ui.editorMaxWidth),
       child: SizedBox(
         height: Ui.editorSize(context).height,
         child: ValueListenableBuilder<TextEditingValue>(
@@ -5398,14 +5552,19 @@ class _ComposeTextDialogState extends State<_ComposeTextDialog> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space4,
+                    Ui.space3,
+                    Ui.space2,
+                    Ui.space1,
+                  ),
                   child: Row(
                     children: [
                       const Text(
                         '添加文本',
                         style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+                          fontSize: Ui.textLg,
+                          fontWeight: Ui.weightLabel,
                         ),
                       ),
                       const Spacer(),
@@ -5417,7 +5576,7 @@ class _ComposeTextDialogState extends State<_ComposeTextDialog> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: Ui.space1),
                 Expanded(
                   child: TextField(
                     key: const ValueKey('draft-input'),
@@ -5430,26 +5589,34 @@ class _ComposeTextDialogState extends State<_ComposeTextDialog> {
                     textAlignVertical: TextAlignVertical.top,
                     keyboardType: TextInputType.multiline,
                     textInputAction: TextInputAction.newline,
-                    style: const TextStyle(fontSize: 16, height: 1.55),
+                    style: const TextStyle(
+                      fontSize: Ui.textBase,
+                      height: Ui.leadingNormal,
+                    ),
                     decoration: const InputDecoration(
                       hintText: '输入或粘贴文字…',
                       filled: false,
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
-                      contentPadding: EdgeInsets.all(20),
+                      contentPadding: Ui.insetPanel,
                     ),
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space4,
+                    Ui.space1,
+                    Ui.space4,
+                    Ui.space4,
+                  ),
                   child: Row(
                     children: [
                       Text(
                         '${value.text.runes.length} 字符',
                         style: TextStyle(
-                          fontSize: 13,
-                          color: Ui.colors(context).muted,
+                          fontSize: Ui.textXs,
+                          color: Ui.colors(context).textSecondary,
                         ),
                       ),
                       const Spacer(),

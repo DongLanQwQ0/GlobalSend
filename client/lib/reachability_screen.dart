@@ -102,36 +102,42 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 760),
                 child: ListView(
-                  padding: const EdgeInsets.all(20),
+                  padding: Ui.insetPanel,
                   children: [
                     Text(
                       '源地址与目标地址 · 以实际检测为准',
-                      style: TextStyle(color: Ui.colors(context).muted, fontSize: 13),
+                      style: TextStyle(
+                        color: Ui.colors(context).textSecondary,
+                        fontSize: Ui.textXs,
+                      ),
                     ),
                     if (!monitor.connected)
                       const Padding(
-                        padding: EdgeInsets.only(top: 12),
+                        padding: EdgeInsets.only(top: Ui.space2),
                         child: Text('连接中心后可检测'),
                       ),
                     if (running)
                       const Padding(
-                        padding: EdgeInsets.only(top: 12),
+                        padding: EdgeInsets.only(top: Ui.space2),
                         child: LinearProgressIndicator(minHeight: 2),
                       ),
                     if (error.isNotEmpty)
                       Padding(
-                        padding: const EdgeInsets.only(top: 12),
+                        padding: const EdgeInsets.only(top: Ui.space2),
                         child: Text(
                           error,
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
+                            color: Ui.colors(context).danger,
+                            fontSize: Ui.textSm,
                           ),
                         ),
                       ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: Ui.space4),
                     if (devices.isEmpty)
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 40),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: Ui.space6,
+                        ),
                         child: Center(
                           child: Text(
                             widget.deviceId == null ? '暂无在线设备' : '设备已离线或不在当前组',
@@ -224,10 +230,10 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
       sections.putIfAbsent(_section(result), () => []).add(result);
     }
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.only(bottom: Ui.space4),
       child: Card(
         child: Padding(
-          padding: const EdgeInsets.all(18),
+          padding: Ui.insetField,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -237,32 +243,38 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
               ),
               if (device['platform'] == 'web')
                 Padding(
-                  padding: EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.only(top: Ui.space1),
                   child: Text(
                     '浏览器未公开 IP 时，显示 RTC 通道检测结果',
                     style: TextStyle(
-                      color: Ui.colors(context).muted,
-                      fontSize: 12,
-                      height: 1.5,
+                      color: Ui.colors(context).textSecondary,
+                      fontSize: Ui.text2xs,
+                      height: Ui.leadingNormal,
                     ),
                   ),
                 ),
               if (expired)
                 Padding(
-                  padding: EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.only(top: Ui.space1),
                   child: Text(
                     '直连地址已过期，等待设备更新',
-                    style: TextStyle(color: Ui.colors(context).muted, fontSize: 12),
+                    style: TextStyle(
+                      color: Ui.colors(context).textSecondary,
+                      fontSize: Ui.text2xs,
+                    ),
                   ),
                 ),
               if (results
                   .where((result) => result.scope != ReachabilityScope.relay)
                   .isEmpty)
                 Padding(
-                  padding: EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.only(top: Ui.space2),
                   child: Text(
                     '尚无直连地址或 RTC 检测结果',
-                    style: TextStyle(color: Ui.colors(context).muted, fontSize: 13),
+                    style: TextStyle(
+                      color: Ui.colors(context).textSecondary,
+                      fontSize: Ui.textXs,
+                    ),
                   ),
                 ),
               for (final label in const [
@@ -275,13 +287,16 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
               ])
                 if (sections.containsKey(label)) ...[
                   Padding(
-                    padding: const EdgeInsets.only(top: 20, bottom: 8),
+                    padding: const EdgeInsets.only(
+                      top: Ui.space4,
+                      bottom: Ui.space1,
+                    ),
                     child: Text(
                       label,
                       style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Ui.colors(context).muted,
+                        fontSize: Ui.textXs,
+                        fontWeight: Ui.weightLabel,
+                        color: Ui.colors(context).textSecondary,
                       ),
                     ),
                   ),
@@ -313,10 +328,10 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
     final relay = result.scope == ReachabilityScope.relay;
     final rtc = result.transport == 'rtc';
     final color = !result.tested
-        ? Ui.colors(context).muted
+        ? Ui.colors(context).textSecondary
         : result.reachable
-        ? Theme.of(context).colorScheme.primary
-        : Theme.of(context).colorScheme.error;
+        ? Ui.colors(context).accent
+        : Ui.colors(context).danger;
     final status = !result.tested
         ? '未测'
         : result.reachable
@@ -332,47 +347,64 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
     final timestamp =
         '${sameDay ? '' : '${two(time.month)}/${two(time.day)} '}${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: Ui.space1),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: Ui.colors(context).input,
+          color: Ui.colors(context).surfaceMuted,
           borderRadius: Ui.fieldRadius,
         ),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(Ui.space2),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  AppIcon(
-                    !result.tested
-                        ? Icons.schedule
-                        : result.reachable
-                        ? Icons.check_circle_outline
-                        : Icons.error_outline,
-                    size: 17,
-                    color: color,
-                  ),
-                  const SizedBox(width: 7),
-                  Text(status, style: TextStyle(color: color, fontSize: 13)),
-                  if (result.tested) ...[
-                    const SizedBox(width: 12),
-                    Text(
-                      '${result.elapsedMs} ms',
-                      style: TextStyle(color: Ui.colors(context).muted, fontSize: 12),
-                    ),
-                    const Spacer(),
-                    Flexible(
-                      child: Text(
-                        timestamp,
-                        style: TextStyle(color: Ui.colors(context).muted, fontSize: 11),
+              TweenAnimationBuilder<Color?>(
+                tween: ColorTween(end: color),
+                duration: Ui.durationNormal,
+                curve: Ui.ease,
+                builder: (context, tint, _) {
+                  final state = tint ?? color;
+                  return Row(
+                    children: [
+                      AppIcon(
+                        !result.tested
+                            ? Icons.schedule
+                            : result.reachable
+                            ? Icons.check_circle_outline
+                            : Icons.error_outline,
+                        size: Ui.iconSm,
+                        color: state,
                       ),
-                    ),
-                  ],
-                ],
+                      const SizedBox(width: Ui.space1),
+                      Text(
+                        status,
+                        style: TextStyle(color: state, fontSize: Ui.textXs),
+                      ),
+                      if (result.tested) ...[
+                        const SizedBox(width: Ui.space2),
+                        Text(
+                          '${result.elapsedMs} ms',
+                          style: TextStyle(
+                            color: Ui.colors(context).textSecondary,
+                            fontSize: Ui.text2xs,
+                          ),
+                        ),
+                        const Spacer(),
+                        Flexible(
+                          child: Text(
+                            timestamp,
+                            style: TextStyle(
+                              color: Ui.colors(context).textSecondary,
+                              fontSize: Ui.text2xs,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
               ),
-              const SizedBox(height: 7),
+              const SizedBox(height: Ui.space1),
               SelectableText(
                 result.reachable &&
                         result.sourceEndpoint.isNotEmpty &&
@@ -387,9 +419,12 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                           : rtc && result.address == 'WebRTC'
                           ? '未提供'
                           : result.address}',
-                style: const TextStyle(fontSize: 13, height: 1.5),
+                style: const TextStyle(
+                  fontSize: Ui.textXs,
+                  height: Ui.leadingNormal,
+                ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: Ui.space0),
               Text(
                 relay
                     ? '仅验证中心可达，未验证目标接收'
@@ -401,21 +436,21 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                     ? '蜂窝网络（系统绑定）'
                     : '系统路由',
                 style: TextStyle(
-                  color: Ui.colors(context).muted,
-                  fontSize: 11,
-                  height: 1.5,
+                  color: Ui.colors(context).textSecondary,
+                  fontSize: Ui.text2xs,
+                  height: Ui.leadingNormal,
                 ),
               ),
               if (result.error.isNotEmpty) ...[
-                const SizedBox(height: 5),
+                const SizedBox(height: Ui.space0),
                 Text(
                   result.error,
                   style: TextStyle(
-                    fontSize: 12,
-                    height: 1.4,
+                    fontSize: Ui.text2xs,
+                    height: Ui.leadingCompact,
                     color: result.tested
-                        ? Theme.of(context).colorScheme.error
-                        : Ui.colors(context).muted,
+                        ? Ui.colors(context).danger
+                        : Ui.colors(context).textSecondary,
                   ),
                 ),
               ],

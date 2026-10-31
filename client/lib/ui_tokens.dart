@@ -6,6 +6,21 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
+/// Signal colours live outside the accent axis, one pair per brightness.
+/// The dark pair is deliberately desaturated so nothing glows on a dark canvas.
+// Same ARGB as the web palette in web/src/appearance.ts so both platforms warn
+// and fail in exactly the same hue. Contrast stays above 4.5:1 in both modes.
+const Color _dangerLight = Color(0xffa94237);
+const Color _warningLight = Color(0xff85662b);
+const Color _dangerDark = Color(0xffffb4a7);
+const Color _warningDark = Color(0xffeac17c);
+
+/// One appearance's colour set.
+///
+/// The nine legacy fields keep their names, units and roles because widgets
+/// already read them; the semantic getters below are the vocabulary new code
+/// should use, and the state getters are the only place hover / pressed /
+/// selected / disabled are decided.
 @immutable
 class UiPalette extends ThemeExtension<UiPalette> {
   const UiPalette({
@@ -18,6 +33,9 @@ class UiPalette extends ThemeExtension<UiPalette> {
     required this.green,
     required this.softGreen,
     required this.onAccent,
+    this.danger = _dangerLight,
+    this.warning = _warningLight,
+    this.brightness = Brightness.light,
   });
   final Color background,
       surface,
@@ -28,6 +46,12 @@ class UiPalette extends ThemeExtension<UiPalette> {
       green,
       softGreen,
       onAccent;
+  final Color danger, warning;
+  final Brightness brightness;
+
+  /// Shorthand for the two derived ladders that need to know the brightness.
+  bool get isDark => brightness == Brightness.dark;
+
   factory UiPalette.from(Appearance appearance) {
     final dark = appearance.mode == AppearanceMode.dark;
     final accent = (dark
@@ -97,8 +121,95 @@ class UiPalette extends ThemeExtension<UiPalette> {
         surface,
       ),
       onAccent: dark ? const Color(0xff16191d) : Colors.white,
+      danger: dark ? _dangerDark : _dangerLight,
+      warning: dark ? _warningDark : _warningLight,
+      brightness: dark ? Brightness.dark : Brightness.light,
     );
   }
+
+  // ── Semantic aliases ───────────────────────────────────────────────────
+  // Same colours, role names: surface carries content, surfaceMuted is the
+  // weak/inert surface, line is the single 1px separator, textPrimary /
+  // textSecondary are the two readable inks.
+
+  Color get canvas => background;
+  Color get surfaceMuted => input;
+  Color get line => border;
+  Color get textPrimary => ink;
+  Color get textSecondary => muted;
+  Color get accent => green;
+  Color get accentOn => onAccent;
+  Color get accentSoft => softGreen;
+  Color get dangerSoft =>
+      Color.alphaBlend(danger.withValues(alpha: isDark ? .18 : .08), surface);
+  Color get warningSoft =>
+      Color.alphaBlend(warning.withValues(alpha: isDark ? .18 : .09), surface);
+
+  // ── Interaction states ─────────────────────────────────────────────────
+  // All four are ink veils over one surface, so hover, pressed and disabled
+  // read as one scale in both themes instead of being recomputed in widgets.
+
+  /// Ink veil over [surface]; the only primitive the state colours use.
+  Color _veil(double strength) =>
+      Color.alphaBlend(ink.withValues(alpha: strength), surface);
+
+  Color get hovered => _veil(isDark ? .06 : .04);
+  Color get pressed => _veil(isDark ? .12 : .08);
+  Color get selected => softGreen;
+  Color get selectedLine =>
+      Color.alphaBlend(green.withValues(alpha: .55), border);
+
+  /// Visible focus halo; [Ui.ringWidth] wide.
+  Color get focusRing =>
+      Color.alphaBlend(green.withValues(alpha: isDark ? .45 : .35), surface);
+
+  /// Disabled is one rule for every surface: 45% of the normal foreground.
+  Color disabledOf(Color foreground) =>
+      foreground.withValues(alpha: Ui.disabledOpacity);
+  Color get disabledInk => disabledOf(textSecondary);
+  Color get disabledFill => _veil(isDark ? .14 : .10);
+  Color get disabledLine => disabledOf(border);
+
+  // ── Elevation ──────────────────────────────────────────────────────────
+  // Shadows come from one tint per appearance: light keeps a trace of the
+  // accent hue, dark strips it to neutral so depth never reads as haze.
+
+  Color get shadowTint => isDark
+      ? const Color(0xff000000)
+      : Color.alphaBlend(green.withValues(alpha: .12), const Color(0xff0a0f0d));
+
+  Color shadowAt(double strength) => shadowTint.withValues(alpha: strength);
+
+  /// No elevation: the resting state of every surface.
+  List<BoxShadow> get shadow0 => const <BoxShadow>[];
+
+  /// Level 1: a card lifting off the canvas (hover / sticky row).
+  List<BoxShadow> get shadow1 => <BoxShadow>[
+    BoxShadow(
+      color: shadowAt(isDark ? .34 : .08),
+      blurRadius: 3,
+      offset: const Offset(0, 1),
+    ),
+  ];
+
+  /// Level 2: an overlay that owns the pointer (menus, sheets, popovers).
+  List<BoxShadow> get shadow2 => <BoxShadow>[
+    BoxShadow(
+      color: shadowAt(isDark ? .42 : .12),
+      blurRadius: 14,
+      offset: const Offset(0, 5),
+    ),
+  ];
+
+  /// Level 3: a modal that dims everything behind it.
+  List<BoxShadow> get shadow3 => <BoxShadow>[
+    BoxShadow(
+      color: shadowAt(isDark ? .52 : .18),
+      blurRadius: 36,
+      offset: const Offset(0, 14),
+    ),
+  ];
+
   @override
   UiPalette copyWith({
     Color? background,
@@ -110,6 +221,9 @@ class UiPalette extends ThemeExtension<UiPalette> {
     Color? green,
     Color? softGreen,
     Color? onAccent,
+    Color? danger,
+    Color? warning,
+    Brightness? brightness,
   }) => UiPalette(
     background: background ?? this.background,
     surface: surface ?? this.surface,
@@ -120,6 +234,9 @@ class UiPalette extends ThemeExtension<UiPalette> {
     green: green ?? this.green,
     softGreen: softGreen ?? this.softGreen,
     onAccent: onAccent ?? this.onAccent,
+    danger: danger ?? this.danger,
+    warning: warning ?? this.warning,
+    brightness: brightness ?? this.brightness,
   );
   @override
   UiPalette lerp(covariant UiPalette? other, double t) {
@@ -134,22 +251,153 @@ class UiPalette extends ThemeExtension<UiPalette> {
       green: Color.lerp(green, other.green, t)!,
       softGreen: Color.lerp(softGreen, other.softGreen, t)!,
       onAccent: Color.lerp(onAccent, other.onAccent, t)!,
+      danger: Color.lerp(danger, other.danger, t)!,
+      warning: Color.lerp(warning, other.warning, t)!,
+      brightness: t < .5 ? brightness : other.brightness,
     );
   }
 }
 
 /// Shared visual language; transfer, focus and persistence stay with callers.
+///
+/// Colours are per-appearance and reached through [colors]; everything else in
+/// this file is a fixed step on a ladder (spacing, radius, type, elevation,
+/// motion), so no widget needs to invent a number or compute a state colour.
 abstract final class Ui {
-  static const background = Color(0xfff4f6f2);
-  static const input = Color(0xfffafcf9);
-  static const ink = Color(0xff202923);
-  static const muted = Color(0xff667068);
-  static const border = Color(0xffdfe6df);
+  // ── Palette fallbacks ──────────────────────────────────────────────────
+  // Kept for API compatibility; they mirror UiPalette.from(const Appearance()).
+
+  static const background = Color(0xfff5f5f6);
+  static const input = Color(0xfff8fbfa);
+  static const ink = Color(0xff25272b);
+  static const muted = Color(0xff62666d);
+  static const border = Color(0xffdedfe3);
   static const green = Color(0xff176b50);
-  static const softGreen = Color(0xffedf4ef);
-  static const radius = BorderRadius.all(Radius.circular(20));
-  static const fieldRadius = BorderRadius.all(Radius.circular(14));
-  static const cardRadius = BorderRadius.all(Radius.circular(16));
+  static const softGreen = Color(0xffecf3f1);
+
+  // ── Spacing ladder (4px rhythm; mirrors the web foundation --space-*) ──
+
+  static const double space0 = 4;
+  static const double space1 = 8;
+  static const double space2 = 12;
+  static const double space3 = 16;
+  static const double space4 = 24;
+  static const double space5 = 32;
+  static const double space6 = 40;
+  static const double space7 = 48;
+  static const double space8 = 64;
+
+  static const EdgeInsets insetField = EdgeInsets.all(space3);
+  static const EdgeInsets insetPanel = EdgeInsets.all(space4);
+
+  // ── Radius ladder ──────────────────────────────────────────────────────
+
+  /// Control: buttons, inputs, menus, snack bars.
+  static const double radiusControl = 10;
+
+  /// Card: every content container.
+  static const double radiusCard = 14;
+
+  /// Panel: dialogs, sheets and other full-height surfaces.
+  static const double radiusPanel = 18;
+
+  /// Pill: fully rounded chips and dots.
+  static const double radiusPill = 999;
+
+  static const fieldRadius = BorderRadius.all(Radius.circular(radiusControl));
+  static const cardRadius = BorderRadius.all(Radius.circular(radiusCard));
+  static const panelRadius = BorderRadius.all(Radius.circular(radiusPanel));
+  static const pillRadius = BorderRadius.all(Radius.circular(radiusPill));
+
+  /// Legacy alias: used by the card theme, now on the card step.
+  static const radius = cardRadius;
+
+  // ── Type ladder ────────────────────────────────────────────────────────
+
+  static const double text2xs = 12;
+  static const double textXs = 13;
+  static const double textSm = 14;
+  static const double textBase = 16;
+  static const double textLg = 18;
+  static const double textXl = 22;
+  static const double text2xl = 28;
+
+  static const double leadingTight = 1.25;
+  static const double leadingCompact = 1.45;
+  static const double leadingNormal = 1.55;
+  static const double leadingRelaxed = 1.7;
+
+  /// Two steps only: 400 for reading, 600 for labels. Nothing heavier at small
+  /// sizes and nothing lighter for Chinese titles.
+  static const FontWeight weightBody = FontWeight.w400;
+  static const FontWeight weightLabel = FontWeight.w600;
+
+  static const List<String> fontFallback = [
+    'Microsoft YaHei',
+    'PingFang SC',
+    'sans-serif',
+  ];
+
+  static const TextStyle body = TextStyle(
+    fontSize: textBase,
+    height: leadingNormal,
+  );
+  static const TextStyle caption = TextStyle(
+    fontSize: textXs,
+    height: leadingCompact,
+  );
+  static const TextStyle label = TextStyle(
+    fontSize: textSm,
+    height: leadingTight,
+    fontWeight: weightLabel,
+  );
+  static const TextStyle subtitle = TextStyle(
+    fontSize: textBase,
+    height: leadingCompact,
+    fontWeight: weightLabel,
+  );
+  static const TextStyle title = TextStyle(
+    fontSize: textXl,
+    height: leadingTight,
+    fontWeight: weightLabel,
+  );
+  static const TextStyle display = TextStyle(
+    fontSize: text2xl,
+    height: leadingTight,
+    fontWeight: weightLabel,
+  );
+
+  // ── Strokes, sizes, motion ─────────────────────────────────────────────
+
+  static const double stroke = 1;
+  static const double strokeFocus = 2;
+  static const double ringWidth = 3;
+
+  /// Minimum touch target (mobile); desktop controls may sit at [rowHeight].
+  static const double touch = 44;
+  static const double controlHeight = 48;
+  static const double rowHeight = 40;
+  static const double fieldHeight = 56;
+
+  static const double iconSm = 18;
+  static const double iconMd = 24;
+  static const double iconLg = 40;
+
+  static const double disabledOpacity = .45;
+
+  static const Duration durationFast = Duration(milliseconds: 110);
+  static const Duration durationNormal = Duration(milliseconds: 170);
+  static const Duration durationSlow = Duration(milliseconds: 260);
+  static const Curve ease = Cubic(.2, 0, .2, 1);
+
+  // ── Elevation ladder (Material numbers; shadows live on the palette) ───
+
+  static const double elevationFlat = 0;
+  static const double elevationRaised = 1;
+  static const double elevationOverlay = 3;
+  static const double elevationModal = 6;
+
+  static const double editorMaxWidth = 680;
 
   static UiPalette colors(BuildContext context) =>
       Theme.of(context).extension<UiPalette>() ??
@@ -170,20 +418,20 @@ abstract final class Ui {
     const buttonShape = RoundedRectangleBorder(borderRadius: fieldRadius);
     return ThemeData(
       useMaterial3: true,
-      brightness: appearance.mode == AppearanceMode.dark
-          ? Brightness.dark
-          : Brightness.light,
+      brightness: palette.brightness,
       extensions: [palette],
       fontFamily: switch (defaultTargetPlatform) {
         TargetPlatform.windows => 'Segoe UI',
         TargetPlatform.iOS || TargetPlatform.macOS => '.AppleSystemUIFont',
         _ => null,
       },
-      fontFamilyFallback: const [
-        'Microsoft YaHei',
-        'PingFang SC',
-        'sans-serif',
-      ],
+      fontFamilyFallback: fontFallback,
+      // States come from tokens, never from each widget's own blend.
+      hoverColor: palette.hovered,
+      highlightColor: palette.pressed,
+      splashColor: palette.pressed,
+      focusColor: palette.focusRing,
+      shadowColor: palette.shadowAt(palette.isDark ? .5 : .14),
       actionIconTheme: ActionIconThemeData(
         backButtonIconBuilder: (context) => AppIcon(
           Theme.of(context).platform == TargetPlatform.iOS ||
@@ -199,14 +447,16 @@ abstract final class Ui {
           ColorScheme.fromSeed(
             seedColor: green,
             surface: palette.surface,
-            brightness: appearance.mode == AppearanceMode.dark
-                ? Brightness.dark
-                : Brightness.light,
+            brightness: palette.brightness,
           ).copyWith(
             primary: green,
             onPrimary: palette.onAccent,
             primaryContainer: palette.softGreen,
             onPrimaryContainer: ink,
+            error: palette.danger,
+            onError: palette.onAccent,
+            errorContainer: palette.dangerSoft,
+            onErrorContainer: palette.danger,
             surface: palette.surface,
             surfaceContainerLowest: palette.surface,
             surfaceContainerLow: palette.input,
@@ -221,163 +471,199 @@ abstract final class Ui {
       scaffoldBackgroundColor: background,
       iconTheme: IconThemeData(color: muted),
       textTheme: TextTheme(
-        bodyMedium: TextStyle(fontSize: 16, height: 1.55),
-        bodyLarge: TextStyle(fontSize: 16, height: 1.55),
-        bodySmall: TextStyle(fontSize: 13, height: 1.45, color: muted),
-        titleLarge: TextStyle(
-          fontSize: 24,
-          height: 1.3,
-          fontWeight: FontWeight.w600,
+        bodyMedium: const TextStyle(fontSize: textBase, height: leadingNormal),
+        bodyLarge: const TextStyle(fontSize: textBase, height: leadingNormal),
+        bodySmall: TextStyle(
+          fontSize: textXs,
+          height: leadingCompact,
+          color: muted,
         ),
-        titleMedium: TextStyle(
-          fontSize: 16,
-          height: 1.4,
-          fontWeight: FontWeight.w600,
+        titleLarge: const TextStyle(
+          fontSize: textXl,
+          height: leadingTight,
+          fontWeight: weightLabel,
         ),
-        labelLarge: TextStyle(
-          fontSize: 14,
-          height: 1.35,
-          fontWeight: FontWeight.w600,
+        titleMedium: const TextStyle(
+          fontSize: textBase,
+          height: leadingCompact,
+          fontWeight: weightLabel,
+        ),
+        labelLarge: const TextStyle(
+          fontSize: textSm,
+          height: leadingTight,
+          fontWeight: weightLabel,
         ),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: background,
         surfaceTintColor: Colors.transparent,
-        elevation: 0,
+        elevation: elevationFlat,
         centerTitle: false,
-        titleSpacing: 24,
+        titleSpacing: space4,
         titleTextStyle: TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.w600,
+          fontSize: textXl,
+          height: leadingTight,
+          fontWeight: weightLabel,
           color: ink,
-          fontFamilyFallback: const [
-            'Microsoft YaHei',
-            'PingFang SC',
-            'sans-serif',
-          ],
+          fontFamilyFallback: fontFallback,
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: palette.surface,
-        indicatorColor: palette.softGreen,
+        indicatorColor: palette.selected,
+        elevation: elevationFlat,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       ),
       inputDecorationTheme: InputDecorationTheme(
         border: outline,
         enabledBorder: outline,
         focusedBorder: OutlineInputBorder(
           borderRadius: fieldRadius,
-          borderSide: BorderSide(color: green, width: 1.5),
+          borderSide: BorderSide(color: green, width: strokeFocus),
         ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: fieldRadius,
+          borderSide: BorderSide(color: palette.danger),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: fieldRadius,
+          borderSide: BorderSide(color: palette.danger, width: strokeFocus),
+        ),
+        disabledBorder: outline,
         filled: true,
         fillColor: input,
-        constraints: BoxConstraints(minHeight: 56),
-        contentPadding: EdgeInsets.all(16),
-        hintStyle: TextStyle(fontSize: 15, color: muted),
+        constraints: const BoxConstraints(minHeight: fieldHeight),
+        contentPadding: insetField,
+        hintStyle: TextStyle(fontSize: textSm, color: muted),
+        labelStyle: TextStyle(fontSize: textBase, color: muted),
+        errorStyle: TextStyle(fontSize: textXs, color: palette.danger),
       ),
       cardTheme: CardThemeData(
-        elevation: 0,
+        elevation: elevationFlat,
         color: palette.surface,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: radius,
+          borderRadius: cardRadius,
           side: BorderSide(color: border),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size(88, 48),
+          minimumSize: const Size(88, controlHeight),
           shape: buttonShape,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: space2),
+          textStyle: label,
+          foregroundColor: palette.onAccent,
+          backgroundColor: green,
+          disabledBackgroundColor: palette.disabledFill,
+          disabledForegroundColor: palette.disabledInk,
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size(88, 48),
+          minimumSize: const Size(88, controlHeight),
           shape: buttonShape,
           side: BorderSide(color: border),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: space2),
+          textStyle: label,
+          foregroundColor: green,
+          disabledForegroundColor: palette.disabledInk,
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          minimumSize: const Size(48, 48),
+          minimumSize: const Size(48, controlHeight),
           shape: buttonShape,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: space2,
+            vertical: space1,
+          ),
+          textStyle: label,
+          disabledForegroundColor: palette.disabledInk,
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
-          minimumSize: const Size(40, 40),
-          padding: const EdgeInsets.all(8),
+          minimumSize: const Size(rowHeight, rowHeight),
+          padding: const EdgeInsets.all(space1),
+          disabledForegroundColor: palette.disabledInk,
         ),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: palette.surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: radius),
+        elevation: elevationModal,
+        shape: RoundedRectangleBorder(
+          borderRadius: panelRadius,
+          side: BorderSide(color: border),
+        ),
         titleTextStyle: TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.w600,
+          fontSize: textXl,
+          height: leadingTight,
+          fontWeight: weightLabel,
           color: ink,
-          fontFamilyFallback: const [
-            'Microsoft YaHei',
-            'PingFang SC',
-            'sans-serif',
-          ],
+          fontFamilyFallback: fontFallback,
         ),
         contentTextStyle: TextStyle(
-          fontSize: 16,
-          height: 1.55,
+          fontSize: textBase,
+          height: leadingNormal,
           color: ink,
-          fontFamilyFallback: const [
-            'Microsoft YaHei',
-            'PingFang SC',
-            'sans-serif',
-          ],
+          fontFamilyFallback: fontFallback,
         ),
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: palette.surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: fieldRadius),
+        elevation: elevationOverlay,
+        shape: RoundedRectangleBorder(
+          borderRadius: fieldRadius,
+          side: BorderSide(color: border),
+        ),
         textStyle: TextStyle(
-          fontSize: 15,
+          fontSize: textBase,
+          height: leadingCompact,
           color: ink,
-          fontFamilyFallback: const [
-            'Microsoft YaHei',
-            'PingFang SC',
-            'sans-serif',
-          ],
+          fontFamilyFallback: fontFallback,
         ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: palette.surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        elevation: elevationOverlay,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(radiusPanel),
+          ),
         ),
       ),
       listTileTheme: const ListTileThemeData(
-        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        minVerticalPadding: 12,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: space3,
+          vertical: space1,
+        ),
+        minVerticalPadding: space2,
       ),
       snackBarTheme: const SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: fieldRadius),
       ),
-      dividerTheme: DividerThemeData(color: border, thickness: 1, space: 24),
+      dividerTheme: DividerThemeData(
+        color: border,
+        thickness: stroke,
+        space: space4,
+      ),
     );
   }
 
   static Size editorSize(BuildContext context) {
     final viewport = MediaQuery.sizeOf(context);
-    final width = math.min(680.0, viewport.width - 32);
+    final width = math.min(editorMaxWidth, viewport.width - space5);
     final available =
-        viewport.height - MediaQuery.viewInsetsOf(context).bottom - 48;
+        viewport.height - MediaQuery.viewInsetsOf(context).bottom - space7;
     return Size(
       width,
-      math.min((width - 40) * .75 + 128, math.max(160, available)),
+      math.min((width - space6) * .75 + 128, math.max(160, available)),
     );
   }
 }
@@ -390,14 +676,15 @@ class UiContentToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+    // 2px vertical padding keeps the 44px drag area inside a 48px row.
+    padding: const EdgeInsets.symmetric(horizontal: Ui.space2, vertical: 2),
     child: SizedBox(
-      height: 44,
+      height: Ui.touch,
       child: TextButtonTheme(
         data: TextButtonThemeData(
           style: TextButton.styleFrom(
-            minimumSize: const Size(40, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: const Size(Ui.rowHeight, 36),
+            padding: const EdgeInsets.symmetric(horizontal: Ui.space1),
             visualDensity: VisualDensity.standard,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
@@ -434,13 +721,13 @@ class UiField extends StatelessWidget {
       Text(
         label,
         style: TextStyle(
-          fontSize: 14,
-          height: 1.4,
-          fontWeight: FontWeight.w600,
-          color: Ui.colors(context).muted,
+          fontSize: Ui.textSm,
+          height: Ui.leadingCompact,
+          fontWeight: Ui.weightLabel,
+          color: Ui.colors(context).textSecondary,
         ),
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: Ui.space1),
       Semantics(label: label, child: child),
     ],
   );
@@ -451,7 +738,7 @@ class UiSection extends StatelessWidget {
     super.key,
     required this.title,
     required this.children,
-    this.padding = 24,
+    this.padding = Ui.space4,
   });
   final String title;
   final List<Widget> children;
@@ -464,7 +751,7 @@ class UiSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(title, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 24),
+          const SizedBox(height: Ui.space4),
           ...children,
         ],
       ),
@@ -478,26 +765,45 @@ Widget uiDisclosure({
   required List<Widget> children,
 }) => Builder(
   builder: (context) => Material(
-    color: Ui.colors(context).input,
+    color: Ui.colors(context).surfaceMuted,
     shape: RoundedRectangleBorder(
       borderRadius: Ui.cardRadius,
-      side: BorderSide(color: Ui.colors(context).border),
+      side: BorderSide(color: Ui.colors(context).line),
     ),
     clipBehavior: Clip.antiAlias,
     child: AppExpansionTile(
       key: key,
       title: Text(
         title,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        style: const TextStyle(fontSize: Ui.textSm, fontWeight: Ui.weightLabel),
       ),
-      tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      tilePadding: const EdgeInsets.symmetric(
+        horizontal: Ui.space3,
+        vertical: Ui.space1,
+      ),
+      childrenPadding: const EdgeInsets.fromLTRB(
+        Ui.space3,
+        0,
+        Ui.space3,
+        Ui.space3,
+      ),
       shape: const Border(),
       collapsedShape: const Border(),
       children: children,
     ),
   ),
 );
+
+/// One-line segmented caption: shrinks to the segment, never wraps.
+class _SegmentLabel extends StatelessWidget {
+  const _SegmentLabel(this.text);
+  final String text;
+  @override
+  Widget build(BuildContext context) => FittedBox(
+    fit: BoxFit.scaleDown,
+    child: Text(text, maxLines: 1, softWrap: false),
+  );
+}
 
 class AppearancePicker extends StatelessWidget {
   const AppearancePicker({super.key});
@@ -511,9 +817,10 @@ class AppearancePicker extends StatelessWidget {
       try {
         await settings.set(mode: mode, accent: accent);
       } catch (_) {
-        if (context.mounted)
+        if (context.mounted) {
           ScaffoldMessenger.maybeOf(context)
               ?.showSnackBar(const SnackBar(content: Text('外观未保存，请重试')));
+        }
       }
     }
 
@@ -523,19 +830,38 @@ class AppearancePicker extends StatelessWidget {
         SegmentedButton<AppearanceMode>(
           key: const ValueKey('appearance-mode'),
           showSelectedIcon: false,
+          // Labels never wrap: a wide system font (or a large text scale) shrinks the
+          // caption instead of breaking "跟随系统" across two lines.
+          style: const ButtonStyle(
+            padding: WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: Ui.space2),
+            ),
+          ),
           segments: const [
-            ButtonSegment(value: AppearanceMode.light, label: Text('亮色')),
-            ButtonSegment(value: AppearanceMode.dark, label: Text('暗色')),
-            ButtonSegment(value: AppearanceMode.neutral, label: Text('中性')),
-            ButtonSegment(value: AppearanceMode.system, label: Text('跟随系统')),
+            ButtonSegment(
+              value: AppearanceMode.light,
+              label: _SegmentLabel('亮色'),
+            ),
+            ButtonSegment(
+              value: AppearanceMode.dark,
+              label: _SegmentLabel('暗色'),
+            ),
+            ButtonSegment(
+              value: AppearanceMode.neutral,
+              label: _SegmentLabel('中性'),
+            ),
+            ButtonSegment(
+              value: AppearanceMode.system,
+              label: _SegmentLabel('跟随系统'),
+            ),
           ],
           selected: {value.mode},
           onSelectionChanged: (selected) => save(mode: selected.single),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: Ui.space3),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: Ui.space1,
+          runSpacing: Ui.space1,
           children: [
             for (final accent in AccentColor.values)
               Semantics(
@@ -554,26 +880,36 @@ class AppearancePicker extends StatelessWidget {
                   child: InkResponse(
                     key: ValueKey('accent-${accent.name}'),
                     onTap: () => save(accent: accent),
-                    radius: 24,
+                    radius: Ui.space4,
                     child: SizedBox.square(
-                      dimension: 44,
+                      dimension: Ui.touch,
                       child: Center(
                         child: Container(
-                          width: 32,
-                          height: 32,
+                          width: Ui.space5,
+                          height: Ui.space5,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: UiPalette.from(
                               resolved.copyWith(accent: accent),
                             ).green,
                           ),
-                          child: value.accent == accent
-                              ? AppIcon(
-                                  Icons.done,
-                                  size: 20,
-                                  color: UiPalette.from(resolved).onAccent,
-                                )
-                              : null,
+                          // Always mounted: scale and opacity carry the
+                          // check in and out without touching the swatch size.
+                          child: AnimatedScale(
+                            scale: value.accent == accent ? 1 : 0,
+                            duration: Ui.durationFast,
+                            curve: Ui.ease,
+                            child: AnimatedOpacity(
+                              opacity: value.accent == accent ? 1 : 0,
+                              duration: Ui.durationFast,
+                              curve: Ui.ease,
+                              child: AppIcon(
+                                Icons.done,
+                                size: Ui.iconSm + 2,
+                                color: UiPalette.from(resolved).onAccent,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -600,18 +936,25 @@ class UiEmpty extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
     child: Padding(
-      padding: const EdgeInsets.all(24),
+      padding: Ui.insetPanel,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          AppIcon(icon, size: 40, color: Ui.colors(context).muted),
-          const SizedBox(height: 16),
+          AppIcon(
+            icon,
+            size: Ui.iconLg,
+            color: Ui.colors(context).textSecondary,
+          ),
+          const SizedBox(height: Ui.space3),
           Text(
             title,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16, color: Ui.colors(context).muted),
+            style: TextStyle(
+              fontSize: Ui.textBase,
+              color: Ui.colors(context).muted,
+            ),
           ),
-          if (action != null) ...[const SizedBox(height: 16), action!],
+          if (action != null) ...[const SizedBox(height: Ui.space3), action!],
         ],
       ),
     ),

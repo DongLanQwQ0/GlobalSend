@@ -150,9 +150,14 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
         child: Material(
           key: ValueKey('drag-feedback-${widget.entry.id}'),
           color: Ui.colors(context).surface,
-          elevation: 8,
-          shadowColor: Colors.black26,
-          borderRadius: Ui.cardRadius,
+          elevation: Ui.elevationModal,
+          // Material takes one colour, not a BoxShadow: mirror Ui.shadow3.
+          shadowColor: Ui.colors(context)
+              .shadowAt(Ui.colors(context).isDark ? .52 : .18),
+          shape: RoundedRectangleBorder(
+            borderRadius: Ui.cardRadius,
+            side: BorderSide(color: Ui.colors(context).line),
+          ),
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
             width: ContentDragSurface.previewSize.width,
@@ -171,22 +176,26 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
                   ),
                 ),
                 Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Ui.space2,
+                    vertical: Ui.space1,
+                  ),
                   child: Row(
                     children: [
                       AppIcon(
                         Icons.add,
                         size: 16,
-                        color: Ui.colors(context).green,
+                        color: Ui.colors(context).accent,
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: Ui.space1),
                       Text(
                         widget.itemCount == null
                             ? '复制'
                             : '复制 ${widget.itemCount} 项',
                         style: TextStyle(
-                          fontSize: 12,
-                          color: Ui.colors(context).green,
+                          fontSize: Ui.text2xs,
+                          height: Ui.leadingNormal,
+                          color: Ui.colors(context).accent,
                         ),
                       ),
                     ],

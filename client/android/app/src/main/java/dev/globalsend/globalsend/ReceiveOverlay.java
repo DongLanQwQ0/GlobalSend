@@ -622,11 +622,18 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             if(shelfVisible && shelf.isSuggested(receipt.id))suggested.add(receipt);
             else ordered.add(receipt);
         }
-        boolean hasContent=!ordered.isEmpty(),tailAdded=false;
+        suggested.sort(java.util.Comparator.comparingLong((ReceiveNotifications.Receipt item) -> shelf.suggestedAt(item.id)).reversed());
+        Map<String,Object> clipboard=shelfVisible?DockCoordinator.clipboardSuggestion():java.util.Collections.emptyMap();
+        long clipboardAt=((Number)clipboard.getOrDefault("suggestedAt",0L)).longValue();
+        boolean clipboardPending=!"empty".equals(clipboard.getOrDefault("kind","empty"));
+        boolean hasContent=!ordered.isEmpty(),tailAdded=false,clipboardAdded=false;
         ordered.addAll(suggested);
         for (ReceiveNotifications.Receipt receipt : ordered) {
             if(shelfVisible && !tailAdded && shelf.isSuggested(receipt.id)) {
                 appendListTail(side,hasContent);tailAdded=true;
+            }
+            if(shelfVisible && shelf.isSuggested(receipt.id) && clipboardPending && !clipboardAdded && clipboardAt>=shelf.suggestedAt(receipt.id)) {
+                appendClipboardSuggestion(side,clipboard);clipboardAdded=true;
             }
             FrameLayout card = new FrameLayout(context);
             card.setTag(receipt);
@@ -698,7 +705,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             cards.add(card);
         }
         if(!tailAdded)appendListTail(side,hasContent);
-        if(shelfVisible)appendClipboardSuggestion(side);
+        if(shelfVisible && !clipboardAdded)appendClipboardSuggestion(side,clipboard);
         scroll.scrollTo(0, 0);
         if(animateCards) {
             LinearLayout owner=row;
@@ -722,8 +729,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void showClipboardShelf() {
         shelfVisible=true;render();withClipboardFocus(DockCoordinator::refreshClipboardSuggestion);
     }
-    private void appendClipboardSuggestion(int side) {
-        Map<String,Object> suggestion=DockCoordinator.clipboardSuggestion();
+    private void appendClipboardSuggestion(int side,Map<String,Object> suggestion) {
         String kind=(String)suggestion.getOrDefault("kind","empty");
         if(kind.equals("empty"))return;
         String revision=(String)suggestion.get("revision");

@@ -23,20 +23,24 @@ class RecentPhotosView extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       Padding(
-        padding: const EdgeInsets.only(left: 12, right: 4),
+        padding: const EdgeInsets.only(left: Ui.space2, right: Ui.space0),
         child: Row(
           children: [
             Expanded(
               child: Text(
                 '新图片',
-                style: TextStyle(fontSize: 12, color: Ui.colors(context).muted),
+                style: TextStyle(
+                  fontSize: Ui.text2xs,
+                  height: Ui.leadingCompact,
+                  color: Ui.colors(context).textSecondary,
+                ),
               ),
             ),
             IconButton(
               tooltip: '忽略这些图片',
               visualDensity: VisualDensity.compact,
               onPressed: enabled ? onDismiss : null,
-              icon: const AppIcon(Icons.close_rounded, size: 17),
+              icon: const AppIcon(Icons.close_rounded, size: Ui.iconSm),
             ),
           ],
         ),
@@ -44,15 +48,20 @@ class RecentPhotosView extends StatelessWidget {
       Expanded(
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          padding: const EdgeInsets.fromLTRB(
+            Ui.space2,
+            0,
+            Ui.space2,
+            Ui.space1,
+          ),
           itemCount: photos.length,
-          separatorBuilder: (_, _) => const SizedBox(width: 8),
+          separatorBuilder: (_, _) => const SizedBox(width: Ui.space1),
           itemBuilder: (_, index) {
             final photo = photos[index];
             return AspectRatio(
               aspectRatio: 1,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: Ui.cardRadius,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -65,14 +74,14 @@ class RecentPhotosView extends StatelessWidget {
                         child: Align(
                           alignment: Alignment.bottomRight,
                           child: Padding(
-                            padding: EdgeInsets.all(5),
+                            padding: EdgeInsets.all(Ui.space0),
                             child: CircleAvatar(
                               radius: 12,
                               backgroundColor: Ui.colors(context).surface,
                               child: AppIcon(
                                 Icons.add_rounded,
-                                size: 18,
-                                color: Ui.colors(context).green,
+                                size: Ui.iconSm,
+                                color: Ui.colors(context).accent,
                               ),
                             ),
                           ),

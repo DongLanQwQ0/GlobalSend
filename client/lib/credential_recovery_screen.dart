@@ -19,20 +19,21 @@ class CredentialRecoveryScreen extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('旧身份记录')),
     body: ListView(
-      padding: const EdgeInsets.all(24),
+      padding: Ui.insetPanel,
       children: [
         Card(
-          color: Ui.colors(context).softGreen,
+          color: Ui.colors(context).accentSoft,
           child: Padding(
-            padding: EdgeInsets.all(24),
+            padding: Ui.insetField,
             child: Text('旧记录只读。转发本机文件请使用文件库。'),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: Ui.space3),
         for (final record in records)
           ListTile(
             shape: const RoundedRectangleBorder(borderRadius: Ui.cardRadius),
             tileColor: Ui.colors(context).surface,
+            minTileHeight: Ui.touch,
             leading: const AppIcon(Icons.history_outlined),
             title: Text('${record.profile['name'] ?? '原设备'} · 只读'),
             subtitle: Text(
@@ -95,7 +96,7 @@ class _CredentialHistoryState extends State<_CredentialHistory> {
         }
         final staged = List<String>.from(snapshot.data!['stagedTexts'] ?? []);
         return ListView(
-          padding: const EdgeInsets.all(24),
+          padding: Ui.insetPanel,
           children: [
             if (entries.isEmpty && staged.isEmpty)
               const UiEmpty(icon: Icons.history_outlined, title: '暂无旧记录'),
@@ -105,6 +106,7 @@ class _CredentialHistoryState extends State<_CredentialHistory> {
                   borderRadius: Ui.cardRadius,
                 ),
                 tileColor: Ui.colors(context).surface,
+                minTileHeight: Ui.touch,
                 leading: AppIcon(
                   entry.kind == 'text'
                       ? Icons.notes_outlined
@@ -138,7 +140,7 @@ class _CredentialHistoryState extends State<_CredentialHistory> {
               ),
             if (staged.isNotEmpty)
               const Padding(
-                padding: EdgeInsets.only(top: 12),
+                padding: EdgeInsets.only(top: Ui.space2),
                 child: Text('原待发送文本'),
               ),
             for (final text in staged)
@@ -147,6 +149,7 @@ class _CredentialHistoryState extends State<_CredentialHistory> {
                   borderRadius: Ui.cardRadius,
                 ),
                 tileColor: Ui.colors(context).surface,
+                minTileHeight: Ui.touch,
                 title: Text(text, maxLines: 3, overflow: TextOverflow.ellipsis),
                 onTap: () =>
                     showTextViewer(context, title: '原待发送 · 只读', text: text),

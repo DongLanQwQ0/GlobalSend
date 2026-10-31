@@ -35,7 +35,12 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
             (MediaQuery.sizeOf(context).width >= 720 ? .82 : .72),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 12, 20),
+        padding: const EdgeInsets.fromLTRB(
+          Ui.space4,
+          Ui.space2,
+          Ui.space2,
+          Ui.space4,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -45,7 +50,11 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                 const Expanded(
                   child: Text(
                     '本机地址',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: Ui.textXl,
+                      height: Ui.leadingTight,
+                      fontWeight: Ui.weightLabel,
+                    ),
                   ),
                 ),
                 IconButton(
@@ -55,7 +64,7 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: Ui.space2),
             Flexible(
               child: FutureBuilder<List<LocalIpAddress>>(
                 future: addresses,
@@ -68,17 +77,22 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                   }
                   if (snapshot.hasError || snapshot.data!.isEmpty) {
                     return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      padding: const EdgeInsets.symmetric(vertical: Ui.space4),
                       child: Text(
                         snapshot.hasError ? '无法获取地址' : '暂无 IP 地址',
-                        style: TextStyle(color: Ui.colors(context).muted),
+                        style: TextStyle(
+                          color: snapshot.hasError
+                              ? Ui.colors(context).danger
+                              : Ui.colors(context).textSecondary,
+                          fontSize: Ui.textSm,
+                        ),
                       ),
                     );
                   }
                   return ListView(
                     key: const ValueKey('local-ip-list'),
                     shrinkWrap: true,
-                    padding: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.only(right: Ui.space1),
                     children: [
                       for (final sourceId
                           in snapshot.data!
@@ -93,25 +107,30 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                                 )
                                 .source;
                             return Padding(
-                              padding: const EdgeInsets.fromLTRB(2, 12, 2, 10),
+                              padding: const EdgeInsets.only(
+                                top: Ui.space2,
+                                bottom: Ui.space1,
+                              ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     source?.title ?? '本机网卡',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
+                                    style: TextStyle(
+                                      fontSize: Ui.textXs,
+                                      fontWeight: Ui.weightLabel,
+                                      color: Ui.colors(context).textSecondary,
                                     ),
                                   ),
                                   if (source != null &&
                                       source.subtitle.isNotEmpty) ...[
-                                    const SizedBox(height: 3),
+                                    const SizedBox(height: Ui.space0),
                                     Text(
                                       source.subtitle,
                                       style: TextStyle(
-                                        color: Ui.colors(context).muted,
-                                        fontSize: 12,
-                                        height: 1.4,
+                                        color: Ui.colors(context).textSecondary,
+                                        fontSize: Ui.text2xs,
+                                        height: Ui.leadingCompact,
                                       ),
                                     ),
                                   ],
@@ -124,9 +143,9 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                           (address) => (address.source?.id ?? '') == sourceId,
                         ))
                           Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.only(bottom: Ui.space1),
                             child: Material(
-                              color: Ui.colors(context).input,
+                              color: Ui.colors(context).surfaceMuted,
                               borderRadius: Ui.fieldRadius,
                               child: ListTile(
                                 key: ValueKey(
@@ -135,22 +154,23 @@ class _LocalIpMenuState extends State<_LocalIpMenu> {
                                 shape: const RoundedRectangleBorder(
                                   borderRadius: Ui.fieldRadius,
                                 ),
+                                minTileHeight: Ui.touch,
                                 contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 4,
+                                  horizontal: Ui.space3,
+                                  vertical: Ui.space0,
                                 ),
                                 title: Text(
                                   address.address,
                                   style: const TextStyle(
-                                    fontSize: 14,
-                                    height: 1.5,
+                                    fontSize: Ui.textSm,
+                                    height: Ui.leadingNormal,
                                   ),
                                 ),
                                 subtitle: Text(
                                   address.categoryLabel,
                                   style: TextStyle(
-                                    fontSize: 11,
-                                    color: Ui.colors(context).muted,
+                                    fontSize: Ui.text2xs,
+                                    color: Ui.colors(context).textSecondary,
                                   ),
                                 ),
                                 onTap: () =>

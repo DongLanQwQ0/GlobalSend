@@ -174,16 +174,19 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
           children: [
             Text(
               file.name,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+              style: const TextStyle(fontWeight: Ui.weightLabel),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: Ui.space1),
             Text(
               '${file.directory ? '文件夹' : bytesLabel(file.size)} · ${compactTime(file.receivedAt)}',
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: Ui.space2),
             Text(
               file.path,
-              style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
+              style: TextStyle(
+                fontSize: Ui.textXs,
+                color: Ui.colors(context).textSecondary,
+              ),
             ),
           ],
         ),
@@ -223,7 +226,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
+              backgroundColor: Ui.colors(context).danger,
             ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('删除'),
@@ -258,18 +261,28 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Padding(
-                    padding: EdgeInsets.fromLTRB(24, 4, 24, 12),
+                    padding: EdgeInsets.fromLTRB(
+                      Ui.space4,
+                      Ui.space0,
+                      Ui.space4,
+                      Ui.space2,
+                    ),
                     child: Text(
                       '转发到',
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
+                        fontSize: Ui.textXl,
+                        fontWeight: Ui.weightLabel,
                       ),
                     ),
                   ),
                   if (peers.isEmpty)
                     const Padding(
-                      padding: EdgeInsets.fromLTRB(24, 8, 24, 28),
+                      padding: EdgeInsets.fromLTRB(
+                        Ui.space4,
+                        Ui.space1,
+                        Ui.space4,
+                        Ui.space4,
+                      ),
                       child: Text('暂无其他设备'),
                     )
                   else
@@ -318,7 +331,6 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
   Widget build(BuildContext context) {
     final issue = error.isNotEmpty ? error : c.savedFilesIssue;
     final files = sortSavedFiles(folderLibraryCards(c.savedFiles), sort);
-    final scheme = Theme.of(context).colorScheme;
     final scaffold = Scaffold(
       backgroundColor: Ui.colors(context).surface,
       appBar: widget.embedded
@@ -360,7 +372,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                       : () => selecting ? finishSelection() : startSelection(),
                   child: Text(selecting ? '完成' : '编辑'),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: Ui.space1),
               ],
             ),
       body: Align(
@@ -377,8 +389,8 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                         ? '${selected.length}/${files.length} 项'
                         : '${files.length} 个文件',
                     style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 12,
+                      color: Ui.colors(context).textSecondary,
+                      fontSize: Ui.text2xs,
                     ),
                   ),
                   BulkFileDrag(
@@ -411,16 +423,18 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                       child: SizedBox(
                         height: 36,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: Ui.space1,
+                          ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
                                 _sortLabels[sort]!,
-                                style: const TextStyle(fontSize: 13),
+                                style: const TextStyle(fontSize: Ui.textXs),
                               ),
-                              const SizedBox(width: 5),
-                              const AppIcon(Icons.sort, size: 18),
+                              const SizedBox(width: Ui.space0),
+                              const AppIcon(Icons.sort, size: Ui.iconSm),
                             ],
                           ),
                         ),
@@ -451,13 +465,18 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
               ),
               if (issue.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space3,
+                    0,
+                    Ui.space3,
+                    Ui.space2,
+                  ),
                   child: Row(
                     children: [
                       Expanded(
                         child: Text(
                           issue,
-                          style: TextStyle(color: scheme.error),
+                          style: TextStyle(color: Ui.colors(context).danger),
                         ),
                       ),
                       TextButton(
@@ -475,30 +494,38 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                           children: [
                             AppIcon(
                               Icons.folder_open_rounded,
-                              size: 48,
-                              color: scheme.outline,
+                              size: Ui.iconLg,
+                              color: Ui.colors(context).textSecondary,
                             ),
-                            const SizedBox(height: 14),
+                            const SizedBox(height: Ui.space3),
                             Text(
                               '收到的文件会保存在这里',
-                              style: TextStyle(color: scheme.onSurfaceVariant),
+                              style: TextStyle(
+                                color: Ui.colors(context).textSecondary,
+                              ),
                             ),
                           ],
                         ),
                       )
                     : GridView.builder(
                         key: const ValueKey('saved-files-grid'),
-                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                        padding: const EdgeInsets.fromLTRB(
+                          Ui.space3,
+                          Ui.space0,
+                          Ui.space3,
+                          Ui.space4,
+                        ),
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
+                          crossAxisSpacing: Ui.space2,
+                          mainAxisSpacing: Ui.space2,
                           mainAxisExtent:
                               230 +
                               math.max(
                                     0,
-                                    MediaQuery.textScalerOf(context).scale(14) -
-                                        14,
+                                    MediaQuery.textScalerOf(context)
+                                            .scale(Ui.textSm) -
+                                        Ui.textSm,
                                   ) *
                                   4,
                         ),
@@ -514,10 +541,17 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
           ? SafeArea(
               child: Container(
                 decoration: BoxDecoration(
-                  color: scheme.surface,
-                  border: Border(top: BorderSide(color: scheme.outlineVariant)),
+                  color: Ui.colors(context).surface,
+                  border: Border(
+                    top: BorderSide(color: Ui.colors(context).line),
+                  ),
                 ),
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                padding: const EdgeInsets.fromLTRB(
+                  Ui.space2,
+                  Ui.space1,
+                  Ui.space2,
+                  Ui.space1,
+                ),
                 child: Row(
                   children: [
                     Expanded(
@@ -527,7 +561,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                             : rename,
                         icon: const AppIcon(
                           Icons.drive_file_rename_outline,
-                          size: 19,
+                          size: Ui.iconSm,
                         ),
                         label: const Text('重命名'),
                       ),
@@ -535,14 +569,20 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                     Expanded(
                       child: TextButton.icon(
                         onPressed: working || selected.isEmpty ? null : delete,
-                        icon: const AppIcon(Icons.delete_outline, size: 19),
+                        icon: const AppIcon(
+                          Icons.delete_outline,
+                          size: Ui.iconSm,
+                        ),
                         label: const Text('删除'),
                       ),
                     ),
                     Expanded(
                       child: FilledButton.icon(
                         onPressed: working || selected.isEmpty ? null : forward,
-                        icon: const AppIcon(Icons.send_outlined, size: 18),
+                        icon: const AppIcon(
+                          Icons.send_outlined,
+                          size: Ui.iconSm,
+                        ),
                         label: const Text('转发'),
                       ),
                     ),
@@ -674,8 +714,8 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
     width: 66,
     height: 76,
     decoration: BoxDecoration(
-      color: Ui.colors(context).softGreen,
-      borderRadius: BorderRadius.circular(10),
+      color: Ui.colors(context).accentSoft,
+      borderRadius: Ui.fieldRadius,
     ),
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -683,9 +723,9 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
         AppIcon(
           Icons.insert_drive_file_outlined,
           size: 30,
-          color: Ui.colors(context).green,
+          color: Ui.colors(context).accent,
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: Ui.space0),
         Text(
           extension.isEmpty
               ? 'FILE'
@@ -695,8 +735,8 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                 ),
           style: TextStyle(
             fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: Ui.colors(context).green,
+            fontWeight: Ui.weightLabel,
+            color: Ui.colors(context).accent,
           ),
         ),
       ],

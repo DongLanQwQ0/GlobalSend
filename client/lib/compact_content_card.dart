@@ -83,18 +83,34 @@ class CompactContentCard extends StatelessWidget {
               SavedFileCategory.image,
               SavedFileCategory.text,
             }.contains(category);
-    final card = Material(
-      color: surfaceColor ?? Ui.colors(context).surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: Ui.cardRadius,
-        side: BorderSide(
-          color: selected
-              ? Ui.colors(context).green
-              : Ui.colors(context).border,
-          width: selected ? 1.5 : 1,
+    final card = TweenAnimationBuilder<double>(
+      // Only the ring's colour and width move; radius, child and padding stay
+      // fixed so the card's stable size never depends on selection.
+      tween: Tween<double>(end: selected ? 1 : 0),
+      duration: Ui.durationNormal,
+      curve: Ui.ease,
+      builder: (context, selection, child) => Material(
+        color: surfaceColor ?? Ui.colors(context).surface,
+        // A caller-supplied surface means it owns the backdrop (the dock paints
+        // a single translucent pane), so only self-contained cards lift a step.
+        elevation: surfaceColor == null ? Ui.elevationRaised : Ui.elevationFlat,
+        // The tween owns the ring timing; Material's own implicit shape
+        // animation would otherwise chase every frame and smear the curve.
+        animationDuration: Duration.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: Ui.cardRadius,
+          side: BorderSide(
+            color: Color.lerp(
+              Ui.colors(context).line,
+              Ui.colors(context).accent,
+              selection,
+            )!,
+            width: Ui.stroke + (Ui.strokeFocus - Ui.stroke) * selection,
+          ),
         ),
+        clipBehavior: Clip.antiAlias,
+        child: child,
       ),
-      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -110,17 +126,17 @@ class CompactContentCard extends StatelessWidget {
                             speed.isNotEmpty ||
                             action != null
                         ? 42
-                        : 8,
+                        : Ui.space1,
                     color: previewColor,
                   )
                 else if (entry.isDirectory)
                   ColoredBox(
-                    color: previewColor ?? Ui.colors(context).input,
+                    color: previewColor ?? Ui.colors(context).surfaceMuted,
                     child: Center(
                       child: AppIcon(
                         Icons.folder_outlined,
                         size: 56,
-                        color: Ui.colors(context).green,
+                        color: Ui.colors(context).accent,
                       ),
                     ),
                   )
@@ -139,8 +155,8 @@ class CompactContentCard extends StatelessWidget {
                   ),
                 if (selecting)
                   Positioned(
-                    left: 8,
-                    top: 8,
+                    left: Ui.space1,
+                    top: Ui.space1,
                     child: SizedBox(
                       width: 28,
                       height: 28,
@@ -161,7 +177,7 @@ class CompactContentCard extends StatelessWidget {
                         color:
                             menuColor ??
                             Ui.colors(context).surface.withValues(alpha: .94),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: Ui.fieldRadius,
                         child: SizedBox(width: 36, height: 32, child: menu),
                       ),
                     ),
@@ -174,7 +190,7 @@ class CompactContentCard extends StatelessWidget {
                       child: Material(
                         color: Ui.colors(context).surface
                             .withValues(alpha: .82),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: Ui.fieldRadius,
                         child: TextButton(
                           key: copyKey,
                           style: TextButton.styleFrom(
@@ -182,7 +198,7 @@ class CompactContentCard extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 7),
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             textStyle: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(fontSize: 12),
+                                ?.copyWith(fontSize: Ui.text2xs),
                           ),
                           onPressed: onCopy,
                           child: const Text('复制'),
@@ -201,7 +217,7 @@ class CompactContentCard extends StatelessWidget {
                     bottom: 6,
                     child: Material(
                       color: Ui.colors(context).surface.withValues(alpha: .82),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: Ui.fieldRadius,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 5,
@@ -220,12 +236,11 @@ class CompactContentCard extends StatelessWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        fontSize: 11,
+                                        fontSize: Ui.text2xs,
+                                        height: Ui.leadingCompact,
                                         color: entry.status == 'failed'
-                                            ? Theme.of(context)
-                                                  .colorScheme
-                                                  .error
-                                            : Ui.colors(context).ink,
+                                            ? Ui.colors(context).danger
+                                            : Ui.colors(context).textPrimary,
                                       ),
                                     ),
                                   if (speed.isNotEmpty)
@@ -234,8 +249,9 @@ class CompactContentCard extends StatelessWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        fontSize: 10,
-                                        color: Ui.colors(context).muted,
+                                        fontSize: Ui.text2xs,
+                                        height: Ui.leadingCompact,
+                                        color: Ui.colors(context).textSecondary,
                                       ),
                                     ),
                                 ],
@@ -255,7 +271,7 @@ class CompactContentCard extends StatelessWidget {
                                       textStyle: Theme.of(context)
                                           .textTheme
                                           .labelLarge
-                                          ?.copyWith(fontSize: 12),
+                                          ?.copyWith(fontSize: Ui.text2xs),
                                     ),
                                   ),
                                   child: action!,
@@ -281,11 +297,14 @@ class CompactContentCard extends StatelessWidget {
           ),
           if (!previewOnly && image)
             Container(
-              color: metadataColor ?? Ui.colors(context).input,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              color: metadataColor ?? Ui.colors(context).surfaceMuted,
+              padding: const EdgeInsets.symmetric(
+                horizontal: Ui.space2,
+                vertical: Ui.space0,
+              ),
               child: Wrap(
-                spacing: 8,
-                runSpacing: 3,
+                spacing: Ui.space1,
+                runSpacing: Ui.space0,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   if (sender.isNotEmpty)
@@ -294,8 +313,9 @@ class CompactContentCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 11,
-                        color: Ui.colors(context).muted,
+                        fontSize: Ui.text2xs,
+                        height: Ui.leadingCompact,
+                        color: Ui.colors(context).textSecondary,
                       ),
                     ),
                   Text(
@@ -306,8 +326,9 @@ class CompactContentCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 11,
-                      color: Ui.colors(context).muted,
+                      fontSize: Ui.text2xs,
+                      height: Ui.leadingCompact,
+                      color: Ui.colors(context).textSecondary,
                     ),
                   ),
                   if (!selecting && (stateLabel.isNotEmpty || speed.isNotEmpty))
@@ -317,10 +338,11 @@ class CompactContentCard extends StatelessWidget {
                         speed,
                       ].where((part) => part.isNotEmpty).join(' · '),
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: Ui.text2xs,
+                        height: Ui.leadingCompact,
                         color: entry.status == 'failed'
-                            ? Theme.of(context).colorScheme.error
-                            : Ui.colors(context).muted,
+                            ? Ui.colors(context).danger
+                            : Ui.colors(context).textSecondary,
                       ),
                     ),
                   if (!selecting && action != null)
@@ -330,8 +352,11 @@ class CompactContentCard extends StatelessWidget {
             )
           else if (!previewOnly)
             Container(
-              color: metadataColor ?? Ui.colors(context).input,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              color: metadataColor ?? Ui.colors(context).surfaceMuted,
+              padding: const EdgeInsets.symmetric(
+                horizontal: Ui.space2,
+                vertical: Ui.space0,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -344,17 +369,17 @@ class CompactContentCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          height: 1.4,
+                          fontSize: Ui.textXs,
+                          fontWeight: Ui.weightLabel,
+                          height: Ui.leadingCompact,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: Ui.space0),
                   ],
                   if (!selecting && (stateLabel.isNotEmpty || speed.isNotEmpty))
                     Padding(
-                      padding: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.only(top: Ui.space0),
                       child: Text(
                         [
                           stateLabel,
@@ -363,10 +388,11 @@ class CompactContentCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: Ui.text2xs,
+                          height: Ui.leadingCompact,
                           color: entry.status == 'failed'
-                              ? Theme.of(context).colorScheme.error
-                              : Ui.colors(context).muted,
+                              ? Ui.colors(context).danger
+                              : Ui.colors(context).textSecondary,
                         ),
                       ),
                     ),
@@ -392,9 +418,9 @@ class CompactContentCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 11,
-                                height: 1.3,
-                                color: Ui.colors(context).muted,
+                                fontSize: Ui.text2xs,
+                                height: Ui.leadingTight,
+                                color: Ui.colors(context).textSecondary,
                               ),
                             ),
                             if (sender.isNotEmpty)
@@ -403,9 +429,9 @@ class CompactContentCard extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 11,
-                                  height: 1.3,
-                                  color: Ui.colors(context).muted,
+                                  fontSize: Ui.text2xs,
+                                  height: Ui.leadingTight,
+                                  color: Ui.colors(context).textSecondary,
                                 ),
                               ),
                           ],
@@ -484,9 +510,9 @@ class _DockFileSummary extends StatelessWidget {
   final Color? color;
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: color ?? Ui.colors(context).input,
+    color: color ?? Ui.colors(context).surfaceMuted,
     child: Padding(
-      padding: EdgeInsets.fromLTRB(10, 24, 10, bottomSpace),
+      padding: EdgeInsets.fromLTRB(10, Ui.space4, 10, bottomSpace),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -500,10 +526,10 @@ class _DockFileSummary extends StatelessWidget {
                     SavedFileCategory.archive => Icons.folder_zip_outlined,
                     _ => Icons.insert_drive_file_outlined,
                   },
-            size: bottomSpace > 8 ? 28 : 40,
-            color: Ui.colors(context).green,
+            size: bottomSpace > Ui.space1 ? 28 : Ui.iconLg,
+            color: Ui.colors(context).accent,
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: Ui.space0),
           Flexible(
             child: Text(
               entry.title,
@@ -511,9 +537,9 @@ class _DockFileSummary extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 12,
-                height: 1.3,
-                color: Ui.colors(context).ink,
+                fontSize: Ui.text2xs,
+                height: Ui.leadingTight,
+                color: Ui.colors(context).textPrimary,
               ),
             ),
           ),

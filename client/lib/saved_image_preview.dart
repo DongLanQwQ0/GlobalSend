@@ -89,6 +89,8 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    // An image viewer sits on the canvas, never on a bright surface.
+    backgroundColor: Ui.colors(context).canvas,
     appBar: AppBar(
       title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
       actions: [
@@ -97,7 +99,7 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
           onPressed: openExternal,
           icon: const AppIcon(Icons.open_in_new),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: Ui.space0),
       ],
     ),
     body: LayoutBuilder(
@@ -142,7 +144,7 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
     ),
     bottomNavigationBar: SafeArea(
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: Ui.space1),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -166,7 +168,7 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
               onPressed: () => zoom(1.5),
               icon: const AppIcon(Icons.add),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: Ui.space3),
             TextButton(
               onPressed: () => transform.value = Matrix4.identity(),
               child: const Text('适应窗口'),

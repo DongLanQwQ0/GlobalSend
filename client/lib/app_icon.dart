@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_icon_paths.dart';
+import 'ui_tokens.dart';
 
 /// Same icon identifiers and semantics, drawn as vectors without an icon font.
 class AppIcon extends Icon {
@@ -172,7 +173,8 @@ class _AppExpansionTileState extends State<AppExpansionTile> {
     onExpansionChanged: (value) => setState(() => expanded = value),
     trailing: AnimatedRotation(
       turns: expanded ? 0.5 : 0,
-      duration: const Duration(milliseconds: 180),
+      duration: Ui.durationNormal,
+      curve: Ui.ease,
       child: const AppIcon(Icons.expand_more),
     ),
     children: widget.children,
@@ -190,7 +192,19 @@ class AppCheckedPopupMenuItem<T> extends PopupMenuItem<T> {
            children: [
              SizedBox(
                width: 24,
-               child: checked ? const AppIcon(Icons.done, size: 20) : null,
+               // The check stays mounted so the 24px slot never reflows; scale
+               // and opacity carry it in and out at the fast token duration.
+               child: AnimatedScale(
+                 scale: checked ? 1 : 0,
+                 duration: Ui.durationFast,
+                 curve: Ui.ease,
+                 child: AnimatedOpacity(
+                   opacity: checked ? 1 : 0,
+                   duration: Ui.durationFast,
+                   curve: Ui.ease,
+                   child: const AppIcon(Icons.done, size: 20),
+                 ),
+               ),
              ),
              const SizedBox(width: 12),
              Flexible(child: child),

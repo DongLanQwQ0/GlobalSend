@@ -19,6 +19,17 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34, manifest=Config.NONE)
 public class TemporaryShelfTest {
+    @Test public void mediaSuggestionsExpireAfterEightSecondsButConfirmedContentRemains() {
+        TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/one","one.jpg",1),
+            new RecentMediaSuggestions.Media("content://fixture/two","two.jpg",2)));
+        shelf.add(List.of("content://fixture/two"),List.of("manual text"),Map.of());
+        advance(7999);assertEquals(3,shelf.items.size());
+        advance(1);assertEquals(2,shelf.items.size());
+        assertTrue(shelf.suggestedPaths().isEmpty());
+        assertTrue(shelf.items.values().stream().anyMatch(item -> "content://fixture/two".equals(item.localPath)));
+        assertTrue(shelf.items.values().stream().anyMatch(item -> "manual text".equals(item.text)));
+    }
     private void advance(long millis) { Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(millis)); }
     @Test public void missingSuggestionsLeaveValidSuggestionsAndExplicitlyStagedReferencesAlone() {
         TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});

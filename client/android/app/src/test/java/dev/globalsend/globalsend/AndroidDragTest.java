@@ -5,6 +5,7 @@ import static org.junit.Assert.*;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipDescription;
+import android.content.Context;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -121,6 +122,43 @@ public class AndroidDragTest {
             assertTrue(((TemporaryShelf)ReflectionHelpers.getField(overlay,"shelf")).items.isEmpty());
             ((View)ReflectionHelpers.getField(overlay,"count")).performClick();
             assertNull(row.findViewWithTag("clipboard-suggestion"));assertEquals(1,overlay.bulkDragItems().size());
+        } finally {overlay.hide();}
+    }
+
+    @Test public void mediaAndClipboardShareOneNewestFirstSuggestionZone() throws Exception {
+        ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions(){
+            public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}
+        });
+        try {
+            overlay.show(new ReceiveNotifications.Receipt("received","1","fixture","received text",null,null,0),1,shown -> {});
+            overlay.foreground();
+            activity.getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("fixture","clipboard candidate"));
+            ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
+            TemporaryShelf shelf=ReflectionHelpers.getField(overlay,"shelf");
+            shelf.add(List.of(),List.of("manual staged text"),Map.of());
+            shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/old","old.jpg",1)));
+            ReceiveNotifications.Receipt old=shelf.items.values().stream().filter(item -> "old.jpg".equals(item.fileName)).findFirst().orElseThrow();
+            long older=shelf.suggestedAt(old.id);
+            Thread.sleep(25);
+            shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/new","new.jpg",2)));
+            ReceiveNotifications.Receipt newest=shelf.items.values().stream().filter(item -> "new.jpg".equals(item.fileName)).findFirst().orElseThrow();
+            assertTrue(shelf.suggestedAt(newest.id)>older);
+            activity.getSharedPreferences("clipboard-suggestion",Context.MODE_PRIVATE).edit().putLong("suggestedAt",older+1).commit();
+            ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
+            android.widget.LinearLayout row=ReflectionHelpers.getField(overlay,"row");
+            List<String> order=new ArrayList<>();
+            for(int i=0;i<row.getChildCount();i++) {
+                Object tag=row.getChildAt(i).getTag();
+                if("clipboard-suggestion".equals(tag))order.add("clipboard");
+                else if(tag instanceof ReceiveNotifications.Receipt && shelf.isSuggested(((ReceiveNotifications.Receipt)tag).id))
+                    order.add(((ReceiveNotifications.Receipt)tag).fileName);
+            }
+            assertEquals(List.of("new.jpg","clipboard","old.jpg"),order);
+            assertEquals("open-app-space",row.getChildAt(2).getTag());
+            assertEquals(1,overlay.bulkDragItems().size());
+            assertEquals("manual staged text",overlay.bulkDragItems().get(0).text);
+            shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/old","old.jpg",1)));
+            assertEquals(older,shelf.suggestedAt(old.id));
         } finally {overlay.hide();}
     }
 

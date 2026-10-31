@@ -88,10 +88,10 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
 
   @override
   Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(20),
+    borderRadius: Ui.panelRadius,
     clipBehavior: Clip.antiAlias,
     child: ColoredBox(
-      color: Ui.colors(context).input,
+      color: Ui.colors(context).surfaceMuted,
       child: Stack(
         children: [
           Column(
@@ -106,8 +106,8 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
                     child: Center(
                       child: AppIcon(
                         Icons.drag_handle,
-                        size: 22,
-                        color: Ui.colors(context).muted,
+                        size: Ui.iconMd,
+                        color: Ui.colors(context).textSecondary,
                       ),
                     ),
                   ),
@@ -119,11 +119,15 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
           ),
           if (error.isNotEmpty)
             Positioned(
-              left: 12,
-              bottom: 4,
+              left: Ui.space2,
+              bottom: Ui.space0,
               child: Text(
                 error,
-                style: const TextStyle(fontSize: 12, color: Colors.red),
+                style: TextStyle(
+                  fontSize: Ui.text2xs,
+                  height: Ui.leadingCompact,
+                  color: Ui.colors(context).danger,
+                ),
               ),
             ),
           Positioned(
@@ -139,11 +143,11 @@ class _AndroidReceiveWindowFrameState extends State<AndroidReceiveWindowFrame> {
                   child: Align(
                     alignment: Alignment.bottomRight,
                     child: Padding(
-                      padding: EdgeInsets.all(5),
+                      padding: const EdgeInsets.all(Ui.space0),
                       child: AppIcon(
                         Icons.south_east_rounded,
-                        size: 17,
-                        color: Ui.colors(context).muted,
+                        size: Ui.iconSm,
+                        color: Ui.colors(context).textSecondary,
                       ),
                     ),
                   ),

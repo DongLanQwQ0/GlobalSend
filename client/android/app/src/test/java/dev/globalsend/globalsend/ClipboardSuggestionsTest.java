@@ -26,6 +26,9 @@ public class ClipboardSuggestionsTest {
             clipboard.setPrimaryClip(ClipData.newPlainText("fixture","clipboard text"));
             Map<String,Object> first=suggestions.refresh(true);
             assertEquals("text",first.get("kind"));
+            assertTrue(((Number)first.get("suggestedAt")).longValue()>0);
+            context.getSharedPreferences("clipboard-suggestion",Context.MODE_PRIVATE).edit().putLong("suggestedAt",123).commit();
+            assertEquals(123L,suggestions.refresh(true).get("suggestedAt"));
             suggestions.dismiss((String)first.get("revision"));
             assertEquals("empty",suggestions.snapshot().get("kind"));
             assertEquals("empty",suggestions.refresh(true).get("kind"));
@@ -33,6 +36,7 @@ public class ClipboardSuggestionsTest {
             clipboard.setPrimaryClip(image);
             Map<String,Object> next=suggestions.refresh(true);
             assertEquals("image",next.get("kind"));assertNotEquals(first.get("revision"),next.get("revision"));
+            assertTrue(((Number)next.get("suggestedAt")).longValue()>123);
             assertEquals(next,suggestions.refresh(false));
             clipboard.setPrimaryClip(new ClipData(new ClipDescription("files",new String[]{ClipDescription.MIMETYPE_TEXT_URILIST}),new ClipData.Item(Uri.parse("content://fixture/file/1"))));
             assertEquals("files",suggestions.refresh(true).get("kind"));

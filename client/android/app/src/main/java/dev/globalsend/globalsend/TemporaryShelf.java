@@ -18,8 +18,9 @@ import org.json.JSONObject;
 
 /** Installation-local references, deliberately separate from received messages. */
 final class TemporaryShelf {
+    private static final long SUGGESTION_DURATION_MS=8000;
     final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
-    private final java.util.Set<String> suggested = new java.util.HashSet<>();
+    private final Map<String,Long> suggested = new LinkedHashMap<>();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final File file;
@@ -34,7 +35,7 @@ final class TemporaryShelf {
         this.changed = changed;
         io.execute(() -> {
             List<ReceiveNotifications.Receipt> restored = new ArrayList<>();
-            java.util.Set<String> restoredSuggested=new java.util.HashSet<>();
+            Map<String,Long> restoredSuggested=new LinkedHashMap<>();
             try {
                 if (file.isFile()) {
                     JSONArray records = new JSONArray(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
@@ -43,20 +44,29 @@ final class TemporaryShelf {
                         String path = record.optString("path");
                         // External originals may have been removed while the app was stopped.
                         if (!path.isEmpty() && !path.startsWith("content://") && !new File(path).exists()) continue;
+                        long offeredAt=record.optLong("suggestedAt",file.lastModified());
+                        if(record.optBoolean("suggested") && offeredAt+SUGGESTION_DURATION_MS<=System.currentTimeMillis())continue;
                         restored.add(new ReceiveNotifications.Receipt(record.getString("id"), "1", "暂存",
                             record.has("text") ? record.getString("text") : null, record.optString("name"), path, 0));
-                        if(record.optBoolean("suggested"))restoredSuggested.add(record.getString("id"));
+                        if(record.optBoolean("suggested"))restoredSuggested.put(record.getString("id"),offeredAt);
                     }
                 }
             } catch (java.io.IOException | org.json.JSONException unavailable) {
                 android.util.Log.w("GlobalSend", "Cannot restore temporary shelf", unavailable);
             }
             main.post(() -> {
+                Map<Long,List<String>> expiryBatches=new LinkedHashMap<>();
                 for (ReceiveNotifications.Receipt receipt : restored)
                     if (!contains(receipt.localPath, receipt.text)) {
                         items.put(receipt.id, receipt);
-                        if(restoredSuggested.contains(receipt.id))suggested.add(receipt.id);
+                        if(restoredSuggested.containsKey(receipt.id)) {
+                            long offeredAt=restoredSuggested.get(receipt.id);
+                            suggested.put(receipt.id,offeredAt);
+                            expiryBatches.computeIfAbsent(offeredAt,at -> new ArrayList<>()).add(receipt.id);
+                        }
                     }
+                for(Map.Entry<Long,List<String>> batch:expiryBatches.entrySet())
+                    expireAfter(batch.getValue(),Math.max(0,batch.getKey()+SUGGESTION_DURATION_MS-System.currentTimeMillis()));
                 loaded = true;
                 save(); changed.run();
             });
@@ -87,17 +97,21 @@ final class TemporaryShelf {
         save(); changed.run();
     }
 
-    boolean isSuggested(String id) {return suggested.contains(id);}
+    boolean isSuggested(String id) {return suggested.containsKey(id);}
+    long suggestedAt(String id) {return suggested.getOrDefault(id,0L);}
     List<String> suggestedPaths() {
         List<String> paths=new ArrayList<>();
-        for(ReceiveNotifications.Receipt item:items.values())if(suggested.contains(item.id))paths.add(item.localPath);
+        for(ReceiveNotifications.Receipt item:items.values())if(suggested.containsKey(item.id))paths.add(item.localPath);
         return paths;
     }
     void removeMissingSuggestions(java.util.Set<String> missing) {
+        removeSuggestions(item -> missing.contains(item.localPath));
+    }
+    private void removeSuggestions(java.util.function.Predicate<ReceiveNotifications.Receipt> matches) {
         boolean removed=false;
         for(java.util.Iterator<Map.Entry<String,ReceiveNotifications.Receipt>> it=items.entrySet().iterator();it.hasNext();) {
             Map.Entry<String,ReceiveNotifications.Receipt> item=it.next();
-            if(suggested.contains(item.getKey()) && missing.contains(item.getValue().localPath)) {
+            if(suggested.containsKey(item.getKey()) && matches.test(item.getValue())) {
                 it.remove();suggested.remove(item.getKey());pendingRemoval.remove(item.getKey());pendingConsumed.remove(item.getKey());removed=true;
             }
         }
@@ -105,18 +119,23 @@ final class TemporaryShelf {
         if(pendingRemoval.isEmpty()) {main.removeCallbacks(removeExported);removalDeadline=0;}
         save();changed.run();
     }
+    private void expireAfter(List<String> ids,long delay) {
+        main.postDelayed(() -> removeSuggestions(item -> ids.contains(item.id)),delay);
+    }
     void suggest(List<RecentMediaSuggestions.Media> media) {
         LinkedHashMap<String,ReceiveNotifications.Receipt> next=new LinkedHashMap<>();
+        long now=System.currentTimeMillis();
         for(RecentMediaSuggestions.Media entry:media)if(!contains(entry.uri,null)) {
-            String id="shelf:"+UUID.randomUUID();suggested.add(id);
+            String id="shelf:"+UUID.randomUUID();suggested.put(id,now);
             next.put(id,new ReceiveNotifications.Receipt(id,"1","暂存",null,entry.name,entry.uri,0));
         }
         if(next.isEmpty())return;
+        expireAfter(new ArrayList<>(next.keySet()),SUGGESTION_DURATION_MS);
         next.putAll(items);items.clear();items.putAll(next);save();changed.run();
     }
     void clearSuggestions() {
         if(suggested.isEmpty())return;
-        for(String id:suggested)items.remove(id);
+        for(String id:suggested.keySet())items.remove(id);
         suggested.clear();save();changed.run();
     }
 
@@ -167,7 +186,9 @@ final class TemporaryShelf {
             JSONObject record = new JSONObject();
             try {
                 record.put("id", item.id); record.put("path", item.localPath); record.put("name", item.fileName);
-                if(suggested.contains(item.id))record.put("suggested",true);
+                if(suggested.containsKey(item.id)) {
+                    record.put("suggested",true);record.put("suggestedAt",suggested.get(item.id));
+                }
                 if (item.text != null) record.put("text", item.text);
                 records.put(record);
             } catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }

@@ -133,4 +133,29 @@ public class RecentMediaSuggestionsTest {
         assertEquals(List.of(MediaStore.Video.Media.EXTERNAL_CONTENT_URI+"/102"),current);
         assertTrue(gallery.original.exists());
     }
+    @Test public void periodicValidationRemovesMissingOriginalWithoutAnyStoreNotification() throws Exception {
+        List<String> current=new ArrayList<>();
+        feed=new RecentMediaSuggestions(context,items -> {for(RecentMediaSuggestions.Media item:items)current.add(item.uri);},
+            disabled::incrementAndGet,() -> new ArrayList<>(current),current::removeAll);
+        feed.start();until(() -> current.size()==2);
+        // The provider still returns its old row. Only opening the original fails,
+        // exactly as when a file manager removes a file without updating MediaStore.
+        gallery.deleted.add("101");
+        until(() -> current.size()==1);
+        assertEquals(List.of(MediaStore.Video.Media.EXTERNAL_CONTENT_URI+"/102"),current);
+        feed.stop();
+        int reads=gallery.reads.get();
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6));
+        assertEquals(reads,gallery.reads.get());
+    }
+    @Test public void mainPageDismissalAlsoPrunesAnAlreadyVisibleDockSuggestion() throws Exception {
+        List<String> current=new ArrayList<>();
+        feed=new RecentMediaSuggestions(context,items -> {for(RecentMediaSuggestions.Media item:items)current.add(item.uri);},
+            disabled::incrementAndGet,() -> new ArrayList<>(current),current::removeAll);
+        feed.start();until(() -> current.size()==2);
+        Files.write(new java.io.File(context.getFilesDir(),"recent-photo-suggestions.json").toPath(),
+            "{\"enabled\":true,\"handled\":[\"101\"]}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        feed.refresh();until(() -> current.size()==1);
+        assertEquals(List.of(MediaStore.Video.Media.EXTERNAL_CONTENT_URI+"/102"),current);
+    }
 }

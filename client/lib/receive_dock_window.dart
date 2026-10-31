@@ -128,11 +128,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && scroll.hasClients && scroll.offset > 0) {
               unawaited(
-                scroll.animateTo(
-                  0,
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                ),
+                scroll.animateTo(0, duration: Ui.durationSlow, curve: Ui.ease),
               );
             }
           });
@@ -224,10 +220,10 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
               label: '拖出全部文件',
               child: const SizedBox(
                 key: ValueKey('dock-drag-all-files'),
-                width: 44,
+                width: Ui.touch,
                 height: 30,
                 child: Center(
-                  child: AppIcon(Icons.file_copy_outlined, size: 18),
+                  child: AppIcon(Icons.file_copy_outlined, size: Ui.iconSm),
                 ),
               ),
             ),
@@ -365,7 +361,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                     action(value, entry.id);
                   },
                   itemBuilder: menuItems,
-                  icon: const AppIcon(Icons.more_horiz, size: 20),
+                  icon: const AppIcon(Icons.more_horiz, size: Ui.iconSm),
                 ),
               ),
             ),
@@ -398,13 +394,13 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
       debugShowCheckedModeBanner: false,
       theme: theme.copyWith(
         popupMenuTheme: theme.popupMenuTheme.copyWith(
-          color: palette.softGreen,
-          elevation: 0,
+          color: palette.accentSoft,
+          elevation: Ui.elevationFlat,
           shadowColor: Colors.transparent,
-          menuPadding: const EdgeInsets.symmetric(vertical: 4),
+          menuPadding: const EdgeInsets.symmetric(vertical: Ui.space0),
           shape: RoundedRectangleBorder(
             borderRadius: Ui.fieldRadius,
-            side: BorderSide(color: palette.border),
+            side: BorderSide(color: palette.line),
           ),
         ),
       ),
@@ -424,7 +420,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
           autofocus: true,
           child: Scaffold(
             key: const ValueKey('dock-pane'),
-            backgroundColor: palette.softGreen,
+            backgroundColor: palette.accentSoft,
             body: Listener(
               // Translucent gesture hits in the pane's gaps must also reach this
               // listener; otherwise window movement reuses an older down point.
@@ -456,7 +452,12 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                 },
                 child: SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+                    padding: const EdgeInsets.fromLTRB(
+                      10,
+                      Ui.space0,
+                      10,
+                      Ui.space1,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -471,18 +472,18 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                       key: const ValueKey('dock-count'),
                                       decoration: BoxDecoration(
                                         color: Colors.transparent,
-                                        borderRadius: BorderRadius.circular(10),
+                                        borderRadius: Ui.fieldRadius,
                                       ),
                                       child: Padding(
                                         padding: const EdgeInsets.symmetric(
-                                          horizontal: 9,
-                                          vertical: 5,
+                                          horizontal: Ui.space1,
+                                          vertical: Ui.space0,
                                         ),
                                         child: Text(
                                           '收到 ${items.length} 项',
                                           style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
+                                            fontSize: Ui.text2xs,
+                                            fontWeight: Ui.weightLabel,
                                           ),
                                         ),
                                       ),
@@ -495,7 +496,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                 key: const ValueKey('dock-open'),
                                 decoration: BoxDecoration(
                                   color: Colors.transparent,
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: Ui.fieldRadius,
                                 ),
                                 child: ContentDragControl(
                                   child: Semantics(
@@ -511,18 +512,18 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                       onPressed: () => action('open'),
                                       icon: const AppIcon(
                                         Icons.open_in_full,
-                                        size: 19,
+                                        size: Ui.iconSm,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 6),
+                              const SizedBox(width: Ui.space0),
                               DecoratedBox(
                                 key: const ValueKey('dock-close'),
                                 decoration: BoxDecoration(
                                   color: Colors.transparent,
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: Ui.fieldRadius,
                                 ),
                                 child: ContentDragControl(
                                   child: Semantics(
@@ -538,7 +539,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                       onPressed: () => action('close'),
                                       icon: const AppIcon(
                                         Icons.close,
-                                        size: 20,
+                                        size: Ui.iconSm,
                                       ),
                                     ),
                                   ),
@@ -547,7 +548,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                             ],
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: Ui.space0),
                         Expanded(
                           child: LayoutBuilder(
                             key: const ValueKey('dock-content-strip'),
@@ -597,10 +598,8 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                             key: ValueKey(
                                               'dock-tile-${order[i]}',
                                             ),
-                                            duration: const Duration(
-                                              milliseconds: 240,
-                                            ),
-                                            curve: Curves.easeOutCubic,
+                                            duration: Ui.durationSlow,
+                                            curve: Ui.ease,
                                             left: i * (edge + 10),
                                             top: 0,
                                             width: edge,
@@ -619,10 +618,8 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                                         : 0,
                                                     end: 0,
                                                   ),
-                                                  duration: const Duration(
-                                                    milliseconds: 260,
-                                                  ),
-                                                  curve: Curves.easeOutCubic,
+                                                  duration: Ui.durationSlow,
+                                                  curve: Ui.ease,
                                                   builder: (_, value, child) =>
                                                       Transform.translate(
                                                         offset: Offset(
@@ -652,10 +649,14 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                         if (error.isNotEmpty)
                           Padding(
                             key: const ValueKey('dock-error'),
-                            padding: const EdgeInsets.only(top: 8),
+                            padding: const EdgeInsets.only(top: Ui.space1),
                             child: Text(
                               error,
-                              style: const TextStyle(color: Colors.red),
+                              style: TextStyle(
+                                fontSize: Ui.textXs,
+                                height: Ui.leadingCompact,
+                                color: Ui.colors(context).danger,
+                              ),
                             ),
                           ),
                       ],

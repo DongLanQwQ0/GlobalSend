@@ -28,13 +28,16 @@ final class ClipboardSuggestions {
         if(!focused)return snapshot();
         ClipDescription description=clipboard.getPrimaryClipDescription();
         String kind="empty",revision="empty";
+        long timestamp=0;
         if(description!=null) {
-            long timestamp=Build.VERSION.SDK_INT>=26?description.getTimestamp():0;
+            timestamp=Build.VERSION.SDK_INT>=26?description.getTimestamp():0;
             revision=(timestamp>0?Long.toString(timestamp):Long.toString(epoch))+"-"+sequence;
             kind=description.hasMimeType("image/*")?"image":description.hasMimeType(ClipDescription.MIMETYPE_TEXT_URILIST)?"files":"text";
         }
-        if(!revision.equals(state.getString("revision","")) || !kind.equals(state.getString("kind","empty"))) {
-            state.edit().putString("revision",revision).putString("kind",kind).apply();
+        boolean newRevision=!revision.equals(state.getString("revision","")) || !kind.equals(state.getString("kind","empty"));
+        if(newRevision || !state.contains("suggestedAt")) {
+            state.edit().putString("revision",revision).putString("kind",kind)
+                .putLong("suggestedAt",kind.equals("empty")?0:newRevision?System.currentTimeMillis():timestamp>0?timestamp:epoch).apply();
             changed.run();
         }
         return snapshot();
@@ -42,7 +45,7 @@ final class ClipboardSuggestions {
     Map<String,Object> snapshot() {
         String revision=state.getString("revision","");
         String kind=revision.equals(state.getString("dismissed",""))?"empty":state.getString("kind","empty");
-        return Map.of("available",true,"revision",revision,"kind",kind);
+        return Map.of("available",true,"revision",revision,"kind",kind,"suggestedAt",state.getLong("suggestedAt",0));
     }
     void dismiss(String revision) {
         state.edit().putString("dismissed",revision).apply();changed.run();

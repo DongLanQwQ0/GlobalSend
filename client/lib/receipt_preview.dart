@@ -72,22 +72,27 @@ class ReceivedContentPreview extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 16, 12, 8),
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space4,
+                    Ui.space3,
+                    Ui.space2,
+                    Ui.space1,
+                  ),
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(11),
+                        padding: const EdgeInsets.all(Ui.space2),
                         decoration: BoxDecoration(
-                          color: Ui.colors(context).softGreen,
-                          borderRadius: BorderRadius.circular(14),
+                          color: Ui.colors(context).accentSoft,
+                          borderRadius: Ui.cardRadius,
                         ),
                         child: AppIcon(
                           platformIcon,
                           size: 25,
-                          color: Ui.colors(context).green,
+                          color: Ui.colors(context).accent,
                         ),
                       ),
-                      const SizedBox(width: 13),
+                      const SizedBox(width: Ui.space2),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -97,11 +102,12 @@ class ReceivedContentPreview extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
+                                fontSize: Ui.textLg,
+                                height: Ui.leadingTight,
+                                fontWeight: Ui.weightLabel,
                               ),
                             ),
-                            const SizedBox(height: 3),
+                            const SizedBox(height: Ui.space0),
                             Text(
                               entry.kind == 'text'
                                   ? '收到文本'
@@ -109,8 +115,9 @@ class ReceivedContentPreview extends StatelessWidget {
                                   ? transfer.label
                                   : '收到文件',
                               style: TextStyle(
-                                fontSize: 13,
-                                color: Ui.colors(context).muted,
+                                fontSize: Ui.textXs,
+                                height: Ui.leadingCompact,
+                                color: Ui.colors(context).textSecondary,
                               ),
                             ),
                           ],
@@ -139,11 +146,11 @@ class ReceivedContentPreview extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: Ui.space1),
                 Expanded(
                   child: bodySurface(
                     Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: Ui.insetPanel,
                       child: entry.kind == 'text'
                           ? SingleChildScrollView(
                               key: const ValueKey('receipt-content-scroll'),
@@ -151,8 +158,8 @@ class ReceivedContentPreview extends StatelessWidget {
                                 entry.text.isEmpty ? '空文本' : entry.text,
                                 key: const ValueKey('receipt-text'),
                                 style: const TextStyle(
-                                  fontSize: 16,
-                                  height: 1.55,
+                                  fontSize: Ui.textBase,
+                                  height: Ui.leadingRelaxed,
                                 ),
                               ),
                             )
@@ -168,7 +175,12 @@ class ReceivedContentPreview extends StatelessWidget {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space4,
+                    Ui.space1,
+                    Ui.space4,
+                    Ui.space4,
+                  ),
                   child: Row(
                     children: [
                       Expanded(
@@ -179,12 +191,13 @@ class ReceivedContentPreview extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 13,
-                            color: Ui.colors(context).muted,
+                            fontSize: Ui.textXs,
+                            height: Ui.leadingCompact,
+                            color: Ui.colors(context).textSecondary,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: Ui.space2),
                       if (entry.kind == 'text')
                         control(
                           FilledButton.icon(
@@ -265,14 +278,20 @@ class _ReceivedBatchPreviewState extends State<ReceivedBatchPreview> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 12, 8),
+                padding: const EdgeInsets.fromLTRB(
+                  Ui.space4,
+                  Ui.space3,
+                  Ui.space2,
+                  Ui.space1,
+                ),
                 child: Row(
                   children: [
                     Text(
                       '收到 ${entries.length} 项',
                       style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
+                        fontSize: Ui.textLg,
+                        height: Ui.leadingTight,
+                        fontWeight: Ui.weightLabel,
                       ),
                     ),
                     const Spacer(),
@@ -309,12 +328,12 @@ class _ReceivedBatchPreviewState extends State<ReceivedBatchPreview> {
                   ],
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: Ui.space1),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, bounds) => GridView.builder(
                     key: const ValueKey('receipt-batch-grid'),
-                    padding: const EdgeInsets.all(16),
+                    padding: Ui.insetField,
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       mainAxisExtent: embedded
@@ -329,8 +348,8 @@ class _ReceivedBatchPreviewState extends State<ReceivedBatchPreview> {
                                 (MediaQuery.textScalerOf(context).scale(14) -
                                         14) *
                                     10,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
+                      crossAxisSpacing: Ui.space2,
+                      mainAxisSpacing: Ui.space2,
                     ),
                     itemCount: entries.length,
                     itemBuilder: (_, index) {
@@ -372,16 +391,16 @@ class _ReceiptFrame extends StatelessWidget {
   Widget build(BuildContext context) => embedded
       ? Material(
           key: const ValueKey('receipt-preview'),
-          color: Ui.colors(context).input,
-          borderRadius: BorderRadius.circular(20),
+          color: Ui.colors(context).surface,
+          borderRadius: Ui.panelRadius,
           clipBehavior: Clip.antiAlias,
           child: child,
         )
       : Dialog(
           key: const ValueKey('receipt-preview'),
           insetPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 24,
+            horizontal: Ui.space3,
+            vertical: Ui.space4,
           ),
           backgroundColor: Ui.colors(context).surface,
           clipBehavior: Clip.antiAlias,
@@ -404,42 +423,51 @@ class _IncomingProgressBody extends StatelessWidget {
             AppIcon(
               Icons.insert_drive_file_outlined,
               size: 56,
-              color: Ui.colors(context).green,
+              color: Ui.colors(context).accent,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: Ui.space4),
             Text(
               entry.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: Ui.textLg,
+                height: Ui.leadingTight,
+                fontWeight: Ui.weightLabel,
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: Ui.space1),
             Text(
               bytesLabel(entry.size),
-              style: TextStyle(color: Ui.colors(context).muted),
+              style: TextStyle(color: Ui.colors(context).textSecondary),
             ),
             if (state.showProgress) ...[
-              const SizedBox(height: 20),
+              const SizedBox(height: Ui.space4),
               LinearProgressIndicator(value: state.progressValue, minHeight: 4),
             ],
             if (entry.transferBytesPerSecond > 0 && state.pending) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: Ui.space2),
               Text(
                 '${bytesLabel(entry.transferBytesPerSecond.round())}/s',
-                style: TextStyle(fontSize: 13, color: Ui.colors(context).muted),
+                style: TextStyle(
+                  fontSize: Ui.textXs,
+                  height: Ui.leadingCompact,
+                  color: Ui.colors(context).textSecondary,
+                ),
               ),
             ],
             if (state.failed && entry.error.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: Ui.space2),
               Text(
                 entry.error,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 13,
-                  color: Theme.of(context).colorScheme.error,
+                  fontSize: Ui.textXs,
+                  height: Ui.leadingCompact,
+                  color: Ui.colors(context).danger,
                 ),
               ),
             ],
@@ -485,20 +513,24 @@ class _ReceivedFileBodyState extends State<_ReceivedFileBody> {
         AppIcon(
           Icons.insert_drive_file_outlined,
           size: 70,
-          color: Ui.colors(context).muted,
+          color: Ui.colors(context).textSecondary,
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: Ui.space4),
         Text(
           widget.entry.title,
           textAlign: TextAlign.center,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: Ui.textLg,
+            height: Ui.leadingTight,
+            fontWeight: Ui.weightLabel,
+          ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: Ui.space1),
         Text(
           bytesLabel(widget.entry.size),
-          style: TextStyle(color: Ui.colors(context).muted),
+          style: TextStyle(color: Ui.colors(context).textSecondary),
         ),
       ],
     ),
@@ -530,7 +562,10 @@ class _ReceivedFileBodyState extends State<_ReceivedFileBody> {
           return SingleChildScrollView(
             child: WebLinkText(
               result.data!.text,
-              style: const TextStyle(fontSize: 15, height: 1.6),
+              style: const TextStyle(
+                fontSize: Ui.textBase,
+                height: Ui.leadingRelaxed,
+              ),
             ),
           );
         },
