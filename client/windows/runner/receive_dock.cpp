@@ -250,7 +250,7 @@ void GlobalSendReceiveDock::TrackDrop(bool active, POINTL screen) {
   POINT point{screen.x,screen.y};
   ScreenToClient(controller_->view()->GetNativeWindow(),&point);
   channel_->InvokeMethod("dropHover",std::make_unique<Value>(Map{
-    {Value("active"),Value(active)}, {Value("x"),Value(point.x)}, {Value("y"),Value(point.y)},
+    {Value("active"),Value(active)}, {Value("x"),Value(static_cast<int>(point.x))}, {Value("y"),Value(static_cast<int>(point.y))},
     {Value("targetDeviceId"),Value(active ? DropDeviceAt(screen) : "")}}));
 }
 
