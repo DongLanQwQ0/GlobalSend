@@ -1,0 +1,44 @@
+/* 70-integration: cross-layer decisions that no single surface owns.
+   Imported last on purpose. Keep this file small: only layout ratios, shared scrim and
+   rhythm fixes that would otherwise force two authors to edit the same rule. */
+
+/* Two panes read better as "composer column + content field" than as two equal halves:
+   the 50/50 split left a 690px composer holding one empty dropzone while cards queued up. */
+@media (min-width:960px){
+  .workspace{grid-template-columns:minmax(320px,26rem) minmax(0,1fr)}
+}
+
+/* Receive / history / files stay a two-column grid at every width, matching the native
+   client: two cards per row is the product rule, not a desktop-only convenience. */
+.receive-grid,.library-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+
+/* Page tabs read as tabs, not as a full-width segmented control: equal thirds made the
+   selected tab a 300px white slab. Content-width tabs, centred in the header cell. */
+.content-tabs{justify-content:center;gap:var(--space-0)}
+.content-tabs button{flex:0 1 auto;padding-inline:var(--space-5)}
+
+/* Two layers disagreed on the compact control height (60-details says 32, 20-workspace says 36).
+   One ramp wins: compact = 32 is for dense metadata rows only, every toolbar button is 36. */
+.content-toolbar>button,.dock-toolbar.content-toolbar>button{min-height:var(--control-sm);height:var(--control-sm)}
+.content-toolbar>button.quiet:has(>svg:only-child){width:var(--control-sm);min-width:var(--control-sm)}
+
+/* The status strip is absolute; reserve its band so a two-line device name cannot collide with it. */
+.target-device{padding-bottom:calc(var(--text-2xs) * 1.25 + var(--space-1))}
+.target-name{-webkit-line-clamp:1;text-overflow:ellipsis;overflow:hidden}
+
+/* One scrim for every overlay, so modal backdrops and their enter/exit keyframes agree. */
+.modal-backdrop{background:var(--scrim)}
+
+/* Section headers read as a label row, not as a third title level. */
+.section-label h3{letter-spacing:.01em}
+
+/* Keep the page gutter stable when a scrollbar appears in the content field. */
+@media (min-width:960px){
+  .receive-panel,.library-panel{scrollbar-gutter:stable}
+}
+
+/* A square card is a scanner on desktop and a full screen on a phone: relax the ratio there. */
+@media (max-width:640px){
+  .preview-card,.file-card:not(.preview-card){aspect-ratio:16/11}
+  .preview-card>.card-text,.preview-card .file-text-preview{padding:var(--space-3) var(--space-2)}
+}

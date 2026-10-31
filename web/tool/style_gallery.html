@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>GlobalSend · 样式画廊（开发期）</title>
+    <style>
+      /* 画廊自身外壳：只属于开发期校验页，不进入产品 CSS 层，也不修改任何既有文件。
+         下面所有颜色都走 palette/geometry token，主题切换后随产品变量一起变。 */
+      html:has(#gallery-root),html:has(#gallery-root) body{height:auto;overflow:visible;overscroll-behavior:auto}
+      .gallery-toolbar{position:sticky;top:0;z-index:300;display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+        padding:8px 16px;min-height:56px;border-bottom:1px solid var(--line);
+        background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(12px)}
+      .gallery-toolbar-group{display:flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--field)}
+      .gallery-toolbar-label{padding:0 4px;font-size:var(--text-2xs);color:var(--muted);white-space:nowrap}
+      .gallery-toolbar button{min-height:36px;padding:6px 12px;border-radius:var(--radius-pill);color:var(--muted);font-size:var(--text-sm);font-weight:500}
+      .gallery-toolbar button:hover{background:var(--soft);color:var(--green)}
+      .gallery-toolbar button[aria-pressed=true]{background:var(--surface);color:var(--green);font-weight:600;box-shadow:var(--shadow-1)}
+      .gallery-hint{margin-left:auto;font-size:var(--text-xs);color:var(--muted)}
+      #gallery-root{max-width:var(--gallery-width,1280px);margin:0 auto;padding:16px 16px 72px;display:flex;flex-direction:column;gap:20px}
+      .gallery-block{min-width:0;padding:16px;border:1px solid var(--line);border-radius:var(--radius-panel);background:var(--surface);box-shadow:var(--shadow-1)}
+      .gallery-block-head{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+      .gallery-block-head h2{font-size:var(--text-lg)}
+      .gallery-block-head p{font-size:var(--text-xs);color:var(--muted);line-height:var(--leading-relaxed)}
+      .gallery-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:2px}
+      .gallery-stage{min-width:0;padding:12px;border:1px solid color-mix(in srgb,var(--line) 70%,transparent);border-radius:var(--radius-card);background:var(--canvas)}
+      .gallery-stage+.gallery-stage{margin-top:12px}
+      .gallery-stage--stack{display:flex;flex-direction:column;gap:12px}
+      .gallery-stage--grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+      .gallery-panel-body{display:flex;flex-direction:column;min-height:0;height:440px}
+      .gallery-row-wrap{flex-wrap:wrap}
+      .gallery-readout{font-family:var(--font-mono);font-size:var(--text-2xs);color:var(--muted);overflow-wrap:anywhere}
+      @media (max-width:640px){.gallery-hint{display:none}.gallery-block{padding:12px}}
+
+      /* 把“只在整屏页面里成立”的定位/高度改成画廊内的静态块，让 CSS 层照常渲染。 */
+      .gallery-stage .onboarding{min-height:0;margin:0;padding:0}
+      .gallery-stage .app-shell.transfer-workspace{height:auto}
+      .gallery-stage .transfer-workspace .main{height:auto}
+      .gallery-stage .workspace{min-height:520px}
+      .gallery-stage .modal-backdrop{position:static;inset:auto;height:auto;display:block;padding:0;background:transparent;animation:none}
+      .gallery-stage .receipt-backdrop{background:transparent;backdrop-filter:none}
+      .gallery-stage .modal{max-height:none;overflow:visible;animation:none;margin:0 auto}
+      .gallery-stage .receipt-modal{max-height:none}
+      .gallery-stage .editor-sheet .text-input{max-height:320px}
+      .gallery-stage .content-menu{position:static}
+      .gallery-stage .large-file-preview{max-height:none}
+      .gallery-stage .large-file-preview>img{max-height:260px}
+      .gallery-stage .loading-view{min-height:120px}
+      .gallery-stage .window-drop{position:static;display:block;inset:auto}
+    </style>
+  </head>
+  <body>
+    <header class="gallery-toolbar" role="toolbar" aria-label="画廊工具栏">
+      <span class="gallery-toolbar-label">主题</span>
+      <div class="gallery-toolbar-group" role="group" aria-label="主题模式">
+        <button type="button" data-gallery-theme="light" aria-pressed="true">亮色</button>
+        <button type="button" data-gallery-theme="dark" aria-pressed="false">暗色</button>
+        <button type="button" data-gallery-theme="neutral" aria-pressed="false">中性</button>
+      </div>
+      <span class="gallery-toolbar-label">容器</span>
+      <div class="gallery-toolbar-group" role="group" aria-label="容器宽度">
+        <button type="button" data-gallery-width="360" aria-pressed="false">360</button>
+        <button type="button" data-gallery-width="768" aria-pressed="false">768</button>
+        <button type="button" data-gallery-width="1280" aria-pressed="true">1280</button>
+      </div>
+      <span class="gallery-hint">开发期样式画廊 · 仅结构与 class，无业务逻辑</span>
+    </header>
+
+    <main id="gallery-root">
+      <!-- 01 连接与入组 -->
+      <section class="gallery-block" id="block-connection" aria-labelledby="gallery-connection-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-connection-title">连接与入组</h2>
+          <p>10-connection：中心连接页、组密码字段、内联错误、连接横幅与高级加入。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage">
+            <main class="onboarding">
+              <header class="onboarding-header">
+                <span class="brand">GlobalSend</span>
+                <div class="row">
+                  <button class="icon-button quiet" type="button" aria-label="设置"><span class="gallery-svg" data-icon="settings"></span></button>
+                  <button class="icon-button secondary" type="button" aria-label="本机文件库"><span class="gallery-svg" data-icon="folder"></span></button>
+                </div>
+              </header>
+              <section class="pair-form panel">
+                <h1>加入分组</h1>
+                <div class="connection-server">
+                  <span>服务器</span>
+                  <div>
+                    <code title="https://send.example.com">https://send.example.com</code>
+                    <button class="quiet" type="button">更换</button>
+                  </div>
+                </div>
+                <div class="error-message" role="alert">无法连接服务器：请确认地址与网络后重试。<button class="quiet" type="button">重试</button></div>
+                <form id="enroll-form" novalidate>
+                  <label class="field" for="gallery-group-key">组密码
+                    <span class="password-input">
+                      <input id="gallery-group-key" type="password" value="gallery-sample-key" minlength="10" maxlength="256" autocomplete="off" placeholder="至少 10 位" />
+                      <button type="button" class="password-eye" aria-label="显示组密码" aria-pressed="false" title="显示组密码"><span class="gallery-svg" data-icon="eye"></span></button>
+                    </span>
+                  </label>
+                  <label class="field" for="gallery-device-name">设备名称
+                    <input id="gallery-device-name" value="DongLan 的浏览器" maxlength="80" autocomplete="off" placeholder="浏览器设备" />
+                  </label>
+                  <label class="preference-check"><input type="checkbox" checked />记住设备</label>
+                  <p class="field-note">组密码至少 10 位；加入后本机会注册成一台新设备。</p>
+                  <button class="primary connect-button" type="submit">连接</button>
+                </form>
+                <details class="advanced-join">
+                  <summary>高级加入</summary>
+                  <p class="field-note">可指定服务器地址，或复用旧的设备密钥。</p>
+                  <div class="key-actions">
+                    <code class="key-value">gs_7f2c…9a41</code>
+                    <button class="secondary" type="button">复制键值</button>
+                    <button class="quiet" type="button">重新生成</button>
+                  </div>
+                </details>
+              </section>
+            </main>
+          </div>
+          <div class="gallery-stage gallery-stage--stack">
+            <div class="connection-banner" role="status"><span class="gallery-svg" data-icon="alert"></span><span>直连暂不可用，正在改用中继传输。</span><button class="quiet" type="button">重试</button></div>
+            <div class="error-message" role="alert">组密码不正确，请向管理员确认后重试。</div>
+            <p class="field-note">字段说明文本：用于解释阈值、上限与默认行为。</p>
+            <div class="key-actions"><button class="copy-button" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button><span class="key-value">gs_7f2c…9a41</span></div>
+            <div class="server-entry"><button class="quiet" type="button">使用其他服务器</button></div>
+            <p class="target-note">此批文件仅限直连，但当前设备暂不支持。</p>
+            <p class="inline-alert">当前浏览器不支持目录接收，将回退到浏览器文件库。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 02 工作区外壳 -->
+      <section class="gallery-block" id="block-workspace" aria-labelledby="gallery-workspace-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-workspace-title">工作区外壳</h2>
+          <p>20-workspace：顶栏 + 页签 + 发送面板（待发、目标、共享文本）+ 连接横幅 + 接收面板。移动端按 data-mobile-view=send 渲染，接收面板此时隐藏，卡片见 04 / 05 区块。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage">
+            <div class="app-shell transfer-workspace">
+              <main class="main">
+                <header class="topbar">
+                  <div class="app-title">
+                    <button class="brand brand-button" type="button" aria-label="GlobalSend，本机地址">GlobalSend</button>
+                    <span class="current-device">工作室台式机</span>
+                    <div class="compose-actions">
+                      <button class="compose-action" type="button"><span class="gallery-svg" data-icon="text"></span><span>文本</span></button>
+                      <button class="compose-action" type="button"><span class="gallery-svg" data-icon="clipboard"></span><span>剪贴板</span></button>
+                    </div>
+                  </div>
+                  <div class="right-header">
+                    <nav class="content-tabs" role="tablist" aria-label="内容页面">
+                      <button id="gallery-tab-receive" class="active" type="button" role="tab" aria-selected="true" aria-controls="receive-panel">接收</button>
+                      <button id="gallery-tab-sent" type="button" role="tab" aria-selected="false" aria-controls="receive-panel">已发送</button>
+                      <button id="gallery-tab-library" type="button" role="tab" aria-selected="false" aria-controls="receive-panel">文件库</button>
+                    </nav>
+                    <div class="topbar-actions">
+                      <span class="connection-state reconnecting" role="status"><span class="gallery-svg" data-icon="retry"></span>重连中</span>
+                      <button class="icon-button quiet connection-icon connected" type="button" aria-label="已连接" title="连接"><span class="gallery-svg" data-icon="link"></span></button>
+                      <button class="icon-button quiet" type="button" aria-label="设置"><span class="gallery-svg" data-icon="settings"></span></button>
+                    </div>
+                  </div>
+                </header>
+                <div class="workspace" data-mobile-view="send">
+                  <section class="panel send-column send-panel" id="send-panel" role="tabpanel" aria-labelledby="gallery-tab-receive">
+                    <div class="mobile-file-actions">
+                      <button type="button"><span class="gallery-svg" data-icon="text"></span>文本</button>
+                      <button type="button"><span class="gallery-svg" data-icon="clipboard"></span>剪贴板</button>
+                      <button type="button"><span class="gallery-svg" data-icon="file"></span>文件</button>
+                      <button type="button"><span class="gallery-svg" data-icon="image"></span>媒体</button>
+                    </div>
+                    <div class="queue-heading section-label">
+                      <div class="row"><h3>待发送 <span class="count">3</span></h3></div>
+                      <div class="row">
+                        <button class="quiet" type="button"><span class="gallery-svg" data-icon="plus"></span>文件</button>
+                        <button class="quiet" type="button">文件夹</button>
+                      </div>
+                    </div>
+                    <div class="staged-list" tabindex="0" aria-label="待发送内容">
+                      <article class="staged-item staged-text">
+                        <button class="staged-description" type="button" aria-label="编辑待发文本"><span class="staged-snippet">会议纪要与门禁码，已复制到剪贴板</span><small>18 字符</small></button>
+                        <button class="icon-button quiet" type="button" aria-label="移除文本"><span class="gallery-svg" data-icon="close"></span></button>
+                      </article>
+                      <article class="staged-item">
+                        <span class="content-preview file"><span class="gallery-svg" data-icon="file"></span><span class="preview-type">PDF</span></span>
+                        <div class="staged-description"><strong title="报价单-2026Q4.pdf">报价单-2026Q4.pdf</strong><small>1.4 MB</small></div>
+                        <button class="icon-button quiet" type="button" aria-label="移除报价单"><span class="gallery-svg" data-icon="close"></span></button>
+                      </article>
+                      <article class="staged-item clipboard-suggestion">
+                        <button class="staged-suggestion-confirm" type="button" aria-label="添加剪贴板建议"><span class="gallery-svg" data-icon="clipboard"></span><strong>剪贴板</strong><small>文本 · 点按添加</small></button>
+                        <button class="icon-button quiet" type="button" aria-label="忽略剪贴板建议"><span class="gallery-svg" data-icon="close"></span></button>
+                      </article>
+                    </div>
+                    <div class="queue-total">3 项 · 1.4 MB</div>
+                    <p class="preparation">正在核对源文件…</p>
+                    <section class="targets-section">
+                      <div class="section-label">
+                        <h3>设备 <span>3</span></h3>
+                        <div class="target-tools">
+                          <button class="quiet active" type="button" aria-pressed="true">取消多选</button>
+                          <button class="primary multi-send-confirm" type="button">发送 2 台</button>
+                          <button class="icon-button quiet" type="button" aria-label="刷新设备" title="刷新设备"><span class="gallery-svg" data-icon="retry"></span></button>
+                        </div>
+                      </div>
+                      <p class="target-selection-summary" aria-label="发送目标摘要">工作室台式机、客厅平板</p>
+                      <div class="target-devices" tabindex="0" aria-label="发送目标">
+                        <button class="target-device selected" type="button" aria-pressed="true">
+                          <span class="target-check"><span class="gallery-svg" data-icon="check"></span></span>
+                          <span class="target-icon"><span class="gallery-svg" data-icon="laptop"></span></span>
+                          <span class="target-name" title="工作室台式机">工作室台式机</span>
+                        </button>
+                        <button class="target-device sent" type="button" aria-pressed="false">
+                          <span class="target-check"></span>
+                          <span class="target-icon"><span class="gallery-svg" data-icon="check"></span></span>
+                          <span class="target-name" title="客厅平板">客厅平板</span>
+                        </button>
+                        <button class="target-device offline" type="button" aria-pressed="false">
+                          <span class="target-check"></span>
+                          <span class="target-icon"><span class="gallery-svg" data-icon="phone"></span></span>
+                          <span class="target-name" title="随身手机">随身手机</span>
+                          <span class="target-status">暂离线</span>
+                        </button>
+                        <button class="target-device failed" type="button" aria-pressed="false" disabled>
+                          <span class="target-check"><span class="gallery-svg" data-icon="alert"></span></span>
+                          <span class="target-icon"><span class="gallery-svg" data-icon="tablet"></span></span>
+                          <span class="target-name" title="旧 iPad">旧 iPad</span>
+                          <span class="target-status">重试</span>
+                        </button>
+                      </div>
+                    </section>
+                    <section class="shared-note">
+                      <div class="section-label">
+                        <label class="shared-group-picker">组内共享<select aria-label="共享文本分组"><option>家庭</option><option selected>工作室</option></select></label>
+                        <span id="shared-status" role="status"></span>
+                        <div class="shared-edit-tools">
+                          <button class="icon-button quiet" type="button" aria-label="撤销" disabled><span class="gallery-svg" data-icon="undo"></span></button>
+                          <button class="icon-button quiet" type="button" aria-label="重做"><span class="gallery-svg" data-icon="redo"></span></button>
+                        </div>
+                      </div>
+                      <div data-shared-host data-drag-shared="true" data-enabled="true" data-max="100000">
+                        <textarea id="shared-group-text" class="selectable-text" rows="5" aria-label="组内共享文本" placeholder="组内设备共同编辑">组内共享文本：会议改到 2 号会议室，门禁码 4821。</textarea>
+                      </div>
+                      <div id="shared-conflict" class="shared-conflict">
+                        <span>另一设备已更新</span>
+                        <button class="secondary" type="button">使用最新内容</button>
+                        <button class="secondary" type="button">保留我的内容</button>
+                      </div>
+                    </section>
+                  </section>
+                  <div class="connection-banner" role="status"><span class="gallery-svg" data-icon="alert"></span><span>中继连接暂未完成，将自动重试。</span><button class="quiet" type="button">重试</button></div>
+                  <section class="panel dock-panel" id="receive-panel" role="tabpanel" aria-labelledby="gallery-tab-receive">
+                    <div id="right-content" class="right-content" role="region" aria-label="接收内容">
+                      <div class="dock-toolbar content-toolbar">
+                        <button class="active" type="button" aria-pressed="true">全部</button>
+                        <button type="button" aria-pressed="false">文本</button>
+                        <button type="button" aria-pressed="false">文件</button>
+                        <button class="selection-action" type="button">多选</button>
+                        <button class="quiet" type="button" aria-label="清理记录"><span class="gallery-svg" data-icon="trash"></span></button>
+                      </div>
+                      <div class="dock-items" data-multi-select="false" tabindex="0" aria-label="收到的内容">
+                        <div class="receive-grid">
+                          <article class="content-card text-card preview-card" tabindex="0" aria-label="预览文本">
+                            <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                            <div class="card-text selectable-text"><span class="card-text-lines">会议室改到 3 楼，10:30 开始。
+带好门禁卡。</span></div>
+                            <button class="quiet card-copy preview-copy" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button>
+                          </article>
+                          <article class="content-card file-card image-card preview-card receive-selected" tabindex="0" aria-label="预览 图纸.png">
+                            <span class="receive-select-indicator" aria-hidden="true"><span class="gallery-svg" data-icon="check"></span></span>
+                            <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                            <div class="card-preview-button"><span class="content-preview image"><span class="gallery-svg" data-icon="image"></span><span class="preview-type">图片</span></span></div>
+                            <div class="card-transfer">
+                              <span class="card-status">接收中</span>
+                              <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="62" aria-label="传输进度"><div style="width:62%"></div></div>
+                              <span class="transfer-bytes">4.2 MB / 6.8 MB</span><span class="transfer-speed">1.8 MB/s</span>
+                              <div class="card-actions"><button class="quiet transfer-cancel" type="button">取消传输</button></div>
+                            </div>
+                          </article>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+                <nav class="mobile-view-tabs" role="tablist" aria-label="收发">
+                  <button class="active" type="button" role="tab" aria-selected="true"><span class="gallery-svg" data-icon="send"></span>发送</button>
+                  <button type="button" role="tab" aria-selected="false"><span class="gallery-svg" data-icon="inbox"></span>接收</button>
+                  <button type="button" role="tab" aria-selected="false"><span class="gallery-svg" data-icon="history"></span>历史</button>
+                  <button type="button" role="tab" aria-selected="false"><span class="gallery-svg" data-icon="folder"></span>文件</button>
+                </nav>
+              </main>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 03 模态与设置卡 -->
+      <section class="gallery-block" id="block-modals" aria-labelledby="gallery-modals-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-modals-title">模态与设置卡</h2>
+          <p>30-surfaces：设置模态（身份、收发、分组、服务器）、文本编辑器、收件回执。模态在画廊内改为静态排布。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage">
+            <div class="modal-backdrop">
+              <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="gallery-settings-title">
+                <div class="modal-header">
+                  <h2 id="gallery-settings-title">设置</h2>
+                  <button class="icon-button quiet" type="button" aria-label="关闭设置"><span class="gallery-svg" data-icon="close"></span></button>
+                </div>
+                <section class="settings-identity settings-card">
+                  <span class="device-icon"><span class="gallery-svg" data-icon="laptop"></span></span>
+                  <form>
+                    <label for="gallery-device-display-name">设备名称</label>
+                    <div class="settings-input-row">
+                      <input id="gallery-device-display-name" value="工作室台式机" maxlength="80" required />
+                      <button class="secondary" type="button">保存</button>
+                    </div>
+                    <button class="quiet auto-device-name" type="button">自动命名</button>
+                    <p class="settings-error" role="alert">名称不能为空。</p>
+                  </form>
+                </section>
+                <section class="settings-card">
+                  <h3>收发</h3>
+                  <div class="setting-row"><span>显示</span><button class="quiet" type="button">标准视图</button></div>
+                  <p class="notification-reason" role="status">添加到主屏幕后可开启</p>
+                  <label class="setting-row"><span>接收通知</span><input type="checkbox" checked /></label>
+                  <label class="setting-row"><span>记住设备</span><input type="checkbox" checked /></label>
+                  <label class="setting-row"><span>自动接收</span><input type="checkbox" /></label>
+                  <label class="setting-row"><span>传输方式</span>
+                    <select><option>自动</option><option>仅局域网</option><option>仅公网直连</option><option>中继</option></select>
+                  </label>
+                  <label class="limit-field" for="gallery-auto-accept-limit">中继确认阈值
+                    <span><input id="gallery-auto-accept-limit" type="number" min="0" step="1" value="4" inputmode="numeric" aria-label="中继确认阈值 MiB" /> MiB / 文件</span>
+                  </label>
+                  <button class="quiet" type="button">文件与自动清理</button>
+                </section>
+                <section class="settings-card group-settings">
+                  <h3>分组</h3>
+                  <div class="group-membership">
+                    <label><input type="radio" name="gallery-shared-group" value="family" checked />家庭</label>
+                    <button class="icon-button quiet" type="button" aria-label="退出 家庭"><span class="gallery-svg" data-icon="logout"></span></button>
+                  </div>
+                  <div class="group-membership">
+                    <label><input type="radio" name="gallery-shared-group" value="studio" />工作室</label>
+                    <button class="icon-button quiet" type="button" aria-label="退出 工作室"><span class="gallery-svg" data-icon="logout"></span></button>
+                  </div>
+                  <form id="group-join-form">
+                    <label class="field">名称（可选）<input maxlength="80" value="新分组" /></label>
+                    <label class="field">组密码<input type="password" minlength="10" maxlength="256" required value="gallery-sample-key" autocomplete="off" /></label>
+                    <button class="secondary" type="button">加入分组</button>
+                  </form>
+                </section>
+                <section class="settings-card server-settings">
+                  <label class="settings-field-label" for="gallery-server-url">服务器地址</label>
+                  <form class="server-change">
+                    <input id="gallery-server-url" type="url" placeholder="https://send.example.com" value="https://send.example.com" aria-label="服务器地址" />
+                    <button class="secondary" type="button">前往</button>
+                  </form>
+                </section>
+                <div class="settings-footer"><button class="quiet" type="button">断开服务器</button></div>
+              </section>
+            </div>
+          </div>
+          <div class="gallery-stage">
+            <div class="modal-backdrop">
+              <section class="modal editor-modal" role="dialog" aria-modal="true" aria-labelledby="gallery-editor-title">
+                <div class="modal-header">
+                  <h2 id="gallery-editor-title">添加文本</h2>
+                  <button class="icon-button quiet" type="button" aria-label="关闭文本输入"><span class="gallery-svg" data-icon="close"></span></button>
+                </div>
+                <div class="editor-sheet">
+                  <textarea class="text-input selectable-text" rows="6" aria-label="待发送文本">明天 9:00 例会改到 2 号会议室。</textarea>
+                  <div class="web-link-list"><span class="web-link" tabindex="0">https://send.example.com/i/7f2c</span></div>
+                  <div class="editor-tools"><span>32 字符</span><span>Ctrl / ⌘ + Enter 添加</span></div>
+                </div>
+                <div class="send-row"><span class="send-note">Ctrl / ⌘ + Enter 添加</span><button class="primary" type="button">添加</button></div>
+              </section>
+            </div>
+          </div>
+          <div class="gallery-stage">
+            <div class="modal-backdrop receipt-backdrop">
+              <section class="modal receipt-modal receipt-single-modal" role="dialog" aria-modal="true" aria-labelledby="gallery-receipt-title" tabindex="-1">
+                <div class="modal-header">
+                  <h2 id="gallery-receipt-title"><button class="quiet receipt-back" type="button">← 全部 3 项</button></h2>
+                  <button class="icon-button quiet" type="button" aria-label="关闭收件"><span class="gallery-svg" data-icon="close"></span></button>
+                </div>
+                <div class="receipt-batch-grid receive-grid receipt-single-grid">
+                  <article class="content-card text-card preview-card">
+                    <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                    <div class="card-text receipt-content selectable-text"><span class="card-text-lines">收件内容：明天 9:00 例会改到 2 号会议室。</span></div>
+                    <button class="quiet card-copy preview-copy" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button>
+                  </article>
+                </div>
+                <div class="receipt-actions"><button class="secondary" type="button">稍后</button><button class="primary" type="button">知道了</button></div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 04 历史与库列表 -->
+      <section class="gallery-block" id="block-history-library" aria-labelledby="gallery-history-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-history-title">历史与库列表</h2>
+          <p>40-content：已发送历史（普通行 + 多选行）与本机文件库（工具栏、转发、改名、卡片、自动清理）。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage">
+            <div class="right-content gallery-panel-body">
+              <div class="dock-toolbar history-toolbar content-toolbar">
+                <span class="count">12 项</span>
+                <button class="selection-action" type="button">多选</button>
+              </div>
+              <div class="history-items" data-multi-select="false" tabindex="0" aria-label="已发送内容">
+                <div class="receive-grid">
+                  <article class="content-card text-card preview-card" tabindex="0" aria-label="已发送文本">
+                    <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                    <div class="card-text selectable-text"><span class="card-text-lines">设计稿已更新到 v3，麻烦按新版标注切图。</span></div>
+                    <button class="quiet card-copy preview-copy" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button>
+                  </article>
+                  <article class="content-card file-card preview-card" tabindex="0" aria-label="已发送文件">
+                    <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                    <button class="icon-button quiet failed-card-retry" type="button" aria-label="重试 交付包.zip" title="重试"><span class="gallery-svg" data-icon="retry"></span></button>
+                    <div class="card-preview-button"><span class="content-preview file"><span class="gallery-svg" data-icon="file"></span><span class="preview-type">ZIP</span></span></div>
+                    <div class="card-transfer">
+                      <span class="card-status error">传输失败</span>
+                      <div class="card-actions">
+                        <button class="primary transfer-retry" type="button">重试</button>
+                        <button class="quiet transfer-cancel" type="button">取消传输</button>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+              <div class="dock-toolbar history-toolbar content-toolbar receive-selection-toolbar">
+                <span class="count selection-count">已选 2</span>
+                <button class="quiet" type="button">全选</button>
+                <button class="quiet receive-delete" type="button">删除</button>
+                <button class="quiet" type="button">取消</button>
+              </div>
+            </div>
+          </div>
+          <div class="gallery-stage">
+            <section class="file-library-modal embedded-library" aria-labelledby="gallery-library-title">
+              <div class="library-pane-header">
+                <div>
+                  <h2 id="gallery-library-title">本机文件</h2>
+                  <p class="library-subtitle">6 项 · 最近接收</p>
+                </div>
+              </div>
+              <div class="library-toolbar content-toolbar">
+                <button class="icon-button quiet" type="button" draggable="true" aria-label="全部拖拽" title="拖出 3 个本地文件"><span class="gallery-svg" data-icon="drag"></span></button>
+                <span class="count">6 项</span>
+                <label class="toolbar-field" for="gallery-library-sort"><span class="sr-only">排序</span>
+                  <select id="gallery-library-sort" aria-label="文件排序"><option>最新接收</option><option>最早接收</option><option>名称</option><option>大小</option></select>
+                </label>
+                <button class="icon-button quiet" type="button" aria-label="刷新文件库"><span class="gallery-svg" data-icon="retry"></span></button>
+                <button class="quiet selection-action" type="button">多选</button>
+              </div>
+              <div class="library-forward">
+                <label class="toolbar-field" for="gallery-library-target"><span class="sr-only">转发到</span>
+                  <select id="gallery-library-target" aria-label="转发到在线设备"><option>工作室台式机</option><option>客厅平板</option></select>
+                </label>
+                <button class="primary" type="button">转发</button>
+              </div>
+              <form class="library-rename-form">
+                <label class="field" for="gallery-library-rename">文件名<input id="gallery-library-rename" value="设计稿-v3.png" maxlength="255" required /></label>
+                <button class="primary" type="button">保存</button>
+                <button class="quiet" type="button">取消</button>
+              </form>
+              <div class="library-grid">
+                <article tabindex="0" role="checkbox" aria-checked="true" class="library-card preview-card image-card selected" aria-label="选择 图纸.png">
+                  <span class="library-card-preview image"><span class="gallery-svg" data-icon="image"></span><span class="library-select-dot"><span class="gallery-svg" data-icon="check"></span></span></span>
+                  <span class="library-card-detail"><span class="card-source">来自 客厅平板</span><time>10:24</time></span>
+                </article>
+                <article tabindex="0" role="button" class="library-card preview-card" aria-label="查看 会议记录.txt">
+                  <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                  <span class="library-card-preview"><span class="file-text-preview">2026-10-30 09:12
+参会：DongLan、小林
+结论：先落 Windows 与 Android，IPA 最后。</span></span>
+                  <button class="quiet card-copy preview-copy" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button>
+                </article>
+                <article tabindex="0" role="button" class="library-card" aria-label="查看 交付包.zip">
+                  <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                  <span class="library-card-preview"><span class="gallery-svg" data-icon="file"></span></span>
+                  <span class="library-card-name" title="交付包.zip">交付包.zip</span>
+                  <span class="library-card-detail"><span class="card-source">来自 工作室台式机</span><time>昨天 18:02</time></span>
+                </article>
+              </div>
+              <details class="advanced-join library-cleanup settings-card" open>
+                <summary>自动清理 <span class="cleanup-value">保留 7 天</span></summary>
+                <form>
+                  <label class="library-retention" for="gallery-library-retention">保留时长
+                    <span><input id="gallery-library-retention" type="number" min="1" step="1" value="7" inputmode="numeric" required /><select aria-label="保留时长单位"><option>天</option><option>小时</option></select></span>
+                  </label>
+                  <div class="library-categories" aria-label="清理类别">
+                    <label><input type="checkbox" checked />图片</label>
+                    <label><input type="checkbox" checked />视频</label>
+                    <label><input type="checkbox" />音频</label>
+                    <label><input type="checkbox" checked />文本</label>
+                    <label><input type="checkbox" />压缩包</label>
+                    <label><input type="checkbox" />其他</label>
+                  </div>
+                  <label class="library-cleanup-size" for="gallery-library-size-rule">文件大小
+                    <span><select id="gallery-library-size-rule"><option>不限</option><option>大于</option><option>小于</option><option>不大于</option></select><input type="number" min="0" step="any" inputmode="decimal" aria-label="清理大小 KB" value="2048" /><span>KB</span></span>
+                  </label>
+                  <div class="library-cleanup-footer"><p>只清理符合规则的过期文件，不影响下载副本。</p><button class="secondary" type="button">保存</button></div>
+                </form>
+              </details>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- 05 文件与图片预览卡 -->
+      <section class="gallery-block" id="block-previews" aria-labelledby="gallery-previews-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-previews-title">文件 / 图片预览卡</h2>
+          <p>50-cards：预览优先卡片（操作浮层 + 元信息）、失败重试、进度、以及大图/文本预览面。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage">
+            <div class="receive-grid">
+              <article class="content-card file-card image-card preview-card" tabindex="0" aria-label="预览 图纸.png" draggable="true">
+                <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                <div class="card-preview-button"><span class="content-preview image"><span class="gallery-svg" data-icon="image"></span><span class="preview-type">图片</span></span></div>
+                <div class="image-card-footer"><span class="card-source">来自 客厅平板</span><time>10:24</time></div>
+                <button class="quiet card-copy preview-copy" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button>
+              </article>
+              <article class="content-card file-card preview-card" tabindex="0" aria-label="预览 会议记录.txt">
+                <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                <div class="card-preview-button"><span class="content-preview text"><span class="file-text-preview">2026-10-30 09:12
+参会：DongLan、小林
+结论：先落 Windows 与 Android。</span></span></div>
+                <button class="quiet card-copy preview-copy" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button>
+              </article>
+              <article class="content-card file-card preview-card" tabindex="0" aria-label="预览 交付包.zip">
+                <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                <button class="quiet receipt-prepare" type="button">准备拖出</button>
+                <div class="card-preview-button"><span class="content-preview file"><span class="gallery-svg" data-icon="folder"></span><span class="preview-type">文件夹</span></span></div>
+                <div class="card-transfer">
+                  <span class="card-status">发送中</span>
+                  <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="38" aria-label="传输进度"><div style="width:38%"></div></div>
+                  <span class="transfer-bytes">1.2 MB / 3.1 MB</span><span class="transfer-speed">820 KB/s</span>
+                </div>
+              </article>
+              <article class="content-card file-card" tabindex="0" aria-label="预览 报价单.pdf">
+                <button class="icon-button quiet card-menu-button" type="button" aria-label="更多">···</button>
+                <div class="card-preview-button"><span class="content-preview file"><span class="gallery-svg" data-icon="file"></span><span class="preview-type">PDF</span></span></div>
+                <div class="card-body"><strong class="card-name" title="报价单-2026Q4.pdf">报价单-2026Q4.pdf</strong></div>
+                <div class="card-transfer">
+                  <span class="card-status error">传输失败</span>
+                  <div class="card-actions">
+                    <button class="primary transfer-retry" type="button">重试</button>
+                    <button class="quiet transfer-cancel" type="button">取消传输</button>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+          <div class="gallery-stage gallery-stage--stack">
+            <div class="large-file-preview"><pre>2026-10-30 周报
+1. Windows 打包与自更新回归
+2. Android 接收目录权限修复
+3. 条例：改版期间不动业务逻辑</pre></div>
+            <p class="reader-status error">此文件暂不支持预览，可下载后查看。</p>
+            <details class="file-details">
+              <summary>详情</summary>
+              <dl>
+                <dt>大小</dt><dd>3.1 MB</dd>
+                <dt>时间</dt><dd>2026-10-30 18:02</dd>
+                <dt>设备</dt><dd>工作室台式机</dd>
+                <dt>连接</dt><dd>中继</dd>
+                <dt>状态</dt><dd>可下载</dd>
+              </dl>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- 06 紧凑操作行 -->
+      <section class="gallery-block" id="block-actions" aria-labelledby="gallery-actions-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-actions-title">紧凑操作行</h2>
+          <p>60-details：接收/历史/文件库共用的一行式工具条、多选行、转发行、失败批量操作与卡片菜单。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage gallery-stage--stack">
+            <div class="dock-toolbar content-toolbar">
+              <button class="icon-button quiet" type="button" aria-label="全部拖拽"><span class="gallery-svg" data-icon="drag"></span></button>
+              <button class="active" type="button" aria-pressed="true">全部</button>
+              <button type="button" aria-pressed="false">文本</button>
+              <button type="button" aria-pressed="false">文件</button>
+              <button class="selection-action" type="button">多选</button>
+              <button class="quiet" type="button" aria-label="清理记录"><span class="gallery-svg" data-icon="trash"></span></button>
+            </div>
+            <div class="dock-toolbar content-toolbar receive-selection-toolbar">
+              <span class="count selection-count">已选 3</span>
+              <button class="quiet" type="button">取消全选</button>
+              <button class="selection-action" type="button">复制 2</button>
+              <button class="quiet receive-delete" type="button">删除</button>
+              <button class="quiet" type="button">取消</button>
+            </div>
+            <div class="library-toolbar content-toolbar">
+              <span class="count">6 项</span>
+              <label class="toolbar-field" for="gallery-actions-sort"><span class="sr-only">排序</span>
+                <select id="gallery-actions-sort" aria-label="文件排序"><option>最新接收</option><option>名称</option></select>
+              </label>
+              <button class="icon-button quiet" type="button" aria-label="刷新"><span class="gallery-svg" data-icon="retry"></span></button>
+              <button class="quiet selection-action" type="button">多选</button>
+            </div>
+            <div class="failed-send-tools">
+              <button class="quiet" type="button">清除所有失败文件</button>
+              <button class="primary" type="button">重试所有</button>
+            </div>
+            <div class="card-actions">
+              <button class="quiet transfer-cancel" type="button">取消传输</button>
+              <button class="primary transfer-retry" type="button">重试</button>
+            </div>
+            <div class="content-menu" role="menu">
+              <button type="button" role="menuitem">打开</button>
+              <button type="button" role="menuitem">下载</button>
+              <button type="button" role="menuitem">加入待发送</button>
+              <button type="button" role="menuitem">重命名</button>
+              <button type="button" role="menuitem">删除</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 07 外观设置 -->
+      <section class="gallery-block" id="block-appearance" aria-labelledby="gallery-appearance-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-appearance-title">外观设置</h2>
+          <p>60-details：主题四态 + 主色 swatch。点按这里或顶部工具条都会走 appearancePalette 的真实变量路径。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage">
+            <section class="settings-card appearance-settings">
+              <h3>外观</h3>
+              <div class="appearance-modes" role="group" aria-label="主题">
+                <button type="button" data-appearance-mode="light" aria-pressed="true">亮色</button>
+                <button type="button" data-appearance-mode="dark" aria-pressed="false">暗色</button>
+                <button type="button" data-appearance-mode="neutral" aria-pressed="false">中性</button>
+                <button type="button" data-appearance-mode="system" aria-pressed="false">跟随系统</button>
+              </div>
+              <div class="appearance-accents" role="group" aria-label="主题颜色">
+                <button type="button" data-appearance-accent="green" aria-label="绿" title="绿" aria-pressed="true" style="--swatch:#176b50"><span></span></button>
+                <button type="button" data-appearance-accent="blue" aria-label="蓝" title="蓝" aria-pressed="false" style="--swatch:#245ea8"><span></span></button>
+                <button type="button" data-appearance-accent="purple" aria-label="紫" title="紫" aria-pressed="false" style="--swatch:#7051a8"><span></span></button>
+                <button type="button" data-appearance-accent="rose" aria-label="玫瑰" title="玫瑰" aria-pressed="false" style="--swatch:#a34363"><span></span></button>
+                <button type="button" data-appearance-accent="amber" aria-label="琥珀" title="琥珀" aria-pressed="false" style="--swatch:#815c17"><span></span></button>
+                <button type="button" data-appearance-accent="slate" aria-label="石板" title="石板" aria-pressed="false" style="--swatch:#4c6375"><span></span></button>
+              </div>
+            </section>
+            <p id="gallery-appearance-readout" class="gallery-readout" role="status">data-theme=light · data-accent=green · 容器 1280px</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 08 toast 空态错误态 -->
+      <section class="gallery-block" id="block-feedback" aria-labelledby="gallery-feedback-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-feedback-title">toast / 空态 / 错误态</h2>
+          <p>40-content + 20-workspace：提示条、空态、库空态、错误提示、连接横幅、队列空态与加载态。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage gallery-stage--stack">
+            <div class="toast">已复制到剪贴板</div>
+            <div class="toast error">复制失败，请选择文字手动复制。</div>
+            <div class="empty-state">
+              <div class="empty-symbol"><span class="gallery-svg" data-icon="inbox"></span></div>
+              <h3>暂无内容</h3>
+            </div>
+            <div class="library-empty"><span class="gallery-svg" data-icon="file"></span>暂无已保存文件</div>
+            <div class="staged-list" tabindex="0" aria-label="待发送内容（空态）">
+              <button class="queue-empty" type="button"><span class="gallery-svg" data-icon="plus"></span><span>点击输入，或拖入内容</span></button>
+            </div>
+            <div class="error-message" role="alert">无法连接服务器：请确认地址与网络后重试。<button class="quiet" type="button">重试</button></div>
+            <div class="library-error" role="alert">此浏览器暂不支持本机文件库</div>
+            <div class="connection-banner" role="status"><span class="gallery-svg" data-icon="alert"></span><span>直连暂不可用，正在改用中继传输。</span><button class="quiet" type="button">重试</button></div>
+            <div class="loading-view"><span class="spinner"></span>正在读取地址…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 09 多组控件 -->
+      <section class="gallery-block" id="block-controls" aria-labelledby="gallery-controls-title">
+        <header class="gallery-block-head">
+          <h2 id="gallery-controls-title">多组控件</h2>
+          <p>按钮变体、字段、复选框/单选、分组归属、键值与邀请码，覆盖 hover / focus / disabled 状态。</p>
+        </header>
+        <div class="gallery-scroll">
+          <div class="gallery-stage gallery-stage--stack">
+            <div class="row gallery-row-wrap">
+              <button class="primary" type="button">主要按钮</button>
+              <button class="secondary" type="button">次要按钮</button>
+              <button class="copy-button" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button>
+              <button class="quiet" type="button">安静按钮</button>
+              <button class="danger" type="button">危险操作</button>
+              <button class="icon-button quiet" type="button" aria-label="设置"><span class="gallery-svg" data-icon="settings"></span></button>
+              <button class="primary" type="button" disabled>已禁用</button>
+            </div>
+            <div class="gallery-stage--grid">
+              <label class="field">文本字段<input value="send.example.com" /></label>
+              <label class="field">密码字段<input type="password" value="gallery-sample-key" /></label>
+              <label class="field">数字字段<input type="number" value="4" /></label>
+              <label class="field">下拉字段<select><option>自动</option><option>中继</option></select></label>
+            </div>
+            <label class="field">多行字段<textarea rows="3">组内共享文本，换行与链接都会被保留。</textarea></label>
+            <p class="field-note">字段说明：4px 节奏、行内 8/12 间距。</p>
+            <div class="row gallery-row-wrap">
+              <label class="preference-check"><input type="checkbox" checked />记住设备</label>
+              <label class="preference-check"><input type="checkbox" />自动接收</label>
+              <span class="small muted">辅助文本 --text-xs</span>
+              <span class="dot live"></span>
+            </div>
+            <div class="settings-input-row"><input value="工作室台式机" aria-label="设备名称" /><button class="secondary" type="button">保存</button></div>
+            <div class="server-change"><input type="url" value="https://send.example.com" aria-label="服务器地址" /><button class="secondary" type="button">前往</button></div>
+            <label class="limit-field" for="gallery-limit">中继确认阈值 <span><input id="gallery-limit" type="number" value="4" /> MiB / 文件</span></label>
+            <div class="item-actions">
+              <button class="copy-button" type="button"><span class="gallery-svg" data-icon="copy"></span>复制</button>
+              <button class="quiet" type="button">移除</button>
+              <button class="icon-button quiet" type="button" aria-label="重试"><span class="gallery-svg" data-icon="retry"></span></button>
+            </div>
+            <div class="group-created-inline">
+              <span>新分组已创建</span>
+              <input readonly value="STUDIO-4821" aria-label="邀请码" />
+              <button class="secondary" type="button">复制邀请码</button>
+            </div>
+            <p class="invite-code">STUDIO-4821</p>
+            <div class="target-tools">
+              <button class="quiet active" type="button" aria-pressed="true">取消多选</button>
+              <button class="primary multi-send-confirm" type="button">发送 2 台</button>
+            </div>
+            <span class="sr-only">仅屏幕阅读器可见的说明文本</span>
+          </div>
+        </div>
+      </section>
+
+      <p class="gallery-readout">开发期页面：只 import ../src/style.css、../src/appearance、../src/icons，不加载 main.ts。</p>
+    </main>
+
+    <script type="module" src="./style_gallery.ts"></script>
+  </body>
+</html>

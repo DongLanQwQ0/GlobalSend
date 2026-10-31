@@ -28,3 +28,8 @@ key.properties
 /find
 *.iml
 .idea/
+
+# Agent bus runtime state (the transcript, leases and digest stay tracked)
+docs/Communication/bus/run/
+docs/Communication/bus/ack/
+docs/Communication/bus/lock

@@ -23,4 +23,15 @@
 - 构建、设备操作、浏览器配置和发布遵循项目及用户现行约定。需要共用手机、模拟器、浏览器 profile 或发布窗口时，先协调占用；源码检查不能代替实机验收。
 - 不在留言中放入密码、组密钥、token 或私钥。项目日志和临时文件放在项目内。
 
-文件是当前通信渠道，不会自动唤醒另一个 Agent，也不代表对方已接收或执行。处理后应另写回复，明确采用的决定和后续负责人。需要实时通信时再协商本机回环网络通道，保留必要的交接记录，不直接暴露到公网。
+## 当前实时通道
+
+外部UI集成者已建立 `scripts/agentbus.mjs` 本机HTTP通道，消息留存在本目录 `bus/transcript.jsonl`，`THREADS.md` 是生成的摘要，不手工改写。GlobalSend主会话使用 `external` 身份，UI集成者使用 `orchestrator` 身份。
+
+```sh
+node scripts/agentbus.mjs status --json
+node scripts/agentbus.mjs inbox --as external --json
+node scripts/agentbus.mjs wait --as external --timeout 120s --mark --json
+node scripts/agentbus.mjs send --from external --to orchestrator --kind answer --subject "交付回复" --ref m000001 --body-file path/to/message.md
+```
+
+命令在项目根目录运行。先检查现有服务，不重复启动或停止对方的服务；浏览器profile和设备占用仍需明确协调。文件或消息存在不代表已接收、批准或执行，处理后回复具体采用的决定、实际结果和后续负责人。服务地址从运行元数据读取，只使用本机回环，不暴露到公网。

@@ -1,0 +1,82 @@
+/* 10-connection: center connection and enrollment — the single-card first screen (page frame, the one
+   panel, the server row, the vertical field rhythm, the password reveal control, form states, the error
+   message and the connection banner). Selector names, the layout structure (block page frame, two-column
+   form grid, flex rows) and the pre-split semantics from lines 43-63 of the pre-split style.css are kept. */
+/* Connection and forms */
+.onboarding{width:100%;max-width:568px;min-height:100dvh;margin:auto;padding:var(--space-5) var(--space-4)}
+.onboarding-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-5)}
+.panel,.pair-form{min-width:0;border:1px solid var(--line);border-radius:var(--radius-panel);background:var(--surface)}
+.pair-form{padding:var(--space-5);box-shadow:var(--shadow-2)}
+.pair-form h1{margin-bottom:var(--space-4);font-size:var(--text-xl);letter-spacing:-.015em}
+.connection-server{margin-bottom:var(--space-4);color:var(--muted);font-size:var(--text-sm)}
+.connection-server>span{display:block;margin-bottom:var(--space-1);line-height:var(--leading-tight)}
+.connection-server>div{display:flex;align-items:center;gap:var(--space-2);min-height:var(--space-6)}
+.connection-server code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted)}
+.connection-server button{flex-shrink:0;min-height:36px;padding:0 var(--space-2);border-radius:var(--radius-control);font-size:var(--text-xs);color:var(--muted)}
+.connection-server button:hover{background:var(--soft);color:var(--green)}
+.connection-server button:active{background:color-mix(in srgb,var(--soft) 72%,var(--line));color:var(--green)}
+.connection-server button:focus-visible{outline:0;box-shadow:var(--ring-strong)}
+.connection-server button:disabled{opacity:.45;cursor:not-allowed;background:transparent}
+/* one consistent 16px row rhythm inside the form: first row carries no top margin, the last row no separator */
+#enroll-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3)}
+#enroll-form>.field{margin:0}
+#enroll-form>.preference-check,#enroll-form>.error-message,#enroll-form>.connect-button{grid-column:1/-1}
+#enroll-form>.preference-check{margin:0}
+#enroll-form>.error-message{margin-top:0}
+#enroll-form>.connect-button{margin:var(--space-1) 0 0}
+#enroll-form>.connect-button:last-child{margin-bottom:0}
+
+.field{display:flex;flex-direction:column;gap:var(--space-1);margin-top:var(--space-4);color:var(--muted);font-size:var(--text-sm)}
+.field:first-child{margin-top:0}
+.field input,.field select{width:100%;font-size:var(--text-base);color:var(--text)}
+.field input:hover:not(:disabled):not(:focus),.field select:hover:not(:disabled):not(:focus){border-color:color-mix(in srgb,var(--green) 32%,var(--line))}
+.field input:active:not(:disabled):not(:focus){border-color:color-mix(in srgb,var(--green) 45%,var(--line))}
+.field input:focus-visible,.field select:focus-visible{border-color:color-mix(in srgb,var(--green) 60%,var(--line))}
+.field input:disabled,.field select:disabled{opacity:.45;cursor:not-allowed;background:var(--field)}
+.field-note{margin-top:var(--space-1);color:var(--muted);font-size:var(--text-xs);line-height:var(--leading-relaxed)}
+.password-input{position:relative;display:block}.password-input>input{padding-right:calc(var(--space-6) + var(--space-3))}
+.password-eye{position:absolute;right:var(--space-0);top:0;bottom:0;margin:auto 0;width:var(--space-6);height:var(--space-6);padding:var(--space-1);border-radius:var(--radius-control);color:var(--muted)}
+.password-eye:hover{background:var(--soft);color:var(--green)}
+.password-eye:active{background:color-mix(in srgb,var(--soft) 72%,var(--line));color:var(--green)}
+.password-eye[aria-pressed=true]{background:color-mix(in srgb,var(--green) 8%,var(--surface));color:var(--green)}
+.password-eye:focus-visible{outline:0;box-shadow:var(--ring-strong)}
+.password-eye:disabled{opacity:.45;cursor:not-allowed;background:transparent;color:var(--muted)}
+#group-key::-ms-reveal,#group-key::-ms-clear{display:none}
+.preference-check{display:flex;align-items:center;gap:var(--space-2);min-height:var(--space-6);margin:var(--space-3) 0;color:var(--text);font-size:var(--text-sm);cursor:pointer}
+.preference-check input{margin:0}
+.preference-check:hover,.preference-check:active,.preference-check:focus-within{color:var(--green)}
+.preference-check:has(input:disabled){opacity:.45;cursor:not-allowed;color:var(--muted)}
+.connect-button{width:100%;margin-top:var(--space-3);min-height:var(--space-7);font-size:var(--text-base)}
+.connect-button:hover{box-shadow:var(--shadow-2)}
+.connect-button:active{box-shadow:none}
+.connect-button:focus-visible{outline:0;box-shadow:var(--ring-strong)}
+.connect-button:disabled{box-shadow:none;transform:none}
+.server-entry{display:flex;margin:var(--space-2) auto 0}
+.error-message,.library-error{padding:var(--space-3);border:1px solid color-mix(in srgb,var(--red) 30%,var(--line));border-radius:var(--radius-card);background:color-mix(in srgb,var(--red) 8%,var(--surface));color:var(--red);font-size:var(--text-sm);line-height:var(--leading-relaxed);overflow-wrap:anywhere}
+.error-message{margin-top:var(--space-3)}
+.error-message button{min-height:36px;margin-left:var(--space-0);padding:var(--space-0) var(--space-2);border-radius:var(--radius-control);color:inherit;font-size:var(--text-xs);font-weight:600;vertical-align:middle}
+.error-message button:hover{background:color-mix(in srgb,var(--red) 12%,var(--surface));color:var(--red)}
+.error-message button:active{background:color-mix(in srgb,var(--red) 20%,var(--surface));color:var(--red)}
+.error-message button:focus-visible{outline:0;box-shadow:var(--ring-strong)}
+.error-message button:disabled{opacity:.45;cursor:not-allowed;background:transparent}
+.connection-banner{display:flex;align-items:center;gap:var(--space-2);flex-shrink:0;padding:var(--space-2) var(--space-3);margin-bottom:var(--space-3);border:1px solid color-mix(in srgb,var(--warning) 30%,var(--line));border-radius:var(--radius-card);background:color-mix(in srgb,var(--warning) 8%,var(--surface));color:var(--warning);font-size:var(--text-sm);line-height:var(--leading-normal)}
+.connection-banner>svg{width:18px;height:18px;flex-shrink:0}
+.connection-banner>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.connection-banner button{flex-shrink:0;min-height:36px;padding:var(--space-0) var(--space-2);border-radius:var(--radius-control);color:inherit;font-size:var(--text-xs);font-weight:600}
+.connection-banner button:hover{background:color-mix(in srgb,var(--warning) 14%,var(--surface))}
+.connection-banner button:active{background:color-mix(in srgb,var(--warning) 22%,var(--surface))}
+.connection-banner button:focus-visible{outline:0;box-shadow:var(--ring-strong)}
+.connection-banner button:disabled{opacity:.45;cursor:not-allowed;background:transparent}
+.error-detail{color:var(--red);font-size:var(--text-sm);line-height:var(--leading-normal);overflow-wrap:anywhere}
+.target-note,.inline-alert{color:var(--warning);font-size:var(--text-xs);line-height:var(--leading-relaxed);overflow-wrap:anywhere}
+.key-actions{display:flex;gap:var(--space-1);flex-wrap:wrap;margin-top:var(--space-1)}
+.key-value{font-family:var(--font-mono);font-size:var(--text-sm);user-select:all;overflow-wrap:anywhere}
+
+/* Mobile: the form collapses to one column (matching the shell's 760px breakpoint) and every control
+   reaches the 44px touch target. Later layers keep owning page padding at their own breakpoints. */
+@media (max-width:640px){
+  #enroll-form{grid-template-columns:minmax(0,1fr)}
+  .password-eye{right:0;width:44px;height:44px}
+  .preference-check,.connection-server>div{min-height:44px}
+  .connection-server button,.error-message button,.connection-banner button{min-height:44px}
+}

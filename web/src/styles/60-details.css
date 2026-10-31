@@ -1,0 +1,101 @@
+/* 60-details: compact action rows (Receive/History/Files), appearance settings (theme modes + accent swatches) and multi-group membership controls — the fine-detail layer, re-expressed on foundation tokens so every small control matches the shared button/input primitives (source lines 338-380 of the pre-split style.css).
+   Palette values are injected at runtime, so this layer only reads them (var()/color-mix()); layer-local sizes derive from the 4px rhythm: 36px compact control, 44px touch row. */
+.content-toolbar,.library-forward,.appearance-modes,.appearance-accents,.group-membership,.shared-group-picker{--control-compact:calc(var(--space-5) + var(--space-0));--row-touch:calc(var(--space-6) + var(--space-0))}
+
+/* One compact action row on Receive, History and Files, in either mode. */
+.content-toolbar{display:flex;align-items:center;flex-wrap:nowrap;gap:var(--space-0);min-height:var(--row-touch);padding:var(--space-0) var(--space-1);flex-shrink:0;overflow-x:auto;margin:0}
+.content-toolbar>button{flex-shrink:0;min-height:var(--control-compact);height:var(--control-compact);padding:0 var(--space-1);border-radius:var(--radius-control);font-size:var(--text-xs);font-weight:500;color:var(--muted);white-space:nowrap}
+.content-toolbar>button:hover:not(:disabled){background:var(--soft);color:var(--green)}
+.content-toolbar>button:active:not(:disabled){background:color-mix(in srgb,var(--soft) 55%,var(--surface));transform:translateY(.5px);box-shadow:none}
+/* Dense rows live inside a horizontal scroller, so their focus ring is drawn inside the control instead of outside it. */
+.content-toolbar>button:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+.content-toolbar>button:disabled{opacity:.45;cursor:not-allowed}
+.content-toolbar>button[aria-pressed=true],.content-toolbar>button.active{background:var(--soft);color:var(--green);font-weight:600;box-shadow:none}
+.content-toolbar>button.danger,.content-toolbar>button.receive-delete{color:var(--red)}
+.content-toolbar>button.danger:hover:not(:disabled),.content-toolbar>button.receive-delete:hover:not(:disabled){background:color-mix(in srgb,var(--red) 10%,var(--surface));color:var(--red)}
+.content-toolbar>button.selection-action{color:var(--green);font-weight:600}
+.content-toolbar>button.selection-action:disabled{color:var(--muted)}
+.content-toolbar>.icon-button{width:var(--control-compact);min-width:var(--control-compact);height:var(--control-compact);padding:0;border-radius:var(--radius-sm);color:var(--muted)}
+.content-toolbar>button.quiet:has(>svg:only-child){width:var(--control-compact);min-width:var(--control-compact);padding:0}
+.content-toolbar>.count{white-space:nowrap;padding:0 var(--space-0);font-size:var(--text-xs);color:var(--muted);font-variant-numeric:tabular-nums}
+.content-toolbar .selection-action{margin-left:auto}.content-toolbar .selection-count{margin-right:auto;white-space:nowrap}
+.library-toolbar.content-toolbar{align-items:center}
+.library-toolbar.content-toolbar>.toolbar-field{display:block;min-width:0;max-width:calc(var(--space-8) * 2);flex:1;margin:0 0 0 auto}
+.library-toolbar.content-toolbar select,.library-forward select{height:var(--control-compact);min-height:var(--control-compact);padding:0 var(--space-5) 0 var(--space-2);border-radius:var(--radius-control);background-position:right var(--space-1) center;font-size:var(--text-xs);color:var(--text)}
+.library-toolbar.content-toolbar select:hover:not(:disabled),.library-forward select:hover:not(:disabled){border-color:color-mix(in srgb,var(--green) 35%,var(--line))}
+.library-toolbar.content-toolbar select:focus-visible,.library-forward select:focus-visible{border-color:color-mix(in srgb,var(--green) 55%,var(--line));box-shadow:none;outline:2px solid var(--green);outline-offset:-2px}
+.library-toolbar.content-toolbar select:disabled,.library-forward select:disabled{opacity:.45;cursor:not-allowed}
+.embedded-library{padding:0 var(--space-2) var(--space-2)}.library-pane-header:has(.library-subtitle:empty){display:none}
+.library-forward{padding:var(--space-0) var(--space-1) var(--space-1);gap:var(--space-1);flex-wrap:nowrap;align-items:center}
+.library-forward>.toolbar-field{flex-basis:auto;min-width:0}
+.library-forward>button{flex-shrink:0;min-height:var(--control-compact);height:var(--control-compact);padding:0 var(--space-2);border-radius:var(--radius-control);font-size:var(--text-xs);font-weight:600}
+.library-forward>button.primary:hover:not(:disabled){box-shadow:var(--shadow-2)}
+.library-forward>button.quiet:hover:not(:disabled){background:var(--soft);color:var(--green)}
+.library-forward>button:active:not(:disabled){transform:translateY(.5px);box-shadow:none}
+.library-forward>button:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+.library-forward>button:disabled{opacity:.45;cursor:not-allowed}
+.library-grid{margin-top:var(--space-0)}
+@media(max-width:760px){
+ html:has(.transfer-workspace),html:has(.transfer-workspace) body{height:100%;overflow:hidden;overscroll-behavior:none}
+ #app{position:fixed;top:var(--app-viewport-top,0px);left:0;right:0;height:var(--app-viewport-height,100dvh);overflow:auto;overscroll-behavior:contain}
+ .onboarding{min-height:100%;padding-top:var(--space-3)}.modal-backdrop{top:var(--app-viewport-top,0px);bottom:auto;height:var(--app-viewport-height,100dvh)}
+ .keyboard-open .mobile-view-tabs{display:none}.keyboard-open .transfer-workspace .main{padding-bottom:calc(var(--space-0) + 2px)}
+ .keyboard-open .send-panel{overflow-y:auto;overscroll-behavior:contain}.keyboard-open .shared-note{flex:0 0 auto;min-height:160px;overflow:visible;padding-bottom:var(--space-1)}
+ .keyboard-open [data-shared-host]{min-height:110px;height:min(180px,42dvh);flex:none}.keyboard-open #shared-group-text{min-height:0;height:100%;flex:1}
+ .keyboard-open .modal{max-height:calc(var(--app-viewport-height,100dvh) - 16px);padding:var(--space-3)}
+ .keyboard-open .modal-header{margin-bottom:var(--space-2)}.keyboard-open .editor-sheet .text-input{aspect-ratio:auto;min-height:80px;height:clamp(80px,calc(var(--app-viewport-height,100dvh) - 220px),280px);max-height:none;padding:var(--space-2)}
+ .keyboard-open .send-row,.keyboard-open .reader-footer{margin-top:var(--space-2)}.keyboard-open .editor-tools{min-height:28px;padding:calc(var(--space-0) / 2) var(--space-2)}
+ .content-toolbar,.dock-toolbar.content-toolbar{min-height:var(--row-touch);padding:var(--space-0) var(--space-1);gap:calc(var(--space-0) / 2)}
+ .content-toolbar>button,.dock-toolbar.content-toolbar>button{min-height:var(--row-touch);height:var(--row-touch);font-size:var(--text-xs);padding:0 var(--space-1)}
+ .content-toolbar>.icon-button{width:var(--row-touch);min-width:var(--row-touch);height:var(--row-touch);padding:0}
+ .content-toolbar>button.quiet:has(>svg:only-child){width:var(--row-touch);min-width:var(--row-touch);padding:0}
+ .library-toolbar.content-toolbar select,.library-forward select{min-height:var(--row-touch);height:var(--row-touch)}
+ .embedded-library{padding:0 var(--space-2) var(--space-2)}
+}
+@media(max-width:640px){
+ .appearance-modes button{min-height:var(--row-touch);padding:var(--space-0)}
+ .library-forward>button{min-height:var(--row-touch);height:var(--row-touch)}
+ .shared-group-picker select{min-height:var(--row-touch);height:var(--row-touch)}
+}
+
+.device-network-paths .setting-row:has(.probe-addresses){flex-wrap:wrap}.probe-addresses{flex-basis:100%;font-size:var(--text-xs);line-height:var(--leading-normal);overflow-wrap:anywhere;white-space:normal;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* Appearance changes repaint UI surfaces only; images and previews keep their colors. */
+.appearance-modes{display:flex;gap:var(--space-0);padding:var(--space-0);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--field)}
+.appearance-modes button{flex:1;min-width:0;min-height:var(--space-6);padding:var(--space-0) var(--space-2);border-radius:var(--radius-control);color:var(--muted);font-size:var(--text-xs);font-weight:500;white-space:nowrap}
+.appearance-modes button:hover:not([aria-pressed=true]):not(:disabled){background:color-mix(in srgb,var(--surface) 62%,transparent);color:var(--text)}
+.appearance-modes button:active:not(:disabled){transform:translateY(.5px);box-shadow:none}
+.appearance-modes button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.appearance-modes button:disabled{opacity:.45;cursor:not-allowed}
+.appearance-modes button[aria-pressed=true]{background:var(--surface);color:var(--green);font-weight:600;box-shadow:var(--shadow-1)}
+.appearance-accents{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-2)}
+.appearance-accents button{position:relative;width:var(--row-touch);height:var(--row-touch);min-height:var(--row-touch);padding:0;border:0;border-radius:var(--radius-pill);background:transparent;box-shadow:0 0 0 1px transparent}
+.appearance-accents button>span{width:calc(var(--row-touch) - var(--space-2));height:calc(var(--row-touch) - var(--space-2));border-radius:var(--radius-pill);background:var(--swatch);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 12%,transparent)}
+.appearance-accents button:hover:not(:disabled){transform:scale(1.06);background:color-mix(in srgb,var(--swatch) 14%,transparent)}
+.appearance-accents button:hover:not(:disabled)>span{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 24%,transparent)}
+.appearance-accents button:active:not(:disabled){transform:scale(.96)}
+.appearance-accents button:focus-visible{outline:2px solid var(--green);outline-offset:var(--space-0)}
+.appearance-accents button:disabled{opacity:.45;cursor:not-allowed}
+.appearance-accents button[aria-pressed=true]{box-shadow:0 0 0 2px var(--swatch)}
+.appearance-accents button[aria-pressed=true]::after{content:'';position:absolute;inset:0;margin:auto;width:10px;height:6px;border-left:2px solid var(--on-accent);border-bottom:2px solid var(--on-accent);transform:translateY(-1px) rotate(-45deg);pointer-events:none}
+
+/* Multi-group membership controls share the existing compact form language. */
+.group-membership{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-height:var(--row-touch);padding:var(--space-1) 0}
+.group-membership+.group-membership{border-top:1px solid var(--line)}
+.group-membership label,.shared-group-picker{display:flex;align-items:center;gap:var(--space-1)}
+.group-membership label{flex:1;min-width:0;font-size:var(--text-sm);font-weight:500;line-height:var(--leading-normal);overflow-wrap:anywhere;cursor:pointer;transition:color var(--duration-fast) var(--ease),background-color var(--duration-fast) var(--ease)}
+.group-membership label:hover{color:var(--green)}
+.group-membership label:has(input:disabled){opacity:.45;cursor:not-allowed}
+.group-membership input{width:auto;min-height:0;margin:0;flex-shrink:0;accent-color:var(--green)}
+.group-membership input:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.group-membership input:disabled{opacity:.45;cursor:not-allowed}
+.group-membership button:hover:not(:disabled){background:color-mix(in srgb,var(--red) 10%,var(--surface));color:var(--red)}
+.group-membership button:active:not(:disabled){transform:translateY(.5px);box-shadow:none}
+.group-membership button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.group-membership button:disabled{opacity:.45;cursor:not-allowed}
+#group-join-form{display:grid;gap:var(--space-2);margin-top:var(--space-3)}
+.shared-group-picker{min-width:0;font-size:var(--text-xs);font-weight:600;line-height:var(--leading-tight);color:var(--muted)}
+.shared-group-picker select{width:auto;min-width:0;max-width:calc(var(--space-8) * 2 + var(--space-2));min-height:var(--control-compact);height:var(--control-compact);padding:0 var(--space-5) 0 var(--space-2);border-radius:var(--radius-control);background-color:transparent;background-position:right var(--space-1) center;font-size:var(--text-xs);font-weight:500;color:var(--text)}
+.shared-group-picker select:hover:not(:disabled){border-color:color-mix(in srgb,var(--green) 40%,var(--line))}
+.shared-group-picker select:focus-visible{border-color:color-mix(in srgb,var(--green) 55%,var(--line));box-shadow:none;outline:2px solid var(--green);outline-offset:-2px}
+.shared-group-picker select:disabled{opacity:.45;cursor:not-allowed}
