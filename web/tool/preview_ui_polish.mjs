@@ -183,6 +183,12 @@ try {
   await setTheme('dark');
   await capture('settings-dark', 1440, 900, false);
 
+  // Clipboard candidate at the Windows default window size: an unconfirmed suggestion card
+  // next to an already staged item, which must stay a square card inside the two-column queue.
+  await setState('c.contentView = "receive"; c.mobileView = "receive"; c.modal = null; c.clipboardSuggestion = "text"; c.stagedTexts = [{id:"staged-verified", text:"已确认：这条文本已经加入待发送队列。"}];');
+  await capture('clipboard-950', 950, 650, false);
+  await capture('clipboard-390', 390, 844, true);
+
   await writeFile(join(reports, 'ui-polish-visual.json'), JSON.stringify({ capturedAt: new Date().toISOString(), origin, evidence }, null, 2));
   console.log(JSON.stringify({ ok: true, shots: evidence.length, widths: [...new Set(evidence.map((item) => item.width))], themes: [...new Set(evidence.map((item) => item.theme))] }));
 } finally {
