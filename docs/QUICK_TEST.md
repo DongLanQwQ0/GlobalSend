@@ -5,7 +5,7 @@
 截至 2026-10-31，本地构建与公开发布分别为：
 
 - Windows **1.0.60+77** 已完整更新并启动于 `E:\Programs\GlobalSend`；本轮不进行 Windows 界面测试。[开机启动与后台参数](WINDOWS_STARTUP.md)保持默认关闭，登录启动、不抢焦点及托盘恢复仍待手动验收。
-- [Android 77版 arm64 APK](../artifacts/releases/GlobalSend-1.0.60-android-arm64-v8a.apk)16,337,264 字节，手机已保留数据覆盖安装并读回77版。77修复共享目录接收完成后系统索引未更新，原模拟器已验证实际收件可直接通过系统文件选择器选择读取，实体手机仍需确认。此前真机已验证文件夹仅显示根卡片且结构完整、文本直接投到设备且其它草稿保留、编辑保存不再弹旧收件、删除媒体后建议消失；76版剪贴板交互也仍待真机确认。
+- [Android 77版 arm64 APK](../artifacts/releases/GlobalSend-1.0.60-android-arm64-v8a.apk)16,337,264 字节，手机已保留数据覆盖安装并读回77版。77修复共享目录接收完成后系统索引未更新，原模拟器已验证实际收件可直接通过系统文件选择器选择读取；用户实机已确认新文件在选择器及最近文件中可见。此前真机已验证文件夹仅显示根卡片且结构完整、文本直接投到设备且其它草稿保留、编辑保存不再弹旧收件、删除媒体后建议消失；76版剪贴板交互也仍待真机确认。
 - [Windows 完整包](../artifacts/releases/GlobalSend-1.0.60-windows-x64.zip)，不要只复制 EXE。[Windows/Android GitHub 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)仍为50版；本地77版未发布这些平台的包。中心不托管包。
 - [iPad / iPhone 76版 IPA](../artifacts/releases/ios-1.0.59-build76/GlobalSend-iPad-unsigned.ipa)14,828,084 字节，已构建并[发布](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.59-build76)，由用户用 iloader 手动签名安装。
 - 中心及[网页版](https://123.207.180.163/globalsend/app/)已部署76版源码（0be2951），镜像 `globalsend:clipboard-1.0.59-20261031`。健康、页面及新 JS/CSS 均验证200；保留多组连接、流式中继和链接识别。
