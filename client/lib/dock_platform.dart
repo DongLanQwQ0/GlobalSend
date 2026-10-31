@@ -42,6 +42,11 @@ class DockPlatform {
       channel.invokeMethod('notificationPermission');
   static Future<void> importClipboard() =>
       channel.invokeMethod('importClipboard');
+  static Future<bool> dragClipboardSuggestion(String revision) async =>
+      await channel.invokeMethod<bool>('dragClipboardSuggestion', {
+        'revision': revision,
+      }) ??
+      false;
 
   /// Opens Android's image/video Photo Picker. Selections are imported through
   /// [events] / [pending], not returned here, so callers must not stage twice.

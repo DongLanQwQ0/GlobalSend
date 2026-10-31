@@ -7,7 +7,7 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import java.util.Map;
 
-/** Format metadata only. Clipboard bytes are imported only after a tap. */
+/** Format metadata only. Clipboard content is read only for an explicit tap or drag. */
 final class ClipboardSuggestions {
     private final ClipboardManager clipboard;
     private final SharedPreferences state;

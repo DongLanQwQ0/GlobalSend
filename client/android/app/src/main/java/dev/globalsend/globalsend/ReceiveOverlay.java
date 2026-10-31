@@ -886,10 +886,28 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             });
             if(!accepted){importing--;updateLabels();android.widget.Toast.makeText(context,"剪贴板为空",android.widget.Toast.LENGTH_SHORT).show();}
         }));
+        card.setOnLongClickListener(v -> {
+            cancelPendingOpen();
+            withClipboardFocus(() -> {
+                try {
+                    boolean started=DockCoordinator.startClipboardDrag(card,revision,session -> {
+                        shelf.cancelRemoval();main.removeCallbacks(countdown);refreshPendingStyles();
+                        forwarding=new ForwardDrag(session.paths,session.texts,List.of());
+                        updateSuggestionVisibility();
+                    },accepted -> {if(forwarding!=null)finishForwarding(forwarding);},true);
+                    if(!started && forwarding!=null)finishForwarding(forwarding);
+                } catch(Exception unavailable) {
+                    if(forwarding!=null)finishForwarding(forwarding);
+                    android.util.Log.w("GlobalSend","Cannot drag clipboard suggestion",unavailable);
+                    android.widget.Toast.makeText(context,"无法拖出剪贴板，请重试",android.widget.Toast.LENGTH_SHORT).show();
+                }
+            });
+            return true;
+        });
         LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(side,side);size.rightMargin=dp(3);row.addView(card,size);
     }
 
-    /** A deliberate paste tap may focus this bounded window; never a drag hover. */
+    /** A deliberate clipboard tap or hold may focus this bounded window; never a drag hover. */
     private void withClipboardFocus(Runnable read) {
         final View owner=root;
         if(owner==null)return;

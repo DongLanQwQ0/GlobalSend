@@ -351,7 +351,7 @@ public class AndroidDragTest {
             ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
             View row=ReflectionHelpers.getField(overlay,"row"),card=row.findViewWithTag("clipboard-suggestion");
             TemporaryShelf shelf=ReflectionHelpers.getField(overlay,"shelf");
-            assertNotNull(card);assertFalse(card.isLongClickable());assertTrue(shelf.items.isEmpty());
+            assertNotNull(card);assertTrue(card.isLongClickable());assertTrue(shelf.items.isEmpty());
             assertTrue(overlay.bulkDragItems().isEmpty());assertEquals(0,dropCount());
             java.util.concurrent.ExecutorService importer=ReflectionHelpers.getField(coordinator,"importer");
             importer.execute(() -> {try {release.await(5,TimeUnit.SECONDS);}catch(InterruptedException error){Thread.currentThread().interrupt();}});
@@ -419,6 +419,8 @@ public class AndroidDragTest {
         @Implementation protected void cancelDragAndDrop() { }
         static void resetFixture() { allowed = true; clips.clear(); states.clear(); }
     }
+    @Implements(android.view.ViewGroup.class)
+    public static class NativeDragGroup extends NativeDragView {}
 
     @Test @Config(shadows = NativeDragView.class)
     public void nativeSessionsReleaseAfterEndAndDeclineOnlyLiveReentry() throws Exception {
@@ -435,6 +437,94 @@ public class AndroidDragTest {
         coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED, second, 0, 0));
         assertTrue(DockCoordinator.startDrag(source, null, "第三条", "文本"));
         assertEquals(3, NativeDragView.states.size());
+    }
+
+    @Test @Config(shadows=NativeDragView.class)
+    public void clipboardHoldExportsWithoutStagingAndCancellationKeepsTheSuggestion() throws Exception {
+        NativeDragView.resetFixture();View source=new View(activity);activity.setContentView(source);queueBounds();
+        activity.getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("fixture","剪贴板原文"));
+        DockCoordinator.refreshClipboardSuggestion();String revision=(String)DockCoordinator.clipboardSuggestion().get("revision");
+        List<Boolean> completed=new ArrayList<>();
+        assertTrue(DockCoordinator.startClipboardDrag(source,revision,session -> {},completed::add,false));
+        assertEquals(0,dropCount());assertEquals("剪贴板原文",NativeDragView.clips.get(0).getItemAt(0).getText().toString());
+        DockCoordinator.LocalDrag first=(DockCoordinator.LocalDrag)NativeDragView.states.get(0);
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,first,0,0));
+        assertEquals(List.of(false),completed);assertEquals("text",DockCoordinator.clipboardSuggestion().get("kind"));
+        assertTrue(DockCoordinator.startClipboardDrag(source,revision,session -> {},completed::add,false));
+        DockCoordinator.LocalDrag second=(DockCoordinator.LocalDrag)NativeDragView.states.get(1);
+        assertTrue(coordinator.acceptDrag(localEvent(DragEvent.ACTION_DROP,second,100,200)));
+        assertEquals(1,dropCount());
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,second,0,0));
+        assertEquals(List.of(false,true),completed);assertEquals("empty",DockCoordinator.clipboardSuggestion().get("kind"));
+    }
+
+    @Test @Config(shadows=NativeDragView.class)
+    public void clipboardHoldReturnedToShelfConfirmsTheSuggestionButDoesNotQueueIt() throws Exception {
+        NativeDragView.resetFixture();View source=new View(activity);activity.setContentView(source);
+        activity.getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("fixture","暂存文字"));
+        DockCoordinator.refreshClipboardSuggestion();String revision=(String)DockCoordinator.clipboardSuggestion().get("revision");
+        assertTrue(DockCoordinator.startClipboardDrag(source,revision,session -> {},accepted -> {},false));
+        DockCoordinator.LocalDrag local=(DockCoordinator.LocalDrag)NativeDragView.states.get(0);
+        List<Map<String,Object>> content=new ArrayList<>();
+        assertTrue(DockCoordinator.importToShelf(localEvent(DragEvent.ACTION_DROP,local,0,0),content::add));
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,local,0,0));
+        assertEquals(List.of("暂存文字"),content.get(0).get("texts"));assertEquals(0,dropCount());
+        assertEquals("empty",DockCoordinator.clipboardSuggestion().get("kind"));
+    }
+
+    @Test @Config(shadows=NativeDragView.class)
+    public void clipboardImageAndFileUrisRemainOriginalReferencesUntilDropped() throws Exception {
+        NativeDragView.resetFixture();View source=new View(activity);activity.setContentView(source);queueBounds();
+        DockShareProvider provider=new DockShareProvider();ProviderInfo info=new ProviderInfo();info.authority=activity.getPackageName()+".dock-files";
+        provider.attachInfo(activity,info);ShadowContentResolver.registerProviderInternal(info.authority,provider);
+        List<String> originals=new ArrayList<>();ClipData clip=null;
+        for(String name:List.of("clipboard.jpg","clipboard.zip")) {
+            File file=new File(activity.getCacheDir(),name);Files.write(file.toPath(),new byte[]{1,2,3});
+            Uri uri=DockShareProvider.register(activity,file,name);originals.add(uri.toString());
+            if(clip==null)clip=new ClipData("fixture",new String[]{"image/jpeg","application/zip"},new ClipData.Item(uri));
+            else clip.addItem(new ClipData.Item(uri));
+        }
+        activity.getSystemService(android.content.ClipboardManager.class).setPrimaryClip(clip);DockCoordinator.refreshClipboardSuggestion();
+        String revision=(String)DockCoordinator.clipboardSuggestion().get("revision");
+        assertTrue(DockCoordinator.startClipboardDrag(source,revision,session -> {},accepted -> {},false));
+        DockCoordinator.LocalDrag local=(DockCoordinator.LocalDrag)NativeDragView.states.get(0);
+        assertEquals(originals,local.paths);assertTrue(local.texts.isEmpty());assertEquals(0,dropCount());
+        ClipData exported=NativeDragView.clips.get(0);assertEquals(2,exported.getItemCount());
+        assertEquals("image/jpeg",activity.getContentResolver().getType(exported.getItemAt(0).getUri()));
+        assertEquals("application/zip",activity.getContentResolver().getType(exported.getItemAt(1).getUri()));
+        assertTrue(coordinator.acceptDrag(localEvent(DragEvent.ACTION_DROP,local,100,200)));
+        MethodCall drop=events.stream().filter(call -> call.method.equals("nativeDrop")).findFirst().get();
+        assertEquals(originals,((Map<?,?>)drop.arguments).get("paths"));
+        coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,local,0,0));
+        assertEquals("empty",DockCoordinator.clipboardSuggestion().get("kind"));
+    }
+
+    @Test @Config(shadows={NativeDragView.class,NativeDragGroup.class})
+    public void overlayClipboardHoldUsesNativeDragAndShowsDeviceTargets() throws Exception {
+        NativeDragView.resetFixture();
+        activity.getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("fixture","悬浮坞文字"));
+        DockCoordinator.refreshClipboardSuggestion();
+        ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions() {
+            public void open(String id) {} public void copy(String id) {}
+            public void dismiss(Map<String,String> versions,long generation) {}
+        });
+        try {
+            overlay.show(new ReceiveNotifications.Receipt("one","1","fixture","收件",null,null,0),1,shown -> {});
+            overlay.foreground();Shadows.shadowOf(Looper.getMainLooper()).idle();
+            ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
+            android.widget.LinearLayout row=ReflectionHelpers.getField(overlay,"row");
+            View suggestion=row.findViewWithTag("clipboard-suggestion");assertNotNull(suggestion);
+            assertTrue((Boolean)ReflectionHelpers.getField(overlay,"appForeground"));
+            assertTrue(suggestion.performLongClick());
+            assertEquals("logs="+org.robolectric.shadows.ShadowLog.getLogsForTag("GlobalSend").stream().map(log -> String.valueOf(log.throwable)).collect(java.util.stream.Collectors.joining(";")),1,NativeDragView.clips.size());assertEquals(0,dropCount());
+            assertNotNull(ReflectionHelpers.getField(overlay,"forwarding"));
+            ReflectionHelpers.callInstanceMethod(overlay,"showSendTargets");
+            assertEquals(View.VISIBLE,((View)ReflectionHelpers.getField(overlay,"targetScroll")).getVisibility());
+            DockCoordinator.LocalDrag local=(DockCoordinator.LocalDrag)NativeDragView.states.get(0);
+            coordinator.acceptDrag(localEvent(DragEvent.ACTION_DRAG_ENDED,local,0,0));
+            assertNull(ReflectionHelpers.getField(overlay,"forwarding"));
+            assertEquals("text",DockCoordinator.clipboardSuggestion().get("kind"));
+        } finally {overlay.hide();}
     }
 
     @Test @Config(sdk=34,shadows=NativeDragView.class)

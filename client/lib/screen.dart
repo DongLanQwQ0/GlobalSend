@@ -1079,6 +1079,7 @@ class _SendScreenState extends State<SendScreen>
                   key: const ValueKey('add-clipboard'),
                   style: headerActionStyle,
                   onPressed: working ? null : () => perform(c.stageClipboard),
+                  onLongPress: clipboardDragAction(),
                   icon: const AppIcon(Icons.content_paste_rounded, size: 19),
                   label: const Text('剪贴板'),
                 ),
@@ -1903,6 +1904,7 @@ class _SendScreenState extends State<SendScreen>
             Icons.content_paste_rounded,
             () => perform(c.stageClipboard),
             key: 'add-clipboard',
+            onLongPress: clipboardDragAction(),
           ),
           const SizedBox(width: Ui.space0),
           actionTile(
@@ -2196,6 +2198,7 @@ class _SendScreenState extends State<SendScreen>
     VoidCallback onTap, {
     required String key,
     bool quiet = false,
+    VoidCallback? onLongPress,
   }) => Expanded(
     child: TextButton(
       key: ValueKey(key),
@@ -2208,6 +2211,7 @@ class _SendScreenState extends State<SendScreen>
         shape: const RoundedRectangleBorder(borderRadius: Ui.fieldRadius),
       ),
       onPressed: working ? null : onTap,
+      onLongPress: working ? null : onLongPress,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -2551,6 +2555,16 @@ class _SendScreenState extends State<SendScreen>
     );
   }
 
+  VoidCallback? clipboardDragAction([String? revision]) =>
+      working || Theme.of(context).platform != TargetPlatform.android
+      ? null
+      : () => perform(() async {
+          await DockPlatform.dragClipboardSuggestion(
+            revision ?? clipboardSuggestions.item?.revision ?? '',
+          );
+          await clipboardSuggestions.refresh();
+        });
+
   Widget clipboardSuggestionTile(ClipboardSuggestion suggestion) => Material(
     key: const ValueKey('clipboard-suggestion'),
     color: Ui.colors(context).accentSoft,
@@ -2565,6 +2579,7 @@ class _SendScreenState extends State<SendScreen>
         children: [
           Positioned.fill(
             child: InkWell(
+              onLongPress: clipboardDragAction(suggestion.revision),
               onTap: working
                   ? null
                   : () => perform(() async {

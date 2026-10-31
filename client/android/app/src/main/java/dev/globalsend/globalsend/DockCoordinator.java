@@ -114,6 +114,10 @@ final class DockCoordinator {
                         result.success(clipboardSuggestions.refresh(attached.get()!=null && attached.get().hasWindowFocus()));break;
                     case "dismissClipboardSuggestion":
                         clipboardSuggestions.dismiss(call.argument("revision"));result.success(null);break;
+                    case "dragClipboardSuggestion":
+                        View clipboardSource=findFlutterView(host().findViewById(android.R.id.content));
+                        if(clipboardSource==null || !host().hasWindowFocus())throw new IllegalStateException("请在发送页长按剪贴板建议");
+                        result.success(startClipboardDrag(clipboardSource,call.argument("revision"),session -> {},accepted -> {},false));break;
                     case "mediaSuggestions": ReceiveOverlay.mediaSuggestionSnapshot(result::success);break;
                     case "mainMediaActive": ReceiveOverlay.mainMediaActive(Boolean.TRUE.equals(call.argument("active")));result.success(null);break;
                     case "mainMediaShowing": ReceiveOverlay.mainMediaShowing(call.argument("ids"),Boolean.TRUE.equals(call.argument("interacting")));result.success(null);break;
@@ -570,6 +574,31 @@ final class DockCoordinator {
         coordinator.consume(clip,null,completed);
         return true;
     }
+    /** Read only for the held gesture; keep URI references instead of importing a queued copy. */
+    static boolean startClipboardDrag(View source,String revision,java.util.function.Consumer<LocalDrag> starting,
+            java.util.function.Consumer<Boolean> completed,boolean rootHandlesDrag) throws Exception {
+        DockCoordinator coordinator=current.get();
+        if(coordinator==null || coordinator.disposed || activeExport!=null)return false;
+        // Do not refresh/rebuild the suggestion card underneath this held pointer.
+        // Read the clipboard just like a paste tap; acknowledge only the held revision.
+        ClipData clip=coordinator.context.getSystemService(ClipboardManager.class).getPrimaryClip();
+        if(clip==null)return false;
+        List<String> paths=new ArrayList<>(),texts=new ArrayList<>();
+        for(int i=0;i<clip.getItemCount();i++) {
+            ClipData.Item item=clip.getItemAt(i);
+            if(item.getUri()!=null)paths.add(item.getUri().toString());
+            else if(item.getText()!=null && item.getText().length()>0)texts.add(item.getText().toString());
+        }
+        if(paths.isEmpty() && texts.isEmpty())return false;
+        LocalDrag session=new LocalDrag(source,paths,texts);
+        session.completed=accepted -> {
+            completed.accept(accepted);
+            // A successful drop into our own shelf also confirms this suggestion.
+            if(session.accepted)coordinator.clipboardSuggestions.dismiss(revision);
+        };
+        starting.accept(session);
+        return startDrag(source,session,"剪贴板",rootHandlesDrag);
+    }
     static boolean importToShelf(DragEvent event, java.util.function.Consumer<Map<String, Object>> completed) {
         DockCoordinator coordinator = current.get();
         if (coordinator == null || coordinator.disposed) return false;
@@ -712,10 +741,14 @@ final class DockCoordinator {
     }
     static boolean startDrag(View view,List<String> paths,List<String> texts,String label,
             java.util.function.Consumer<Boolean> completed,boolean rootHandlesDrag) throws Exception {
-        if (activeExport != null) return false; // A second long press must not re-enter a live system drag.
-        traceDrag("begin export source="+view.getClass().getSimpleName());
         LocalDrag session = new LocalDrag(view, paths,texts);
         session.completed = completed;
+        return startDrag(view,session,label,rootHandlesDrag);
+    }
+    private static boolean startDrag(View view,LocalDrag session,String label,boolean rootHandlesDrag) throws Exception {
+        if (activeExport != null) return false; // A second long press must not re-enter a live system drag.
+        traceDrag("begin export source="+view.getClass().getSimpleName());
+        List<String> paths=session.paths,texts=session.texts;
         List<ClipData.Item> items=new ArrayList<>();java.util.LinkedHashSet<String> types=new java.util.LinkedHashSet<>();
         int flags = View.DRAG_FLAG_GLOBAL;
         for(String path:paths) {
