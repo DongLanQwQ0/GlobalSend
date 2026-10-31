@@ -1,6 +1,6 @@
 # Android 文件选择器可见性（1.0.60+77，已出包）
 
-Windows 已更新重启，Android APK已构建，手机断开未安装。20项原生目录/发布检查、6项Dart目录检查及原模拟器实际系统验证通过：TXT/PDF/JPEG/PNG索引大小、类型正确；本地中心经生产控制器接收71字节TXT后，系统file picker直接显示并可选中读取，检查器没有额外扫描或移动它。实体手机更新后确认“接收→直接进入Download/GlobalSend→可选中读取”，不能把模拟器结果记作厂商真机通过。详见 [接收可见性](ANDROID_FILE_VISIBILITY.md)。
+Windows 已更新重启，手机已保留数据覆盖安装并读回77版。20项原生目录/发布检查、6项Dart目录检查及原模拟器实际系统验证通过：TXT/PDF/JPEG/PNG索引大小、类型正确；本地中心经生产控制器接收71字节TXT后，系统file picker直接显示并可选中读取，检查器没有额外扫描或移动它。实体手机仍需确认“接收→直接进入Download/GlobalSend→可选中读取”，不能把模拟器结果记作厂商真机通过。详见 [接收可见性](ANDROID_FILE_VISIBILITY.md)。
 
 # 剪贴板建议（1.0.59+76，已出包）
 

@@ -10,7 +10,7 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows / Android 最新本地版为 **1.0.60+77**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`；Android 新包已构建，手机断开未安装，最后确认安装的是 1.0.58+74。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
+Windows / Android 最新本地版为 **1.0.60+77**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`；手机已保留数据覆盖安装并读回77版。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
 
 Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.60-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
