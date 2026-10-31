@@ -2,7 +2,7 @@
 
 按用户新要求将媒体建议的总显示时长从8秒改为30秒，沿用81版实际可见才计时、操作时暂停的规则。点击建议直接成为正式暂存，不再打开文件；未确认建议也可直接长按系统拖放，系统确认投放成功后立即移除引用。加入暂存后取消建议期限，沿用正式暂存成功后3秒移除与轻点取消。取消拖放保留，回投自己的暂存区不会误删。升级保留已用显示时间，扩充到30秒；iOS主应用媒体建议默认时长同步为30秒。
 
-41项Android框架与10项Dart检查通过。82版Windows完整包已更新到E:\Programs\GlobalSend并重启，读回1.0.65+82、PID3052；精简APK为16,340,856字节，两端无打包字体。构建完成后手机已不在ADB或mDNS设备中，82版安装返回device not found；手机最后确认安装的是81版（12:56:42），不能将其视为82版实测。APK保留于 `artifacts/releases/GlobalSend-1.0.65-android-arm64-v8a.apk`，详细发行与验证见 `artifacts/reports/suggestions82-delivery.json`。未操作手机或Windows界面，不上传安装包，不启动IPA构建。
+41项Android框架与10项Dart检查通过。82版Windows完整包已更新到E:\Programs\GlobalSend并重启，读回1.0.65+82、PID3052；精简APK为16,340,856字节，两端无打包字体。手机重新连接到10.196.97.162:36737后，覆盖安装返回Success，13:15:33读回versionName=1.0.65、versionCode=82，保留数据；具体交互仍待用户验收。APK保留于 `artifacts/releases/GlobalSend-1.0.65-android-arm64-v8a.apk`，详细发行与验证见 `artifacts/reports/suggestions82-delivery.json`。未操作手机或Windows界面，不上传安装包，不启动IPA构建。
 
 ## 历史修复：建议只消耗实际可见时间 1.0.64+81
 
