@@ -13,4 +13,10 @@ Windows 发送页内的剪贴板建议卡片是投放排除区。悬停该矩形
 - `client/test/windows_recommendation_drag_test.dart`：鼠标与触屏建议导出期间设备区域保持启用、目标高亮、定向批次发送回归通过。首次测试引擎提前退出无断言结果；详细日志运行通过，日志在 `artifacts/tmp/windows-clipboard-exclusion88/device-regression-verbose.log`。
 - 遵照用户先前要求，未操作真实 Windows 桌面进行投放验收。手机、Web、服务器及 IPA 不在本次改动范围。
 
-构建与安装结果将在完成后补充。
+## 已交付
+
+- 源码：`7874cac2be843f3f12d5c31f28625bb4bbd634b7`。
+- `npm run release:local -- -WindowsOnly` 成功，完整替换并重启 `E:\Programs\GlobalSend`；实际文件版本 `1.0.71+88`，PID 29144，未打包字体。
+- 本地包：`artifacts/releases/GlobalSend-1.0.71-windows-x64.zip`，22,412,144 字节。
+- 构建日志和实际进程证据：`artifacts/tmp/windows-clipboard-exclusion88/release-build.log`、`windows-version.json`。
+- 手机维持已确认的 `1.0.68+85`，本次未访问 ADB、未更新 Web 或服务器、未发布新的 GitHub Release。
