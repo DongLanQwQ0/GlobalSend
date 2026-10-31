@@ -88,6 +88,7 @@ class DropTarget final : public IDropTarget {
  private:
   bool Outgoing() const { return callbacks_.outgoing_drag && callbacks_.outgoing_drag(); }
   bool Allows(POINTL point) const {
+    if (callbacks_.excluded_at && callbacks_.excluded_at(point)) return false;
     return !Outgoing() || (callbacks_.local_drop_at && callbacks_.local_drop_at(point));
   }
   void Hover(bool active, POINTL point = {}) {

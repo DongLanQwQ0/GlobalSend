@@ -143,6 +143,7 @@ class _SendScreenState extends State<SendScreen>
   bool _receiptPresentedExternally = false;
   bool _shelfPermissionPending = false;
   final _nativeQueueKey = GlobalKey();
+  final _clipboardSuggestionDropKey = GlobalKey();
   final _nativeDeviceKeys = <String, GlobalKey>{};
   final _savedFilesKey = GlobalKey<SavedFilesScreenState>();
   bool? _allFilesAccess;
@@ -1349,6 +1350,7 @@ class _SendScreenState extends State<SendScreen>
       return window;
     return NativeQueueDropHost(
       target: _nativeQueueKey,
+      excludedTargets: [_clipboardSuggestionDropKey],
       deviceTargets: _nativeDeviceKeys,
       serverKey: c.profile?.key ?? '',
       enabled:
@@ -2543,16 +2545,38 @@ class _SendScreenState extends State<SendScreen>
                                         // key keeps the state with the entry, so a
                                         // rebuild never replays the animation.
                                         final identity = queueIdentities[index];
+                                        final card = UiAppear(
+                                          animate: _seenQueueEntries.add(
+                                            identity,
+                                          ),
+                                          child: tile,
+                                        );
+                                        final excludeDrop =
+                                            Theme.of(context).platform ==
+                                                TargetPlatform.windows &&
+                                            clipboardSuggestion != null &&
+                                            identity ==
+                                                (
+                                                  'clipboard',
+                                                  clipboardSuggestion.revision,
+                                                );
                                         return KeyedSubtree(
                                           key: ValueKey<Object>(identity),
                                           child: AspectRatio(
                                             aspectRatio: 1,
-                                            child: UiAppear(
-                                              animate: _seenQueueEntries.add(
-                                                identity,
-                                              ),
-                                              child: tile,
-                                            ),
+                                            // The entire card slot is excluded,
+                                            // including during its entrance animation.
+                                            child: excludeDrop
+                                                ? DragTarget<DockEntry>(
+                                                    key:
+                                                        _clipboardSuggestionDropKey,
+                                                    onWillAcceptWithDetails: (
+                                                      _,
+                                                    ) => true,
+                                                    onAcceptWithDetails: (_) {},
+                                                    builder: (_, _, _) => card,
+                                                  )
+                                                : card,
                                           ),
                                         );
                                       },

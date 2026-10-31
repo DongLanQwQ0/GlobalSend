@@ -3,6 +3,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -91,6 +92,11 @@ int main() {
   assert(region.Contains(POINT{30, 60}, SIZE{950, 650}));
   assert(!region.Contains(POINT{230, 60}, SIZE{950, 650}));
   assert(!region.Contains(POINT{30, 60}, SIZE{1000, 650}));
+  region.exclusions = {RECT{25, 50, 80, 100}};
+  assert(region.Excludes(POINT{30, 60}, SIZE{950, 650}));
+  assert(!region.Contains(POINT{30, 60}, SIZE{950, 650}));
+  assert(region.Contains(POINT{100, 60}, SIZE{950, 650}));
+  assert(!region.Excludes(POINT{30, 60}, SIZE{1000, 650}));
   region.enabled = false;
   assert(!region.Contains(POINT{30, 60}, SIZE{950, 650}));
   std::wstring long_path = L"\\\\?\\F:\\长目录\\";
@@ -198,6 +204,33 @@ int main() {
   positioned->DragLeave();
   assert(!positions.back().first);
   positioned->Release();
+  // Both external and returning exports reject only the clipboard rectangle.
+  auto* excluded = CreateGlobalSendDropTarget({{},
+    [&](GlobalSendDroppedContent) { assert(false && "excluded drop reached importer"); },
+    [&] { return outgoing; },
+    [](POINTL point) { return point.x >= 20 && point.x < 220; }, {},
+    [](POINTL point) { return point.x >= 25 && point.x < 80 && point.y >= 50 && point.y < 100; }});
+  for (bool local : {false, true}) {
+    outgoing = local;
+    effect = DROPEFFECT_COPY;
+    excluded->DragEnter(data, 0, POINTL{100, 60}, &effect);
+    assert(effect == DROPEFFECT_COPY);
+    effect = DROPEFFECT_COPY;
+    excluded->DragOver(0, POINTL{30, 60}, &effect);
+    assert(effect == DROPEFFECT_NONE);
+    effect = DROPEFFECT_COPY;
+    excluded->DragOver(0, POINTL{100, 60}, &effect);
+    assert(effect == DROPEFFECT_COPY);
+    effect = DROPEFFECT_COPY;
+    excluded->Drop(data, 0, POINTL{30, 60}, &effect);
+    assert(effect == DROPEFFECT_NONE);
+  }
+  outgoing = false;
+  effect = DROPEFFECT_COPY;
+  excluded->DragEnter(data, 0, POINTL{500, 500}, &effect);
+  assert(effect == DROPEFFECT_COPY); // external whole-window input is preserved
+  excluded->DragLeave();
+  excluded->Release();
   assert(target->QueryInterface(IID_IUnknown, reinterpret_cast<void**>(&identity)) == S_OK);
   assert(identity->Release() == 1);
   assert(target->Release() == 0);

@@ -51,12 +51,14 @@ class SystemBridge {
     Rect? bounds, {
     Size? surface,
     List<Map<String, Object>> devices = const [],
+    List<Map<String, Object>> exclusions = const [],
     String serverKey = '',
   }) async {
     if (!Platform.isWindows) return;
     bounds ??= devices.isEmpty ? null : Rect.zero;
     await channel.invokeMethod<void>('queueDropBounds', {
       'enabled': bounds != null,
+      if (exclusions.isNotEmpty) 'exclusions': exclusions,
       if (devices.isNotEmpty || serverKey.isNotEmpty) ...{
         'devices': devices,
         'serverKey': serverKey,

@@ -180,6 +180,12 @@ bool LocalDropAt(POINTL screen) {
   if (!ScreenToClient(import_view, &point) || !GetClientRect(import_view, &client)) return false;
   return queue_drop.Contains(point, SIZE{client.right, client.bottom}) || !DeviceDropAt(screen).empty();
 }
+bool ExcludedDropAt(POINTL screen) {
+  if (!import_view || !IsWindowVisible(import_view)) return false;
+  POINT point{screen.x, screen.y}; RECT client{};
+  if (!ScreenToClient(import_view, &point) || !GetClientRect(import_view, &client)) return false;
+  return queue_drop.Excludes(point, SIZE{client.right, client.bottom});
+}
 bool ClipboardBytes(UINT format, const void* bytes, size_t count) {
   HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, count);
   if (!memory) return false;
@@ -527,6 +533,15 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       result->Success();
     } else if (call.method_name() == "queueDropBounds") {
       device_drop_regions.clear();
+      queue_drop.exclusions.clear();
+      const auto exclusions = arguments->find(Value("exclusions"));
+      if (exclusions != arguments->end()) if (const auto* values = std::get_if<flutter::EncodableList>(&exclusions->second)) {
+        for (const auto& value : *values) if (const auto* region = std::get_if<Map>(&value)) {
+          queue_drop.exclusions.push_back(RECT{
+            static_cast<LONG>(std::floor(Number(*region, "left"))), static_cast<LONG>(std::floor(Number(*region, "top"))),
+            static_cast<LONG>(std::ceil(Number(*region, "right"))), static_cast<LONG>(std::ceil(Number(*region, "bottom")))});
+        }
+      }
       drop_server_key = String(*arguments, "serverKey");
       const auto devices = arguments->find(Value("devices"));
       if (devices != arguments->end()) if (const auto* values = std::get_if<flutter::EncodableList>(&devices->second)) {
@@ -595,7 +610,7 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
   });
   if (ole_initialized) {
     drop_target = CreateGlobalSendDropTarget({PublishDrag, PublishDrop,
-      [] { return outgoing_drag; }, LocalDropAt, PublishDragAt}, window);
+      [] { return outgoing_drag; }, LocalDropAt, PublishDragAt, ExcludedDropAt}, window);
     // The registered desktop_drop plugin owns this same Flutter child HWND.
     // It remains installed for its normal lifecycle, but imports are handled
     // here for both Unicode text and files across the complete client area.
