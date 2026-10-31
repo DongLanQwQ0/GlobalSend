@@ -16,4 +16,11 @@
 - 实际控件渲染已检查：`render/incoming-device-mode.jpg`（Android），`windows/device-mode.jpg`（Windows），均在上述任务目录内。Flutter 测试引擎出现过无断言的提前退出；分开用例并保留阶段日志后通过。
 - 本次未控制真实 Windows 桌面或手机进行新手势验收；之前的手机界面操作暂停仍保留。
 
-构建与本地交付结果待补充。安装包不上传中心服务器；不构建 IPA。
+## 本地交付
+
+- 源码：`2bbb6550f461382e55243910c5ad1b6d7f8961ff`。Windows 桥接坐标已显式编码为 codec 支持的整数类型，原生构建通过。
+- `npm run release:local -- -DeferPhone` 成功，完整替换并重启 `E:\Programs\GlobalSend`；实际文件版本 `1.0.72+89`，PID 19660。
+- Android APK：`artifacts/releases/GlobalSend-1.0.72-android-arm64-v8a.apk`，16,370,000 字节。包元数据确认 `versionName=1.0.72`、`versionCode=89`。尚未推送或安装，手机仍保留最后确认的 `1.0.68+85`。
+- Windows ZIP：`artifacts/releases/GlobalSend-1.0.72-windows-x64.zip`，22,420,915 字节。两个包均通过无字体文件检查。
+- 构建及实际产物证据：`artifacts/tmp/android-dock-hover89/release-build.log`、`delivery.json`、`apk-version.txt`。
+- 待手机操作恢复后，覆盖安装 APK 并进行新悬停手势的实机验收。未操作真实 Windows 桌面做投放测试，未更新 Web/服务器，安装包未上传中心服务器，也未构建 IPA。
