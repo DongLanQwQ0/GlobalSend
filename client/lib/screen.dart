@@ -158,6 +158,7 @@ class _SendScreenState extends State<SendScreen>
     feed: Platform.isAndroid ? AndroidRecentPhotoFeed() : null,
   );
   final _photoKeys = <String, GlobalKey>{};
+  final _seenQueueEntries = <Object>{};
   bool _photoTouch = false, _photoScrolling = false;
   final clipboardSuggestions = ClipboardSuggestions();
   bool get loggedIn => c.api?.token.isNotEmpty == true;
@@ -2228,14 +2229,19 @@ class _SendScreenState extends State<SendScreen>
   Widget queuePanel() {
     final count = c.stagedFiles.length + c.stagedTexts.length;
     final clipboardSuggestion = clipboardSuggestions.item;
-    final suggestions = <({int at, Widget tile})>[
+    final suggestions = <({Object id, int at, Widget tile})>[
       if (clipboardSuggestion != null)
         (
+          id: ('clipboard', clipboardSuggestion.revision),
           at: clipboardSuggestion.suggestedAt,
           tile: clipboardSuggestionTile(clipboardSuggestion),
         ),
       for (final photo in recentPhotos.items)
-        (at: photo.suggestedAt, tile: photoSuggestionTile(photo)),
+        (
+          id: ('media', photo.id),
+          at: photo.suggestedAt,
+          tile: photoSuggestionTile(photo),
+        ),
     ]..sort((a, b) => b.at.compareTo(a.at));
     final failed = c.failedOutgoingFiles;
     final active = c.dock
@@ -2252,6 +2258,13 @@ class _SendScreenState extends State<SendScreen>
               ].contains(item.status),
         )
         .toList();
+    final queueIdentities = <Object>[
+      for (final path in c.stagedFiles) ('file', path),
+      for (final text in c.stagedTexts) ('text', text),
+      for (final entry in active) ('active', entry.id),
+      for (final suggestion in suggestions) suggestion.id,
+    ];
+    _seenQueueEntries.retainAll(queueIdentities);
     return KeyedSubtree(
       key: _nativeQueueKey,
       child: DragTarget<DockEntry>(
@@ -2444,6 +2457,12 @@ class _SendScreenState extends State<SendScreen>
                                     thumbVisibility: true,
                                     child: ListView.separated(
                                       key: const ValueKey('send-queue-list'),
+                                      findItemIndexCallback: (key) {
+                                        final index = key is ValueKey<Object>
+                                            ? queueIdentities.indexOf(key.value)
+                                            : -1;
+                                        return index < 0 ? null : index;
+                                      },
                                       controller: queueScroll,
                                       scrollDirection: Axis.horizontal,
                                       padding: const EdgeInsets.fromLTRB(
@@ -2482,19 +2501,17 @@ class _SendScreenState extends State<SendScreen>
                                         // fades in once instead of jumping in; the
                                         // key keeps the state with the entry, so a
                                         // rebuild never replays the animation.
-                                        final identity =
-                                            index < c.stagedFiles.length
-                                            ? 'file:${c.stagedFiles[index]}'
-                                            : index < count
-                                            ? 'text:${index - c.stagedFiles.length}'
-                                            : index < count + active.length
-                                            ? 'active:${index - count}'
-                                            : 'suggestion:${index - count - active.length}';
+                                        final identity = queueIdentities[index];
                                         return KeyedSubtree(
-                                          key: ValueKey('queue-entry-$identity'),
+                                          key: ValueKey<Object>(identity),
                                           child: AspectRatio(
                                             aspectRatio: 1,
-                                            child: UiAppear(child: tile),
+                                            child: UiAppear(
+                                              animate: _seenQueueEntries.add(
+                                                identity,
+                                              ),
+                                              child: tile,
+                                            ),
                                           ),
                                         );
                                       },

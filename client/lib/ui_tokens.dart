@@ -798,10 +798,16 @@ Widget uiDisclosure({
 /// user just added reads as arriving instead of appearing out of nowhere. The
 /// scale stays within 2% so layout, hit testing and tests keep their geometry.
 class UiAppear extends StatefulWidget {
-  const UiAppear({super.key, required this.child, this.beginScale = .98});
+  const UiAppear({
+    super.key,
+    required this.child,
+    this.beginScale = .98,
+    this.animate = true,
+  });
 
   final Widget child;
   final double beginScale;
+  final bool animate;
 
   @override
   State<UiAppear> createState() => _UiAppearState();
@@ -812,6 +818,7 @@ class _UiAppearState extends State<UiAppear>
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: Ui.durationNormal,
+    value: widget.animate ? 0 : 1,
   );
   late final CurvedAnimation _curve = CurvedAnimation(
     parent: _controller,
@@ -821,7 +828,7 @@ class _UiAppearState extends State<UiAppear>
   @override
   void initState() {
     super.initState();
-    _controller.forward();
+    if (widget.animate) _controller.forward();
   }
 
   @override

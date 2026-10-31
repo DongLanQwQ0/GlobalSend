@@ -62,6 +62,8 @@
 .queue-empty>svg{width:var(--space-4);height:var(--space-4)}
 .staged-item{position:relative;display:flex;flex-direction:column;aspect-ratio:1;min-width:0;overflow:hidden;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface)}
 .staged-item:hover{border-color:color-mix(in srgb,var(--green) 30%,var(--line))}
+.queue-appear{transform-origin:center;animation:queue-entry-in var(--duration) var(--ease) both}
+@keyframes queue-entry-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
 .staged-description{display:flex;flex-direction:column;gap:var(--space-0);min-width:0;min-height:0;flex:1;padding:var(--space-1);border-radius:0;text-align:left;font-weight:400;overflow:hidden;transition:background-color var(--duration-fast) var(--ease),color var(--duration-fast) var(--ease)}
 .staged-description:hover{background:var(--soft)}
 .staged-description:active{background:color-mix(in srgb,var(--soft) 70%,var(--surface))}

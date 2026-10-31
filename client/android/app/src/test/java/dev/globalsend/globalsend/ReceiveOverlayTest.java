@@ -15,6 +15,51 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34, manifest=Config.NONE)
 public class ReceiveOverlayTest {
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void continuousEdgeResizeKeepsDecodedPicturesAndScrollPosition() throws Exception {
+        Context context=RuntimeEnvironment.getApplication();
+        java.io.File file=new java.io.File(context.getCacheDir(),"resize-picture.jpg");
+        android.graphics.Bitmap source=android.graphics.Bitmap.createBitmap(240,160,android.graphics.Bitmap.Config.ARGB_8888);
+        source.eraseColor(0xff347aad);
+        try(java.io.FileOutputStream output=new java.io.FileOutputStream(file)) {source.compress(android.graphics.Bitmap.CompressFormat.JPEG,90,output);}source.recycle();
+        ReceiveOverlay overlay=receiver();
+        try {
+            for(int i=0;i<3;i++)overlay.show(new ReceiveNotifications.Receipt("image-"+i,"1","fixture",null,file.getName(),file.getPath(),1),i+1,shown -> {});
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            View root=(View)field(overlay,"root");draw(root);
+            LinearLayout row=(LinearLayout)field(overlay,"row");
+            android.widget.FrameLayout card=(android.widget.FrameLayout)row.getChildAt(0);
+            android.widget.ImageView image=(android.widget.ImageView)card.getChildAt(0);
+            long deadline=System.currentTimeMillis()+5000;
+            while(image.getDrawable()==null && System.currentTimeMillis()<deadline) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();Thread.sleep(5);
+            }
+            assertNotNull(image.getDrawable());Object decoded=image.getDrawable();
+            android.widget.HorizontalScrollView scroll=(android.widget.HorizontalScrollView)field(overlay,"scroll");
+            scroll.scrollTo(30,0);int offset=scroll.getScrollX();
+            WindowManager.LayoutParams size=(WindowManager.LayoutParams)root.getLayoutParams();
+            int startHeight=size.height;float x=size.width/2f,y=size.height-1;
+            root.dispatchTouchEvent(android.view.MotionEvent.obtain(0,0,android.view.MotionEvent.ACTION_DOWN,x,y,0));
+            for(int step=1;step<=4;step++) {
+                root.dispatchTouchEvent(android.view.MotionEvent.obtain(0,step*16,android.view.MotionEvent.ACTION_MOVE,x,y+step*8,0));
+                draw(root);
+                assertSame("Resizing must retain the card instead of rebuilding it",card,row.getChildAt(0));
+                assertSame("The already decoded bitmap must remain visible on every move",decoded,image.getDrawable());
+                assertEquals(card.getWidth(),card.getHeight());assertEquals(card.getWidth(),image.getWidth());
+                assertEquals(offset,scroll.getScrollX());
+                android.graphics.Bitmap frame=android.graphics.Bitmap.createBitmap(size.width,size.height,android.graphics.Bitmap.Config.ARGB_8888);
+                root.draw(new android.graphics.Canvas(frame));
+                int[] origin=new int[2],host=new int[2];image.getLocationOnScreen(origin);root.getLocationOnScreen(host);
+                int color=frame.getPixel(origin[0]-host[0]+image.getWidth()/2,origin[1]-host[1]+image.getHeight()/2);
+                assertTrue("The real resized frame still contains the blue picture",android.graphics.Color.blue(color)>android.graphics.Color.red(color)+40);
+                String output=System.getenv("GLOBALSEND_TEST_ARTIFACTS");
+                if(output!=null)try(java.io.FileOutputStream out=new java.io.FileOutputStream(new java.io.File(output,"resize-step-"+step+".jpg"))) {frame.compress(android.graphics.Bitmap.CompressFormat.JPEG,80,out);}frame.recycle();
+            }
+            assertTrue(size.height>startHeight);
+            root.dispatchTouchEvent(android.view.MotionEvent.obtain(0,80,android.view.MotionEvent.ACTION_UP,x,y+32,0));
+            assertSame(decoded,image.getDrawable());
+        } finally {overlay.hide();}
+    }
     @Test public void handleTapKeepsHostFocusWhenAppIsAlreadyForeground() throws Exception {
         ReceiveOverlay overlay=receiver();
         try {

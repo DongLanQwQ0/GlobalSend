@@ -1,4 +1,5 @@
 import './style.css';
+import {QueueMotion} from './queue_motion';
 import { clipboardSuggestion } from './clipboard_suggestion';
 import type { ClipboardSuggestionKind } from './clipboard_suggestion';
 import { folderCards, folderMembers, folderRoot, isFolderRoot, summarizeFolder } from './folder_cards';
@@ -173,6 +174,7 @@ class GlobalSend {
   rtcProbes:RtcProbeMonitor|null=null;
   private rtcProbeScope='';
   picked: File[] = [];
+  private readonly queueMotion=new QueueMotion();
   stagedTexts:{id:string;text:string;target?:string}[]=[];
   editingStagedId='';
   queueSending=false;
@@ -2333,7 +2335,7 @@ class GlobalSend {
     let selection: [number|null,number|null,'forward'|'backward'|'none'|null]|null = null;
     if (active && ['INPUT','TEXTAREA'].includes(active.tagName)) selection = [active.selectionStart,active.selectionEnd,active.selectionDirection];
     const scroll = document.querySelector('.dock-items')?.scrollTop || 0;
-    const queueScroll=document.querySelector('.staged-list')?.scrollTop || 0,deviceScroll=document.querySelector('.target-devices')?.scrollTop || 0,historyScroll=document.querySelector('.history-items')?.scrollTop || 0;
+    const queueScroll=document.querySelector('.staged-list')?.scrollTop || 0,queueScrollX=document.querySelector('.staged-list')?.scrollLeft || 0,deviceScroll=document.querySelector('.target-devices')?.scrollTop || 0,historyScroll=document.querySelector('.history-items')?.scrollTop || 0;
     const editorScroll=this.editorElement?.scrollTop || 0;
     const readerScroll=this.viewedText()?.displayElement?.scrollTop || this.viewedText()?.element?.scrollTop || 0;
     const receiptScroll=document.querySelector('.receipt-batch-grid')?.scrollTop || 0;
@@ -2348,6 +2350,7 @@ class GlobalSend {
     else if(this.modal==='receipt'){const receipt=document.querySelector('.receipt-backdrop');if(receipt)document.body.append(receipt);}
     this.mountEditor();this.mountTextViewer();this.mountAutoAcceptLimit();this.shared.mount();this.bind();this.fileLibrary.bind();this.mountPreviews();
     this.animateWorkspaceView();
+    this.queueMotion.apply(app,[...this.stagedTexts.map(item=>'text:'+item.id),...this.picked.map(file=>'file:'+this.pickedKey(file)),...this.failedSendFiles().map(item=>'failed:'+item.key),...(this.clipboardSuggestion?['clipboard:'+this.clipboardSuggestion]:[])]);
     const modalKey=this.modal || '';
     const backdrop=document.querySelector<HTMLElement>('.modal-backdrop');
     if(modalKey!==this.renderedModalKey)this.modalOpenedAt=Date.now();
@@ -2366,7 +2369,7 @@ class GlobalSend {
       if (next) { next.focus({preventScroll:true}); if (selection && selection[0] !== null) { try { next.setSelectionRange(selection[0],selection[1],selection[2] || 'none'); } catch { /* Some inputs do not expose a text selection. */ } } }
     }
     const dock = document.querySelector('.dock-items'); if (dock) dock.scrollTop = scroll;
-    const queue=document.querySelector('.staged-list');if(queue)queue.scrollTop=queueScroll;const deviceList=document.querySelector('.target-devices');if(deviceList)deviceList.scrollTop=deviceScroll;const history=document.querySelector('.history-items');if(history)history.scrollTop=historyScroll;
+    const queue=document.querySelector('.staged-list');if(queue){queue.scrollTop=queueScroll;queue.scrollLeft=queueScrollX;}const deviceList=document.querySelector('.target-devices');if(deviceList)deviceList.scrollTop=deviceScroll;const history=document.querySelector('.history-items');if(history)history.scrollTop=historyScroll;
     if(this.editorElement)this.editorElement.scrollTop=editorScroll;
     const reader=this.viewedText()?.displayElement || this.viewedText()?.element;if(reader)reader.scrollTop=readerScroll;
     const receiptGrid=document.querySelector('.receipt-batch-grid');if(receiptGrid)receiptGrid.scrollTop=receiptScroll;

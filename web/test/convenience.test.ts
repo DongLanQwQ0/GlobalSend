@@ -107,7 +107,9 @@ function fixture() {
     close() { this.readyState=3;this.onclose?.(); }
     send() {}
   }
-  const {document,Event,HTMLTextAreaElement}=parseHTML(pageTemplate).window;
+  const {document,Event,HTMLElement,HTMLTextAreaElement}=parseHTML(pageTemplate).window;
+  // Linkedom has no layout engine; rendered queue nodes are visible in this fixture.
+  HTMLElement.prototype.getClientRects=function(){return [{width:120,height:120}] as any;};
   // linkedom supplies the real node/event lifecycle but no visual selection
   // engine. Model the standard textarea selection API for cursor assertions.
   HTMLTextAreaElement.prototype.setSelectionRange=function(start:number,end:number,direction='none'){

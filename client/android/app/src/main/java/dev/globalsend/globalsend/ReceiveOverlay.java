@@ -736,6 +736,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         int side = Math.max(1, expandedHeight - dp(8));
         if (displayed().isEmpty() && !shelfVisible) {
             TextView empty = label(shelfVisible ? "拖入文件、图片或文字" : "暂无接收内容", 13, appearance.muted);
+            empty.setTag("empty-receive");
             empty.setGravity(Gravity.CENTER);
             row.addView(empty, new LinearLayout.LayoutParams(expandedWidth - dp(43), side));
         }
@@ -1368,7 +1369,26 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if((edges&8)!=0)bottom=clamp(startY+startHeight+dy,top+minH,Math.min(bounds.bottom,top+maxH));
         layout.x=left;layout.y=top;layout.width=right-left;layout.height=bottom-top;
         preferredWidth=expandedWidth=layout.width;preferredHeight=expandedHeight=layout.height;
-        visualBounds=new Rect(left,top,right,bottom);windows.updateViewLayout(root,layout);render(false);
+        visualBounds=new Rect(left,top,right,bottom);surfaceAnchored=true;
+        windows.updateViewLayout(root,layout);
+        // Resize the existing view tree. Rebuilding it here clears every image
+        // and queues another decode for each pointer movement.
+        surface.setLayoutParams(new FrameLayout.LayoutParams(layout.width,layout.height));
+        expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth,expandedHeight,
+            Gravity.TOP | (edgeRight?Gravity.LEFT:Gravity.RIGHT)));
+        int side=Math.max(1,expandedHeight-dp(8));
+        boolean hasContent=displayed().values().stream().anyMatch(item -> !shelfVisible || !shelf.isSuggested(item.id));
+        for(int i=0;i<row.getChildCount();i++) {
+            View child=row.getChildAt(i);
+            LinearLayout.LayoutParams size=(LinearLayout.LayoutParams)child.getLayoutParams();
+            int width="empty-receive".equals(child.getTag())?expandedWidth-dp(43):
+                "open-app-space".equals(child.getTag()) && shelfVisible && !hasContent?
+                    Math.max(side,expandedWidth-dp(43)):side;
+            if(size.width!=width || size.height!=side) {
+                size.width=width;size.height=side;child.setLayoutParams(size);
+            }
+        }
+        styleSurface();positionSurface();root.requestLayout();root.invalidate();
     }
     private void installEdgeMove(View view) {
         final boolean[] pulledOpen={false};

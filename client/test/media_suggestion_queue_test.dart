@@ -102,6 +102,29 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      Finder entryFade(String text) => find.descendant(
+        of: find.byKey(ValueKey<Object>(('text', text))),
+        matching: find.byType(FadeTransition),
+      );
+      expect(
+        tester.widget<FadeTransition>(entryFade('已确认的文字')).opacity.value,
+        1,
+      );
+      c.stagedTexts.insert(0, '新插入的文字');
+      c.changed();
+      await tester.pump();
+      expect(
+        tester.widget<FadeTransition>(entryFade('新插入的文字')).opacity.value,
+        lessThan(1),
+      );
+      expect(
+        tester.widget<FadeTransition>(entryFade('已确认的文字')).opacity.value,
+        1,
+      );
+      await tester.pumpAndSettle();
+      c.stagedTexts.removeAt(0);
+      c.changed();
+      await tester.pumpAndSettle();
       final dynamic screen = tester.state(find.byType(SendScreen));
       final RecentPhotos photos = screen.recentPhotos;
       await settleModelIO(tester, photos.setEnabled(true));
