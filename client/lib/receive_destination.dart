@@ -362,7 +362,7 @@ class ReceiveDestination {
   }
 
   static Future<void> openExternal(String location) async {
-    if (location.startsWith('content://')) {
+    if (Platform.isAndroid || location.startsWith('content://')) {
       await channel.invokeMethod<void>('openExternal', {'location': location});
       return;
     }

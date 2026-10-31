@@ -9,16 +9,10 @@ import 'receive_destination.dart';
 /// A content URI is a durable identity; its native descriptor is only a lease.
 /// Ordinary picked files retain their existing File contract.
 class ReceivedFileAccess {
-  ReceivedFileAccess._(
-    this.location,
-    this.file,
-    this._handle, [
-    String? nativeLocation,
-  ]) : _nativeLocation = nativeLocation ?? location;
+  ReceivedFileAccess._(this.location, this.file, this._handle);
   final String location;
   final File file;
   final String _handle;
-  final String _nativeLocation;
   bool _closed = false;
 
   static bool isContentUri(String location) =>
@@ -45,7 +39,6 @@ class ReceivedFileAccess {
     location,
     handle.descriptorOnly ? _DescriptorFile(handle) : File(handle.ioPath),
     handle.handle,
-    handle.location,
   );
 
   bool get descriptorOnly => file is _DescriptorFile;
@@ -67,20 +60,9 @@ class ReceivedFileAccess {
   }
 
   static Future<void> openExternal(String location) async {
-    if (isContentUri(location)) {
+    if (Platform.isAndroid || isContentUri(location)) {
       await ReceiveDestination.openExternal(location);
       return;
-    }
-    if (Platform.isAndroid) {
-      final source = await open(location);
-      try {
-        if (isContentUri(source._nativeLocation)) {
-          await ReceiveDestination.openExternal(source._nativeLocation);
-          return;
-        }
-      } finally {
-        await source.close();
-      }
     }
     final result = await OpenFilex.open(location);
     if (result.type != ResultType.done) throw StateError(result.message);

@@ -92,8 +92,7 @@ final class ReceiveDirectory {
                 case "delete": submit(result, () -> delete(call.argument("location"))); break;
                 case "openExternal":
                     try {
-                        Uri document = contentUri(call.argument("location"));
-                        AndroidFileOpener.open(host(), document);
+                        openExternal(call.argument("location"));
                         result.success(null);
                     } catch (Exception error) { fail(result, error); }
                     break;
@@ -103,6 +102,15 @@ final class ReceiveDirectory {
     }
 
     void attach(Activity activity) { attached = new java.lang.ref.WeakReference<>(activity); }
+    void openExternal(String location) throws Exception {
+        String readable=readableLocation(context,location);
+        // Reuse the packaged FileProvider, not the expiring drag capability.
+        // Its native provider does not depend on the plugin's Flutter channel.
+        Uri document = readable.startsWith("content://") ? contentUri(readable)
+            : androidx.core.content.FileProvider.getUriForFile(context,
+                context.getPackageName()+".fileProvider.com.crazecoder.openfile",new File(readable));
+        AndroidFileOpener.open(host(), document);
+    }
     void detach(Activity activity) { if (attached.get() == activity) attached.clear(); }
     private Activity host() {
         Activity activity = attached.get();

@@ -68,6 +68,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private ForwardDrag forwarding;
     private Runnable sendTargetHover;
     private View hoveredTarget;
+    private String hapticTargetId="";
     private int targetScrollDirection;
     private float targetPointerX, targetPointerY;
     private float targetEdgeDepth, targetScrollVelocity, targetScrollOffset;
@@ -386,6 +387,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if (exportingRoot != null && DockCoordinator.afterExportFrom(exportingRoot, () -> {
             showWhenReady(item, arrival, shown, request);
         })) return;
+        boolean newArrival=arrival>generation;
         generation = arrival;
         boolean newItem = !items.containsKey(item.id);
         if (newItem) {
@@ -396,6 +398,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         boolean newWindow = root == null;
         try {
             if (newWindow) create();
+            if ((newItem || newArrival) && !newWindow && !collapsed) feedbackResult(true);
             if (newItem) {shelfVisible = false;setCollapsed(false);}
             int previousScroll = scroll.getScrollX();
             render();
@@ -498,6 +501,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     doubleTapGesture=false;
                     sizingEdges=collapsed || geometry!=null || hitsAction(surface,event)?0:
                         resizeEdges(event.getX(),event.getY(),getWidth(),getHeight());
+                    if(sizingEdges!=0)feedback(HapticFeedbackConstants.CLOCK_TICK);
                     backgroundMove=sizingEdges==0 && !collapsed && geometry==null && !hitsInteraction(surface,event);
                     backgroundMoved=false;
                     if(backgroundMove || sizingEdges!=0) {downX=event.getRawX();downY=event.getRawY();startX=layout.x;startY=layout.y;startWidth=layout.width;startHeight=layout.height;}
@@ -522,6 +526,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 }
                 if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) cancelTap = false;
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN && shelf.cancelRemoval()) {
+                    feedbackResult(true);
                     main.removeCallbacks(countdown); refreshPendingStyles(); updateLabels();
                     cancelTap = true;
                     // Deliver DOWN/MOVE so a long press can still start a system
@@ -529,12 +534,16 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 }
                 if(sizingEdges!=0) {
                     if(event.getActionMasked()==MotionEvent.ACTION_MOVE)resizeFromEdges(sizingEdges,Math.round(event.getRawX()-downX),Math.round(event.getRawY()-downY));
-                    if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL){sizingEdges=0;cancelTap=false;savePlacement();}
+                    if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL){
+                        if(event.getActionMasked()==MotionEvent.ACTION_UP && (layout.width!=startWidth || layout.height!=startHeight))feedbackResult(true);
+                        sizingEdges=0;cancelTap=false;savePlacement();
+                    }
                     return true;
                 }
                 if(backgroundMove) {
                     if(event.getActionMasked()==MotionEvent.ACTION_MOVE &&
                         Math.hypot(event.getRawX()-downX,event.getRawY()-downY)>ViewConfiguration.get(context).getScaledTouchSlop()) {
+                        if(!backgroundMoved)feedback(HapticFeedbackConstants.CLOCK_TICK);
                         backgroundMoved=true;Rect bounds=availableBounds();
                         layout.x=clamp(startX+Math.round(event.getRawX()-downX),bounds.left,bounds.right-layout.width);
                         layout.y=clamp(startY+Math.round(event.getRawY()-downY),bounds.top,bounds.bottom-layout.height);
@@ -545,8 +554,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                         backgroundMove=false;cancelTap=false;
                         if(backgroundMoved && event.getActionMasked()==MotionEvent.ACTION_UP) {
                             Rect bounds=availableBounds();
-                            if(layout.x<=bounds.left+dp(16) || layout.x+layout.width>=bounds.right-dp(16))setCollapsed(true);
-                            else savePlacement();
+                            if(layout.x<=bounds.left+dp(16) || layout.x+layout.width>=bounds.right-dp(16))collapseFromGesture();
+                            else {savePlacement();feedbackResult(true);}
                         }
                     }
                     return true;
@@ -559,7 +568,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             @Override public boolean onDoubleTap(MotionEvent event) {
                 doubleTapGesture=true; cancelPendingOpen();
                 android.content.Intent intent=context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
-                if(intent!=null)context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+                if(intent!=null) {
+                    context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+                    feedbackResult(true);
+                }
                 return true;
             }
         });
@@ -846,6 +858,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             }
             styleCard(card,pending);
             card.setOnClickListener(view -> {
+                feedback(HapticFeedbackConstants.VIRTUAL_KEY);
                 if(shelfVisible && shelf.isSuggested(receipt.id))
                     shelf.add(List.of(receipt.localPath),List.of(),Map.of(receipt.localPath,receipt.fileName));
                 else queueOpen(receipt);
@@ -902,7 +915,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         body.addView(confirm,new LinearLayout.LayoutParams(-1,dp(16)));
         card.addView(body,new FrameLayout.LayoutParams(-1,-1));
         TextView ignore=label("×",24,listAccent());ignore.setGravity(Gravity.CENTER);ignore.setContentDescription("忽略剪贴板建议");
-        ignore.setOnClickListener(v -> DockCoordinator.dismissClipboardSuggestion(revision));
+        ignore.setOnClickListener(v -> {feedback(HapticFeedbackConstants.VIRTUAL_KEY);DockCoordinator.dismissClipboardSuggestion(revision);});
         card.addView(ignore,new FrameLayout.LayoutParams(dp(36),dp(36),Gravity.TOP|Gravity.RIGHT));
         card.setOnClickListener(v -> withClipboardFocus(() -> {
             importing++;updateLabels();
@@ -911,8 +924,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     (Map<String,String>)content.getOrDefault("directoryNames",java.util.Collections.emptyMap()));
                 if(content.containsKey("error"))android.widget.Toast.makeText(context,"部分剪贴板内容无法读取",android.widget.Toast.LENGTH_SHORT).show();
                 else DockCoordinator.dismissClipboardSuggestion(revision);
+                feedbackResult(!content.containsKey("error"));
             });
-            if(!accepted){importing--;updateLabels();android.widget.Toast.makeText(context,"剪贴板为空",android.widget.Toast.LENGTH_SHORT).show();}
+            if(!accepted){importing--;updateLabels();feedbackResult(false);android.widget.Toast.makeText(context,"剪贴板为空",android.widget.Toast.LENGTH_SHORT).show();}
         }));
         card.setOnLongClickListener(v -> {
             cancelPendingOpen();
@@ -923,9 +937,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                         forwarding=new ForwardDrag(session.paths,session.texts,List.of());
                         updateSuggestionVisibility();
                     },accepted -> {if(forwarding!=null)finishForwarding(forwarding);},true);
-                    if(!started && forwarding!=null)finishForwarding(forwarding);
+                    if(!started) {if(forwarding!=null)finishForwarding(forwarding);feedbackResult(false);}
                 } catch(Exception unavailable) {
                     if(forwarding!=null)finishForwarding(forwarding);
+                    feedbackResult(false);
                     android.util.Log.w("GlobalSend","Cannot drag clipboard suggestion",unavailable);
                     android.widget.Toast.makeText(context,"无法拖出剪贴板，请重试",android.widget.Toast.LENGTH_SHORT).show();
                 }
@@ -977,7 +992,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             clear.addView(clearIcon,new LinearLayout.LayoutParams(dp(40),dp(40)));
             TextView clearLabel=label("清空",12,appearance.muted);clearLabel.setGravity(Gravity.CENTER);
             clear.addView(clearLabel);
-            clear.setOnClickListener(view -> clearDisplayed());
+            clear.setOnClickListener(view -> {feedbackResult(true);clearDisplayed();});
             LinearLayout.LayoutParams clearSize=new LinearLayout.LayoutParams(side,side);clearSize.rightMargin=dp(3);
             row.addView(clear,clearSize);
         }
@@ -1138,10 +1153,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     return consumed;
                 });
             },true);
-            if(!began)finishForwarding(drag);
+            if(!began){finishForwarding(drag);feedbackResult(false);}
             return began;
         } catch (Exception unavailable) {
             finishForwarding(drag);
+            feedbackResult(false);
             android.util.Log.w("GlobalSend", "Cannot export temporary shelf drag", unavailable);
             android.widget.Toast.makeText(context, "无法拖出，请重试", android.widget.Toast.LENGTH_SHORT).show(); return false;
         }
@@ -1171,7 +1187,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 @Override public boolean onPreDraw() {
                     strip.getViewTreeObserver().removeOnPreDrawListener(this);
                     if(root==owner && dragInside && forwarding==drag && strip.getVisibility()==View.VISIBLE)
-                        updateTargetHover(targetPointerX,targetPointerY);
+                        updateTargetHover(targetPointerX,targetPointerY,false);
                     return true;
                 }
             });
@@ -1182,6 +1198,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         cancelSendTargetHover();
         DockCoordinator.traceDrag("show targets requested forwarding="+(forwarding!=null));
         if(forwarding==null || root==null || targetScroll.getVisibility()==View.VISIBLE)return;
+        feedback(HapticFeedbackConstants.LONG_PRESS);
+        hapticTargetId="";
         renderSendTargets();
         styleSurface();
         expanded.setAlpha(0); // No detach, visibility change, or replacement of the active source.
@@ -1213,6 +1231,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
     }
     private void highlightTarget(float x,float y) {
+        highlightTarget(x,y,true);
+    }
+    private void highlightTarget(float x,float y,boolean notify) {
         View next=null;
         Rect bounds=new Rect();
         for(int i=0;i<targetRow.getChildCount();i++) {
@@ -1221,6 +1242,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             card.getDrawingRect(bounds);root.offsetDescendantRectToMyCoords(card,bounds);
             if(bounds.contains((int)x,(int)y)){next=card;break;}
         }
+        String id=next==null?"":(String)next.getTag();
+        if(notify && !id.isEmpty() && !id.equals(hapticTargetId))feedback(HapticFeedbackConstants.CLOCK_TICK);
+        hapticTargetId=id;
         if(next==hoveredTarget)return;
         if(hoveredTarget!=null)hoveredTarget.setBackground(shape(glass(appearance.soft,0xb3),12));
         hoveredTarget=next;
@@ -1231,19 +1255,20 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private boolean dragOverTargets(DragEvent event) {
         int action=event.getAction();
-        if(action==DragEvent.ACTION_DRAG_EXITED) {dragInside=false;stopTargetScroll();highlightTarget(-1,-1);return true;}
+        if(action==DragEvent.ACTION_DRAG_EXITED) {dragInside=false;stopTargetScroll();highlightTarget(-1,-1,false);return true;}
         if(action==DragEvent.ACTION_DRAG_ENTERED || action==DragEvent.ACTION_DRAG_LOCATION) {
             if(action==DragEvent.ACTION_DRAG_ENTERED)feedbackDragEntry();
             updateTargetHover(event.getX(),event.getY());
             return true;
         }
         if(action==DragEvent.ACTION_DROP) {
-            stopTargetScroll();highlightTarget(event.getX(),event.getY());
+            stopTargetScroll();highlightTarget(event.getX(),event.getY(),false);
             if(hoveredTarget==null)return false;
             ForwardDrag drag=forwarding;
             drag.sentToDevice=true;
             java.util.function.Consumer<Boolean> completed=success -> {
                 if(success)shelf.exported(drag.staged,true);
+                feedbackResult(success);
                 android.widget.Toast.makeText(context,success?"已开始发送":"发送失败，内容已保留",android.widget.Toast.LENGTH_SHORT).show();
             };
             boolean accepted=drag.incoming
@@ -1251,6 +1276,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 : DockCoordinator.sendToDevice(event,drag.serverKey,(String)hoveredTarget.getTag(),drag.paths,drag.texts,completed);
             if(!accepted) {
                 drag.sentToDevice=false;
+                feedbackResult(false);
                 android.widget.Toast.makeText(context,"设备已不可用，内容已保留",android.widget.Toast.LENGTH_SHORT).show();
             }
             return accepted;
@@ -1258,7 +1284,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         return true;
     }
     private void updateTargetHover(float x,float y) {
-        targetPointerX=x;targetPointerY=y;highlightTarget(x,y);
+        updateTargetHover(x,y,true);
+    }
+    private void updateTargetHover(float x,float y,boolean notify) {
+        targetPointerX=x;targetPointerY=y;highlightTarget(x,y,notify);
         int zone=dp(36);
         int direction=targetPointerX<zone?-1:targetPointerX>root.getWidth()-zone?1:0;
         targetEdgeDepth=Math.max(0,Math.min(1,direction<0?(zone-targetPointerX)/zone:(targetPointerX-root.getWidth()+zone)/zone));
@@ -1280,6 +1309,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if(forwarding!=drag)return;
         cancelSendTargetHover();
         stopTargetScroll();forwarding=null;hoveredTarget=null;
+        hapticTargetId="";
         if(targetScroll!=null) {targetScroll.animate().cancel();targetScroll.setVisibility(View.GONE);}
         if(expanded!=null)expanded.setAlpha(1);
         updateSuggestionVisibility();
@@ -1288,6 +1318,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void feedbackDragEntry() {
         if(!dragInside && root!=null)root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         dragInside=true;
+    }
+    private void feedback(int effect) {
+        if(root!=null)root.performHapticFeedback(effect);
+    }
+    private void feedbackResult(boolean success) {
+        feedback(Build.VERSION.SDK_INT>=30 ? (success?HapticFeedbackConstants.CONFIRM:HapticFeedbackConstants.REJECT)
+            : HapticFeedbackConstants.VIRTUAL_KEY);
+    }
+    private void collapseFromGesture() {
+        if(!collapsed)feedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        setCollapsed(true);
     }
 
     @SuppressWarnings("unchecked")
@@ -1328,13 +1369,14 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     shelfVisible = true;
                     shelf.add((List<String>)content.get("paths"), (List<String>)content.get("texts"),
                         (Map<String, String>)content.getOrDefault("directoryNames", java.util.Collections.emptyMap()));
+                    feedbackResult(!content.containsKey("error"));
                     if (root != null) setCollapsed(false);
                     if (content.containsKey("error")) android.widget.Toast.makeText(context, "部分内容无法读取，请重新拖入", android.widget.Toast.LENGTH_LONG).show();
                 }); } catch (RuntimeException unavailable) {
                     accepted = false;
                     android.widget.Toast.makeText(context, "无法读取拖入内容，请重试", android.widget.Toast.LENGTH_SHORT).show();
                 }
-                if (!accepted) { importing--; updateLabels(); }
+                if (!accepted) { importing--; updateLabels(); feedbackResult(false); }
                 return accepted;
             default: return true;
         }
@@ -1353,7 +1395,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             android.net.Uri uri = receipt.localPath.startsWith("content://") ? android.net.Uri.parse(receipt.localPath) :
                 DockShareProvider.register(context, new java.io.File(receipt.localPath), receipt.fileName);
             AndroidFileOpener.open(context, uri);
-        } catch (Exception unavailable) { android.widget.Toast.makeText(context, "无法打开文件", android.widget.Toast.LENGTH_SHORT).show(); }
+        } catch (Exception unavailable) { feedbackResult(false);android.widget.Toast.makeText(context, "无法打开文件", android.widget.Toast.LENGTH_SHORT).show(); }
     }
 
     /** The whole title row moves the window; taps and stationary long presses
@@ -1399,6 +1441,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     if (!tracking) return false;
                     if (!moving && Math.hypot(event.getRawX() - initialTouchX,
                             event.getRawY() - initialTouchY) <= slop) return true;
+                    if(!moving)feedback(HapticFeedbackConstants.CLOCK_TICK);
                     moving = true;
                     moveWindow(event);
                     return true;
@@ -1407,7 +1450,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     tracking = false; moving = false;
                     if (!dragged) { performClick(); return true; }
                     Rect work = availableBounds();
-                    setCollapsed(layout.x <= work.left + dp(16) || layout.x + layout.width >= work.right - dp(16));
+                    if(layout.x <= work.left + dp(16) || layout.x + layout.width >= work.right - dp(16))collapseFromGesture();
+                    else {setCollapsed(false);feedbackResult(true);}
                     if(geometry==null)savePlacement();
                     return true;
                 case MotionEvent.ACTION_CANCEL:
@@ -1467,9 +1511,11 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private void installEdgeMove(View view) {
         final boolean[] pulledOpen={false};
+        final boolean[] moved={false};
         view.setOnTouchListener((handle, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 pulledOpen[0]=false;
+                moved[0]=false;
                 stopGeometry();
                 releaseHandleVelocity();handleVelocity=VelocityTracker.obtain();
                 trackHandleVelocity(event);
@@ -1481,6 +1527,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 if(pulledOpen[0])return true;
                 int dx = Math.round(event.getRawX() - downX), dy = Math.round(event.getRawY() - downY);
                 if ((edgeRight ? -dx : dx) > dp(28)) { pulledOpen[0]=true;releaseHandleVelocity();setCollapsed(false);return true; }
+                if(!moved[0] && Math.abs(dy)>ViewConfiguration.get(context).getScaledTouchSlop()) {
+                    moved[0]=true;feedback(HapticFeedbackConstants.CLOCK_TICK);
+                }
                 Rect bounds = availableBounds();
                 layout.y = clamp(startY + dy, bounds.top, bounds.bottom - layout.height);
                 visualBounds=new Rect(layout.x,layout.y,layout.x+layout.width,layout.y+layout.height);
@@ -1497,7 +1546,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             if (event.getActionMasked() == MotionEvent.ACTION_UP &&
                     Math.abs(event.getRawY() - downY) < dp(6) && Math.abs(event.getRawX() - downX) < dp(6)) handle.performClick();
             else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
-                setCollapsed(true);flingHandle(velocity);
+                if(moved[0])feedbackResult(true);
+                collapseFromGesture();flingHandle(velocity);
             }
             if(event.getActionMasked()==MotionEvent.ACTION_UP && geometry==null)savePlacement();
             return true;
@@ -1719,7 +1769,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private TextView control(String text, String description, Runnable action) {
         TextView button = label(text, 13, appearance.accent);
         button.setGravity(Gravity.CENTER); button.setContentDescription(description);
-        button.setOnClickListener(view -> action.run());
+        button.setOnClickListener(view -> {feedback(HapticFeedbackConstants.VIRTUAL_KEY);action.run();});
         return button;
     }
     private LinearLayout countTab(TextView number,ImageView icon,Runnable action) {
@@ -1728,7 +1778,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         group.addView(number,new LinearLayout.LayoutParams(-2,-1));
         LinearLayout.LayoutParams iconSize=new LinearLayout.LayoutParams(dp(18),dp(18));iconSize.leftMargin=dp(4);
-        group.addView(icon,iconSize);group.setOnClickListener(view -> action.run());
+        View.OnClickListener click=view -> {feedback(HapticFeedbackConstants.CLOCK_TICK);action.run();};
+        group.addView(icon,iconSize);group.setOnClickListener(click);number.setOnClickListener(click);
         return group;
     }
     private TextView label(String value, int sp, int color) {
