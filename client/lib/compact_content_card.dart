@@ -173,12 +173,32 @@ class CompactContentCard extends StatelessWidget {
                     right: 5,
                     top: 5,
                     child: ContentDragControl(
+                      // The ripple has to be clipped by the same rounded rectangle the
+                      // button is drawn in, and the icon button inside must use that
+                      // shape too — otherwise a circular highlight bleeds out of a
+                      // 36x32 rounded slot.
                       child: Material(
                         color:
                             menuColor ??
                             Ui.colors(context).surface.withValues(alpha: .94),
-                        borderRadius: Ui.fieldRadius,
-                        child: SizedBox(width: 36, height: 32, child: menu),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: Ui.fieldRadius,
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: IconButtonTheme(
+                          data: IconButtonThemeData(
+                            style: IconButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: Ui.fieldRadius,
+                              ),
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(36, 32),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              highlightColor: Ui.colors(context).hovered,
+                            ),
+                          ),
+                          child: SizedBox(width: 36, height: 32, child: menu),
+                        ),
                       ),
                     ),
                   ),
@@ -190,7 +210,10 @@ class CompactContentCard extends StatelessWidget {
                       child: Material(
                         color: Ui.colors(context).surface
                             .withValues(alpha: .82),
-                        borderRadius: Ui.fieldRadius,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: Ui.fieldRadius,
+                        ),
+                        clipBehavior: Clip.antiAlias,
                         child: TextButton(
                           key: copyKey,
                           style: TextButton.styleFrom(
@@ -298,9 +321,13 @@ class CompactContentCard extends StatelessWidget {
           if (!previewOnly && image)
             Container(
               color: metadataColor ?? Ui.colors(context).surfaceMuted,
-              padding: const EdgeInsets.symmetric(
-                horizontal: Ui.space2,
-                vertical: Ui.space0,
+              // The copy row must not sit on the card edge: 8 above, 12 below keeps
+              // the footer optically centred against the 12pt side padding.
+              padding: const EdgeInsets.fromLTRB(
+                Ui.space2,
+                Ui.space1,
+                Ui.space2,
+                Ui.space2,
               ),
               child: Wrap(
                 spacing: Ui.space1,
@@ -353,9 +380,11 @@ class CompactContentCard extends StatelessWidget {
           else if (!previewOnly)
             Container(
               color: metadataColor ?? Ui.colors(context).surfaceMuted,
-              padding: const EdgeInsets.symmetric(
-                horizontal: Ui.space2,
-                vertical: Ui.space0,
+              padding: const EdgeInsets.fromLTRB(
+                Ui.space2,
+                Ui.space1,
+                Ui.space2,
+                Ui.space2,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
