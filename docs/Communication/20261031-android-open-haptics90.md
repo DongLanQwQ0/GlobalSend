@@ -32,3 +32,7 @@ Android 的普通路径与 SAF URI 现在统一进入现有 `ReceiveDestination 
 - 已核对实际 APK 的 FileProvider authority、`exported=false`、URI 授权及 `FILE_PROVIDER_PATHS` 资源。资源压缩后实际路径为 `res/oS.xml`，文件/缓存/外部存储等原有路径配置存在，不是仅检查源清单。
 - 证据：上述任务目录中的 `release-build.log`、`delivery.json`、`apk-version.txt`、`file-provider.txt`、`file-provider-paths.txt`。
 - 手机操作暂停保持，触感与真实系统查看器仍需新包实机验收。未操作真实 Windows 桌面做功能测试，未更新 Web/服务器或构建 IPA，安装包未上传中心服务器。
+
+## 手机已覆盖更新
+
+用户随后要求 ADB 推送。已对现有连接的 vivo V2527A（`10.195.179.127:42381`）执行 `adb install -r`，返回 Success；未卸载或清空数据。`dumpsys package` 确认 `1.0.73 / versionCode=90`，随后启动 MainActivity。使用 streamed install，没有在手机共享目录散放 APK。记录：`artifacts/tmp/android-install90/`。本次只安装与启动，尚未进行触感或系统查看器的手动验收。
