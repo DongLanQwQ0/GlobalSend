@@ -2478,9 +2478,24 @@ class _SendScreenState extends State<SendScreen>
                                                       count -
                                                       active.length]
                                                   .tile;
-                                        return AspectRatio(
-                                          aspectRatio: 1,
-                                          child: tile,
+                                        // A suggestion that lands in the queue
+                                        // fades in once instead of jumping in; the
+                                        // key keeps the state with the entry, so a
+                                        // rebuild never replays the animation.
+                                        final identity =
+                                            index < c.stagedFiles.length
+                                            ? 'file:${c.stagedFiles[index]}'
+                                            : index < count
+                                            ? 'text:${index - c.stagedFiles.length}'
+                                            : index < count + active.length
+                                            ? 'active:${index - count}'
+                                            : 'suggestion:${index - count - active.length}';
+                                        return KeyedSubtree(
+                                          key: ValueKey('queue-entry-$identity'),
+                                          child: AspectRatio(
+                                            aspectRatio: 1,
+                                            child: UiAppear(child: tile),
+                                          ),
                                         );
                                       },
                                     ),

@@ -794,6 +794,53 @@ Widget uiDisclosure({
   ),
 );
 
+/// Plays a short fade + tiny scale the first time a widget mounts, so an item a
+/// user just added reads as arriving instead of appearing out of nowhere. The
+/// scale stays within 2% so layout, hit testing and tests keep their geometry.
+class UiAppear extends StatefulWidget {
+  const UiAppear({super.key, required this.child, this.beginScale = .98});
+
+  final Widget child;
+  final double beginScale;
+
+  @override
+  State<UiAppear> createState() => _UiAppearState();
+}
+
+class _UiAppearState extends State<UiAppear>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: Ui.durationNormal,
+  );
+  late final CurvedAnimation _curve = CurvedAnimation(
+    parent: _controller,
+    curve: Ui.ease,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _curve.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: _curve,
+    child: ScaleTransition(
+      scale: Tween<double>(begin: widget.beginScale, end: 1).animate(_curve),
+      child: widget.child,
+    ),
+  );
+}
+
 /// One-line segmented caption: shrinks to the segment, never wraps.
 class _SegmentLabel extends StatelessWidget {
   const _SegmentLabel(this.text);
