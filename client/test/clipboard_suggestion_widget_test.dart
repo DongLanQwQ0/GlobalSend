@@ -15,7 +15,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadSystemTestFonts);
   testWidgets(
-    'clipboard suggestion fits the header, stages on tap and can be ignored',
+    'unconfirmed clipboard card lives in the queue but is excluded from direct send until tapped',
     (tester) async {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -37,6 +37,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       final controller = signedIn()..clipboardTexts = ['synthetic clipboard'];
+      controller.stagedTexts.add('confirmed draft');
       final capture = GlobalKey();
       await tester.pumpWidget(
         RepaintBoundary(
@@ -50,21 +51,50 @@ void main() {
         findsOneWidget,
       );
       expect(controller.clipboardReads, 0);
-      await tester.runAsync(() async {
-        final boundary =
-            capture.currentContext!.findRenderObject() as RenderRepaintBoundary;
-        final image = await boundary.toImage();
-        final bytes = await image.toByteData(format: ImageByteFormat.png);
-        final file = File('../artifacts/screenshots/clipboard76-mobile.png');
-        await file.parent.create(recursive: true);
-        await file.writeAsBytes(bytes!.buffer.asUint8List());
-        image.dispose();
-      });
+      expect(find.text('待发送 · 1'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('send-queue-list')),
+          matching: find.byKey(const ValueKey('clipboard-suggestion')),
+        ),
+        findsOneWidget,
+      );
+      for (final size in [const Size(390, 844), const Size(950, 650)]) {
+        tester.view.physicalSize = size;
+        await tester.pumpAndSettle();
+        final card = tester.getSize(
+          find.byKey(const ValueKey('clipboard-suggestion')),
+        );
+        expect(card.width, closeTo(card.height, .1));
+        expect(tester.takeException(), isNull);
+        await tester.runAsync(() async {
+          final boundary =
+              capture.currentContext!.findRenderObject()
+                  as RenderRepaintBoundary;
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(format: ImageByteFormat.png);
+          final file = File(
+            '../artifacts/screenshots/clipboard79-${size.width.toInt()}.png',
+          );
+          await file.parent.create(recursive: true);
+          await file.writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      await tester.tap(find.byKey(const ValueKey('target-phone')));
+      await tester.pumpAndSettle();
+      expect(controller.stagedSends, ['phone']);
+      expect(controller.clipboardReads, 0);
+      expect(controller.stagedTexts, isEmpty);
+      expect(
+        find.byKey(const ValueKey('clipboard-suggestion')),
+        findsOneWidget,
+      );
       await tester.tap(find.byKey(const ValueKey('clipboard-suggestion')));
       await tester.pumpAndSettle();
       expect(controller.clipboardReads, 1);
       expect(controller.stagedTexts, ['synthetic clipboard']);
-      expect(controller.stagedSends, isEmpty);
+      expect(controller.stagedSends, ['phone']);
       expect(find.byKey(const ValueKey('clipboard-suggestion')), findsNothing);
       revision = 'copy-2';
       await tester.pump(const Duration(seconds: 2));

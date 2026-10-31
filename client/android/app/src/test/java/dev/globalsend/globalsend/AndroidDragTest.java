@@ -124,6 +124,35 @@ public class AndroidDragTest {
         } finally {overlay.hide();}
     }
 
+    @Test public void shelfClipboardCardRequiresConfirmationAndKeepsTheNextCopySuggested() throws Exception {
+        ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions(){
+            public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}
+        });
+        CountDownLatch release=new CountDownLatch(1);
+        try {
+            overlay.show(new ReceiveNotifications.Receipt("received","1","fixture","received text",null,null,0),1,shown -> {});
+            overlay.foreground();
+            var clipboard=activity.getSystemService(android.content.ClipboardManager.class);
+            clipboard.setPrimaryClip(ClipData.newPlainText("fixture","confirmed shelf candidate"));
+            ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
+            View row=ReflectionHelpers.getField(overlay,"row"),card=row.findViewWithTag("clipboard-suggestion");
+            TemporaryShelf shelf=ReflectionHelpers.getField(overlay,"shelf");
+            assertNotNull(card);assertFalse(card.isLongClickable());assertTrue(shelf.items.isEmpty());
+            assertTrue(overlay.bulkDragItems().isEmpty());assertEquals(0,dropCount());
+            java.util.concurrent.ExecutorService importer=ReflectionHelpers.getField(coordinator,"importer");
+            importer.execute(() -> {try {release.await(5,TimeUnit.SECONDS);}catch(InterruptedException error){Thread.currentThread().interrupt();}});
+            card.performClick();
+            clipboard.setPrimaryClip(ClipData.newPlainText("fixture","next unconfirmed copy"));
+            release.countDown();
+            long deadline=System.currentTimeMillis()+5000;
+            while(shelf.items.isEmpty()&&System.currentTimeMillis()<deadline){Shadows.shadowOf(Looper.getMainLooper()).idle();Thread.sleep(5);}
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertEquals(1,shelf.items.size());assertEquals("confirmed shelf candidate",overlay.bulkDragItems().get(0).text);
+            assertNotNull(row.findViewWithTag("clipboard-suggestion"));assertEquals("text",DockCoordinator.clipboardSuggestion().get("kind"));
+            assertEquals(0,dropCount());
+        } finally {release.countDown();overlay.hide();}
+    }
+
     @Test public void externalAndLocalHoverReportTheDeviceInsteadOfOnlyTheQueue() {
         queueBounds();
         coordinator.updateDeviceDropBounds("center",List.of(

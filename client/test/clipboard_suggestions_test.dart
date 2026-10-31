@@ -31,4 +31,29 @@ void main() {
     await suggestions.refresh();
     expect(suggestions.item, isNull);
   });
+  test(
+    'confirming an earlier card does not hide a newer clipboard copy',
+    () async {
+      var revision = 'first';
+      final acknowledged = <String>[];
+      final suggestions = ClipboardSuggestions(
+        read: () async => {
+          'available': true,
+          'revision': revision,
+          'kind': 'text',
+        },
+        acknowledge: (value) async => acknowledged.add(value),
+      );
+      addTearDown(suggestions.dispose);
+      await suggestions.refresh();
+      final confirming = suggestions.item!.revision;
+      revision = 'second';
+      await suggestions.refresh();
+      await suggestions.dismissRevision(confirming);
+      expect(suggestions.item!.revision, 'second');
+      await suggestions.refresh();
+      expect(suggestions.item!.revision, 'second');
+      expect(acknowledged, ['first']);
+    },
+  );
 }

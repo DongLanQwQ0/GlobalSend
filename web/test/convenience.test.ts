@@ -1493,6 +1493,26 @@ test('empty clipboard reads are silent no-ops but genuine permission denial rema
   context.navigator.clipboard={read:async()=>{throw new DOMException('denied','NotAllowedError');}};await c.readClipboard();assert.equal(toasts,1);
 });
 
+test('clipboard card is inside pending items but direct send only consumes confirmed content',async()=>{
+  const {c,context,document,render}=fixture();c.render=render;
+  let loads=0;const sent:string[]=[];
+  context.navigator.clipboard={read:async()=>[{types:['text/plain'],getType:async()=>{loads++;return new Blob(['clipboard candidate'],{type:'text/plain'});}}]};
+  c.clipboardSuggestion='text';c.stagedTexts=[{id:'confirmed',text:'confirmed draft'}];
+  c.api.request=async(path:string,body:any)=>{if(path==='/texts')sent.push(body.text);return {};};c.render();
+  const card=document.querySelector('.staged-list .clipboard-suggestion')!;
+  assert.ok(card);assert.equal(card.getAttribute('draggable'),'false');
+  assert.equal(document.querySelector('.queue-heading .clipboard-suggestion'),null);
+  assert.equal(document.querySelector('.queue-heading .count')!.textContent,'1');
+  assert.equal(loads,0);
+  await c.sendQueue(['sender']);
+  assert.deepEqual(sent,['confirmed draft']);assert.equal(loads,0);
+  assert.equal(c.stagedTexts.length,0);assert.ok(document.querySelector('.staged-list .clipboard-suggestion'));
+  document.querySelector<HTMLButtonElement>('.clipboard-suggestion [data-action="clipboard"]')!.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(loads,1);assert.equal(c.stagedTexts.length,1);assert.equal(c.stagedTexts[0].text,'clipboard candidate');
+  assert.deepEqual(sent,['confirmed draft']);assert.equal(document.querySelector('.clipboard-suggestion'),null);
+});
+
 test('sent batch selection is independent, whole-card and removes only selected history references',async()=>{
   const {c,document,render,Event}=fixture();c.render=render;const sentA=textEvent('sent-a',true,'发送一'),sentB=textEvent('sent-b',true,'发送二'),incoming=textEvent('incoming-keep',false,'收到的内容');c.events=[sentA,sentB,incoming];const file=transfer('sent-file','received');file.sourceDeviceId='receiver';file.targetDeviceId='sender';c.transfers=[file];const original=new File(['external-original'],'original.txt');c.fileSources.set('sent-file:file-sent-file',original);let removedBytes=0;c.rtcStore={remove:async()=>{removedBytes++;}};
   c.selected.add('incoming-keep');c.receiveSelecting=true;c.contentView='sent';c.render();document.querySelector<HTMLButtonElement>('[data-action="sent-multi-select"]')!.click();assert.equal(c.sentSelected.size,0);assert.equal(c.selected.has('incoming-keep'),true);

@@ -729,12 +729,16 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         String revision=(String)suggestion.get("revision");
         FrameLayout card=new FrameLayout(context);card.setTag("clipboard-suggestion");
         card.setContentDescription("剪贴板建议");styleCard(card,false);
+        card.setBackground(shape(glass(listSoft(),0x59),12));
+        GradientDrawable suggestionBorder=shape(0,12);suggestionBorder.setStroke(dp(1),listAccent(),dp(4),dp(3));card.setForeground(suggestionBorder);
         LinearLayout body=new LinearLayout(context);body.setGravity(Gravity.CENTER);body.setOrientation(LinearLayout.VERTICAL);
         View clipboardIcon=icon(R.drawable.ic_shelf_clipboard,"剪贴板");clipboardIcon.setPadding(0,0,0,0);
         body.addView(clipboardIcon,new LinearLayout.LayoutParams(dp(28),dp(28)));
         String type=kind.equals("image")?"图片":kind.equals("files")?"文件":"文本";
         TextView label=label("剪贴板 · "+type,12,listAccent());label.setGravity(Gravity.CENTER);
         body.addView(label,new LinearLayout.LayoutParams(-1,dp(28)));
+        TextView confirm=label("点按添加",11,appearance.muted);confirm.setGravity(Gravity.CENTER);
+        body.addView(confirm,new LinearLayout.LayoutParams(-1,dp(16)));
         card.addView(body,new FrameLayout.LayoutParams(-1,-1));
         TextView ignore=label("×",24,listAccent());ignore.setGravity(Gravity.CENTER);ignore.setContentDescription("忽略剪贴板建议");
         ignore.setOnClickListener(v -> DockCoordinator.dismissClipboardSuggestion(revision));
@@ -745,7 +749,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 importing--;shelf.add((List<String>)content.get("paths"),(List<String>)content.get("texts"),
                     (Map<String,String>)content.getOrDefault("directoryNames",java.util.Collections.emptyMap()));
                 if(content.containsKey("error"))android.widget.Toast.makeText(context,"部分剪贴板内容无法读取",android.widget.Toast.LENGTH_SHORT).show();
-                else DockCoordinator.dismissClipboardSuggestion((String)DockCoordinator.clipboardSuggestion().get("revision"));
+                else DockCoordinator.dismissClipboardSuggestion(revision);
             });
             if(!accepted){importing--;updateLabels();android.widget.Toast.makeText(context,"剪贴板为空",android.widget.Toast.LENGTH_SHORT).show();}
         }));

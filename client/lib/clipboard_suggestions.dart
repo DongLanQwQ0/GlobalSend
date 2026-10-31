@@ -91,10 +91,16 @@ class ClipboardSuggestions extends ChangeNotifier {
   Future<void> dismiss() async {
     final current = item;
     if (current == null) return;
-    _handledRevision = current.revision;
-    item = null;
-    notifyListeners();
-    await acknowledge(current.revision);
+    await dismissRevision(current.revision);
+  }
+
+  Future<void> dismissRevision(String revision) async {
+    _handledRevision = revision;
+    if (item?.revision == revision) {
+      item = null;
+      notifyListeners();
+    }
+    await acknowledge(revision);
   }
 
   @override

@@ -1097,6 +1097,9 @@ class _SendScreenState extends State<SendScreen>
                   if (working) const LinearProgressIndicator(minHeight: 2),
                   Expanded(
                     child: AnimatedSwitcher(
+                      // A breakpoint reparents the same native drop targets;
+                      // do not keep a second keyed workspace alive while fading.
+                      key: ValueKey(wide),
                       duration: const Duration(milliseconds: 180),
                       layoutBuilder: (currentChild, previousChildren) => Stack(
                         fit: StackFit.expand,
@@ -2105,6 +2108,7 @@ class _SendScreenState extends State<SendScreen>
 
   Widget queuePanel() {
     final count = c.stagedFiles.length + c.stagedTexts.length;
+    final clipboardSuggestion = clipboardSuggestions.item;
     final failed = c.failedOutgoingFiles;
     final active = c.dock
         .where(
@@ -2160,58 +2164,7 @@ class _SendScreenState extends State<SendScreen>
                           fontSize: 13,
                         ),
                       ),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: clipboardSuggestions.item == null
-                              ? const SizedBox.shrink()
-                              : Padding(
-                                  padding: const EdgeInsets.only(left: 6),
-                                  child: Tooltip(
-                                    message:
-                                        '剪贴板建议：${clipboardSuggestions.item!.label}',
-                                    child: InputChip(
-                                      key: const ValueKey(
-                                        'clipboard-suggestion',
-                                      ),
-                                      avatar: const AppIcon(
-                                        Icons.content_paste_rounded,
-                                        size: 14,
-                                      ),
-                                      label: Text(
-                                        clipboardSuggestions.item!.label,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontSize: 11),
-                                      ),
-                                      onPressed: working
-                                          ? null
-                                          : () => perform(() async {
-                                              await c.stageClipboard();
-                                              await clipboardSuggestions
-                                                  .dismiss();
-                                            }),
-                                      onDeleted: () =>
-                                          clipboardSuggestions.dismiss(),
-                                      deleteButtonTooltipMessage: '忽略剪贴板建议',
-                                      deleteIcon: const AppIcon(
-                                        Icons.close,
-                                        size: 14,
-                                      ),
-                                      visualDensity: VisualDensity.compact,
-                                      materialTapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                      padding: const EdgeInsets.all(2),
-                                      labelPadding: const EdgeInsets.symmetric(
-                                        horizontal: 2,
-                                      ),
-                                      backgroundColor: Ui.colors(context)
-                                          .softGreen,
-                                    ),
-                                  ),
-                                ),
-                        ),
-                      ),
+                      const Spacer(),
                       if (count > 0 && recentPhotos.items.isNotEmpty)
                         IconButton(
                           tooltip: '新图片',
@@ -2297,7 +2250,10 @@ class _SendScreenState extends State<SendScreen>
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: count == 0 && active.isEmpty
+                        child:
+                            count == 0 &&
+                                active.isEmpty &&
+                                clipboardSuggestion == null
                             ? recentPhotos.items.isNotEmpty
                                   ? photoSuggestions()
                                   : Center(
@@ -2352,7 +2308,10 @@ class _SendScreenState extends State<SendScreen>
                                     ),
                                     separatorBuilder: (_, _) =>
                                         const SizedBox(width: 8),
-                                    itemCount: count + active.length,
+                                    itemCount:
+                                        count +
+                                        active.length +
+                                        (clipboardSuggestion == null ? 0 : 1),
                                     itemBuilder: (_, index) {
                                       final tile = index < c.stagedFiles.length
                                           ? stagedTile(
@@ -2363,8 +2322,12 @@ class _SendScreenState extends State<SendScreen>
                                               textIndex:
                                                   index - c.stagedFiles.length,
                                             )
-                                          : activeTransferTile(
+                                          : index < count + active.length
+                                          ? activeTransferTile(
                                               active[index - count],
+                                            )
+                                          : clipboardSuggestionTile(
+                                              clipboardSuggestion!,
                                             );
                                       return AspectRatio(
                                         aspectRatio: 1,
@@ -2405,6 +2368,76 @@ class _SendScreenState extends State<SendScreen>
       ),
     );
   }
+
+  Widget clipboardSuggestionTile(ClipboardSuggestion suggestion) => Material(
+    key: const ValueKey('clipboard-suggestion'),
+    color: Ui.colors(context).softGreen.withValues(alpha: .45),
+    borderRadius: Ui.cardRadius,
+    clipBehavior: Clip.antiAlias,
+    child: CustomPaint(
+      foregroundPainter: _DashedDropBorder(
+        Ui.colors(context).green.withValues(alpha: .55),
+        radius: 16,
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: InkWell(
+              onTap: working
+                  ? null
+                  : () => perform(() async {
+                      await c.stageClipboard();
+                      await clipboardSuggestions.dismissRevision(
+                        suggestion.revision,
+                      );
+                    }),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AppIcon(
+                    Icons.content_paste_rounded,
+                    size: 26,
+                    color: Ui.colors(context).green,
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    '剪贴板',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${suggestion.label} · 点按添加',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Ui.colors(context).muted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 2,
+            right: 2,
+            child: SizedBox(
+              width: 28,
+              height: 28,
+              child: IconButton(
+                tooltip: '忽略剪贴板建议',
+                padding: EdgeInsets.zero,
+                onPressed: working
+                    ? null
+                    : () => clipboardSuggestions.dismissRevision(
+                        suggestion.revision,
+                      ),
+                icon: const AppIcon(Icons.close, size: 16),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget stagedTile({String? path, int? textIndex}) {
     final isText = textIndex != null;
@@ -5292,13 +5325,14 @@ class NativeDropFeedback extends StatelessWidget {
 }
 
 class _DashedDropBorder extends CustomPainter {
-  const _DashedDropBorder(this.color);
+  const _DashedDropBorder(this.color, {this.radius = 20});
   final Color color;
+  final double radius;
   @override
   void paint(Canvas canvas, Size size) {
     final path = Path()
       ..addRRect(
-        RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(20)),
+        RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)),
       );
     final paint = Paint()
       ..style = PaintingStyle.stroke
@@ -5316,7 +5350,7 @@ class _DashedDropBorder extends CustomPainter {
 
   @override
   bool shouldRepaint(_DashedDropBorder oldDelegate) =>
-      color != oldDelegate.color;
+      color != oldDelegate.color || radius != oldDelegate.radius;
 }
 
 class _ComposeTextDialog extends StatefulWidget {
