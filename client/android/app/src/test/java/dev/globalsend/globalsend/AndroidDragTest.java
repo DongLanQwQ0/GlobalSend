@@ -124,6 +124,55 @@ public class AndroidDragTest {
         } finally {overlay.hide();}
     }
 
+    @Test public void clipboardOnlyShelfCanSwipePastOpeningSpaceWithoutMovingWindow() {
+        ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions(){
+            public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}
+        });
+        try {
+            overlay.show(new ReceiveNotifications.Receipt("received","1","fixture","received text",null,null,0),1,shown -> {});
+            activity.getSystemService(android.content.ClipboardManager.class)
+                .setPrimaryClip(ClipData.newPlainText("fixture","unconfirmed clipboard text"));
+            ((View)ReflectionHelpers.getField(overlay,"shelfTab")).performClick();
+            View root=ReflectionHelpers.getField(overlay,"root");
+            android.view.WindowManager.LayoutParams layout=(android.view.WindowManager.LayoutParams)root.getLayoutParams();
+            root.measure(View.MeasureSpec.makeMeasureSpec(layout.width,View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(layout.height,View.MeasureSpec.EXACTLY));
+            root.layout(0,0,layout.width,layout.height);
+            root.getViewTreeObserver().dispatchOnPreDraw();
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(600));
+            android.widget.HorizontalScrollView scroll=ReflectionHelpers.getField(overlay,"scroll");
+            TemporaryShelf shelf=ReflectionHelpers.getField(overlay,"shelf");
+            assertTrue(shelf.items.isEmpty());
+            assertNotNull(scroll.findViewWithTag("clipboard-suggestion"));
+            assertTrue("Only an opening space and an unconfirmed suggestion still overflow",scroll.canScrollHorizontally(1));
+            android.graphics.Rect bounds=new android.graphics.Rect();
+            scroll.getDrawingRect(bounds);((android.view.ViewGroup)root).offsetDescendantRectToMyCoords(scroll,bounds);
+            float left=bounds.left+bounds.width()*.2f,right=bounds.left+bounds.width()*.75f,y=bounds.exactCenterY();
+            int windowX=layout.x,windowY=layout.y;
+            swipeOverlay(root,right,left,y);
+            assertTrue("The first swipe from the deliberately blank opening space must scroll",scroll.getScrollX()>0);
+            int forwardOffset=scroll.getScrollX();
+            swipeOverlay(root,left,right,y);
+            assertTrue("A reverse swipe must scroll back",scroll.getScrollX()<forwardOffset);
+            int reverseOffset=scroll.getScrollX();
+            swipeOverlay(root,right,left,y);
+            assertTrue("A second swipe must remain available",scroll.getScrollX()>reverseOffset);
+            assertEquals(windowX,layout.x);assertEquals(windowY,layout.y);
+            assertFalse((Boolean)ReflectionHelpers.getField(overlay,"collapsed"));
+            assertTrue(shelf.items.isEmpty());assertTrue(overlay.bulkDragItems().isEmpty());assertEquals(0,dropCount());
+        } finally {overlay.hide();}
+    }
+
+    private void swipeOverlay(View root,float from,float to,float y) {
+        long down=android.os.SystemClock.uptimeMillis();
+        for(int step=0;step<=6;step++) {
+            if(step>0)Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(20));
+            int action=step==0?MotionEvent.ACTION_DOWN:step==6?MotionEvent.ACTION_UP:MotionEvent.ACTION_MOVE;
+            MotionEvent event=MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),action,from+(to-from)*step/6,y,0);
+            root.dispatchTouchEvent(event);event.recycle();
+        }
+    }
+
     @Test public void shelfClipboardCardRequiresConfirmationAndKeepsTheNextCopySuggested() throws Exception {
         ReceiveOverlay overlay=new ReceiveOverlay(activity,new ReceiveOverlay.Actions(){
             public void open(String id){}public void copy(String id){}public void dismiss(Map<String,String> versions,long generation){}

@@ -853,7 +853,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private boolean hitsInteraction(View view,MotionEvent event) {
         if(view.getVisibility()!=View.VISIBLE || !hits(view,event))return false;
-        if(view==scroll && !displayed().isEmpty() || view.isClickable() || view.isLongClickable())return true;
+        // Unconfirmed clipboard cards are not in displayed(), but the opening
+        // space still belongs to the overflowing list, not to window movement.
+        if(view==scroll && (!displayed().isEmpty() || scroll.canScrollHorizontally(-1) || scroll.canScrollHorizontally(1)) ||
+            view.isClickable() || view.isLongClickable())return true;
         if(view instanceof android.view.ViewGroup) {
             android.view.ViewGroup group=(android.view.ViewGroup)view;
             for(int i=0;i<group.getChildCount();i++)if(hitsInteraction(group.getChildAt(i),event))return true;

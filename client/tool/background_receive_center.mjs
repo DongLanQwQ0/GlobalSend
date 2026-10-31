@@ -61,7 +61,7 @@ app.post('/fixture/file', async request => {
   })();
   return { transferId, fileId, name, size: bytes.length };
 });
-await app.listen({ host: '127.0.0.1', port: 0 });
+await app.listen({ host: '127.0.0.1', port: Number(process.env.GLOBALSEND_FIXTURE_PORT || 0) });
 sender = await call('POST', '/devices/enroll', { name: '后台验收电脑', platform: 'other', groupKey: 'background-ui-fixture' });
 endpoint = `http://127.0.0.1:${app.server.address().port}`;
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
