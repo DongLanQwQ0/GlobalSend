@@ -26,3 +26,5 @@
 ## 交付范围
 
 仅运行 `npm run release:local -- -WindowsOnly` 更新 Windows。Android 保持已装好的 `1.0.74+93`，不构建或推送 APK、不访问 ADB、不再次占用手机；服务器、Web 和 IPA 不变。
+
+Windows 已构建、完整覆盖并重启，实际文件版本 `1.0.74+94`；字体文件数为 0。发布记录已明确区分 Windows build 94 与已确认的 Android build 93，证据保存于任务目录 `delivery.json`。真实虚拟桌面切换仍待用户手动验收。
