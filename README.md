@@ -12,9 +12,9 @@
 
 Windows / Android 最新本地版为 **1.0.74+97**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`；手机已保留数据覆盖安装、读回 97 版并启动。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [完整 ZIP](artifacts/releases/GlobalSend-1.0.74-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.75+98 完整 ZIP](artifacts/releases/GlobalSend-1.0.75-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.74+97 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.74-android-arm64-v8a.apk)已验签、不打包字体，已覆盖安装并启动；物理贴边与新收件不重复建议仍待交互实测。97 修正把手贴屏幕物理边缘，并排除接收图片的重复建议；胶囊内色条居中、松手惯性阻尼保持。此前的[接收文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)已由用户确认，文件选择器与最近文件均可见。图片／视频和剪贴板建议按建议时间排序，清空与建议之间保留双击空白；建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留：iPad 等不能远程打开浏览器的设备收到链接后手动点击。实际安装状态以[本机发布记录](artifacts/releases/latest-local.json)为准，本轮证据见[97版交付记录](docs/Communication/20261101-edge-alignment97.md)。
+Android [1.0.75+98 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.75-android-arm64-v8a.apk)已构建、验签，不打包字体；手机覆盖更新待设备交接，当前确认安装97版。98 新增指定设备的文件复制引用拉取；97 的物理贴边、接收媒体不重复建议与把手阻尼继续保留。此前的[接收文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)已由用户确认，文件选择器与最近文件均可见。图片／视频和剪贴板建议按建议时间排序，清空与建议之间保留双击空白；建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留。实际安装状态以[本机发布记录](artifacts/releases/latest-local.json)为准，本轮说明见[文件复制推送](docs/COPIED_FILES.md)。
 
 iPad / iPhone 的[**1.0.59 (76) 未签名 IPA，约14.8 MB**](artifacts/releases/ios-1.0.59-build76/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。接入 UIKit 原生拖入、拖出；普通系统分享唤起待发送，选系统设备建议才按唯一 ID 自动发送本批。由用户用 iloader 手动签名安装，76版真机交互待确认，见[iPad说明](docs/IPAD.md)。**中心不托管安装包；[Windows/Android 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)与[iOS 1.0.59+76](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.59-build76)分别提供对应平台包和更新清单。**
 
@@ -35,6 +35,7 @@ Web 的“本机文件”两列库支持图片/文本预览、排序、多选、
 - **网址**：消息、收件弹层和文本文件预览识别 `http://`、`https://`、`www.`。点击直接使用浏览器打开；复制保留全文，已发送文字仍可编辑。
 - **文件夹与引用**：选择或拖入目录后按目录结构直接接收，保留子目录和空目录，不再转换为 ZIP。原生普通发送文件与文件夹保留外部引用；删除发送历史不删除原件，原件消失后移除引用。Web仅在当前页持有外部 `File` 引用，刷新后不能恢复磁盘引用或持续检测源文件删除。
 - **共享文本**：同组设备实时双向编辑，中文输入期间不打断；并发编辑保留草稿，可选择远端或保留本地。不通知、不唤起、不进入收件页面，与发送草稿和系统剪贴板独立。
+- **文件复制推送**：Windows 设置中先指定目标，再开启“文件复制推送”。复制文件或文件夹后，只有指定设备的共享区与悬浮坞出现可拉取条目，点击才传输，不提前上传、不广播到整个组、不改待发草稿。Web 同样支持接收与拉取，见[说明](docs/COPIED_FILES.md)。
 - **轻量阅读器**：原生和 Web 都支持收到文字只读查看/复制、已发消息原位编辑；原生常见 UTF-8 / 带 BOM 的 UTF-16 文件可预览。
 - **新内容与窗口**：单项大预览、多项网格，支持拖出、复制和Esc。多选通过按钮进入，单击选择，长按仅拖放，返回退出多选；右键与更多共用菜单。Windows记住窗口bounds，托盘卸载主界面而保留接收核心；有焦点在主窗接收，失焦使用独立右下接收坞，不改主窗口尺寸位置。新版源码预热并复用坞的 UI-only engine，关闭后释放卡片和图片缓存，避免每次收件重新启动引擎。
 - **Android后台**：保留接收服务；使用独立有界系统悬浮窗，不以 Activity 的全屏透明遮罩模拟小窗。默认展开232×116dp，可移动/缩放、圆角，支持细把手及1.5倍透明触控区；双击内容区返回主应用，只在设置中关闭。悬浮窗无法显示时使用通知，文本通知支持复制。按用户选择不新增无障碍权限、不自动检测桌面；长期后台稳定性仍取决于系统调度。

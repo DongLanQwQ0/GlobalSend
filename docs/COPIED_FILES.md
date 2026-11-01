@@ -36,4 +36,12 @@ Windows 独立接收坞和 Web 共享区已接通相同引用。Windows 坞分�
 
 证据：`artifacts/tmp/copied-files-native-final-tests.log`、`copied-files-dock-host-regression.log`、`copied-files-dock-bulk-regression.log`、`copied-files-web-tests.log`、`copied-files-web-build.log`、`copied-files-browser/result.json`；窗口与网页 JPEG 在相邻 render/browser 目录。首次测试宿主发生原生访问异常退出，详细记录保留为 `copied-files-host-debug.log`；将窗口渲染与主引擎入口分开后完整通过，不把崩溃运行计为通过。
 
-**待交付 1.0.75+98。** 完整 Windows C++/APK 构建、安装、中心/Web 部署和手机实际拉取仍待完成。当前运行的 97 版不包含此功能；未操作真实 Windows 界面或共享模拟器。手机目前已交还同时使用该设备的任务，新包就绪后在明确交接点安装，保留数据。
+## 交付 1.0.75+98
+
+源提交 `85c1275`。完整 Windows C++ 和 Android release 构建成功，APK 已验签，16,383,608 B；两端字体文件均为 0。Windows 完整目录已覆盖 `E:\Programs\GlobalSend` 并重启，读回文件版本 `1.0.75+98`。未触控测试真实 Windows 或共享模拟器。
+
+中心/Web 已部署至 `https://123.207.180.163/globalsend/app/`，容器 `globalsend:copied-files-1.0.75-20261101` 健康；公开 info 已包含 copiedFiles，实际 JS/CSS 返回 200、MIME 正常，安装包目录仍为 404，未上传安装包。实例 ID 保持不变，旧镜像作为部署脚本的回退目标。部署证据在 `artifacts/tmp/copied-files-deploy/`。
+
+手机安装仍 pending：同一设备正在运行另一个任务的后台总结，已在构建期间交还，不打断该服务；待明确安全点仅覆盖安装、读回版本并启动。手机实际拉取仍待交互验收；不能用浏览器或原生组件检查冒充真机通过。发布状态见 `artifacts/releases/latest-local.json`。
+
+本轮误建的空部署包 `server/artifacts/tmp/copied-files-deploy/source.tar`（0 B）删除被执行策略拦截，留在项目内等待清理；未改换工具绕过拦截。正确源包位于 `artifacts/tmp/copied-files-deploy/source.tar`，不含安装包。
