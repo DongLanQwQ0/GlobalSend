@@ -4757,15 +4757,12 @@ class _SendScreenState extends State<SendScreen>
                     ),
                   ),
               ],
-              onChanged: working
+              onChanged: working || !c.clipboardEnabled
                   ? null
                   : (value) {
                       if (value == null || value == choice) return;
-                      if (c.clipboardEnabled) {
-                        perform(() => c.setClipboardSync(true, value));
-                      } else {
-                        setState(() => clipboardChoice = value);
-                      }
+                      clipboardChoice = value;
+                      perform(() => c.setClipboardSync(true, value));
                     },
             ),
           ),
@@ -4775,10 +4772,13 @@ class _SendScreenState extends State<SendScreen>
           contentPadding: EdgeInsets.zero,
           title: const Text('文件复制推送'),
           value: c.copiedFiles.enabled,
-          onChanged: working || !c.copiedFilesSupported || fileTarget == null
+          onChanged: working || !c.copiedFilesSupported
               ? null
-              : (enabled) =>
-                    perform(() => c.setCopiedFilePush(enabled, [fileTarget])),
+              : (enabled) => perform(
+                  () => c.setCopiedFilePush(enabled, [
+                    if (fileTarget != null) fileTarget,
+                  ]),
+                ),
         ),
         UiField(
           label: '推送到',
@@ -4805,7 +4805,8 @@ class _SendScreenState extends State<SendScreen>
                   child: const Text('所选设备（离线）'),
                 ),
             ],
-            onChanged: working || !c.copiedFilesSupported
+            onChanged:
+                working || !c.copiedFilesSupported || !c.copiedFiles.enabled
                 ? null
                 : (target) {
                     if (target != null)

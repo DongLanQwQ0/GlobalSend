@@ -130,7 +130,7 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
   testWidgets(
-    'file push requires an explicit target and preserves that choice when switched off',
+    'device pickers are disabled while their switches are off and first activation does not choose a file target',
     (tester) async {
       tester.view.physicalSize = const Size(950, 650);
       tester.view.devicePixelRatio = 1;
@@ -153,7 +153,23 @@ void main() {
         ..info = {
           'features': {'copiedFiles': true},
         };
-      await tester.pumpWidget(GlobalSendApp(controller: c));
+      c.appearance.value = const Appearance(
+        mode: AppearanceMode.dark,
+        accent: AccentColor.rose,
+      );
+      c.devices.add({
+        'deviceId': 'browser',
+        'name': '第二台设备',
+        'online': true,
+        'platform': 'web',
+      });
+      final capture = GlobalKey();
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: capture,
+          child: GlobalSendApp(controller: c),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
@@ -164,11 +180,56 @@ void main() {
           )
           .first;
       final toggle = find.byKey(const ValueKey('copied-files-enabled'));
+      final textToggle = find.byKey(const ValueKey('clipboard-sync'));
+      final textDropdown = find.byKey(const ValueKey('clipboard-target-phone'));
+      await tester.scrollUntilVisible(textToggle, 350, scrollable: scroll);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<DropdownButtonFormField<String>>(textDropdown).onChanged,
+        isNull,
+      );
+      await tester.tap(textToggle);
+      await tester.pumpAndSettle();
+      expect(c.clipboardEnabled, isTrue);
+      expect(
+        tester.widget<DropdownButtonFormField<String>>(textDropdown).onChanged,
+        isNotNull,
+      );
+      await tester.ensureVisible(textDropdown);
+      await tester.tap(textDropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('第二台设备').last);
+      await tester.pumpAndSettle();
+      await Scrollable.ensureVisible(tester.element(textToggle), alignment: .5);
+      await tester.pumpAndSettle();
+      await tester.tap(textToggle);
+      await tester.pumpAndSettle();
+      expect(c.clipboardEnabled, isFalse);
+      expect(
+        tester
+            .widget<DropdownButtonFormField<String>>(
+              find.byKey(const ValueKey('clipboard-target-browser')),
+            )
+            .onChanged,
+        isNull,
+      );
       await tester.scrollUntilVisible(toggle, 350, scrollable: scroll);
       await tester.pumpAndSettle();
-      expect(tester.widget<SwitchListTile>(toggle).onChanged, isNull);
+      expect(tester.widget<SwitchListTile>(toggle).onChanged, isNotNull);
       expect(c.copiedFiles.enabled, isFalse);
       final dropdown = find.byKey(const ValueKey('copied-files-target-null'));
+      expect(
+        tester.widget<DropdownButtonFormField<String>>(dropdown).onChanged,
+        isNull,
+      );
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(c.copiedFiles.enabled, isTrue);
+      expect(c.copiedFiles.targets, isEmpty);
+      expect(
+        tester.widget<DropdownButtonFormField<String>>(dropdown).onChanged,
+        isNotNull,
+      );
       await Scrollable.ensureVisible(tester.element(dropdown));
       await tester.pumpAndSettle();
       await tester.tap(dropdown);
@@ -176,16 +237,46 @@ void main() {
       await tester.tap(find.text('我的手机').last);
       await tester.pumpAndSettle();
       expect(c.copiedFiles.targets, ['phone']);
-      expect(c.copiedFiles.enabled, isFalse);
+      expect(c.copiedFiles.enabled, isTrue);
       await Scrollable.ensureVisible(tester.element(toggle), alignment: .5);
       await tester.pumpAndSettle();
       await tester.tap(toggle);
       await tester.pumpAndSettle();
-      expect(c.copiedFiles.enabled, isTrue);
-      await tester.tap(toggle);
-      await tester.pumpAndSettle();
       expect(c.copiedFiles.enabled, isFalse);
       expect(c.copiedFiles.targets, ['phone']);
+      final selected = find.byKey(const ValueKey('copied-files-target-phone'));
+      expect(
+        tester.widget<DropdownButtonFormField<String>>(selected).onChanged,
+        isNull,
+      );
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(c.copiedFiles.enabled, isTrue);
+      expect(c.copiedFiles.targets, ['phone']);
+      expect(
+        tester.widget<DropdownButtonFormField<String>>(selected).onChanged,
+        isNotNull,
+      );
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      await Scrollable.ensureVisible(tester.element(textToggle));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        final image =
+            await (capture.currentContext!.findRenderObject()
+                    as RenderRepaintBoundary)
+                .toImage();
+        final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+        final directory = await Directory(
+          '../artifacts/tmp/copied-files-client/render',
+        ).create(recursive: true);
+        await File('${directory.path}/switch-targets99.rgba')
+            .writeAsBytes(data!.buffer.asUint8List());
+        await File('${directory.path}/switch-targets99.json').writeAsString(
+          jsonEncode({'width': image.width, 'height': image.height}),
+        );
+        image.dispose();
+      });
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),

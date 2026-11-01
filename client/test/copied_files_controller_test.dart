@@ -75,6 +75,11 @@ void main() {
       ];
       c.stagedTexts.add('keep this draft');
       await c.copiedFiles.connect(api, self: 'self', supported: true);
+      await c.setCopiedFilePush(true, []);
+      expect(c.copiedFiles.enabled, isTrue);
+      expect(c.copiedFiles.sourceReady, isFalse);
+      expect(watches.last, isFalse);
+      expect(api.publishes, isEmpty);
       await c.setClipboardSync(true, 'phone');
       await c.setCopiedFilePush(true, ['phone']);
       await c.setClipboardSync(false, '');

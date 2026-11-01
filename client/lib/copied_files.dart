@@ -15,6 +15,7 @@ class CopiedFilesClient {
   final void Function() changed;
   bool enabled = false;
   List<String> targets = [];
+  bool get sourceReady => enabled && targets.isNotEmpty;
   List<Map<String, dynamic>> offers = [];
   String error = '', sourceError = '';
   final Map<String, Map<String, dynamic>> pulls = {};
@@ -75,12 +76,11 @@ class CopiedFilesClient {
         .cast<String>()
         .toSet()
         .toList();
-    if (targets.isEmpty) enabled = false;
   }
 
   Future<void> configure(bool value, Iterable<String> destinationIds) async {
     final selected = destinationIds.toSet().toList();
-    if (value && (selected.isEmpty || selected.contains(_self))) {
+    if (value && selected.contains(_self)) {
       throw const FormatException('请先指定其他目标设备');
     }
     enabled = value;
@@ -117,7 +117,7 @@ class CopiedFilesClient {
       changed();
       return;
     }
-    if (enabled && _local != null) {
+    if (sourceReady && _local != null) {
       try {
         await _write(api, session, _copy, 'PUT', _local);
         sourceError = '';
@@ -195,7 +195,7 @@ class CopiedFilesClient {
   /// Inspect just the copied roots. Do not enumerate folders, read file bytes,
   /// hash files or put source files into the user's outgoing draft queue.
   Future<void> copiedPaths(Iterable<String> paths) async {
-    if (!enabled) return;
+    if (!sourceReady) return;
     final copy = ++_copy;
     _sources.clear();
     _outcomes.clear();

@@ -120,8 +120,10 @@ class SendController extends ChangeNotifier {
     if (!Platform.isWindows) throw UnsupportedError('文件复制推送目前由 Windows 提供');
     if (enabled && !copiedFilesSupported) throw StateError('请先升级中心以使用文件复制推送');
     await copiedFiles.configure(enabled, targets);
-    await SystemBridge.watchClipboard(clipboardEnabled || copiedFiles.enabled);
-    if (enabled)
+    await SystemBridge.watchClipboard(
+      clipboardEnabled || copiedFiles.sourceReady,
+    );
+    if (copiedFiles.sourceReady)
       await copiedFiles.copiedPaths(await SystemBridge.clipboardFilePaths());
     changed();
   }
@@ -1347,7 +1349,7 @@ class SendController extends ChangeNotifier {
       root = await stateDirectory();
       if (Platform.isWindows) {
         await copiedFiles.load(File('${root!.path}/copied-files.json'));
-        if (copiedFiles.enabled) {
+        if (copiedFiles.sourceReady) {
           await SystemBridge.watchClipboard(true);
           await copiedFiles.copiedPaths(
             await SystemBridge.clipboardFilePaths(),
@@ -2845,7 +2847,7 @@ class SendController extends ChangeNotifier {
     caseSensitive: false,
   ).hasMatch(text);
   void _onClipboard(Map<String, dynamic> event) {
-    if (copiedFiles.enabled) {
+    if (copiedFiles.sourceReady) {
       final allowed =
           event['private'] != true &&
           (event['marker'] as String? ?? '').isEmpty;
@@ -2984,7 +2986,7 @@ class SendController extends ChangeNotifier {
     clipboardStatus = '已关闭';
     if (Platform.isWindows) {
       unawaited(
-        SystemBridge.watchClipboard(!disposed && copiedFiles.enabled)
+        SystemBridge.watchClipboard(!disposed && copiedFiles.sourceReady)
             .catchError((Object _) {}),
       );
     }

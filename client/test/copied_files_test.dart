@@ -85,7 +85,25 @@ void main() {
         folder = await Directory('${temporary.path}/Folder').create();
     await File('${folder.path}/child.txt')
         .writeAsString('not a separate clipboard item');
-    await expectLater(copied.configure(true, []), throwsFormatException);
+    await copied.configure(true, []);
+    await copied.copiedPaths([file.path, folder.path]);
+    expect(copied.enabled, isTrue);
+    expect(copied.sourceReady, isFalse);
+    expect(
+      api.calls.any(
+        (call) => call.$1 == 'PUT' && call.$2 == '/clipboard/files',
+      ),
+      isFalse,
+    );
+    final waiting = CopiedFilesClient(
+      newId: () => 'waiting',
+      sendFiles: (_, _) async {},
+      changed: () {},
+    );
+    await waiting.load(File('${temporary.path}/copied-files.json'));
+    expect(waiting.enabled, isTrue);
+    expect(waiting.targets, isEmpty);
+    await expectLater(copied.configure(true, ['self']), throwsFormatException);
     await copied.configure(true, ['target']);
     await copied.copiedPaths([file.path, folder.path, file.path]);
     final offer = latest(), items = offer['items'] as List;
