@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/app_icon.dart';
 import 'package:globalsend/app_icon_paths.dart';
 import 'package:globalsend/models.dart';
+import 'package:globalsend/network_proxy.dart';
 import 'package:globalsend/saved_files_screen.dart';
 import 'package:globalsend/screen.dart';
 import 'package:globalsend/system_bridge.dart';
@@ -240,7 +241,11 @@ void main() {
   check(
     'server modal keeps content clicks but dismisses outside and hides automatic scrollbar',
     (tester) async {
-      await mount(tester, SendScreen(controller: fixture.PreviewController()));
+      addTearDown(() => NetworkProxy.bypassSystemProxy = true);
+      final key = await mount(
+        tester,
+        SendScreen(controller: fixture.PreviewController()),
+      );
       await tester.tap(find.byKey(const ValueKey('setup-server-settings')));
       await tester.pumpAndSettle();
       expect(
@@ -252,6 +257,18 @@ void main() {
       );
       await tester.tap(find.text('允许 HTTP'));
       await tester.pumpAndSettle();
+      final proxySwitch = find.byKey(
+        const ValueKey('setup-bypass-system-proxy'),
+      );
+      expect(tester.widget<SwitchListTile>(proxySwitch).value, true);
+      await tester.tap(proxySwitch);
+      await tester.pumpAndSettle();
+      expect(NetworkProxy.bypassSystemProxy, false);
+      expect(tester.widget<SwitchListTile>(proxySwitch).value, false);
+      await tester.tap(proxySwitch);
+      await tester.pumpAndSettle();
+      expect(NetworkProxy.bypassSystemProxy, true);
+      await capture(tester, key, 'native-proxy-default');
       expect(find.byType(AlertDialog), findsOneWidget);
       allVectorIcons(tester);
       expect(

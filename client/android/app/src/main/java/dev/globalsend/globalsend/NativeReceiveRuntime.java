@@ -251,7 +251,7 @@ final class NativeReceiveRuntime {
                         }
                         // openConnection resolves DNS and binds this socket on the selected Network.
                         // No process-wide network binding and no custom trust manager.
-                        connection = (HttpURLConnection) network.openConnection(url);
+                        connection = (HttpURLConnection) openNetworkConnection(network, url, call);
                         connection.setInstanceFollowRedirects(false);
                         connection.setConnectTimeout(10000);
                         connection.setReadTimeout(30000);
@@ -310,7 +310,14 @@ final class NativeReceiveRuntime {
         byte[] bytes = MessageDigest.getInstance("SHA-256").digest(certificate.getEncoded());
         StringBuilder value = new StringBuilder(); for (byte b : bytes) value.append(String.format("%02x", b & 255)); return value.toString();
     }
-    private HttpsURLConnection pinned(Network network, URL url, String expected) throws Exception {
+    // The selected Network still owns DNS and socket binding. Do not change the
+    // device's global proxy or VPN configuration.
+    static java.net.URLConnection openNetworkConnection(Network network, URL url, MethodCall call) throws java.io.IOException {
+        return Boolean.FALSE.equals(call.argument("bypassSystemProxy"))
+            ? network.openConnection(url)
+            : network.openConnection(url, java.net.Proxy.NO_PROXY);
+    }
+    private HttpsURLConnection pinned(Network network, URL url, String expected, MethodCall call) throws Exception {
         if (!url.getProtocol().equals("https") || url.getUserInfo() != null || !expected.matches("[a-f0-9]{64}")) throw new IllegalArgumentException("Invalid peer identity");
         TrustManager[] managers = new TrustManager[] { new X509TrustManager() {
             @Override public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
@@ -321,7 +328,7 @@ final class NativeReceiveRuntime {
             }
         }};
         SSLContext tls = SSLContext.getInstance("TLS"); tls.init(null, managers, null);
-        HttpsURLConnection connection = (HttpsURLConnection) network.openConnection(url);
+        HttpsURLConnection connection = (HttpsURLConnection) openNetworkConnection(network, url, call);
         connection.setSSLSocketFactory(tls.getSocketFactory());
         connection.setHostnameVerifier((hostname, session) -> { try { return fingerprint((X509Certificate) session.getPeerCertificates()[0]).equals(expected); } catch (Exception e) { return false; } });
         connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(3000); connection.setReadTimeout(20000);
@@ -335,7 +342,7 @@ final class NativeReceiveRuntime {
             throw new IllegalArgumentException("Invalid peer address");
         }
         long started = SystemClock.elapsedRealtime();
-        HttpsURLConnection probe = pinned(network, new URL(base, "/probe?nonce=" + java.net.URLEncoder.encode(nonce, "UTF-8")), expected);
+        HttpsURLConnection probe = pinned(network, new URL(base, "/probe?nonce=" + java.net.URLEncoder.encode(nonce, "UTF-8")), expected, call);
         ObservedTlsSocketFactory observed = new ObservedTlsSocketFactory(probe.getSSLSocketFactory());
         probe.setSSLSocketFactory(observed);
         probe.setConnectTimeout(2000); probe.setReadTimeout(2000);
@@ -381,7 +388,7 @@ final class NativeReceiveRuntime {
                 URL base = new URL(candidate);
                 if (!base.getPath().isEmpty() && !base.getPath().equals("/")) continue;
                 if (base.getQuery() != null || base.getRef() != null) continue;
-                probe = pinned(network, new URL(base, "/probe?nonce=" + nonce), expected);
+                probe = pinned(network, new URL(base, "/probe?nonce=" + nonce), expected, call);
                 activeDownloads.put(operation, probe);
                 probe.setConnectTimeout(Math.min(1500, remaining));
                 probe.setReadTimeout(Math.min(1500, remaining));
@@ -401,7 +408,7 @@ final class NativeReceiveRuntime {
         Number expectedSizeValue = call.argument("expectedSize"); long expectedSize = expectedSizeValue.longValue();
         String expectedHash = call.argument("expectedSha256");
         if (!transfer.matches("[a-zA-Z0-9_-]{1,100}") || !fileId.matches("[a-zA-Z0-9_-]{1,100}")) throw new IllegalArgumentException("Invalid transfer ID");
-        HttpsURLConnection connection = pinned(network, new URL(new URL(chosen), "/files/" + transfer + "/" + fileId), expected);
+        HttpsURLConnection connection = pinned(network, new URL(new URL(chosen), "/files/" + transfer + "/" + fileId), expected, call);
         connection.setRequestProperty("X-GlobalSend-Ticket", (String) call.argument("ticket"));
         java.io.File outputFile = new java.io.File((String) call.argument("path"));
         long offset = outputFile.exists() ? outputFile.length() : 0;
@@ -444,6 +451,7 @@ final class NativeReceiveRuntime {
             try {
                 Map<String, Object> arguments = new HashMap<>();
                 arguments.put("candidate", candidate); arguments.put("fingerprint", expected); arguments.put("nonce", nonce);
+                arguments.put("bypassSystemProxy", !Boolean.FALSE.equals(call.argument("bypassSystemProxy")));
                 probePeer(network, new MethodCall("probePeer", arguments));
                 chosen = candidate; break;
             } catch (Exception error) { lastError = error.getClass().getSimpleName() + ": " + error.getMessage(); }
@@ -454,7 +462,7 @@ final class NativeReceiveRuntime {
         if (!transfer.matches("[a-zA-Z0-9_-]{1,100}") || !fileId.matches("[a-zA-Z0-9_-]{1,100}") || !attempt.matches("[a-zA-Z0-9_-]{1,100}")) throw new IllegalArgumentException("Invalid transfer identity");
         long size = ((Number) call.argument("expectedSize")).longValue(), offset = ((Number) call.argument("offset")).longValue();
         if (offset < 0 || offset > size) throw new IllegalArgumentException("Invalid upload offset");
-        HttpsURLConnection connection = pinned(network, new URL(new URL(chosen), "/push/" + transfer + "/" + fileId + "/" + attempt), expected);
+        HttpsURLConnection connection = pinned(network, new URL(new URL(chosen), "/push/" + transfer + "/" + fileId + "/" + attempt), expected, call);
         connection.setRequestMethod("PUT"); connection.setDoOutput(true); connection.setFixedLengthStreamingMode(size - offset);
         connection.setRequestProperty("Content-Type", "application/octet-stream");
         connection.setRequestProperty("X-GlobalSend-Ticket", (String) call.argument("ticket"));

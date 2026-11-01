@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import 'network_bridge.dart';
+import 'network_proxy.dart';
 import 'peer.dart';
 import 'candidate_routes.dart';
 import 'local_ip_addresses.dart';
@@ -1219,7 +1220,8 @@ Future<({bool reachable, int elapsedMs, String error})> probeCenter(
   void Function(ProbeEndpoints)? onConnected,
 }) async {
   final watch = Stopwatch()..start();
-  final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+  final client = NetworkProxy.client()
+    ..connectionTimeout = const Duration(seconds: 4);
   ProbeEndpoints? endpoints;
   client.connectionFactory = (url, proxyHost, proxyPort) async {
     final tcp = await Socket.startConnect(

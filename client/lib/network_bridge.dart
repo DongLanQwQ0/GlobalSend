@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'network_proxy.dart';
+
 import 'package:flutter/services.dart';
 
 /// Per-connection Android network operations. Control-channel sockets remain Dart-owned.
@@ -23,6 +25,7 @@ class NetworkBridge {
     String? operationId,
   }) async => Map<String, dynamic>.from(
     await channel.invokeMethod('probePeer', {
+      'bypassSystemProxy': NetworkProxy.bypassSystemProxy,
       'candidate': candidate,
       'fingerprint': fingerprint,
       'nonce': nonce,
@@ -51,6 +54,7 @@ class NetworkBridge {
     try {
       return Map<String, dynamic>.from(
         await channel.invokeMethod('downloadPeer', {
+          'bypassSystemProxy': NetworkProxy.bypassSystemProxy,
           'candidates': candidates,
           'fingerprint': fingerprint,
           'ticket': ticket,
@@ -90,6 +94,7 @@ class NetworkBridge {
     try {
       return Map<String, dynamic>.from(
         await channel.invokeMethod('uploadPeer', {
+          'bypassSystemProxy': NetworkProxy.bypassSystemProxy,
           'candidates': candidates,
           'fingerprint': fingerprint,
           'ticket': ticket,
@@ -116,8 +121,11 @@ class NetworkBridge {
   }) async {
     if (!Platform.isAndroid) throw UnsupportedError('逐网络绑定仅用于 Android');
     return Map<String, dynamic>.from(
-      await channel.invokeMethod('probe', {'url': url, 'cellular': cellular})
-          as Map,
+      await channel.invokeMethod('probe', {
+        'url': url,
+        'cellular': cellular,
+        'bypassSystemProxy': NetworkProxy.bypassSystemProxy,
+      }) as Map,
     );
   }
 
@@ -133,6 +141,7 @@ class NetworkBridge {
     String? operationId,
   }) async => Map<String, dynamic>.from(
     await channel.invokeMethod('putFile', {
+      'bypassSystemProxy': NetworkProxy.bypassSystemProxy,
       'url': url,
       'path': path,
       'cellular': cellular,

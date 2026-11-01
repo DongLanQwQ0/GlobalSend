@@ -1,8 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:async';
 
 import 'connection_window.dart';
+import 'network_proxy.dart';
 import 'transfer_operation.dart';
 
 class CenterApi {
@@ -12,7 +13,7 @@ class CenterApi {
   CenterApi forOperation(TransferOperation operation) =>
       _OperationApi(this, operation);
   String token;
-  final HttpClient client = HttpClient()
+  final HttpClient client = NetworkProxy.client()
     ..connectionTimeout = const Duration(seconds: 12);
   Uri uri(String path) => Uri.parse('$baseUrl/api/v1$path');
   Future<Map<String, dynamic>> call(
@@ -30,14 +31,14 @@ class CenterApi {
         ? operation?.resource<HttpClient>(
                 this,
                 () =>
-                    HttpClient()
+                    NetworkProxy.client()
                       ..connectionTimeout = const Duration(seconds: 3),
                 (value) => value.close(force: true),
               ) ??
               client
         : window.resource<HttpClient>(
             this,
-            () => HttpClient()..connectionTimeout = window.remaining,
+            () => NetworkProxy.client()..connectionTimeout = window.remaining,
             (value) => value.close(force: true),
           );
     final request = await activeClient.openUrl(method, uri(path));
@@ -99,7 +100,9 @@ class CenterApi {
     final activeClient =
         operation?.resource<HttpClient>(
           this,
-          () => HttpClient()..connectionTimeout = const Duration(seconds: 3),
+          () =>
+              NetworkProxy.client()
+                ..connectionTimeout = const Duration(seconds: 3),
           (value) => value.close(force: true),
         ) ??
         client;
@@ -139,7 +142,9 @@ class CenterApi {
     final activeClient =
         operation?.resource<HttpClient>(
           this,
-          () => HttpClient()..connectionTimeout = const Duration(seconds: 3),
+          () =>
+              NetworkProxy.client()
+                ..connectionTimeout = const Duration(seconds: 3),
           (value) => value.close(force: true),
         ) ??
         client;

@@ -1778,6 +1778,16 @@ class _SendScreenState extends State<SendScreen>
                       value: development,
                       onChanged: (value) => update(() => development = value),
                     ),
+                    SwitchListTile.adaptive(
+                      key: const ValueKey('setup-bypass-system-proxy'),
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('绕过系统代理'),
+                      value: c.bypassSystemProxy,
+                      onChanged: (value) async {
+                        await perform(() => c.setBypassSystemProxy(value));
+                        if (dialog.mounted) update(() {});
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -4920,6 +4930,15 @@ class _SendScreenState extends State<SendScreen>
             ),
           ]),
           settingsSection('连接', [
+            SwitchListTile.adaptive(
+              key: const ValueKey('bypass-system-proxy'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('绕过系统代理'),
+              value: c.bypassSystemProxy,
+              onChanged: working
+                  ? null
+                  : (value) => perform(() => c.setBypassSystemProxy(value)),
+            ),
             UiField(
               label: '服务器',
               child: TextField(

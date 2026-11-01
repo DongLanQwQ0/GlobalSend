@@ -6,6 +6,7 @@ import 'dart:math';
 import 'connection_window.dart';
 import 'candidate_routes.dart';
 import 'local_ip_addresses.dart';
+import 'network_proxy.dart';
 
 import 'package:basic_utils/basic_utils.dart';
 import 'package:crypto/crypto.dart';
@@ -453,7 +454,7 @@ class PeerTransport {
         sha256.convert(certificate.der).toString() == fingerprint &&
         DateTime.now().isAfter(certificate.startValidity) &&
         DateTime.now().isBefore(certificate.endValidity);
-    final client = HttpClient(context: context)
+    final client = NetworkProxy.client(context: context)
       ..connectionTimeout = const Duration(seconds: 3)
       ..badCertificateCallback = (certificate, host, port) =>
           accepts(certificate);

@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/network_bridge.dart';
+import 'package:globalsend/network_proxy.dart';
 import 'package:globalsend/reachability.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  tearDown(() => NetworkProxy.bypassSystemProxy = true);
   test(
     'canceling a cellular probe releases the same native operation immediately',
     () async {
@@ -70,6 +72,7 @@ void main() {
       );
       expect(received!.method, 'probePeer');
       expect(received!.arguments, {
+        'bypassSystemProxy': true,
         'candidate': 'https://[2001:db8::2]:9443',
         'fingerprint': 'pin',
         'nonce': 'nonce',
@@ -77,6 +80,44 @@ void main() {
       });
       expect(result['reachable'], isFalse);
       expect(result['error'], 'No route to host');
+    },
+  );
+  test(
+    'native requests carry the current proxy preference, including opt-out',
+    () async {
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(NetworkBridge.channel, (call) async {
+        calls.add(call);
+        return <String, dynamic>{};
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(NetworkBridge.channel, null),
+      );
+      for (final bypass in [true, false]) {
+        NetworkProxy.bypassSystemProxy = bypass;
+        await NetworkBridge.putFile(
+          'https://center.example/upload',
+          'file',
+          cellular: true,
+          authorization: 'ticket',
+          offset: 0,
+          length: 1,
+        );
+        await NetworkBridge.probePeer(
+          candidate: 'https://peer.example',
+          fingerprint: 'pin',
+          nonce: 'n',
+          cellular: true,
+        );
+        expect(
+          calls
+              .skip(calls.length - 2)
+              .map((call) => call.arguments['bypassSystemProxy']),
+          [bypass, bypass],
+        );
+      }
     },
   );
   test('cellular push carries a scoped ticket and routes progress only while its operation is active', () async {

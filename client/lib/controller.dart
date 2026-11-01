@@ -15,6 +15,7 @@ import 'models.dart';
 import 'image_signature.dart';
 import 'content_groups.dart';
 import 'network_bridge.dart';
+import 'network_proxy.dart';
 import 'peer.dart';
 import 'vault.dart';
 import 'credential_recovery.dart';
@@ -124,6 +125,8 @@ class SendController extends ChangeNotifier {
     changed: changed,
   );
   final appearance = AppearanceSettings();
+  final networkSettings = NetworkSettings();
+  bool get bypassSystemProxy => networkSettings.bypassSystemProxy;
   final AppUpdates updates;
   String get _platformName => Platform.isWindows
       ? 'windows'
@@ -1298,6 +1301,7 @@ class SendController extends ChangeNotifier {
     try {
       await backgroundReceive.initialize();
       root = await stateDirectory();
+      await networkSettings.load(File('${root!.path}/network.json'));
       await urlIntents.initialize(File('${root!.path}/url-intents.json'));
       await appearance.load(File('${root!.path}/appearance.json'));
       unawaited(updates.initialize(File('${root!.path}/updates.json')));
@@ -2061,8 +2065,10 @@ class SendController extends ChangeNotifier {
             scheme: a.baseUrl.startsWith('https:') ? 'wss' : 'ws',
             queryParameters: {'ticket': ticket['ticket']},
           );
-      final ws = await WebSocket.connect(uri.toString())
-          .timeout(const Duration(seconds: 15));
+      final ws = await WebSocket.connect(
+        uri.toString(),
+        customClient: a.client,
+      ).timeout(const Duration(seconds: 15));
       if (epoch != generation || disposed || attempt != _socketAttempt) {
         await ws.close();
         return;
@@ -4026,6 +4032,14 @@ class SendController extends ChangeNotifier {
     await save();
     changed();
     await safeReconcile();
+  }
+
+  Future<void> setBypassSystemProxy(bool value) async {
+    await networkSettings.setBypassSystemProxy(value);
+    changed();
+    // Replace the persistent signaling socket without resetting files or drafts.
+    // In-flight file bodies finish; subsequent requests use the new policy.
+    unawaited(_networkChanged());
   }
 
   Future<void> setCellularAllowed(bool value) async {

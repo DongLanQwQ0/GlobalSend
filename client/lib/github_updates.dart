@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'network_proxy.dart';
+
 enum UpdatePlatform { windows, android, ios }
 
 class AppReleaseVersion implements Comparable<AppReleaseVersion> {
@@ -186,9 +188,9 @@ PlatformUpdate _offer(
 /// through the user's center. ETags also revalidate replacement metadata assets
 /// published under the same release tag and download URL.
 class GitHubUpdateFeed implements UpdateFeed {
-  GitHubUpdateFeed({HttpClient? client}) : client = client ?? HttpClient() {
+  GitHubUpdateFeed({HttpClient? client})
+    : client = client ?? NetworkProxy.client() {
     this.client.connectionTimeout = const Duration(seconds: 8);
-    this.client.findProxy = HttpClient.findProxyFromEnvironment;
   }
   final HttpClient client;
   static const repository = 'DongLanQwQ0/GlobalSend';
