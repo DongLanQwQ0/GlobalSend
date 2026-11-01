@@ -28,7 +28,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-当前本地 Windows 和 Android 均已覆盖更新并启动 **1.0.75+98**；中心与Web同步上线，未在中心托管安装包。新增指定设备文件复制推送，隔离中心的生产原生控制器直传和浏览器真实拉取均通过；实体Windows界面按用户要求不测试，手机98的新交互待用户确认。GitHub Windows/Android公开通道仍为下方记录的50版，iOS通道仍为76版，不能把本地安装或Web上线写成GitHub已发布。版本、功能和证据见[文件复制推送](COPIED_FILES.md)及[本机发布记录](../artifacts/releases/latest-local.json)。IPA继续在Windows/Android接受稳定后最后构建。
+当前本地 Windows 和 Android 均已覆盖更新并启动 **1.0.75+98**；中心与Web同步上线，未在中心托管安装包。新增指定设备文件复制推送，隔离中心的生产原生控制器直传和浏览器真实拉取均通过；实体Windows界面按用户要求不测试，手机98的新交互待用户确认。GitHub Windows/Android公开通道为[1.0.68+85](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.68-build85)，iOS通道仍为76版，不能把本地安装或Web上线写成GitHub已发布。版本、功能和证据见[文件复制推送](COPIED_FILES.md)及[本机发布记录](../artifacts/releases/latest-local.json)。IPA继续在Windows/Android接受稳定后最后构建。
 
 ### 历史交付：1.0.57+68
 
