@@ -154,6 +154,9 @@ class UiPalette extends ThemeExtension<UiPalette> {
       Color.alphaBlend(ink.withValues(alpha: strength), surface);
 
   Color get hovered => _veil(isDark ? .06 : .04);
+
+  /// Large settings rows need a quieter veil than compact controls.
+  Color get hoveredSubtle => _veil(isDark ? .035 : .025);
   Color get pressed => _veil(isDark ? .12 : .08);
   Color get selected => softGreen;
   Color get selectedLine =>
@@ -638,6 +641,7 @@ abstract final class Ui {
         ),
       ),
       listTileTheme: const ListTileThemeData(
+        shape: RoundedRectangleBorder(borderRadius: fieldRadius),
         contentPadding: EdgeInsets.symmetric(
           horizontal: space3,
           vertical: space1,

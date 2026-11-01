@@ -4653,7 +4653,11 @@ class _SendScreenState extends State<SendScreen>
 
   Widget settingsSection(String title, List<Widget> children) => Padding(
     padding: const EdgeInsets.only(bottom: Ui.space4),
-    child: UiSection(title: title, children: children),
+    child: Theme(
+      data: Theme.of(context)
+          .copyWith(hoverColor: Ui.colors(context).hoveredSubtle),
+      child: UiSection(title: title, children: children),
+    ),
   );
 
   Widget deviceTile(Map<String, dynamic> device) => ListTile(
@@ -4865,6 +4869,7 @@ class _SendScreenState extends State<SendScreen>
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
       child: ListView(
+        key: const ValueKey('settings-list'),
         padding: const EdgeInsets.fromLTRB(
           Ui.space4,
           Ui.space3,
@@ -5350,7 +5355,10 @@ class _SendScreenState extends State<SendScreen>
             if (c.multiGroupSupported) ...[
               for (final group in c.joinedGroups)
                 ListTile(
-                  contentPadding: EdgeInsets.zero,
+                  key: ValueKey('settings-group-${group['groupId']}'),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: Ui.space3,
+                  ),
                   title: Text(group['name'] as String),
                   leading: Container(
                     width: 20,
@@ -5403,7 +5411,8 @@ class _SendScreenState extends State<SendScreen>
               ),
             ],
             ListTile(
-              contentPadding: EdgeInsets.zero,
+              key: const ValueKey('settings-disconnect'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: Ui.space3),
               title: Text(c.multiGroupSupported ? '断开服务器' : '退出当前组'),
               trailing: const AppIcon(Icons.logout_rounded, size: 20),
               onTap: working ? null : signOut,
