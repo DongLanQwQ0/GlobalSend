@@ -133,7 +133,7 @@ function fixture() {
   const render=c.render.bind(c);
   const refresh=c.refresh.bind(c),connect=c.connect.bind(c);
   c.render=()=>{};c.toast=()=>{};c.refresh=async()=>{};c.connect=()=>{};
-  c.info={protocolVersion:1,instanceId:'instance',limits:{maxFileSize:100000,ttlSeconds:86400}};
+  c.info={protocolVersion:1,instanceId:'instance',features:{},limits:{maxFileSize:100000,ttlSeconds:86400}};
   c.loading=false;c.connected=true;c.helloReceived=true;
   c.devices=[{deviceId:'sender',name:'发送设备',platform:'android',online:true}];
   c.session={deviceToken:'token',device:{deviceId:'receiver',name:'Browser',platform:'web'},groupId:'group-one'};
@@ -226,13 +226,14 @@ test('ten-character group password enrolls directly with no generated password o
 });
 test('RTC publication starts only after hello and reconnect immediately republishes without re-enrollment',async()=>{
   const {c,context,connect}=fixture();Object.defineProperty(c,'rtcEnabled',{value:true});
+  const diagnostics:string[]=[];c.toast=(message:string)=>diagnostics.push(message);
   c.connected=false;c.helloReceived=false;c.rtcStore={ready:Promise.resolve(),cleanup:async()=>{}};
   const requests:string[]=[];(context as any).fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({})};};
   c.api.request=async()=>({ticket:'ticket'});await c.ensureRtc();assert.equal(requests.length,0);
   connect();await new Promise(resolve=>setImmediate(resolve));const socket=c.ws;socket.onopen();
   await c.ensureRtc();assert.equal(requests.length,0);
   socket.onmessage({data:JSON.stringify({type:'hello',deviceId:'receiver',protocolVersion:1})});await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(requests.filter(path=>path.endsWith('/devices/me/rtc')).length,1);
+  assert.equal(requests.filter(path=>path.endsWith('/devices/me/rtc')).length,1,JSON.stringify({requests,diagnostics}));
   c.scheduleReconnect=()=>{};socket.onclose();assert.equal(c.rtcRegisteredAt,0);
   connect();await new Promise(resolve=>setImmediate(resolve));c.ws.onmessage({data:JSON.stringify({type:'hello',deviceId:'receiver',protocolVersion:1})});await new Promise(resolve=>setImmediate(resolve));
   assert.equal(requests.filter(path=>path.endsWith('/devices/me/rtc')).length,2);
@@ -1781,14 +1782,18 @@ test('URL-only drags and plain text on nested elements enter the queue without n
   }
 });
 
-test('crossing child elements during native drag does not flash the full-window drop feedback',()=>{
+test('native drag child crossing stays stable while queue and device hits get only their own feedback',()=>{
   const {c,document,render,Event}=fixture();c.render=render;c.installWindowDrop();render();
   const data={types:['Files'],dropEffect:'',files:[],items:[],getData:()=>''};
   const send=(type:string,target:Element,relatedTarget:Element|null)=>{const event=new Event(type,{bubbles:true,cancelable:true});Object.assign(event,{dataTransfer:data,relatedTarget,clientX:80,clientY:90});target.dispatchEvent(event);};
   send('dragenter',document.querySelector('.brand')!,null);const overlay=document.querySelector('#window-drop')!;assert.equal(overlay.classList.contains('visible'),true);
   send('dragleave',document.querySelector('.compose-action span')!,null);assert.equal(overlay.classList.contains('visible'),true,'native null-relatedTarget is not an immediate window exit');
-  send('dragover',document.querySelector('[data-queue-drop]')!,null);assert.equal(overlay.classList.contains('visible'),true);
+  send('dragover',document.querySelector('.compose-action span')!,null);assert.equal(overlay.classList.contains('visible'),true);
+  send('dragover',document.querySelector('[data-queue-drop]')!,null);assert.equal(overlay.classList.contains('visible'),false);assert.ok(document.querySelector('.queue-drop-active'));
+  send('dragover',document.querySelector('[data-target="sender"] .target-icon')!,null);assert.equal(overlay.classList.contains('visible'),false);assert.equal(document.querySelector('.queue-drop-active'),null);assert.equal(document.querySelector('.device-drop-active')?.getAttribute('data-target'),'sender');
+  send('dragover',document.querySelector('[data-queue-drop]')!,null);assert.equal(overlay.classList.contains('visible'),false);assert.ok(document.querySelector('.queue-drop-active'));assert.equal(document.querySelector('.device-drop-active'),null);
   send('drop',document.querySelector('[data-queue-drop]')!,null);assert.equal(overlay.classList.contains('visible'),false);
+  assert.equal(document.querySelector('.queue-drop-active,.device-drop-active'),null);
 });
 
 test('Web card actions keep the app action hierarchy with details last and browser download replacing unavailable locate',()=>{
