@@ -5,6 +5,31 @@ export const PEER_TTL_SECONDS = 30 * 60;
 export type Platform = "windows" | "android" | "web" | "other";
 export const ROUTE_PREFERENCES = ["auto", "lan", "public", "relay"] as const;
 export type RoutePreference = (typeof ROUTE_PREFERENCES)[number];
+/** Copied-file announcements contain metadata only, never source filesystem paths. */
+export interface CopiedFileItem {
+  id: string;
+  name: string;
+  kind: "file" | "directory";
+  size?: number;
+}
+export interface CopiedFileOffer {
+  offerId: string;
+  sourceDeviceId: string;
+  sourceName: string;
+  groupId: string;
+  createdAt: string;
+  items: CopiedFileItem[];
+}
+export interface CopiedFilePull {
+  requestId: string;
+  offerId: string;
+  sourceDeviceId: string;
+  targetDeviceId: string;
+  groupId: string;
+  itemIds: string[];
+  state: "pending" | "sending" | "sent" | "failed";
+  error?: string;
+}
 export type FileStatus =
   | "offered"
   | "accepted"

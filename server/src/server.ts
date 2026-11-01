@@ -36,6 +36,7 @@ import { RtcProbeRegistry } from "./rtc_probes.ts";
 import { TextContents } from "./text_content.ts";
 import { UrlIntents } from "./url_intents.ts";
 import { DeviceGroups } from "./groups.ts";
+import { CopiedFiles } from "./copied_files.ts";
 import {
   PROTOCOL_VERSION,
   DEFAULT_CHUNK_SIZE,
@@ -55,6 +56,7 @@ import {
   type GroupSharedText,
   type OpenUrlIntentRequest,
   type OpenUrlIntentResult,
+  type CopiedFileItem,
 } from "../../packages/protocol/src/index.ts";
 
 type Row = Record<string, any>;
@@ -406,6 +408,12 @@ export async function buildApp(options: Options = {}) {
     if (!groups.has(d.id,groupId)) fail("GROUP_UNAVAILABLE", "请选择已加入的分组", 403);
     return groupId;
   }
+  const copiedFiles = new CopiedFiles({
+    device: id => get("SELECT id,name FROM devices WHERE id=? AND revoked=0", id) as { id: string; name: string } | undefined,
+    online,
+    commonGroup: (a, b) => groups.common(a, b),
+    send,
+  });
   function clearPeerAddresses(deviceId: string) {
     peerAnnouncements.delete(deviceId);
     for (const t of all("SELECT * FROM transfers WHERE source=? OR target=?", deviceId, deviceId))
@@ -677,7 +685,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { relay: true, relayStreaming: true, multiGroup: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true, openUrlIntents: true },
+    features: { copiedFiles: true, relay: true, relayStreaming: true, multiGroup: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true, openUrlIntents: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -827,6 +835,41 @@ export async function buildApp(options: Options = {}) {
   app.post(`${api}/pairing-codes`, async (req) => {
     device(req);
     fail("GROUP_PASSWORD_REQUIRED", "Invitations are retired; use the same group password", 410);
+  });
+  app.get(`${api}/clipboard/files`, async req => copiedFiles.list(device(req).id));
+  app.put(`${api}/clipboard/files`, { schema: { body: {
+    type: "object", additionalProperties: false, required: ["offerId", "items", "targetDeviceIds"], properties: {
+      offerId: id,
+      targetDeviceIds: { type: "array", minItems: 1, items: id },
+      items: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false,
+        required: ["id", "name", "kind"], properties: {
+          id, name: { type: "string", minLength: 1, maxLength: 255 }, kind: { enum: ["file", "directory"] },
+          size: { type: "integer", minimum: 0 },
+        } } },
+    },
+  } } }, async req => {
+    const d = device(req), body = req.body as { offerId: string; items: CopiedFileItem[]; targetDeviceIds: string[] };
+    for (const item of body.items) filename(item.name);
+    return copiedFiles.publish(d.id, body.offerId, body.items, body.targetDeviceIds);
+  });
+  app.delete(`${api}/clipboard/files`, async req => copiedFiles.withdraw(device(req).id));
+  app.post(`${api}/clipboard/files/:sourceDeviceId/pull`, { schema: { body: {
+    type: "object", additionalProperties: false, required: ["offerId", "requestId", "itemIds"], properties: {
+      offerId: id, requestId: id, itemIds: { type: "array", minItems: 1, items: id },
+    },
+  } } }, async req => copiedFiles.request(device(req).id, (req.params as { sourceDeviceId: string }).sourceDeviceId,
+    req.body as { offerId: string; requestId: string; itemIds: string[] }));
+  app.get(`${api}/clipboard/files/pulls`, async req => copiedFiles.pending(device(req).id));
+  app.get(`${api}/clipboard/files/pulls/:requestId`, async req => copiedFiles.status(device(req).id,
+    (req.params as { requestId: string }).requestId));
+  app.put(`${api}/clipboard/files/pulls/:targetDeviceId/:requestId`, { schema: { body: {
+    type: "object", additionalProperties: false, required: ["state"], properties: {
+      state: { enum: ["sending", "sent", "failed"] }, error: { type: "string" },
+    },
+  } } }, async req => {
+    const params = req.params as { targetDeviceId: string; requestId: string };
+    return copiedFiles.result(device(req).id, params.targetDeviceId, params.requestId,
+      req.body as { state: "sending" | "sent" | "failed"; error?: string });
   });
   function sharedText(groupId: string): GroupSharedText {
     const row = get("SELECT * FROM group_shared_text WHERE group_id=?", groupId);
@@ -1394,6 +1437,7 @@ export async function buildApp(options: Options = {}) {
           sessions.delete(d.id);
           if (!closing) {
             clearDeviceDiscovery(d.id);
+            copiedFiles.withdraw(d.id);
             presence(d, false);
             deviceGroupsChanged(d.id);
           }
