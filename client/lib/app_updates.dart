@@ -464,6 +464,9 @@ class AppUpdates extends ChangeNotifier {
       return false;
     if (!_exitExplicit && (!autoDownload || foreground)) return false;
     await beforeInstall?.call();
+    // The native launch response records this attempt's recovery receipt.
+    // Flush that queue as well before allowing its process to disappear.
+    await _writes;
     return !_disposed &&
         !_nativeInteracting &&
         !_cancelledInstall &&
