@@ -21,3 +21,5 @@
 ## 交付
 
 通过 `npm run release:local -- -DeferPhone` 构建 Windows/APK，手机覆盖安装与 Chrona 的同机使用串行协调。保留应用数据，不测试真实 Windows 界面，不上传安装包到中心，不构建 IPA。
+
+Windows 已完整覆盖并重启，实际文件版本 `1.0.74+96`；APK 为 16,370,000 字节，两端均无字体文件。Chrona 明确让出后，手机流式覆盖安装成功，包管理器确认 `versionCode=96`、`versionName=1.0.74`，已启动并交还手机；未做触控手感测试。交付证据集中在任务目录 `delivery.json`、`install.log`、`installed-version.txt` 和 `launch.log`，本地发布记录已同步。
