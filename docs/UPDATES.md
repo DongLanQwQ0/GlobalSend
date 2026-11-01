@@ -39,7 +39,11 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows与Android均已覆盖更新并启动 **1.0.77+101**，中心已上线`clipboardImages`能力，Web按既有图片流程接收自动截图。手机安装Success并读回101版，保留数据；不操作Windows界面。Windows图片剪贴板写入与自动截图发送已接入，实际系统粘贴留给用户验收；生产控制器/真实中心/LAN与WIC格式转换检查通过，见[自动剪贴板同步](CLIPBOARD_SYNC.md)。98版文件引用拉取已由用户确认，99开关联动和100统一卡片继续保留。GitHub Windows/Android公开通道为[1.0.68+85](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.68-build85)，iOS通道为最后构建并发布的[1.0.77+101](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.77-build101)，实际IPA已核对，由用户手动签名安装。101的Release仅含IPA与iOS清单，不向Windows/Android通知不存在的平台更新。中心不托管安装包。版本、功能和证据见[iPad说明](IPAD.md)及[本机发布记录](../artifacts/releases/latest-local.json)。
+Windows与Android均已覆盖更新并启动 **1.0.79+103**，Web及中心已同步。APK 16,423,483字节，Windows完整ZIP 22,516,452字节，包内无字体；手机实际读回103版，保留数据。三个平台的实际包与独立清单已在[GitHub 103版](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.79-build103)发布，不使用中心分发。最后构建的IPA为14,893,687字节，主应用与扩展均为103/arm64，交用户手动签名安装。
+
+自动更新引擎、真实HTTP续传、草稿恢复、Windows隐藏辅助程序替换与回滚、平台筛选和UI检查通过。Android安装器与权限检查通过；实际FileProvider文件读取检查因Windows主机路径差异跳过，仍需在Android真正自动安装时确认。没有操作真实Windows界面或执行真实Windows自更新测试；其实际覆盖由用户后续验收。证据见 `artifacts/reports/automatic-updates103.json`、[Windows更新机制](WINDOWS_SELF_UPDATE.md)和[本机发布记录](../artifacts/releases/latest-local.json)。
+
+101版截图自动发送、98版文件引用拉取及iPad基本跨应用拖放已由用户确认。Windows接收截图后实际Ctrl+V仍因无第二台Windows而未验；103的iPad卡片拖影与剪贴板建议拖动需用户安装后确认，见[iPad说明](IPAD.md)。
 
 ### 历史交付：1.0.57+68
 

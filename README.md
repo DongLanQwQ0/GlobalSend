@@ -12,13 +12,13 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows / Android 最新本地版为 **1.0.77+101**。Windows完整客户端已更新并运行于 `E:\Programs\GlobalSend`；手机已保留数据覆盖安装、读回101版并启动。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
+Windows / Android 最新版为 **1.0.79+103**。Windows完整客户端已更新并运行于 `E:\Programs\GlobalSend`；手机已保留数据覆盖安装、读回103版并启动。设置中自动检查和自动下载安装默认开启；Windows后台空闲时替换完整程序，Android仍需系统安装确认，见[更新说明](docs/UPDATES.md)。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.77+101 完整 ZIP](artifacts/releases/GlobalSend-1.0.77-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。开启“同步剪贴板”并指定目标后，文字与截图自动发送；Windows接收端选择同一来源并启用后可直接Ctrl+V图片，见[自动剪贴板同步](docs/CLIPBOARD_SYNC.md)。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.79+103 完整 ZIP](artifacts/releases/GlobalSend-1.0.79-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。开启“同步剪贴板”并指定目标后，文字与截图自动发送；Windows接收端选择同一来源并启用后可直接Ctrl+V图片，见[自动剪贴板同步](docs/CLIPBOARD_SYNC.md)。
 
-Android [1.0.77+101 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.77-android-arm64-v8a.apk)已构建、验签、保留数据覆盖安装并启动，不打包字体。101可按普通图片接收Windows自动同步的截图；100统一的文件引用卡片、99的开关联动与97的贴边/建议修复继续保留。98的指定设备引用显示与点击拉取已由用户确认。此前的[接收文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)已由用户确认，文件选择器与最近文件均可见。图片／视频和剪贴板建议按建议时间排序，清空与建议之间保留双击空白；建议不参与全部拖出，仍可逐项拖出。[Chrona普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留。实际安装状态以[本机发布记录](artifacts/releases/latest-local.json)为准，文件引用行为见[文件复制推送](docs/COPIED_FILES.md)。
+Android [1.0.79+103 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.79-android-arm64-v8a.apk)已验签、保留数据覆盖安装并启动，不打包字体。可接收Windows自动同步的截图、拉取指定设备的[复制文件引用](docs/COPIED_FILES.md)。[接收文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)已由用户确认，文件选择器与最近文件均可见。图片／视频和剪贴板建议按建议时间排序，清空与建议之间保留双击空白；建议不参与全部拖出，仍可逐项拖出。[Chrona普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留。实际安装状态以[本机发布记录](artifacts/releases/latest-local.json)为准。
 
-iPad / iPhone 的[**1.0.77 (101) 未签名 IPA，约14.8 MB**](artifacts/releases/ios-1.0.77-build101/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体，与Windows/Android使用同一源码，可按普通图片接收Windows同步的截图。接入 UIKit 原生拖入、拖出；普通系统分享唤起待发送，选系统设备建议才按唯一 ID 自动发送本批。由用户用 iloader 手动签名安装，101版真机交互待确认，见[iPad说明](docs/IPAD.md)。**中心不托管安装包；[Windows/Android 1.0.68+85 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.68-build85)与[iOS 1.0.77+101](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.77-build101)分别提供对应平台包和更新清单。**
+iPad / iPhone 的[**1.0.79 (103) 未签名 IPA，约14.9 MB**](artifacts/releases/ios-1.0.79-build103/GlobalSend-iPad-unsigned.ipa)已构建并检查，不打包字体，与Windows/Android使用同一源码。修复剪贴板建议无法拖动、整页抬起与空白拖影，按实际图片格式补齐 `.pic` 等占位后缀；由用户用 iloader 手动签名安装，新的卡片拖影仍需真机确认，见[iPad说明](docs/IPAD.md)。**[GitHub 103版](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.79-build103)提供各平台包及独立更新清单；中心不托管安装包。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 
