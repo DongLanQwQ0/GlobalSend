@@ -69,9 +69,34 @@ function Install-PhoneApk([string]$Device, [string]$Package) {
         [IO.File]::WriteAllText($output,$stdout.GetAwaiter().GetResult())
         [IO.File]::WriteAllText($errors,$stderr.GetAwaiter().GetResult())
         Get-Content -LiteralPath $output,$errors | Write-Output
-        if (-not $finished) { throw 'Phone installation is waiting for system confirmation; the APK remains in Download/GlobalSend-latest.apk' }
+        if (-not $finished) { throw "Phone installation is waiting for system confirmation; local APK retained at $Package" }
         if ($exitCode -ne 0) { throw "Phone installation was not completed ($exitCode); APK retained for manual installation" }
     } finally { $installer.Dispose() }
+}
+function Publish-PhonePackage([string]$Device, [string]$Package, [hashtable]$Report, [switch]$PushOnly) {
+    $Report.serial=$Device
+    if ($PushOnly) {
+        # Explicit file delivery keeps its one intentional artifact inside the
+        # product folder, never scattered in the user's Download root.
+        $directory='/sdcard/Download/GlobalSend/Updates'
+        $destination="$directory/GlobalSend-latest.apk"
+        Invoke-Checked $adb @('-s',$Device,'shell','mkdir','-p',$directory)
+        Invoke-Checked $adb @('-s',$Device,'push',$Package,$destination)
+        $Report.apkPushed=$true
+        $Report.deviceCopy=$destination
+        $Report.phoneInstallSkipped=$true
+        $Report.phoneError='APK pushed; installation deferred by PushOnlyPhone'
+        return
+    }
+    Install-PhoneApk $Device $Package
+    $Report.androidInstalled=$true
+    $Report.phonePending=$false
+    $Report.phoneInstallMode='adb-streamed-install-r'
+    $Report.lastConfirmedPhoneVersion=$version
+    $Report.lastConfirmedPhoneBuildNumber=$buildNumber
+    Invoke-Checked $adb @('-s',$Device,'shell','am','start','-n','dev.globalsend.globalsend/.MainActivity')
+    $Report.phoneLaunched=$true
+    $Report.completedAt=(Get-Date).ToString('o')
 }
 try {
     $env:APPDATA = $config
@@ -175,21 +200,7 @@ try {
             if ($attempt -lt 2) { Start-Sleep -Seconds 2 }
         }
         if (-not $Serial) { throw 'No single authorized phone is connected' }
-        Invoke-Checked $adb @('-s',$Serial,'push',$apk,'/sdcard/Download/GlobalSend-latest.apk')
-        $report.apkPushed=$true
-        $report.deviceCopy='/sdcard/Download/GlobalSend-latest.apk'
-        $report.serial=$Serial
-        if ($PushOnlyPhone) {
-            $report.phoneInstallSkipped=$true
-            $report.phoneError='APK pushed; installation deferred by PushOnlyPhone'
-        } else {
-            Install-PhoneApk $Serial $apk
-            Invoke-Checked $adb @('-s',$Serial,'shell','am','start','-n','dev.globalsend.globalsend/.MainActivity')
-            $report.androidInstalled=$true; $report.phonePending=$false
-            $report.lastConfirmedPhoneVersion=$version
-            $report.lastConfirmedPhoneBuildNumber=$buildNumber
-            $report.completedAt=(Get-Date).ToString('o')
-        }
+        Publish-PhonePackage $Serial $apk $report -PushOnly:$PushOnlyPhone
     } catch {
         # An unattended phone failure must not block the other release targets.
         $report.phoneError=$_.Exception.Message
