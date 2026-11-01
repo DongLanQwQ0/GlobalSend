@@ -28,7 +28,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows与Android均已覆盖更新并启动 **1.0.76+100**，Web同步上线统一文件引用卡片。手机安装Success并读回100版，保留数据；不操作Windows界面。98版指定设备引用显示与点击拉取已由用户确认，99修复开关关闭时目标下拉禁用并保留选择。生产原生控制器直传、实际浏览器拉取及新卡片绘制/动作检查通过。GitHub Windows/Android公开通道为[1.0.68+85](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.68-build85)，iOS通道为最后构建并发布的[1.0.76+100](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.76-build100)，实际IPA已核对，由用户手动签名安装。100的Release仅含IPA与iOS清单，不向Windows/Android通知不存在的平台更新。中心不托管安装包。版本、功能和证据见[文件复制推送](COPIED_FILES.md)、[iPad说明](IPAD.md)及[本机发布记录](../artifacts/releases/latest-local.json)。
+Windows与Android均已覆盖更新并启动 **1.0.77+101**，中心已上线`clipboardImages`能力，Web按既有图片流程接收自动截图。手机安装Success并读回101版，保留数据；不操作Windows界面。Windows图片剪贴板写入与自动截图发送已接入，实际系统粘贴留给用户验收；生产控制器/真实中心/LAN与WIC格式转换检查通过，见[自动剪贴板同步](CLIPBOARD_SYNC.md)。98版文件引用拉取已由用户确认，99开关联动和100统一卡片继续保留。GitHub Windows/Android公开通道为[1.0.68+85](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.68-build85)，iOS通道为最后构建并发布的[1.0.77+101](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.77-build101)，实际IPA已核对，由用户手动签名安装。101的Release仅含IPA与iOS清单，不向Windows/Android通知不存在的平台更新。中心不托管安装包。版本、功能和证据见[iPad说明](IPAD.md)及[本机发布记录](../artifacts/releases/latest-local.json)。
 
 ### 历史交付：1.0.57+68
 
