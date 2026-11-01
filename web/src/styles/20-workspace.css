@@ -271,15 +271,25 @@
 .content-dragging .modal-backdrop *{pointer-events:none}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .copied-file-list{display:flex;gap:var(--space-2);overflow-x:auto;flex-shrink:0;padding-bottom:var(--space-1)}
-.copied-file-reference{position:relative;flex:0 0 218px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--soft);overflow:hidden}
-.copied-file-pull{display:flex;align-items:center;gap:var(--space-2);width:100%;min-height:72px;padding:var(--space-2);padding-right:32px;text-align:left;background:transparent;color:var(--text)}
+.copied-file-reference{position:relative;flex:0 0 202px;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--field);overflow:hidden}
+.copied-file-pull{display:flex;align-items:center;gap:var(--space-1);width:100%;height:64px;padding:var(--space-2);padding-right:36px;border-radius:inherit;text-align:left;background:transparent;color:var(--text)}
+.copied-file-pull:hover{background:color-mix(in srgb,var(--text) 4%,var(--field))}
+.copied-file-pull:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+.copied-file-pull:disabled{opacity:1;cursor:progress}
 .copied-file-pull>svg{width:22px;height:22px;flex-shrink:0;color:var(--green)}
-.copied-file-pull>svg:last-child{width:18px;height:18px}
 .copied-file-pull>span{min-width:0;flex:1}
 .copied-file-pull strong,.copied-file-pull small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.copied-file-pull strong{font-size:var(--text-sm);font-weight:600}
+.copied-file-pull strong{font-size:var(--text-sm);font-weight:400}
 .copied-file-pull small{font-size:var(--text-xs);color:var(--muted);margin-top:var(--space-0)}
 .copied-file-reference>.icon-button{position:absolute;right:0;top:0;width:32px;height:32px;min-height:32px;min-width:32px;padding:7px}
+.copied-file-action{position:absolute;right:8px;bottom:8px;display:flex;pointer-events:none;color:var(--green)}
+.copied-file-action>svg{width:16px;height:16px}
+.copied-file-reference.failed small,.copied-file-reference.failed .copied-file-action{color:var(--red)}
+.copied-file-reference.pending .copied-file-action{right:0;bottom:0;left:0;height:3px;overflow:hidden;background:var(--soft)}
+.copied-file-reference.pending .copied-file-action>svg{display:none}
+.copied-file-reference.pending .copied-file-action::after{content:"";width:40%;background:var(--green);animation:copied-file-progress 1.2s ease-in-out infinite}
+@keyframes copied-file-progress{from{transform:translateX(-100%)}to{transform:translateX(350%)}}
+@media(prefers-reduced-motion:reduce){.copied-file-reference.pending .copied-file-action::after{animation:none;width:100%;opacity:.5}}
 .copied-file-error{color:var(--red);font-size:var(--text-xs)}
 
 /* Touch floor: shell controls that the responsive layer does not already size. */

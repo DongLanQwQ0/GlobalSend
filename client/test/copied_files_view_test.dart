@@ -5,11 +5,11 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/appearance.dart';
 import 'package:globalsend/copied_files.dart';
 import 'package:globalsend/copied_files_view.dart';
+import 'package:globalsend/copied_file_reference_card.dart';
 import 'package:globalsend/main.dart';
 import 'package:globalsend/system_bridge.dart';
 import 'package:globalsend/ui_tokens.dart';
@@ -24,6 +24,102 @@ void main() {
     await loadSystemTestFonts();
     debugPrintSynchronously('copied-file fonts ready');
   });
+  testWidgets(
+    'reference card uses the same theme and corner actions in workspace and dock',
+    (tester) async {
+      final capture = GlobalKey();
+      tester.view.physicalSize = const Size(430, 540);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: capture,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Column(
+              children: [
+                for (final mode in [
+                  AppearanceMode.light,
+                  AppearanceMode.dark,
+                  AppearanceMode.neutral,
+                ])
+                  Expanded(
+                    child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                      theme: Ui.theme(
+                        Appearance(mode: mode, accent: AccentColor.purple),
+                      ),
+                      home: Scaffold(
+                        body: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 202,
+                                height: 64,
+                                child: CopiedFileReferenceCard(
+                                  compact: true,
+                                  reference: const {
+                                    'name': '课堂资料.pdf',
+                                    'kind': 'file',
+                                    'sourceName': 'DongLan',
+                                    'state': '',
+                                  },
+                                  onPull: () {},
+                                  onDismiss: () {},
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              SizedBox(
+                                width: 136,
+                                height: 136,
+                                child: CopiedFileReferenceCard(
+                                  reference: const {
+                                    'name': 'Course files',
+                                    'kind': 'directory',
+                                    'sourceName': 'DongLan',
+                                    'state': 'failed',
+                                  },
+                                  onPull: () {},
+                                  onDismiss: () {},
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('忽略此条目'), findsNWidgets(6));
+    expect(find.text('拉取失败'), findsNWidgets(3));
+      expect(tester.takeException(), isNull);
+      await tester.runAsync(() async {
+        final image =
+            await (capture.currentContext!.findRenderObject()!
+                    as RenderRepaintBoundary)
+                .toImage();
+        final bytes = await image.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        );
+        final directory = await Directory(
+          '../artifacts/tmp/copied-files-client/render',
+        ).create(recursive: true);
+        await File('${directory.path}/reference-themes100.rgba')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        await File('${directory.path}/reference-themes100.json').writeAsString(
+          jsonEncode({'width': image.width, 'height': image.height}),
+        );
+        image.dispose();
+      });
+    },
+  );
   testWidgets(
     'remote roots are separate click-to-pull tiles, become busy, and dismiss without changing files',
     (tester) async {
@@ -95,12 +191,17 @@ void main() {
       await tester.pumpWidget(page());
       await tester.pump();
       expect(find.text('正在准备'), findsOneWidget);
-      final button = tester.widget<TextButton>(
-        find.byKey(const ValueKey('copied-file-batch-folder')),
+      final folder = find.byKey(const ValueKey('copied-file-batch-folder'));
+      expect(tester.widget<CopiedFileReferenceCard>(folder).compact, isTrue);
+      final button = tester.widget<InkWell>(
+        find.descendant(of: folder, matching: find.byType(InkWell)).first,
       );
-      expect(button.onPressed, isNull);
+      expect(button.onTap, isNull);
+      await tester.tap(find.text('Course files'));
+      await tester.pump();
+      expect(requested, ['folder']);
       copied.pulls.clear();
-      copied.dismiss('copied:source:batch:image');
+      await tester.tap(find.byTooltip('忽略此条目').first);
       await tester.pumpWidget(page());
       await tester.pumpAndSettle();
       expect(find.text('picture.jpg'), findsNothing);

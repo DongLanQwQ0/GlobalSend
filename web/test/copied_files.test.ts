@@ -1,10 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CopiedFilesReceiver } from '../src/copied_files.ts';
+import { copiedFilesHtml } from '../src/copied_files_view.ts';
+import { parseHTML } from 'linkedom';
 import type { CopiedFileOffer, CopiedFilePull } from '../../packages/protocol/src/index.ts';
 
 const offer:CopiedFileOffer={sourceDeviceId:'source',sourceName:'DongLan',offerId:'batch',groupId:'group',createdAt:'2026-11-01T00:00:00Z',items:[{id:'folder',name:'Course files',kind:'directory'}]};
 const response=(state:CopiedFilePull['state']):CopiedFilePull=>({sourceDeviceId:'source',targetDeviceId:'self',offerId:'batch',requestId:'request',groupId:'group',itemIds:['folder'],state});
+
+test('shared reference card keeps pull, dismiss and pending/failure states distinct',async()=>{
+  const client=new CopiedFilesReceiver(async<T>()=>({offers:[offer]}) as T,()=>{});
+  await client.refresh();
+  const markup=()=>parseHTML('<html><body>'+copiedFilesHtml(client)+'</body></html>').document;
+  let doc=markup();
+  assert.equal(doc.querySelector('strong')!.textContent,'Course files');
+  assert.equal(doc.querySelector('small')!.textContent,'DongLan');
+  assert.equal(doc.querySelector('[data-action="pull-copied-file"]')!.hasAttribute('disabled'),false);
+  assert.ok(doc.querySelector('[data-action="dismiss-copied-file"]'));
+  client.receive(response('pending'));doc=markup();
+  assert.ok(doc.querySelector('.copied-file-reference.pending'));
+  assert.ok(doc.querySelector('[data-action="pull-copied-file"]')!.hasAttribute('disabled'));
+  assert.equal(doc.querySelector('small')!.textContent,'正在准备');
+  client.receive({...response('failed'),error:'offline'});doc=markup();
+  assert.ok(doc.querySelector('.copied-file-reference.failed'));
+  assert.equal(doc.querySelector('small')!.textContent,'拉取失败');
+  assert.equal(doc.querySelector('[data-action="pull-copied-file"]')!.hasAttribute('disabled'),false);
+});
 test('references are metadata-only; explicit click pulls once; fast socket result beats pending HTTP reply',async()=>{
   const calls:{path:string;body:unknown}[]=[];
   let release!:(pull:CopiedFilePull)=>void;

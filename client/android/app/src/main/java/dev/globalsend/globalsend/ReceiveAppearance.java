@@ -9,13 +9,14 @@ import org.json.JSONObject;
 
 /** Reads the same installation preference as Flutter, including headless reception. */
 final class ReceiveAppearance {
-    final int surface, field, ink, muted, accent, soft, border;
+    final int surface, field, ink, muted, accent, soft, border, danger;
     final int receivedAccent, receivedSoft, stagedSoft;
     ReceiveAppearance(String mode, String color) {
         boolean dark = "dark".equals(mode), neutral = "neutral".equals(mode);
         surface = dark ? 0xff202124 : neutral ? 0xfff7f7f8 : 0xffffffff;
         ink = dark ? 0xffe9eaed : 0xff25272b;
         muted = dark ? 0xffabb0b8 : 0xff62666d;
+        danger = dark ? 0xffffb4a7 : 0xffa94237;
         border = dark ? 0xff3c4046 : neutral ? 0xffd5d7dc : 0xffdedfe3;
         String[] names = {"green", "blue", "purple", "rose", "amber", "slate"};
         int[] colors = dark ? new int[]{0xff81d6b4,0xff9ecaff,0xffc9b6ff,0xfff3aec0,0xffeac17c,0xffb7c9d8}

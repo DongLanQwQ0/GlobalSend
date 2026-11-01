@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'compact_content_card.dart';
+import 'copied_file_reference_card.dart';
 import 'bulk_file_drag.dart';
 import 'app_icon.dart';
 import 'system_bridge.dart';
@@ -453,72 +454,16 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
 
   Widget card(Map<String, dynamic> value) {
     if (value['copiedReference'] == true) {
-      final busy = value['state'] == 'pending' || value['state'] == 'sending';
       return Builder(
         builder: (context) => MetaData(
           metaData: _dockContentMarker,
           behavior: HitTestBehavior.translucent,
-          child: Material(
-            color: Ui.colors(context).surfaceMuted,
-            borderRadius: Ui.fieldRadius,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: InkWell(
-                    borderRadius: Ui.fieldRadius,
-                    onTap: busy
-                        ? null
-                        : () => action('pullCopiedFile', value['id'] as String),
-                    child: Padding(
-                      padding: const EdgeInsets.all(Ui.space1),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          AppIcon(
-                            value['kind'] == 'directory'
-                                ? Icons.folder_outlined
-                                : Icons.insert_drive_file_outlined,
-                            size: 28,
-                          ),
-                          const SizedBox(height: Ui.space1),
-                          Text(
-                            value['name'] as String,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: Ui.textSm),
-                          ),
-                          const SizedBox(height: Ui.space0),
-                          Text(
-                            busy
-                                ? '正在准备'
-                                : value['state'] == 'failed'
-                                ? '拉取失败，点击重试'
-                                : '拉取 · ${value['sourceName']}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: Ui.text2xs,
-                              color: Ui.colors(context).textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  child: IconButton(
-                    tooltip: '忽略此条目',
-                    icon: const AppIcon(Icons.close, size: 18),
-                    onPressed: () =>
-                        action('dismissCopiedFile', value['id'] as String),
-                  ),
-                ),
-              ],
-            ),
+          child: CopiedFileReferenceCard(
+            reference: value,
+            surfaceColor: Ui.colors(context).surfaceMuted
+                .withValues(alpha: .45),
+            onPull: () => action('pullCopiedFile', value['id'] as String),
+            onDismiss: () => action('dismissCopiedFile', value['id'] as String),
           ),
         ),
       );

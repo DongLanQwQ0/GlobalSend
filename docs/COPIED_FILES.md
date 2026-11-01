@@ -50,4 +50,10 @@ Windows 独立接收坞和 Web 共享区已接通相同引用。Windows 坞分�
 
 99已完成Windows和Android完整构建，源提交 `c78de30`；Windows完整覆盖并重启，读回 `1.0.75+99`。APK 16,383,628 B，验签通过、两端无内置字体；在同设备任务明确让出后，流式覆盖安装Success，读回 `versionCode=99`、`versionName=1.0.75`、`lastUpdateTime=2026-11-01 20:36:54` 并启动一次，保留数据，立即交还设备。手机日志在 `artifacts/tmp/copied-files-client/phone-*99.*`。最后使用相同源码的手动工作流 [41307291358](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41307291358)成功构建IPA并发布iOS专属更新清单。已下载至 `artifacts/releases/ios-1.0.75-build99/GlobalSend-iPad-unsigned.ipa`，14,846,945 B；实际检查主应用与扩展版本99、arm64、共享组模板匹配和零字体，证据 `artifacts/tmp/copied-files-client/ios99-verified.json`。由用户手动签名安装，不操作iPad。
 
+## 统一引用卡片 1.0.76+100
+
+主界面与Windows独立坞共用 `CopiedFileReferenceCard`，复用现有内容卡片的圆角、边线、主题前景与弱背景；主界面保持紧凑横排，坞内保持正方形。来源放在底部小字，移除放右上角，拉取/重试用右下角图标表示；准备中只显示进度与状态，不重复添加操作说明。Android坞同步底部左对齐的文件名/来源和主题失败色，Web使用相同的卡片/颜色token与角落操作。引用尚未下载时仍不冒充本地文件，不加入拖出集合；不改指定目标、文件夹根条目与生产拉取流程。
+
+主界面实际点按、准备中不可重复拉取、右上角忽略、独立坞主引擎动作检查通过，代码分析无error/warning。Web四项状态/视图检查、类型检查、生产构建和固定浏览器配置的真实点击拉取通过，950/390渲染已查看。Android原生窗口方法通道检查与实际卡片绘制通过；这不是手机实测。证据 `artifacts/tmp/copied-files-style100-*`、`artifacts/tmp/copied-files-client/render/*style100.jpg`、`artifacts/tmp/copied-files-client/style100-android/copied-reference.jpg` 和 `artifacts/tmp/copied-files-browser/`。首次组合Flutter宿主发生did-not-complete，独立入口通过；首次Web测试发现extensionless导入无法由Node解析，已统一为显式.ts入口后通过；首次Gradle命令参数转义错误已修正。候选尚待完整原生构建和部署，不据此宣称已安装。
+
 本轮误建的空部署包 `server/artifacts/tmp/copied-files-deploy/source.tar`（0 B）删除被执行策略拦截，留在项目内等待清理；未改换工具绕过拦截。正确源包位于 `artifacts/tmp/copied-files-deploy/source.tar`，不含安装包。

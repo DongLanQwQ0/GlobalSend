@@ -919,13 +919,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         card.setContentDescription("拉取 "+reference.get("name"));
         card.setBackground(shape(glass(listSoft(),0x59),12));card.setClipToOutline(true);
         LinearLayout body=new LinearLayout(context);body.setOrientation(LinearLayout.VERTICAL);body.setGravity(Gravity.CENTER);
-        body.setPadding(dp(6),dp(5),dp(6),dp(5));
+        body.setPadding(dp(10),dp(26),dp(10),dp(8));
         body.addView(icon(reference.get("kind").equals("directory")?R.drawable.ic_shelf_folder:R.drawable.ic_shelf_inbox,"拉取"),new LinearLayout.LayoutParams(dp(24),dp(24)));
-        TextView name=label(reference.get("name"),12,appearance.ink);name.setGravity(Gravity.CENTER);name.setMaxLines(2);name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView name=label(reference.get("name"),12,appearance.ink);name.setGravity(Gravity.BOTTOM|Gravity.LEFT);name.setMaxLines(2);name.setEllipsize(android.text.TextUtils.TruncateAt.END);
         body.addView(name,new LinearLayout.LayoutParams(-1,0,1));
         boolean busy=List.of("pending","sending").contains(reference.get("state"));
-        TextView source=label(busy?"正在准备":reference.get("state").equals("failed")?"拉取失败，点击重试":"拉取 · "+reference.get("sourceName"),10,appearance.muted);
-        source.setGravity(Gravity.CENTER);source.setMaxLines(1);source.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView source=label(busy?"正在准备":reference.get("state").equals("failed")?"拉取失败":reference.get("sourceName"),10,reference.get("state").equals("failed")?appearance.danger:appearance.muted);
+        source.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);source.setMaxLines(1);source.setEllipsize(android.text.TextUtils.TruncateAt.END);
         body.addView(source,new LinearLayout.LayoutParams(-1,dp(18)));card.addView(body,new FrameLayout.LayoutParams(-1,-1));
         TextView remove=control("×","移除此复制条目",() -> DockCoordinator.pullCopiedFile(reference.get("id"),true));
         remove.setTextSize(20);
