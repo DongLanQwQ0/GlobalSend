@@ -34,6 +34,8 @@ Windows 独立接收坞和 Web 共享区已接通相同引用。Windows 坞分�
 
 此次实际联调还发现浏览器刚接收完的文件对象沿用 OPFS 内部名称，重启读取时才恢复真实文件名。已在存储完成入口统一保留来源文件名与 MIME，避免立即拖出/转发丢失文件名与后缀；原传输及存储路径不变。
 
+原生生产控制器的真实中心链路也已通过：三台同名、不同 ID 的隔离客户端中，来源复制普通文件和目录，只有指定接收端出现两个引用，点击前没有文件任务。接收端通过生产 `pullCopiedFileSelection`、HTTP/WebSocket 与来源生产 `offer` 建立局域网 TLS 直传，实际落盘正文、空文件、子目录和空目录均正确。目录折叠为一张卡，六个传输成员只形成两个接收根条目；来源草稿与原文件未改变，未选设备没有引用或传输。撤回引用不移除已经接收的文件，收件具备导出状态，重新加入待发仍引用本地文件/目录，不生成 ZIP 或目录副本。用例是 `client/test/copied_files_center_integration_test.dart`，日志 `artifacts/tmp/copied-files-native-center.log`，隔离中心和数据在 `artifacts/tmp/copied-files-native-center/`；未启动或测试真实 Windows 界面，也未操作手机。
+
 证据：`artifacts/tmp/copied-files-native-final-tests.log`、`copied-files-dock-host-regression.log`、`copied-files-dock-bulk-regression.log`、`copied-files-web-tests.log`、`copied-files-web-build.log`、`copied-files-browser/result.json`；窗口与网页 JPEG 在相邻 render/browser 目录。首次测试宿主发生原生访问异常退出，详细记录保留为 `copied-files-host-debug.log`；将窗口渲染与主引擎入口分开后完整通过，不把崩溃运行计为通过。
 
 ## 交付 1.0.75+98
@@ -43,5 +45,7 @@ Windows 独立接收坞和 Web 共享区已接通相同引用。Windows 坞分�
 中心/Web 已部署至 `https://123.207.180.163/globalsend/app/`，容器 `globalsend:copied-files-1.0.75-20261101` 健康；公开 info 已包含 copiedFiles，实际 JS/CSS 返回 200、MIME 正常，安装包目录仍为 404，未上传安装包。实例 ID 保持不变，旧镜像作为部署脚本的回退目标。部署证据在 `artifacts/tmp/copied-files-deploy/`。
 
 手机已在明确交接后完成流式覆盖安装并启动：`10.197.184.141:39343`，安装返回 Success，读回 `versionCode=98`、`versionName=1.0.75`、`lastUpdateTime=2026-11-01 20:08:16`。仅安装、读回版本和启动一次，未触控其它页面、操作另一应用、访问共享模拟器或创建手机测试文件；完成即交还设备。日志位于 `artifacts/tmp/copied-files-client/phone-install98.log`、`phone-version98.txt`、`phone-launch98.log`。手机实际拉取仍待交互验收；不能用浏览器或原生组件检查冒充真机通过。发布状态见 `artifacts/releases/latest-local.json`。
+
+下一阶段：由用户确认已安装98版的实际“复制 → 手机显示 → 点按拉取”交互；继续遵守不测试真实 Windows 的限制。Windows/Android 接受稳定后才进入最后的 IPA 构建，当前公开 IPA 仍为76版，不把98版原生/网页交付当作已更新 iPad。
 
 本轮误建的空部署包 `server/artifacts/tmp/copied-files-deploy/source.tar`（0 B）删除被执行策略拦截，留在项目内等待清理；未改换工具绕过拦截。正确源包位于 `artifacts/tmp/copied-files-deploy/source.tar`，不含安装包。
