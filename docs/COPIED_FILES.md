@@ -56,4 +56,8 @@ Windows 独立接收坞和 Web 共享区已接通相同引用。Windows 坞分�
 
 主界面实际点按、准备中不可重复拉取、右上角忽略、独立坞主引擎动作检查通过，代码分析无error/warning。Web四项状态/视图检查、类型检查、生产构建和固定浏览器配置的真实点击拉取通过，950/390渲染已查看。Android原生窗口方法通道检查与实际卡片绘制通过；这不是手机实测。证据 `artifacts/tmp/copied-files-style100-*`、`artifacts/tmp/copied-files-client/render/*style100.jpg`、`artifacts/tmp/copied-files-client/style100-android/copied-reference.jpg` 和 `artifacts/tmp/copied-files-browser/`。首次组合Flutter宿主发生did-not-complete，独立入口通过；首次Web测试发现extensionless导入无法由Node解析，已统一为显式.ts入口后通过；首次Gradle命令参数转义错误已修正。候选尚待完整原生构建和部署，不据此宣称已安装。
 
+100完整Windows/Android release构建成功，源码 `921bae5`；Windows已覆盖并重启，实际产品版本 `1.0.76+100`，PID 26592。APK 16,383,024 B、Windows ZIP 22,441,977 B，两端字体文件为零、APK验签通过。Android因另一任务持有真机、且观察到用户使用其它应用而未安装，手机最近确认仍为99；已向当前持有者请求一次30秒安装窗口，未获交接前不访问手机。构建日志 `artifacts/logs/release-copied-files-style100.log` 和 `release-local-1.0.76-{windows,android}.log`，安装状态 `artifacts/releases/latest-local.json`。IPA保留已验证的99版，本轮不在手机更新/验收未结束前启动另一次IPA构建。
+
+Web100已上线：镜像 `globalsend:copied-files-style-1.0.76-20261101`、容器healthy，实例ID不变，实际公开JS/CSS返回200并包含新卡片规则。旧98镜像保留为脚本回退目标，没有新增备份或上传安装包；现有禁用的安装包URL返回410。部署记录 `artifacts/deploy/current-workspace-deployment.json`，证据 `artifacts/tmp/copied-files-style100-deploy/`。
+
 本轮误建的空部署包 `server/artifacts/tmp/copied-files-deploy/source.tar`（0 B）删除被执行策略拦截，留在项目内等待清理；未改换工具绕过拦截。正确源包位于 `artifacts/tmp/copied-files-deploy/source.tar`，不含安装包。
