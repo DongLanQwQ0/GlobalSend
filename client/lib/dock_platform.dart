@@ -9,11 +9,16 @@ class DockPlatform {
       StreamController.broadcast();
   static bool _installed = false;
   static Future<void> Function(Map<String, dynamic>)? onSendToDevice;
+  static Future<void> Function(Map<String, dynamic>)? onPullCopiedFile;
   static Stream<Map<String, dynamic>> get events {
     if (!_installed) {
       _installed = true;
       channel.setMethodCallHandler((call) async {
-        if (call.method == 'sendToDevice') {
+        if (call.method == 'pullCopiedFile') {
+          final pull = onPullCopiedFile;
+          if (pull == null) throw StateError('接收服务尚未就绪');
+          await pull(Map<String, dynamic>.from(call.arguments as Map));
+        } else if (call.method == 'sendToDevice') {
           final send = onSendToDevice;
           if (send == null) throw StateError('发送服务尚未就绪');
           await send(Map<String, dynamic>.from(call.arguments as Map));
@@ -84,10 +89,12 @@ class DockPlatform {
 
   static Future<void> setSendTargets(
     String serverKey,
-    List<Map<String, dynamic>> devices,
-  ) => channel.invokeMethod('sendTargets', {
+    List<Map<String, dynamic>> devices, {
+    List<Map<String, String>> copiedFiles = const [],
+  }) => channel.invokeMethod('sendTargets', {
     'serverKey': serverKey,
     'devices': devices,
+    'copiedFiles': copiedFiles,
   });
 
   static Future<void> setQueueDropBounds(

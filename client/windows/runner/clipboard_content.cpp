@@ -90,19 +90,26 @@ std::string GlobalSendClipboardKind() {
   return IsClipboardFormatAvailable(CF_UNICODETEXT) ? "text" : "empty";
 }
 
-GlobalSendClipboardContent ReadGlobalSendClipboard(HWND owner, const std::wstring& bitmap_path) {
-  GlobalSendClipboardContent content;
-  if (!OpenClipboard(owner)) { content.error = "剪贴板正被占用，请重试"; return content; }
-  const auto kind = GlobalSendClipboardKind();
-  if (kind == "files") {
+std::vector<std::wstring> ReadGlobalSendClipboardPaths() {
+    std::vector<std::wstring> paths;
+    if (!IsClipboardFormatAvailable(CF_HDROP)) return paths;
     const auto drop = static_cast<HDROP>(GetClipboardData(CF_HDROP));
     const UINT count = DragQueryFileW(drop, 0xffffffff, nullptr, 0);
     for (UINT i = 0; i < count; ++i) {
       std::wstring path(DragQueryFileW(drop, i, nullptr, 0) + 1, L'\0');
       DragQueryFileW(drop, i, path.data(), static_cast<UINT>(path.size()));
       path.resize(wcslen(path.c_str()));
-      content.paths.push_back(std::move(path));
+      paths.push_back(std::move(path));
     }
+    return paths;
+}
+
+GlobalSendClipboardContent ReadGlobalSendClipboard(HWND owner, const std::wstring& bitmap_path) {
+  GlobalSendClipboardContent content;
+  if (!OpenClipboard(owner)) { content.error = "剪贴板正被占用，请重试"; return content; }
+  const auto kind = GlobalSendClipboardKind();
+  if (kind == "files") {
+    content.paths = ReadGlobalSendClipboardPaths();
   } else if (kind == "image") {
     auto path = Extension(bitmap_path, L".png");
     bool saved = !bitmap_path.empty() && IsClipboardFormatAvailable(PngFormat()) && SavePng(path);

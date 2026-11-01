@@ -42,6 +42,7 @@ import 'local_ip_menu.dart';
 import 'received_order.dart';
 import 'recent_photos.dart';
 import 'clipboard_suggestions.dart';
+import 'copied_files_view.dart';
 import 'recent_photos_view.dart';
 import 'installed_apps_picker.dart';
 import 'windows_startup_control.dart';
@@ -3555,6 +3556,12 @@ class _SendScreenState extends State<SendScreen>
               ],
             ),
           ),
+          CopiedFileOffers(
+            client: c.copiedFiles,
+            onPull: (offer, id) => perform(() async {
+              await c.copiedFiles.pull(offer, [id]);
+            }),
+          ),
           if (expanded)
             Expanded(child: field)
           else
@@ -4704,6 +4711,7 @@ class _SendScreenState extends State<SendScreen>
     }
     final choice = active ?? clipboardChoice;
     final online = peers.any((peer) => peer['deviceId'] == choice);
+    final fileTarget = c.copiedFiles.targets.firstOrNull;
     return Column(
       children: [
         SwitchListTile.adaptive(
@@ -4759,6 +4767,68 @@ class _SendScreenState extends State<SendScreen>
                         setState(() => clipboardChoice = value);
                       }
                     },
+            ),
+          ),
+        const SizedBox(height: Ui.space2),
+        SwitchListTile.adaptive(
+          key: const ValueKey('copied-files-enabled'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('文件复制推送'),
+          value: c.copiedFiles.enabled,
+          onChanged: working || !c.copiedFilesSupported || fileTarget == null
+              ? null
+              : (enabled) =>
+                    perform(() => c.setCopiedFilePush(enabled, [fileTarget])),
+        ),
+        UiField(
+          label: '推送到',
+          child: DropdownButtonFormField<String>(
+            key: ValueKey('copied-files-target-$fileTarget'),
+            icon: const AppIcon(Icons.arrow_drop_down),
+            initialValue: fileTarget,
+            isExpanded: true,
+            hint: const Text('选择设备'),
+            items: [
+              for (final device in peers)
+                DropdownMenuItem(
+                  value: device['deviceId'] as String,
+                  child: Text(
+                    device['name'] as String,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              if (fileTarget != null &&
+                  !peers.any((device) => device['deviceId'] == fileTarget))
+                DropdownMenuItem(
+                  value: fileTarget,
+                  child: const Text('所选设备（离线）'),
+                ),
+            ],
+            onChanged: working || !c.copiedFilesSupported
+                ? null
+                : (target) {
+                    if (target != null)
+                      perform(
+                        () => c.setCopiedFilePush(c.copiedFiles.enabled, [
+                          target,
+                        ]),
+                      );
+                  },
+          ),
+        ),
+        if (c.copiedFiles.error.isNotEmpty ||
+            c.copiedFiles.sourceError.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: Ui.space1),
+            child: Text(
+              c.copiedFiles.sourceError.isNotEmpty
+                  ? c.copiedFiles.sourceError
+                  : c.copiedFiles.error,
+              style: TextStyle(
+                color: Ui.colors(context).danger,
+                fontSize: Ui.text2xs,
+              ),
             ),
           ),
       ],

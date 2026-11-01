@@ -12,6 +12,8 @@ struct GlobalSendClipboardContent {
 // Format discovery does not open/read clipboard contents. Both the button and
 // Ctrl+V use the same importer after the explicit user action.
 std::string GlobalSendClipboardKind();
+// Caller holds OpenClipboard. Only obtains CF_HDROP references; no disk I/O.
+std::vector<std::wstring> ReadGlobalSendClipboardPaths();
 GlobalSendClipboardContent ReadGlobalSendClipboard(HWND owner,
     const std::wstring& bitmap_path);
 #endif

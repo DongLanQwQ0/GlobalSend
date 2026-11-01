@@ -78,6 +78,7 @@ final class DockCoordinator {
     private static LocalDrag activeExport;
     private String sendServerKey = "";
     private final List<Map<String, String>> sendTargets = new ArrayList<>();
+    private final List<Map<String, String>> copiedFiles = new ArrayList<>();
     private static final String LOCAL_DRAG_SESSION = "dev.globalsend.localDrag";
     private RectF queueDropBounds;
     private final Map<String, RectF> deviceDropBounds = new java.util.LinkedHashMap<>();
@@ -154,6 +155,7 @@ final class DockCoordinator {
                         result.success(null); break;
                     case "sendTargets":
                         updateSendTargets(call.argument("serverKey"), call.argument("devices"));
+                        updateCopiedFiles(call.argument("copiedFiles"));
                         result.success(null); break;
                     case "queueDropBounds":
                         updateQueueDropBounds(Boolean.TRUE.equals(call.argument("enabled")) ? call.arguments() : null);
@@ -209,6 +211,27 @@ final class DockCoordinator {
     static List<Map<String,String>> sendTargets() {
         DockCoordinator coordinator=current.get();
         return coordinator==null?java.util.Collections.emptyList():new ArrayList<>(coordinator.sendTargets);
+    }
+    void updateCopiedFiles(List<Map<String,String>> references) {
+        List<Map<String,String>> next=references==null?List.of():references;
+        if(copiedFiles.equals(next))return;
+        copiedFiles.clear();for(Map<String,String> reference:next)copiedFiles.add(new HashMap<>(reference));
+        ReceiveOverlay.copiedFilesChanged();
+    }
+    static List<Map<String,String>> copiedFiles() {
+        DockCoordinator coordinator=current.get();
+        return coordinator==null?List.of():new ArrayList<>(coordinator.copiedFiles);
+    }
+    static void pullCopiedFile(String id,boolean dismiss) {
+        DockCoordinator coordinator=current.get();
+        if(coordinator==null || coordinator.disposed)return;
+        coordinator.channel.invokeMethod("pullCopiedFile",Map.of("id",id,"serverKey",coordinator.sendServerKey,"dismiss",dismiss),new MethodChannel.Result() {
+            public void success(Object result) {}
+            public void error(String code,String message,Object details) {
+                android.widget.Toast.makeText(coordinator.context,message==null?"无法拉取此文件":message,android.widget.Toast.LENGTH_SHORT).show();
+            }
+            public void notImplemented() {android.widget.Toast.makeText(coordinator.context,"请重新打开 GlobalSend",android.widget.Toast.LENGTH_SHORT).show();}
+        });
     }
     static boolean sendToDevice(DragEvent event, String serverKey, String deviceId,
             List<String> paths, List<String> texts, java.util.function.Consumer<Boolean> completed) {

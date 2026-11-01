@@ -887,6 +887,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
         if(!tailAdded)appendListTail(side,hasContent);
         if(shelfVisible && !clipboardAdded)appendClipboardSuggestion(side,clipboard);
+        if(shelfVisible)for(Map<String,String> reference:DockCoordinator.copiedFiles())appendCopiedFile(side,reference);
         scroll.scrollTo(0, 0);
         if(animateCards) {
             LinearLayout owner=row;
@@ -907,6 +908,31 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
     }
 
+    static void copiedFilesChanged() {
+        ReceiveOverlay overlay=current.get();
+        if(overlay==null || overlay.root==null || !overlay.shelfVisible)return;
+        if(DockCoordinator.afterExportFrom(overlay.root,ReceiveOverlay::copiedFilesChanged))return;
+        overlay.renderKeepingScroll();
+    }
+    private void appendCopiedFile(int side,Map<String,String> reference) {
+        FrameLayout card=new FrameLayout(context);card.setTag("copied-file-reference");styleCard(card,false);
+        card.setContentDescription("拉取 "+reference.get("name"));
+        card.setBackground(shape(glass(listSoft(),0x59),12));card.setClipToOutline(true);
+        LinearLayout body=new LinearLayout(context);body.setOrientation(LinearLayout.VERTICAL);body.setGravity(Gravity.CENTER);
+        body.setPadding(dp(6),dp(5),dp(6),dp(5));
+        body.addView(icon(reference.get("kind").equals("directory")?R.drawable.ic_shelf_folder:R.drawable.ic_shelf_inbox,"拉取"),new LinearLayout.LayoutParams(dp(24),dp(24)));
+        TextView name=label(reference.get("name"),12,appearance.ink);name.setGravity(Gravity.CENTER);name.setMaxLines(2);name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        body.addView(name,new LinearLayout.LayoutParams(-1,0,1));
+        boolean busy=List.of("pending","sending").contains(reference.get("state"));
+        TextView source=label(busy?"正在准备":reference.get("state").equals("failed")?"拉取失败，点击重试":"拉取 · "+reference.get("sourceName"),10,appearance.muted);
+        source.setGravity(Gravity.CENTER);source.setMaxLines(1);source.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        body.addView(source,new LinearLayout.LayoutParams(-1,dp(18)));card.addView(body,new FrameLayout.LayoutParams(-1,-1));
+        TextView remove=control("×","移除此复制条目",() -> DockCoordinator.pullCopiedFile(reference.get("id"),true));
+        remove.setTextSize(20);
+        FrameLayout.LayoutParams corner=new FrameLayout.LayoutParams(dp(36),dp(36),Gravity.TOP|Gravity.RIGHT);card.addView(remove,corner);
+        card.setOnClickListener(view -> {if(!busy){feedback(HapticFeedbackConstants.VIRTUAL_KEY);DockCoordinator.pullCopiedFile(reference.get("id"),false);}});
+        LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(side,side);size.rightMargin=dp(3);row.addView(card,size);
+    }
     private void showClipboardShelf() {
         shelfVisible=true;render();withClipboardFocus(DockCoordinator::refreshClipboardSuggestion);
     }
@@ -1050,7 +1076,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private boolean hitsAction(View view,MotionEvent event) {
         if(view.getVisibility()!=View.VISIBLE || !hits(view,event))return false;
-        if("clipboard-suggestion".equals(view.getTag()))return true;
+        if("clipboard-suggestion".equals(view.getTag()) || "copied-file-reference".equals(view.getTag()))return true;
         if(((view instanceof TextView || view instanceof ImageView) && view.isClickable()) ||
             view==countGroup || view==shelfGroup ||
             "清空当前列表".contentEquals(view.getContentDescription()==null?"":view.getContentDescription()))return true;

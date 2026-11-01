@@ -205,6 +205,17 @@ std::wstring ReadClipboardText(UINT format, size_t maximum) {
   std::wstring value(text, wcsnlen(text, size / sizeof(wchar_t)));
   GlobalUnlock(memory); return value;
 }
+bool ClipboardPrivate() {
+  bool private_content = IsClipboardFormatAvailable(RegisterClipboardFormatW(L"ExcludeClipboardContentFromMonitorProcessing"));
+  for (const auto* name : {L"CanIncludeInClipboardHistory", L"CanUploadToCloudClipboard"}) {
+    HANDLE memory = GetClipboardData(RegisterClipboardFormatW(name));
+    if (memory && GlobalSize(memory) >= sizeof(DWORD)) {
+      const auto* value = static_cast<const DWORD*>(GlobalLock(memory));
+      if (value) { private_content = private_content || *value == 0; GlobalUnlock(memory); }
+    }
+  }
+  return private_content;
+}
 
 winrt::fire_and_forget RevealFile(std::wstring path,
     std::shared_ptr<flutter::MethodResult<Value>> result) {
@@ -574,6 +585,13 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       result->Success(Value(Map{{Value("available"),Value(true)},
         {Value("revision"),Value(std::to_string(GetClipboardSequenceNumber()))},
         {Value("kind"),Value(GlobalSendClipboardKind())}}));
+    } else if (call.method_name() == "clipboardFilePaths") {
+      if (!OpenClipboard(owner)) { result->Error("CLIPBOARD_BUSY", "Clipboard is in use"); return; }
+      flutter::EncodableList paths;
+      if (!ClipboardPrivate() && ReadClipboardText(origin_format, 300).empty())
+        for (const auto& path : ReadGlobalSendClipboardPaths()) paths.emplace_back(Utf8FromUtf16(path.c_str()));
+      CloseClipboard();
+      result->Success(Value(paths));
     } else if (call.method_name() == "readClipboard") {
       const auto content = ReadGlobalSendClipboard(owner, Wide(String(*arguments, "bitmapPath")));
       if (!content.error.empty()) { result->Error("CLIPBOARD_READ", content.error); return; }
@@ -653,18 +671,15 @@ void ShowGlobalSendWindowOnFirstFrame() {
 bool HandleGlobalSendMessage(UINT message) {
   if (message != WM_CLIPBOARDUPDATE || !watching || !channel) return false;
   if (!OpenClipboard(owner)) return true;
-  bool private_content = IsClipboardFormatAvailable(RegisterClipboardFormatW(L"ExcludeClipboardContentFromMonitorProcessing"));
-  for (const auto* name : {L"CanIncludeInClipboardHistory", L"CanUploadToCloudClipboard"}) {
-    HANDLE memory = GetClipboardData(RegisterClipboardFormatW(name));
-    if (memory && GlobalSize(memory) >= sizeof(DWORD)) {
-      const auto* value = static_cast<const DWORD*>(GlobalLock(memory));
-      if (value) { private_content = private_content || *value == 0; GlobalUnlock(memory); }
-    }
-  }
+  const bool private_content = ClipboardPrivate();
   const auto text = private_content ? std::wstring() : ReadClipboardText(CF_UNICODETEXT, 8193);
   const auto marker = ReadClipboardText(origin_format, 300);
+  flutter::EncodableList files;
+  if (!private_content && marker.empty())
+    for (const auto& path : ReadGlobalSendClipboardPaths()) files.emplace_back(Utf8FromUtf16(path.c_str()));
   const auto sequence = GetClipboardSequenceNumber(); CloseClipboard();
   Map event{{Value("text"), Value(Utf8FromUtf16(text.c_str()))}, {Value("private"), Value(private_content)}, {Value("marker"), Value(Utf8FromUtf16(marker.c_str()))}, {Value("sequence"), Value(static_cast<int64_t>(sequence))}};
+  event[Value("files")] = Value(files);
   channel->InvokeMethod("clipboardChanged", std::make_unique<Value>(event)); return true;
 }
 

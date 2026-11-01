@@ -294,6 +294,15 @@ class SystemBridge {
     await channel.invokeMethod('clipboardWatch', {'enabled': enabled});
   }
 
+  static Future<List<String>> clipboardFilePaths() async {
+    if (!Platform.isWindows) return [];
+    return await channel.invokeListMethod<String>(
+          'clipboardFilePaths',
+          <String, dynamic>{},
+        ) ??
+        [];
+  }
+
   static Future<void> copy(
     String text, {
     String originDeviceId = '',

@@ -42,6 +42,7 @@ public class ReceiveOverlayDeviceTargetsTest {
     private View root;
     private MethodCall sent;
     private MethodCall imported;
+    private MethodCall copiedRequest;
     private BinaryMessenger.BinaryReply reply;
     private Object field(Object owner,String name) throws Exception {
         return ReflectionHelpers.getField(owner,name);
@@ -58,6 +59,7 @@ public class ReceiveOverlayDeviceTargetsTest {
                 MethodCall call=StandardMethodCodec.INSTANCE.decodeMethodCall(copy);
                 if(call.method.equals("sendToDevice")){sent=call;reply=callback;}
                 if(call.method.equals("nativeDrop"))imported=call;
+                if(call.method.equals("pullCopiedFile"))copiedRequest=call;
             }
             public void setMessageHandler(String channel,BinaryMessageHandler handler) { }
         },"dock-test"));
@@ -103,6 +105,34 @@ public class ReceiveOverlayDeviceTargetsTest {
             return (Boolean)receive.invoke(overlay,event);
         }
         return root.dispatchDragEvent(event);
+    }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void copiedReferenceIsAnExplicitPullNotALocalDragOrAReceivedFile() throws Exception {
+        Map<String,String> reference=Map.of("id","copied:device:batch:folder","sourceDeviceId","device",
+            "sourceName","DongLan","offerId","batch","itemId","folder","name","Course files",
+            "kind","directory","state","");
+        ReflectionHelpers.setField(overlay,"shelfVisible",true);
+        coordinator.updateSendTargets("center",List.of());coordinator.updateCopiedFiles(List.of(reference));draw();
+        LinearLayout row=(LinearLayout)field(overlay,"row");
+        View card=row.findViewWithTag("copied-file-reference");assertNotNull(card);
+        assertFalse(card.performLongClick());assertNull(copiedRequest);
+        assertTrue(card.performClick());assertEquals("pullCopiedFile",copiedRequest.method);
+        assertEquals("center",copiedRequest.argument("serverKey"));
+        assertEquals(reference.get("id"),copiedRequest.argument("id"));
+        assertEquals(false,copiedRequest.argument("dismiss"));
+        assertTrue(((Map<?,?>)field(field(overlay,"shelf"),"items")).isEmpty());
+        ((android.view.ViewGroup)card).getChildAt(1).performClick();
+        assertEquals(true,copiedRequest.argument("dismiss"));
+        String output=System.getenv("GLOBALSEND_TEST_ARTIFACTS");
+        if(output!=null) {
+            java.io.File folder=new java.io.File(output);folder.mkdirs();
+            android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(card.getWidth(),card.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);
+            card.draw(new android.graphics.Canvas(image));
+            try(var stream=new java.io.FileOutputStream(new java.io.File(folder,"copied-reference.jpg"))) {
+                image.compress(android.graphics.Bitmap.CompressFormat.JPEG,88,stream);
+            }
+            image.recycle();
+        }
     }
     private void targets() {
         List<Map<String,String>> devices=new ArrayList<>();

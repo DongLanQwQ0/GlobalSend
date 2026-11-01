@@ -43,6 +43,7 @@ import 'transfer_operation.dart';
 import 'transfer_route_selection.dart';
 import 'url_intents.dart';
 import 'file_share.dart';
+import 'copied_files.dart';
 
 String newId() {
   final r = Random.secure();
@@ -108,6 +109,43 @@ typedef _PreparedRoutes = ({
 });
 
 class SendController extends ChangeNotifier {
+  late final CopiedFilesClient copiedFiles = CopiedFilesClient(
+    newId: newId,
+    sendFiles: (target, paths) => offer(target, paths),
+    changed: changed,
+  );
+  bool get copiedFilesSupported => info['features']?['copiedFiles'] == true;
+
+  Future<void> setCopiedFilePush(bool enabled, List<String> targets) async {
+    if (!Platform.isWindows) throw UnsupportedError('文件复制推送目前由 Windows 提供');
+    if (enabled && !copiedFilesSupported) throw StateError('请先升级中心以使用文件复制推送');
+    await copiedFiles.configure(enabled, targets);
+    await SystemBridge.watchClipboard(clipboardEnabled || copiedFiles.enabled);
+    if (enabled)
+      await copiedFiles.copiedPaths(await SystemBridge.clipboardFilePaths());
+    changed();
+  }
+
+  void _copiedFileFailure(Object failure) {
+    if (disposed) return;
+    copiedFiles.sourceError = '$failure';
+    changed();
+  }
+
+  Future<void> pullCopiedFileSelection(Map<String, dynamic> selection) async {
+    if (selection['serverKey'] != profile?.key || !connected)
+      throw StateError('请连接原中心后重试');
+    final reference = copiedFiles.references
+        .where((item) => item['id'] == selection['id'])
+        .firstOrNull;
+    if (reference == null) throw StateError('此复制条目已不可用');
+    if (selection['dismiss'] == true) {
+      copiedFiles.dismiss(reference['id']!);
+      return;
+    }
+    await copiedFiles.pull(reference, [reference['itemId']!]);
+  }
+
   late final UrlIntentIntegration urlIntents = UrlIntentIntegration(
     session: () {
       final p = profile, a = api;
@@ -1147,11 +1185,16 @@ class SendController extends ChangeNotifier {
               },
           ]
         : <Map<String, dynamic>>[];
-    final snapshot = jsonEncode([serverKey, peers]);
+    final references = copiedFiles.references;
+    final snapshot = jsonEncode([serverKey, peers, references]);
     if (snapshot == _dockTargetsSnapshot) return;
     _dockTargetsSnapshot = snapshot;
     unawaited(
-      DockPlatform.setSendTargets(serverKey, peers).catchError((Object error) {
+      DockPlatform.setSendTargets(
+        serverKey,
+        peers,
+        copiedFiles: references,
+      ).catchError((Object error) {
         if (_dockTargetsSnapshot == snapshot) _dockTargetsSnapshot = '';
         debugPrint('暂存坞设备列表未更新：$error');
       }),
@@ -1291,6 +1334,7 @@ class SendController extends ChangeNotifier {
     );
     if (Platform.isAndroid) {
       DockPlatform.onSendToDevice = sendDockSelection;
+      DockPlatform.onPullCopiedFile = pullCopiedFileSelection;
       _dockSubscription = DockPlatform.events.listen(handleNativeDockEvent);
       unawaited(refreshNativeDock().catchError((Object _) {}));
     }
@@ -1301,6 +1345,15 @@ class SendController extends ChangeNotifier {
     try {
       await backgroundReceive.initialize();
       root = await stateDirectory();
+      if (Platform.isWindows) {
+        await copiedFiles.load(File('${root!.path}/copied-files.json'));
+        if (copiedFiles.enabled) {
+          await SystemBridge.watchClipboard(true);
+          await copiedFiles.copiedPaths(
+            await SystemBridge.clipboardFilePaths(),
+          );
+        }
+      }
       await networkSettings.load(File('${root!.path}/network.json'));
       await urlIntents.initialize(File('${root!.path}/url-intents.json'));
       await appearance.load(File('${root!.path}/appearance.json'));
@@ -2105,6 +2158,15 @@ class SendController extends ChangeNotifier {
       if (epoch != generation || disposed || attempt != _socketAttempt) return;
       connected = true;
       unawaited(urlIntents.synchronize());
+      unawaited(
+        copiedFiles
+            .connect(
+              a,
+              self: profile!.deviceId,
+              supported: copiedFilesSupported,
+            )
+            .catchError(_copiedFileFailure),
+      );
       unawaited(refreshReceiveNotifications(request: true));
       sharedDocument.connect(
         a,
@@ -2149,6 +2211,7 @@ class SendController extends ChangeNotifier {
     unawaited(previous?.close());
     poll?.cancel();
     connected = false;
+    copiedFiles.disconnect();
     for (final document in _groupDocuments.values) document.disconnected();
     _deviceRevision++;
     updateDiscoveredDevices(
@@ -2165,6 +2228,13 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> handleServerMessage(Map<String, dynamic> message) async {
+    if ((message['type'] as String? ?? '').startsWith('clipboard.files.')) {
+      await copiedFiles.handle(message);
+      return;
+    }
+    if (message['type'] == 'devices.changed' || message['type'] == 'presence') {
+      unawaited(copiedFiles.refresh());
+    }
     if (message['type'] == 'url_intents.changed') {
       await urlIntents.synchronize();
       return;
@@ -2775,6 +2845,20 @@ class SendController extends ChangeNotifier {
     caseSensitive: false,
   ).hasMatch(text);
   void _onClipboard(Map<String, dynamic> event) {
+    if (copiedFiles.enabled) {
+      final allowed =
+          event['private'] != true &&
+          (event['marker'] as String? ?? '').isEmpty;
+      unawaited(
+        copiedFiles
+            .copiedPaths(
+              allowed
+                  ? (event['files'] as List? ?? []).cast<String>()
+                  : const [],
+            )
+            .catchError(_copiedFileFailure),
+      );
+    }
     if (!clipboardEnabled ||
         !connected ||
         event['private'] == true ||
@@ -2899,7 +2983,10 @@ class SendController extends ChangeNotifier {
     dock.removeWhere((d) => d.autoClipboard);
     clipboardStatus = '已关闭';
     if (Platform.isWindows) {
-      unawaited(SystemBridge.watchClipboard(false).catchError((Object _) {}));
+      unawaited(
+        SystemBridge.watchClipboard(!disposed && copiedFiles.enabled)
+            .catchError((Object _) {}),
+      );
     }
   }
 
@@ -6219,6 +6306,7 @@ class SendController extends ChangeNotifier {
     bool preserveStaging = false,
     bool clearNotifications = false,
   }) {
+    copiedFiles.disconnect();
     for (final operation in _fileOperations.values)
       unawaited(operation.cancel());
     for (final waiters in _sourceGateWaits.values) {
@@ -6293,6 +6381,10 @@ class SendController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (Platform.isAndroid &&
+        DockPlatform.onPullCopiedFile == pullCopiedFileSelection) {
+      DockPlatform.onPullCopiedFile = null;
+    }
     if (Platform.isAndroid &&
         DockPlatform.onSendToDevice == sendDockSelection) {
       DockPlatform.onSendToDevice = null;

@@ -13,7 +13,7 @@
 - `DELETE /clipboard/files`：撤回本机批次，只通知该批次原指定目标，不通知其他组员。
 - `POST /clipboard/files/:sourceDeviceId/pull`：`{offerId,requestId,itemIds}`。只有指定目标能请求。相同请求重试只唤起来源一次，来源收到 `clipboard.files.pull`。
 - `GET /clipboard/files/pulls`：来源补取尚未处理的请求，供恢复连接后接续。
-- `PUT /clipboard/files/pulls/:targetDeviceId/:requestId`：来源报告 `{state,error?}`，状态为 `sending/sent/failed`。目标收到 `clipboard.files.pull.updated`；已终结状态不被旧回执退回。
+- `PUT /clipboard/files/pulls/:targetDeviceId/:requestId`：来源报告 `{state,error?}`，状态为 `sending/sent/failed`。`sent` 表示已提交到既有文件传输流程，实际文件进度与接收成功以该流程为准，不代表文件已经落盘。目标收到 `clipboard.files.pull.updated`；已终结状态不被旧回执退回。
 - `GET /clipboard/files/pulls/:requestId`：目标查看自己的请求状态。
 
 `clipboard.files.changed` 是指定目标的刷新通知，不携带路径或文件内容。中心重启后不保留这些临时引用，来源恢复连接后重新发布当前复制批次。文件传输仍使用既有 offer/接收流程及内网→公网→中继选路，不添加第二套文件通道。
@@ -22,4 +22,10 @@
 
 中心接口、共享协议类型及 HTTP/WebSocket 定向测试已完成。3 项用例覆盖按目标通知/可见/拉取、同名设备按 ID 区分、未点击不创建传输或消息、重复请求、目录单条目、多组去重、换目标撤回、关闭/离线/重启生命周期；类型检查通过。证据：`artifacts/tmp/copied-files-targeted-tests.log`、`copied-files-targeted-typecheck.log`。
 
-**尚未上线，也尚未在客户端提供此功能。** 下一步由本任务接入 Windows 文件复制事件与目标选择、按需发送，以及原生/Web 的共享区和悬浮窗条目；保留现有文本剪贴板、建议确认、待发送草稿和系统拖放。待客户端接通再构建与部署，不把中心接口通过测试当作整项完成。
+原生客户端源码现已接入：Windows 的 `CF_HDROP` 文件复制事件、单独的“文件复制推送”开关与明确目标选择、后台来源处理、共享区可拉取条目，以及 Android 暂存坞同源条目。默认关闭，没有目标时不能启用，不自动选第一台设备。配置保存在本机 `copied-files.json`，不会发送到整个组；关闭文本剪贴板同步也不会中断已启用的文件复制监听。文件夹仅检查根节点，点击后才调用原有 `offer`，不进入或清空待发草稿。快速复制通过有序撤回/发布避免旧 DELETE 删除新条目；更换目标后尚未开始发送的请求不会继续发送给旧设备。
+
+Android 条目不冒充已经接收或已经暂存的本地文件，不能在下载前拖出；点按后拉取，叉号仅忽略本机显示，不删除来源。正常下载完成的文件继续使用现有接收、预览和系统拖放入口。原生条目更新保留滚动位置，拖放进行中不重建被拖元素。
+
+检查：4 项客户端状态用例、1 项真实控制器入口用例、2 项实际组件用例、1 项 Android 原生窗口/方法通道用例通过。包含目录单条目、不预传内容、明确目标选择、草稿不变、停止文本同步后文件监听仍有效、连续复制、失败/撤回、快速回执及点按/忽略。Dart 分析无 error/warning；Java 已通过定向 Gradle 编译。组件实际渲染以系统字体查看，新增下载图标由既有 Material 矢量生成器生成，没有打包字体。日志/渲染在 `artifacts/tmp/copied-files-client*`；测试宿主并行渲染曾 `did not complete`，保留原记录，最终单引擎串行渲染通过，不把未完成运行当作通过。
+
+**尚未发布。** Windows C++ 新监听入口仍需完整原生构建检查；Windows 独立接收坞和 Web 的条目展示/拉取尚待接通，跨端实际拉取与正常文件接收/拖出尚待联调。继续由本任务完成这些入口后再统一构建与部署；手机和 Windows 当前运行的 97 版不包含此功能。未操作真实 Windows 界面或共享模拟器，没有占用其他任务的手机。
