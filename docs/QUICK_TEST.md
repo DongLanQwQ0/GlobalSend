@@ -2,15 +2,14 @@
 
 ## 先确认版本
 
-截至 2026-10-31，本地构建与公开发布分别为：
+先看[本机发布记录](../artifacts/releases/latest-local.json)和[中心部署记录](../artifacts/deploy/current-workspace-deployment.json)，不要把已构建APK当成手机已安装，也不要把本地安装当成GitHub已发布。
 
-- Windows **1.0.61+78** 已完整更新并启动于 `E:\Programs\GlobalSend`；本轮不进行 Windows 界面测试。[开机启动与后台参数](WINDOWS_STARTUP.md)保持默认关闭，登录启动、不抢焦点及托盘恢复仍待手动验收。
-- [Android 78版 arm64 APK](../artifacts/releases/GlobalSend-1.0.61-android-arm64-v8a.apk)16,337,304 字节，手机已保留数据覆盖安装并读回78版。78修复在GlobalSend内点击暂存坞把手后自动收回，相关38项检查和原模拟器实际宿主验证通过，手机该项待用户确认。用户已确认77版文件选择器/最近文件可见、设备卡片高亮正常，不重复测试；此前目录结构、保存关闭、删除媒体建议等验收保留。剪贴板内容导入仍待真机确认。
-- [Windows 完整包](../artifacts/releases/GlobalSend-1.0.61-windows-x64.zip)，不要只复制 EXE。[Windows/Android GitHub 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.50-build59)仍为50版；本地78版未发布这些平台的包。中心不托管包。
-- [iPad / iPhone 76版 IPA](../artifacts/releases/ios-1.0.59-build76/GlobalSend-iPad-unsigned.ipa)14,828,084 字节，已构建并[发布](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.59-build76)，由用户用 iloader 手动签名安装。
-- 中心及[网页版](https://123.207.180.163/globalsend/app/)已部署76版源码（0be2951），镜像 `globalsend:clipboard-1.0.59-20261031`。健康、页面及新 JS/CSS 均验证200；保留多组连接、流式中继和链接识别。
+- Windows：运行 `E:\Programs\GlobalSend\globalsend.exe`，核对产品版本；完整ZIP入口见[README](../README.md)，不要只复制EXE。本轮不进行Windows界面自动操作。[开机启动与后台参数](WINDOWS_STARTUP.md)保持默认关闭，登录启动、不抢焦点及托盘恢复由用户手动验收。
+- Android：在系统应用信息中核对版本，依据发布记录中的`lastConfirmedPhoneVersion`和`lastConfirmedPhoneBuildNumber`。覆盖安装保留数据；候选包入口见[README](../README.md)。用户已确认77版文件选择器/最近文件可见、设备卡片高亮正常，不重复测试；此前目录结构、保存关闭、删除媒体建议等验收保留。
+- iPad / iPhone：最新IPA和实际构建结果见[iPad安装说明](IPAD.md)，由用户用iloader手动签名安装。
+- 中心及[网页版](https://123.207.180.163/globalsend/app/)以部署记录为准；保留多组连接、流式中继和链接识别。101的图片剪贴板同步需要中心公开`clipboardImages`能力，中心不托管安装包。各平台GitHub实际分发版本见[更新说明](UPDATES.md)。
 
-版本以 [本机发布记录](../artifacts/releases/latest-local.json) 和 [中心部署记录](../artifacts/deploy/current-workspace-deployment.json) 为准。新版手机重点为 [独立暂存坞](TEMPORARY_SHELF.md)、系统拖影主题及应用安装包选择；不能把框架测试当作手机更新或物理跨应用拖放验收。步骤见 [UI 验收](UI_ACCEPTANCE.md)。
+手机交互细节见[独立暂存坞](TEMPORARY_SHELF.md)及[UI验收](UI_ACCEPTANCE.md)。既有通过项不因版本号改变就重复验收；只重验受本轮改动影响的入口。
 
 ## 快速走一遍
 
@@ -22,10 +21,13 @@
 
 ## 本轮验收状态
 
+- 98版指定设备文件复制引用显示、点击拉取，用户已确认通过。99修复开关关闭时禁用目标下拉；100统一引用卡片。相关来源/目标隔离与生产传输检查保留，不以它们冒充Windows系统剪贴板粘贴通过。
+- 101截图同步：Windows源端开启“同步剪贴板”并指定目标，再截一张小图。应自动发送且不带走待发草稿，手机/Web应收到带后缀的图片；有另一台Windows时，在接收端开启同步并选择来源，收到后Ctrl+V应粘贴图片。再复制新文字，不应被较早传输的图片覆盖；关闭开关后不再自动发送。当前生产控制器/真实中心/局域网传输及WIC格式转换检查已通过，Windows实际剪贴板由用户手动验收，详见[自动剪贴板同步](CLIPBOARD_SYNC.md)。
+
 - 手机：三次左右贴边往返、横竖屏位置恢复通过；用户确认窗口行为、投放和重启后位置记忆正常，并要求跳过后续同类测试。
 - 微信：用户提前打开的文件传输助手实际收到合成测试图；代理没有点击发送。微信松手后直接显示聊天图片，而非确认预览。
 - Windows：按用户最新要求停止测试，不继续操作窗口，不把构建和进程响应当作本轮交互验收。
-- iPad：76版主应用/分享扩展均为真机 arm64，App Group 模板匹配、无打包字体。安装后从“文件”、照片和 Safari 拖入待发区或直接投到设备卡片，确认仅目标设备高亮、图片保留后缀、只发送本批并保留其它草稿；再检查剪贴板建议及图片粘贴。此前用户已验证73版文件拖放可用，不能等同于76版上述修复已实测。普通分享仍唤起待发送；系统第一排设备建议按唯一 ID 定向发送，其出现与排序由 iPadOS 决定。详见 [iPad 安装说明](IPAD.md)。
+- iPad：使用当前已构建的真机arm64 IPA，主应用与分享扩展共享组模板应匹配且无打包字体。安装后从“文件”、照片和Safari拖入待发区或直接投到设备卡片，确认仅目标设备高亮、图片保留后缀、只发送本批并保留其它草稿；再检查剪贴板建议及图片粘贴。此前用户已验证73版文件拖放可用，不替代后续修复的验收。普通分享仍唤起待发送；系统第一排设备建议按唯一ID定向发送，其出现与排序由iPadOS决定。详见[iPad安装说明](IPAD.md)。
 
 失败时记录：两端版本、来源/目标、操作步骤、实际路径或错误提示。先用小文件验证；中继不要用大文件做吞吐测试。
 
