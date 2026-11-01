@@ -18,6 +18,6 @@
 
 通过原生本地发布工作流成功构建 Windows/APK，源提交 `902515f`。Windows 已完整覆盖并启动，实际文件版本 `1.0.74+97`，本次启动 PID 28180；APK 16,370,684 字节，两端打包字体文件均为 0。后续仅加强同名文件用例（提交 `a3c8de2`），单项测试再次通过，未改产品源码。
 
-手机尚未安装 97：同设备任务明确交还后，`adb devices -l` 只有共享模拟器 `emulator-5554`，mDNS 为空，没有可用真机地址。未访问该模拟器、未再尝试已拒绝连接的旧地址、未清除数据；已结束真机占用并交还另一个任务。手机最后确认仍为 `1.0.74+96`，发布记录明确标注 pending，不能将 APK 构建成功视为手机更新成功。真机恢复连接后，下一步由本任务流式 `adb install -r` 并启动一次。
+首次交付时 ADB 只有共享模拟器 `emulator-5554`，mDNS 为空，手机安装保留 pending；未访问共享模拟器或重试失效地址。用户随后提供 `10.197.184.141:39343`，同设备任务在安全点明确让出后，流式 `adb install -r` 成功，读回 `versionCode=97`、`versionName=1.0.74`、`lastUpdateTime=2026-11-01 19:07:05`，已启动一次并立即交还手机。未清除数据、未执行触控或聊天测试。发布记录 pending 已清除，最后确认版本更新为 97；证据在 `install.log`、`installed-version.txt`、`launch.log`。
 
-APK：`artifacts/releases/GlobalSend-1.0.74-android-arm64-v8a.apk`。完整交付状态见任务目录的 `delivery.json`、`adb-devices.txt`；未上传安装包到中心、未构建 IPA。Windows 真实桌面仍不操作，手机的物理贴边和新收件不重复建议尚待 97 安装后的实测。
+APK：`artifacts/releases/GlobalSend-1.0.74-android-arm64-v8a.apk`。完整交付状态见任务目录的 `delivery.json`；`adb-devices.txt` 保留初次未连接时的证据。未上传安装包到中心、未构建 IPA。Windows 真实桌面仍不操作，手机的物理贴边和新收件不重复建议尚待交互实测。正在接入的“指定设备文件复制推送”不属于这个已构建的 97 版。
