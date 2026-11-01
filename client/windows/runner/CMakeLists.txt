@@ -15,6 +15,7 @@ add_executable(${BINARY_NAME} WIN32
   "system_integration.cpp"
   "local_ip_interfaces.cpp"
   "clipboard_content.cpp"
+  "clipboard_image.cpp"
   "shell_file.cpp"
   "touch_drag.cpp"
   "drop_target.cpp"
@@ -52,6 +53,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib" "shell32.lib" "gdi32.li
 target_link_libraries(${BINARY_NAME} PRIVATE "advapi32.lib" "version.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "iphlpapi.lib" "ws2_32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "windowsapp.lib" "comctl32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

@@ -304,7 +304,9 @@ class SendController extends ChangeNotifier {
   bool allowLegacyPeerIdentity = true;
   bool clipboardEnabled = false;
   String clipboardTarget = '', clipboardStatus = '自动剪贴板已关闭';
+  String clipboardError = '';
   int _clipboardEnabledAt = 0, _clipboardSequence = -1, _lastClipboardSend = 0;
+  int _lastRemoteClipboardAt = 0;
   StreamSubscription<Map<String, dynamic>>? _clipboardSubscription;
   Timer? _clipboardDebounce, _ephemeralCleanup;
   int _nextSavedFilesCleanup = 0;
@@ -790,6 +792,10 @@ class SendController extends ChangeNotifier {
       receivedAt: receivedAt,
       managedLocation: managedLocation,
     );
+    if (savedOwner.key == profile?.key &&
+        savedOwner.deviceId == profile?.deviceId) {
+      await _applyRemoteClipboardImage(entry);
+    }
     if (!entry.outgoing &&
         savedOwner.deviceId == profile?.deviceId &&
         savedOwner.groupId == profile?.groupId &&
@@ -2552,6 +2558,11 @@ class SendController extends ChangeNotifier {
               DateTime.tryParse(t['createdAt'] ?? '')?.millisecondsSinceEpoch ??
               DateTime.now().millisecondsSinceEpoch,
           outgoing: outgoing,
+          originDeviceId: (t['clipboard'] as Map?)?['originDeviceId'] ?? '',
+          sourceEventId: (t['clipboard'] as Map?)?['sourceEventId'] ?? '',
+          expiresAtMillis:
+              DateTime.tryParse(t['expiresAt'] ?? '')?.millisecondsSinceEpoch ??
+              0,
         );
         dock.insert(0, item);
         indexed[id] = item;
@@ -2654,6 +2665,8 @@ class SendController extends ChangeNotifier {
         unawaited(rtc?.cancelFile(id));
       }
       if (f['status'] == 'received') {
+        if (!outgoing && item.localPath.isNotEmpty)
+          unawaited(_applyRemoteClipboardImage(item));
         item.relayConfirmationPending = false;
         item.relayPendingBeforeAccept = false;
         if (outgoing) {
@@ -2818,6 +2831,7 @@ class SendController extends ChangeNotifier {
       throw UnsupportedError('自动剪贴板仅用于 Windows；移动端不后台读剪贴板');
     }
     if (!enabled) {
+      await SystemBridge.cancelClipboardImage();
       _stopClipboard();
       changed();
       return;
@@ -2834,11 +2848,14 @@ class SendController extends ChangeNotifier {
     _clipboardSubscription ??= SystemBridge.clipboardEvents.listen(
       _onClipboard,
     );
+    await SystemBridge.cancelClipboardImage();
     await SystemBridge.watchClipboard(true);
     clipboardEnabled = true;
     clipboardTarget = targetDeviceId;
     _clipboardEnabledAt = DateTime.now().millisecondsSinceEpoch;
+    _lastRemoteClipboardAt = 0;
     clipboardStatus = '已开启';
+    clipboardError = '';
     changed();
   }
 
@@ -2861,24 +2878,26 @@ class SendController extends ChangeNotifier {
             .catchError(_copiedFileFailure),
       );
     }
-    if (!clipboardEnabled ||
-        !connected ||
-        event['private'] == true ||
-        (event['marker'] as String? ?? '').isNotEmpty) {
-      return;
-    }
+    if (!clipboardEnabled) return;
     final sequence = event['sequence'] as int? ?? -1;
     if (sequence == _clipboardSequence) return;
     _clipboardSequence = sequence;
+    _clipboardDebounce?.cancel();
+    _clipboardDebounce = null;
+    if (!connected ||
+        event['private'] == true ||
+        (event['marker'] as String? ?? '').isNotEmpty)
+      return;
+    final image = event['kind'] == 'image';
     final value = event['text'] as String? ?? '';
-    if (value.trim().isEmpty ||
-        utf8.encode(value).length > 8192 ||
-        _sensitiveClipboard(value)) {
+    if (!image &&
+        (value.trim().isEmpty ||
+            utf8.encode(value).length > 8192 ||
+            _sensitiveClipboard(value))) {
       clipboardStatus = '已跳过此内容';
       changed();
       return;
     }
-    _clipboardDebounce?.cancel();
     final elapsed = DateTime.now().millisecondsSinceEpoch - _lastClipboardSend;
     final epoch = generation, destination = clipboardTarget;
     _clipboardDebounce = Timer(
@@ -2887,24 +2906,110 @@ class SendController extends ChangeNotifier {
         if (!clipboardEnabled ||
             !connected ||
             epoch != generation ||
-            destination != clipboardTarget) {
+            destination != clipboardTarget ||
+            sequence != _clipboardSequence) {
           return;
         }
         _lastClipboardSend = DateTime.now().millisecondsSinceEpoch;
         try {
-          await api!.call('POST', '/texts', {
-            'eventId': newId(),
-            'targetDeviceId': destination,
-            'text': value,
-            'clipboard': <String, dynamic>{},
-          });
-          clipboardStatus = '已同步';
-        } catch (_) {
-          clipboardStatus = '同步失败';
+          if (image) {
+            if (!await _sendClipboardImage(sequence, destination, epoch))
+              return;
+          } else {
+            await api!.call('POST', '/texts', {
+              'eventId': newId(),
+              'targetDeviceId': destination,
+              'text': value,
+              'clipboard': <String, dynamic>{},
+            });
+          }
+          if (sequence == _clipboardSequence) {
+            clipboardStatus = '已同步';
+            clipboardError = '';
+          }
+        } catch (error) {
+          if (sequence == _clipboardSequence) {
+            clipboardStatus = '同步失败';
+            clipboardError = error.toString();
+          }
         }
         changed();
       },
     );
+  }
+
+  Future<bool> _sendClipboardImage(
+    int sequence,
+    String destination,
+    int epoch,
+  ) async {
+    if (info['features']?['clipboardImages'] != true) {
+      throw StateError('中心需要升级后才能同步图片');
+    }
+    bool current() =>
+        clipboardEnabled &&
+        connected &&
+        generation == epoch &&
+        clipboardTarget == destination &&
+        _clipboardSequence == sequence;
+    final state = root ?? await stateDirectory();
+    final folder = await Directory('${state.path}/outgoing-clipboard')
+        .create(recursive: true);
+    final snapshot = await SystemBridge.readClipboard(
+      '${folder.path}/clipboard-${newId()}.bmp',
+      expectedSequence: sequence,
+      imageOnly: true,
+    );
+    final generated = (snapshot['temporaryPaths'] as List? ?? [])
+        .cast<String>();
+    _temporarySources.addAll(generated);
+    try {
+      if (snapshot['changed'] == true || !current()) return false;
+      final paths = (snapshot['paths'] as List? ?? []).cast<String>();
+      if (paths.isEmpty) return false;
+      await _offerFiles(
+        destination,
+        paths,
+        clipboardImage: true,
+        beforePublish: current,
+      );
+      return current();
+    } finally {
+      for (final path in generated) await _releaseTemporarySource(path);
+    }
+  }
+
+  Future<void> _applyRemoteClipboardImage(DockEntry item) async {
+    if (!Platform.isWindows ||
+        !clipboardEnabled ||
+        item.outgoing ||
+        item.originDeviceId.isEmpty ||
+        item.sourceEventId.isEmpty ||
+        item.originDeviceId != clipboardTarget ||
+        item.createdAtMillis < _clipboardEnabledAt ||
+        item.createdAtMillis < _lastRemoteClipboardAt ||
+        item.localPath.isEmpty ||
+        item.expiresAtMillis <= DateTime.now().millisecondsSinceEpoch)
+      return;
+    final identity = '${item.originDeviceId}/${item.sourceEventId}';
+    if (_clipboardRoots.containsKey(identity)) return;
+    _clipboardRoots[identity] = item.expiresAtMillis;
+    _lastRemoteClipboardAt = item.createdAtMillis;
+    try {
+      final applied = await SystemBridge.copyImage(
+        item.localPath,
+        originDeviceId: item.originDeviceId,
+        sourceEventId: item.sourceEventId,
+      );
+      if (applied) {
+        clipboardStatus = '已同步';
+        clipboardError = '';
+      }
+    } catch (error) {
+      clipboardStatus = '图片已接收，剪贴板写入失败';
+      clipboardError = error.toString();
+    }
+    changed();
   }
 
   Future<void> _applyRemoteClipboard(Map<String, dynamic> event) async {
@@ -2929,6 +3034,7 @@ class SendController extends ChangeNotifier {
     if (origin == profile?.deviceId ||
         root.isEmpty ||
         created < _clipboardEnabledAt ||
+        created < _lastRemoteClipboardAt ||
         expiry <= now ||
         _clipboardRoots.containsKey(identity) ||
         _sensitiveClipboard(text) ||
@@ -2936,6 +3042,7 @@ class SendController extends ChangeNotifier {
       return;
     }
     _clipboardRoots[identity] = expiry;
+    _lastRemoteClipboardAt = created;
     try {
       await SystemBridge.copy(
         text,
@@ -2979,6 +3086,7 @@ class SendController extends ChangeNotifier {
 
   void _stopClipboard() {
     clipboardEnabled = false;
+    clipboardError = '';
     clipboardTarget = '';
     _clipboardDebounce?.cancel();
     _clipboardRoots.clear();
@@ -3910,6 +4018,20 @@ class SendController extends ChangeNotifier {
     List<String> paths, {
     String? routePreferenceOverride,
     Map<String, String>? displayNames,
+  }) => _offerFiles(
+    target,
+    paths,
+    routePreferenceOverride: routePreferenceOverride,
+    displayNames: displayNames,
+  );
+
+  Future<void> _offerFiles(
+    String target,
+    List<String> paths, {
+    String? routePreferenceOverride,
+    Map<String, String>? displayNames,
+    bool clipboardImage = false,
+    bool Function()? beforePublish,
   }) async {
     final epoch = generation, a = api!, p = profile!;
     final maxFileSize = info['limits']['maxFileSize'] as int;
@@ -3982,7 +4104,7 @@ class SendController extends ChangeNotifier {
             ? entry.name
             : displayNames?[path] ?? stagedFileNames[path] ?? safeName(path);
         (String, String)? media;
-        if (!name.contains('.')) {
+        if (clipboardImage || !name.contains('.')) {
           final reader = await file.open();
           try {
             media = imageTypeHeader(await reader.read(32));
@@ -3991,7 +4113,9 @@ class SendController extends ChangeNotifier {
           }
           // Standalone gallery names may omit their suffix. Directory names
           // remain byte-for-byte the source tree, including extensionless leaves.
-          if (media != null && entry.relativePath.isEmpty) {
+          if (media != null &&
+              entry.relativePath.isEmpty &&
+              !name.contains('.')) {
             name += '.${media.$2}';
           }
         }
@@ -4010,10 +4134,12 @@ class SendController extends ChangeNotifier {
       }
     }
     _requireSession(epoch, a, p);
+    if (beforePublish != null && !beforePublish()) return;
     final j = await a.call('POST', '/transfers', {
       'transferId': newId(),
       'targetDeviceId': target,
       'files': files,
+      if (clipboardImage) 'clipboard': true,
       if (routePreference != 'auto') 'routePreference': routePreference,
     });
     _requireSession(epoch, a, p);

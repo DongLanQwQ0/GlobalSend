@@ -3,6 +3,7 @@
 #include "drop_target.h"
 #include "touch_drag.h"
 #include "clipboard_content.h"
+#include "clipboard_image.h"
 #include "shell_file.h"
 #include "window_lifecycle.h"
 #include "autostart.h"
@@ -75,6 +76,7 @@ std::string drop_server_key;
 std::string DeviceDropAt(POINTL screen);
 uint64_t drop_sequence = 0;
 uint64_t system_generation = 0;
+uint64_t clipboard_write_generation = 0;
 constexpr UINT kDestroyReceiveDock = WM_APP + 119;
 std::unique_ptr<GlobalSendReceiveDock> receive_dock;
 int64_t receive_serial = -1;
@@ -216,6 +218,60 @@ bool ClipboardPrivate() {
     }
   }
   return private_content;
+}
+
+winrt::fire_and_forget ReadClipboard(std::wstring path, DWORD expected_sequence,
+    bool image_only, std::shared_ptr<flutter::MethodResult<Value>> result) {
+  const winrt::apartment_context platform_thread;
+  const auto generation = system_generation;
+  const auto window = owner;
+  co_await winrt::resume_background();
+  const auto content = ReadGlobalSendClipboard(window, path, expected_sequence, image_only);
+  co_await platform_thread;
+  if (!channel || generation != system_generation) {
+    for (const auto& generated : content.temporary_paths) DeleteFileW(generated.c_str());
+    co_return;
+  }
+  if (!content.error.empty()) { result->Error("CLIPBOARD_READ", content.error); co_return; }
+  flutter::EncodableList paths, texts, temporary;
+  for (const auto& value : content.paths) paths.emplace_back(Utf8FromUtf16(value.c_str()));
+  for (const auto& value : content.texts) texts.emplace_back(Utf8FromUtf16(value.c_str()));
+  for (const auto& value : content.temporary_paths) temporary.emplace_back(Utf8FromUtf16(value.c_str()));
+  result->Success(Value(Map{{Value("paths"), Value(paths)}, {Value("texts"), Value(texts)},
+      {Value("temporaryPaths"), Value(temporary)}, {Value("changed"), Value(content.changed)}}));
+}
+
+winrt::fire_and_forget WriteClipboardImage(std::wstring path, std::wstring marker,
+    std::shared_ptr<flutter::MethodResult<Value>> result) {
+  const winrt::apartment_context platform_thread;
+  const auto generation = system_generation;
+  const auto revision = ++clipboard_write_generation;
+  const auto sequence = GetClipboardSequenceNumber();
+  co_await winrt::resume_background();
+  const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  GlobalSendClipboardImage image;
+  if (SUCCEEDED(initialized) || initialized == RPC_E_CHANGED_MODE)
+    image = PrepareGlobalSendClipboardImage(path);
+  else image.status = initialized;
+  if (SUCCEEDED(initialized)) CoUninitialize();
+  co_await platform_thread;
+  if (!channel || generation != system_generation) co_return;
+  // A newer remote write or a local copy wins while this image is decoding.
+  if (revision != clipboard_write_generation || sequence != GetClipboardSequenceNumber()) {
+    result->Success(Value(false)); co_return;
+  }
+  if (FAILED(image.status)) { result->Error("CLIPBOARD_IMAGE", "无法读取同步图片"); co_return; }
+  if (!OpenClipboard(owner)) { result->Error("CLIPBOARD_BUSY", "剪贴板正被占用"); co_return; }
+  bool ok = EmptyClipboard() && ClipboardBytes(origin_format, marker.c_str(), (marker.size() + 1) * sizeof(wchar_t));
+  DWORD zero = 0;
+  ok = ClipboardBytes(RegisterClipboardFormatW(L"CanIncludeInClipboardHistory"), &zero, sizeof(zero)) && ok;
+  ok = ClipboardBytes(RegisterClipboardFormatW(L"CanUploadToCloudClipboard"), &zero, sizeof(zero)) && ok;
+  if (ok) ok = ClipboardBytes(RegisterClipboardFormatW(L"PNG"), image.png.data(), image.png.size());
+  if (ok) ok = ClipboardBytes(CF_DIBV5, image.dib_v5.data(), image.dib_v5.size());
+  if (ok) ok = ClipboardBytes(CF_DIB, image.dib.data(), image.dib.size());
+  if (!ok) EmptyClipboard();
+  CloseClipboard();
+  if (ok) result->Success(Value(true)); else result->Error("CLIPBOARD_WRITE", "无法写入同步图片");
 }
 
 winrt::fire_and_forget RevealFile(std::wstring path,
@@ -598,14 +654,18 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       CloseClipboard();
       result->Success(Value(paths));
     } else if (call.method_name() == "readClipboard") {
-      const auto content = ReadGlobalSendClipboard(owner, Wide(String(*arguments, "bitmapPath")));
-      if (!content.error.empty()) { result->Error("CLIPBOARD_READ", content.error); return; }
-      flutter::EncodableList paths, texts, temporary;
-      for (const auto& path : content.paths) paths.emplace_back(Utf8FromUtf16(path.c_str()));
-      for (const auto& text : content.texts) texts.emplace_back(Utf8FromUtf16(text.c_str()));
-      for (const auto& path : content.temporary_paths) temporary.emplace_back(Utf8FromUtf16(path.c_str()));
-      result->Success(Value(Map{{Value("paths"),Value(paths)}, {Value("texts"),Value(texts)}, {Value("temporaryPaths"),Value(temporary)}}));
+      ReadClipboard(Wide(String(*arguments, "bitmapPath")),
+          static_cast<DWORD>(Integer(*arguments, "expectedSequence")), Bool(*arguments, "imageOnly"),
+          std::shared_ptr<flutter::MethodResult<Value>>(std::move(result)));
+    } else if (call.method_name() == "writeClipboardImage") {
+      WriteClipboardImage(Wide(String(*arguments, "path")),
+          Wide(String(*arguments, "originDeviceId") + "\n" + String(*arguments, "sourceEventId")),
+          std::shared_ptr<flutter::MethodResult<Value>>(std::move(result)));
+    } else if (call.method_name() == "cancelClipboardImage") {
+      ++clipboard_write_generation;
+      result->Success();
     } else if (call.method_name() == "writeClipboard") {
+      ++clipboard_write_generation;
       if (!OpenClipboard(owner)) { result->Error("CLIPBOARD_BUSY", "Clipboard is in use"); return; }
       const auto text = Wide(String(*arguments, "text"));
       const auto marker = Wide(String(*arguments, "originDeviceId") + "\n" + String(*arguments, "sourceEventId"));
@@ -679,12 +739,14 @@ bool HandleGlobalSendMessage(UINT message) {
   const bool private_content = ClipboardPrivate();
   const auto text = private_content ? std::wstring() : ReadClipboardText(CF_UNICODETEXT, 8193);
   const auto marker = ReadClipboardText(origin_format, 300);
+  const auto kind = GlobalSendClipboardKind();
   flutter::EncodableList files;
   if (!private_content && marker.empty())
     for (const auto& path : ReadGlobalSendClipboardPaths()) files.emplace_back(Utf8FromUtf16(path.c_str()));
   const auto sequence = GetClipboardSequenceNumber(); CloseClipboard();
   Map event{{Value("text"), Value(Utf8FromUtf16(text.c_str()))}, {Value("private"), Value(private_content)}, {Value("marker"), Value(Utf8FromUtf16(marker.c_str()))}, {Value("sequence"), Value(static_cast<int64_t>(sequence))}};
   event[Value("files")] = Value(files);
+  event[Value("kind")] = Value(kind);
   channel->InvokeMethod("clipboardChanged", std::make_unique<Value>(event)); return true;
 }
 

@@ -532,6 +532,7 @@ export async function buildApp(options: Options = {}) {
     createdAt: t.created,
     expiresAt: iso(t.expires),
     routePreference: transferRoute(t),
+    ...(JSON.parse(t.offer).clipboard ? { clipboard: { originDeviceId: t.source, sourceEventId: t.id } } : {}),
     files: all(
       "SELECT * FROM files WHERE transfer_id=? ORDER BY rowid",
       t.id,
@@ -685,7 +686,7 @@ export async function buildApp(options: Options = {}) {
     name: process.env.SERVER_NAME || "GlobalSend",
     limits,
     enrollment,
-    features: { copiedFiles: true, relay: true, relayStreaming: true, multiGroup: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true, openUrlIntents: true },
+    features: { clipboardImages: true, copiedFiles: true, relay: true, relayStreaming: true, multiGroup: true, direct: true, routePreference: true, directPush: true, rtcDataChannels: true, rtcProbes: true, rtcProbeAddresses: true, httpsPeerProbes: true, rtcParallelProbes: true, groupSharedText: true, discoveryRefresh: true, folderTransfer: true, textContentSync: true, receiveErrorReporting: true, fileReuse: true, folderReuse: true, openUrlIntents: true },
     rtc: { iceServers },
     discovery: { onlineOnly: true, peerTtlSeconds: PEER_TTL_SECONDS },
   }));
@@ -1458,6 +1459,7 @@ export async function buildApp(options: Options = {}) {
             transferId: id,
             targetDeviceId: id,
             routePreference: { enum: ROUTE_PREFERENCES },
+            clipboard: { type: "boolean", const: true },
             files: {
               type: "array",
               minItems: 1,
@@ -1472,6 +1474,8 @@ export async function buildApp(options: Options = {}) {
       const d = device(req),
         b = req.body as any;
       target(d, b.targetDeviceId);
+      if (b.clipboard && (b.files.length !== 1 || !b.files[0].mimeType?.startsWith("image/") || b.files[0].relativePath || b.files[0].entryKind === "directory"))
+        fail("INVALID_CLIPBOARD_IMAGE", "Clipboard image requires one image file");
       const folder = b.files.some((f:any) => f.relativePath || f.entryKind === "directory");
       if (!folder && b.files.length > 32) fail("TOO_MANY_FILES", "Select at most 32 ordinary files");
       if (folder && !get("SELECT folder_transfer FROM device_capabilities WHERE device_id=?", b.targetDeviceId)?.folder_transfer)
@@ -1488,6 +1492,7 @@ export async function buildApp(options: Options = {}) {
           ...(f.relativePath ? { relativePath: relativeFilename(f.relativePath), entryKind: f.entryKind ?? "file" } : {}),
         })),
         ...(b.routePreference && b.routePreference !== "auto" ? { routePreference: b.routePreference } : {}),
+        ...(b.clipboard ? { clipboard: true } : {}),
       });
       const old = get("SELECT * FROM transfers WHERE id=?", b.transferId);
       if (old) {

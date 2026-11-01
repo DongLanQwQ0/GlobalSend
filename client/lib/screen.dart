@@ -4766,6 +4766,20 @@ class _SendScreenState extends State<SendScreen>
                     },
             ),
           ),
+        if (c.clipboardError.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: Ui.space1),
+            child: Tooltip(
+              message: c.clipboardError,
+              child: Text(
+                c.clipboardStatus,
+                style: TextStyle(
+                  fontSize: Ui.textXs,
+                  color: Ui.colors(context).danger,
+                ),
+              ),
+            ),
+          ),
         const SizedBox(height: Ui.space2),
         SwitchListTile.adaptive(
           key: const ValueKey('copied-files-enabled'),

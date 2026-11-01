@@ -178,6 +178,8 @@ export interface Transfer {
   createdAt: string;
   expiresAt: string;
   routePreference?: RoutePreference;
+  /** Automatic image clipboard transfer, stamped by the center. */
+  clipboard?: ClipboardContext;
   files: TransferFile[];
 }
 /** Receiver verified a complete retained root before accepting its payload. */
@@ -209,7 +211,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; relayStreaming?: boolean; multiGroup?: boolean; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean; openUrlIntents?: boolean; copiedFiles?: boolean };
+  features: { relay: true; relayStreaming?: boolean; multiGroup?: boolean; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean; openUrlIntents?: boolean; copiedFiles?: boolean; clipboardImages?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";

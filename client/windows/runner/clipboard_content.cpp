@@ -104,10 +104,17 @@ std::vector<std::wstring> ReadGlobalSendClipboardPaths() {
     return paths;
 }
 
-GlobalSendClipboardContent ReadGlobalSendClipboard(HWND owner, const std::wstring& bitmap_path) {
+GlobalSendClipboardContent ReadGlobalSendClipboard(HWND owner, const std::wstring& bitmap_path,
+    DWORD expected_sequence, bool image_only) {
   GlobalSendClipboardContent content;
   if (!OpenClipboard(owner)) { content.error = "剪贴板正被占用，请重试"; return content; }
   const auto kind = GlobalSendClipboardKind();
+  if ((expected_sequence && GetClipboardSequenceNumber() != expected_sequence) ||
+      (image_only && kind != "image")) {
+    content.changed = true;
+    CloseClipboard();
+    return content;
+  }
   if (kind == "files") {
     content.paths = ReadGlobalSendClipboardPaths();
   } else if (kind == "image") {

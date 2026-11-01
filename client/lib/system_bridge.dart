@@ -325,13 +325,20 @@ class SystemBridge {
     });
   }
 
-  /// Read only after an explicit paste-button action. Files keep their
-  /// original paths; a clipboard bitmap needs one application-owned source.
-  static Future<Map<String, dynamic>> readClipboard(String bitmapPath) async {
+  /// Explicit import, or a version-bound image snapshot for opted-in sync.
+  /// Files keep their original paths; a bitmap needs one application-owned source.
+  static Future<Map<String, dynamic>> readClipboard(
+    String bitmapPath, {
+    int? expectedSequence,
+    bool imageOnly = false,
+  }) async {
     if (Platform.isWindows) {
       return Map<String, dynamic>.from(
-        await channel.invokeMethod('readClipboard', {'bitmapPath': bitmapPath})
-            as Map,
+        await channel.invokeMethod('readClipboard', {
+          'bitmapPath': bitmapPath,
+          if (expectedSequence != null) 'expectedSequence': expectedSequence,
+          if (imageOnly) 'imageOnly': true,
+        }) as Map,
       );
     }
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
@@ -340,6 +347,21 @@ class SystemBridge {
       'texts': text.isEmpty ? <String>[] : [text],
     };
   }
+
+  static Future<bool> copyImage(
+    String path, {
+    required String originDeviceId,
+    required String sourceEventId,
+  }) async =>
+      await channel.invokeMethod<bool>('writeClipboardImage', {
+        'path': path,
+        'originDeviceId': originDeviceId,
+        'sourceEventId': sourceEventId,
+      }) ??
+      false;
+
+  static Future<void> cancelClipboardImage() =>
+      channel.invokeMethod<void>('cancelClipboardImage');
 
   /// Determine how an explicit Ctrl+V should be routed, without reading text
   /// or creating an image source until the user actually imports it.

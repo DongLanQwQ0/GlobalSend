@@ -7,6 +7,7 @@
 struct GlobalSendClipboardContent {
   std::vector<std::wstring> paths, texts, temporary_paths;
   std::string error;
+  bool changed = false;
 };
 
 // Format discovery does not open/read clipboard contents. Both the button and
@@ -15,5 +16,6 @@ std::string GlobalSendClipboardKind();
 // Caller holds OpenClipboard. Only obtains CF_HDROP references; no disk I/O.
 std::vector<std::wstring> ReadGlobalSendClipboardPaths();
 GlobalSendClipboardContent ReadGlobalSendClipboard(HWND owner,
-    const std::wstring& bitmap_path);
+    const std::wstring& bitmap_path, DWORD expected_sequence = 0,
+    bool image_only = false);
 #endif
