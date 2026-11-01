@@ -64,8 +64,8 @@ class DropTarget final : public IDropTarget {
   HRESULT STDMETHODCALLTYPE DragLeave() override {
     supported_ = false;
     Hover(false);
-    if (callbacks_.tracking_at) callbacks_.tracking_at(false, last_point_);
     if (image_) image_->DragLeave();
+    if (callbacks_.tracking_at) callbacks_.tracking_at(false, last_point_);
     return S_OK;
   }
   HRESULT STDMETHODCALLTYPE Drop(IDataObject* data, DWORD, POINTL point, DWORD* effect) override {
@@ -76,8 +76,8 @@ class DropTarget final : public IDropTarget {
     Hover(false);
     POINT screen{point.x, point.y};
     if (!copy) {
-      if (callbacks_.tracking_at) callbacks_.tracking_at(false, point);
       if (image_) image_->Drop(data, &screen, *effect);
+      if (callbacks_.tracking_at) callbacks_.tracking_at(false, point);
       return S_OK;
     }
     GlobalSendDroppedContent content;
@@ -86,8 +86,8 @@ class DropTarget final : public IDropTarget {
     content.has_screen_point = true;
     if (imported || !content.error.empty()) callbacks_.drop(std::move(content));
     if (imported) *effect = DROPEFFECT_COPY;
-    if (callbacks_.tracking_at) callbacks_.tracking_at(false, point);
     if (image_) image_->Drop(data, &screen, *effect);
+    if (callbacks_.tracking_at) callbacks_.tracking_at(false, point);
     return S_OK;
   }
 

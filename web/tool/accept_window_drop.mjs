@@ -13,7 +13,8 @@ const {build}=createRequire(import.meta.url)('esbuild');
 const source=await readFile(join(root,'web/src/main.ts'),'utf8');
 const output=await build({stdin:{contents:source.replace('void new GlobalSend().start();','const c=new GlobalSend();window.__client=c;c.ensureRtc=async()=>{};await c.start();'),resolveDir:join(root,'web/src'),sourcefile:'drop-acceptance.ts',loader:'ts'},bundle:true,platform:'browser',format:'esm',write:false,loader:{'.css':'empty'}});
 await writeFile(join(site,'fixture.js'),output.outputFiles[0].text);
-await writeFile(join(site,'style.css'),await readFile(join(root,'web/src/style.css')));
+const css=await build({entryPoints:[join(root,'web/src/style.css')],bundle:true,write:false});
+await writeFile(join(site,'style.css'),css.outputFiles[0].text);
 await writeFile(join(site,'index.html'),'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="./style.css"><div id="app"></div><input type="file" id="file-input" multiple hidden><input type="file" id="resume-file" hidden><div id="toasts"></div><script type="module" src="./fixture.js"></script></html>');
 const original=join(run,'桌面原件.txt');await writeFile(original,'来自桌面 GlobalSend 的原始文件\n不复制路径文字。');
 const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
@@ -37,9 +38,15 @@ try{
  await evaluate(`(()=>{window.__trace=[];window.__overlay=[];window.__errors=[];addEventListener('error',event=>window.__errors.push(event.message));for(const type of ['dragenter','dragover','dragleave','drop'])document.addEventListener(type,event=>window.__trace.push({type,trusted:event.isTrusted,types:[...event.dataTransfer.types],files:event.dataTransfer.files.length,prevented:event.defaultPrevented}),true);new MutationObserver(()=>{window.__overlay.push(!!document.querySelector('#window-drop.visible'))}).observe(document.querySelector('#app'),{subtree:true,attributes:true,attributeFilter:['class']});})()`);
  const coords=async selector=>evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
  const drag=async(data,target,options={})=>{const point=await coords(target);await evaluate('window.__overlay=[];window.__trace=[]');await page('Input.dispatchDragEvent',{type:'dragEnter',...point,data});
-  for(const selector of ['.brand','[data-queue-drop]','.target-devices','[data-queue-drop]']){const p=await coords(selector);await page('Input.dispatchDragEvent',{type:'dragOver',...p,data});await delay(20);assert.equal(await evaluate("!!document.querySelector('#window-drop.visible')"),true);}
-  if(options.rerender){await evaluate('window.__client.render()');assert.equal(await evaluate("!!document.querySelector('#window-drop.visible')"),true);}
-  const flashes=await evaluate('window.__overlay.filter(value=>!value).length');assert.equal(flashes,0,'overlay stays visible while crossing controls');
+  const brandPoint=await coords('.brand');
+  await page('Input.dispatchDragEvent',{type:'dragOver',...brandPoint,data});await evaluate('window.__overlay=[]');
+  for(let i=0;i<3;i++){await page('Input.dispatchDragEvent',{type:'dragOver',x:brandPoint.x+i,y:brandPoint.y,data});await delay(20);assert.equal(await evaluate("!!document.querySelector('#window-drop.visible')"),true);}
+  const flashes=await evaluate('window.__overlay.filter(value=>!value).length');assert.equal(flashes,0,'overlay stays visible across repeated external dragovers');
+  await page('Input.dispatchDragEvent',{type:'dragOver',...point,data});
+  const expected=target==='[data-queue-drop]'?'queue':'window';
+  const feedback=()=>evaluate("({window:!!document.querySelector('#window-drop.visible'),queue:!!document.querySelector('.queue-drop-active'),devices:document.querySelectorAll('.device-drop-active').length})");
+  assert.deepEqual(await feedback(),{window:expected==='window',queue:expected==='queue',devices:0});
+  if(options.rerender){await evaluate('window.__client.render()');assert.deepEqual(await feedback(),{window:expected==='window',queue:expected==='queue',devices:0});}
   await page('Input.dispatchDragEvent',{type:'drop',...point,data});await poll(()=>evaluate("!document.querySelector('#window-drop.visible')"),Boolean);await delay(30);return evaluate('window.__trace');};
  // Chrome's actual OS-facing drop pipeline, with a real disk File (not setInputFiles or a JS File mock).
  for(let i=0;i<3;i++){
@@ -61,6 +68,22 @@ try{
  // A child trying to consume drop cannot bypass window-level acceptance.
  await evaluate("document.querySelector('.brand').addEventListener('drop',event=>event.stopPropagation(),{once:true})");
  await drag({items:[{mimeType:'text/plain',data:'子元素也可接收'}],dragOperationsMask:1},'.brand');await poll(()=>evaluate('window.__client.stagedTexts.at(-1)?.text'),value=>value==='子元素也可接收');
+ // A device is its own drop zone, for OS files, another GlobalSend window and this window's cards.
+ await evaluate(`(()=>{const c=window.__client;c.devices.push({deviceId:'drop-peer',name:'目标设备',platform:'android',online:true});c.clipboardSuggestion='text';window.__sends=[];c.sendQueue=async(targets,batch)=>window.__sends.push({targets,files:batch.files.map(file=>file.name),texts:batch.texts.map(item=>item.text)});c.render();})()`);
+ const feedback=()=>evaluate("({window:!!document.querySelector('#window-drop.visible'),queue:!!document.querySelector('.queue-drop-active'),devices:[...document.querySelectorAll('.device-drop-active')].map(node=>node.dataset.target)})");
+ const checkDevice=async(data)=>{const point=await coords('[data-target="drop-peer"] .target-icon');await page('Input.dispatchDragEvent',{type:'dragEnter',...point,data});await page('Input.dispatchDragEvent',{type:'dragOver',...point,data});assert.deepEqual(await feedback(),{window:false,queue:false,devices:['drop-peer']});await evaluate('window.__client.render()');assert.deepEqual(await feedback(),{window:false,queue:false,devices:['drop-peer']});const shot=await page('Page.captureScreenshot',{format:'jpeg',quality:72,captureBeyondViewport:false});await writeFile(join(run,'device-highlight.preview.jpg'),Buffer.from(shot.data,'base64'));return point;};
+ const externalData={items:[{mimeType:'application/x-globalsend-card',data:'1'},{mimeType:'text/plain',data:'仅向目标设备发送'}],dragOperationsMask:1};
+ let point=await checkDevice(externalData);await page('Input.dispatchDragEvent',{type:'drop',...point,data:externalData});await poll(()=>evaluate('window.__sends.length'),value=>value===1);
+ assert.deepEqual(await evaluate('window.__sends[0]'),{targets:['drop-peer'],files:[],texts:['仅向目标设备发送']});
+ assert.equal(await evaluate('window.__client.stagedTexts.some(item=>item.text==="子元素也可接收")'),true,'other drafts survive direct target delivery');
+ const diskData={items:[],files:[original],dragOperationsMask:1};point=await checkDevice(diskData);await page('Input.dispatchDragEvent',{type:'drop',...point,data:diskData});await poll(()=>evaluate('window.__sends.length'),value=>value===2);assert.deepEqual(await evaluate('window.__sends[1]'),{targets:['drop-peer'],files:['桌面原件.txt'],texts:[]});
+ const localType=await evaluate("(()=>{const c=window.__client;c.internalPayload={text:'本窗卡片'};return c.internalDragType})()");
+ const internalData={items:[{mimeType:localType,data:'1'},{mimeType:'application/x-globalsend-card',data:'1'}],dragOperationsMask:1};
+ point=await checkDevice(internalData);const queuePoint=await coords('[data-queue-drop]');await page('Input.dispatchDragEvent',{type:'dragOver',...queuePoint,data:internalData});assert.deepEqual(await feedback(),{window:false,queue:true,devices:[]});await page('Input.dispatchDragEvent',{type:'dragOver',...point,data:internalData});await page('Input.dispatchDragEvent',{type:'drop',...point,data:internalData});await poll(()=>evaluate('window.__sends.length'),value=>value===3);
+ assert.deepEqual(await evaluate('window.__sends[2]'),{targets:['drop-peer'],files:[],texts:['本窗卡片']});
+ const before=await evaluate('window.__client.stagedTexts.length'),suggestion=await coords('.clipboard-suggestion');
+ await page('Input.dispatchDragEvent',{type:'dragEnter',...suggestion,data:externalData});await page('Input.dispatchDragEvent',{type:'dragOver',...suggestion,data:externalData});assert.deepEqual(await feedback(),{window:false,queue:false,devices:[]});await page('Input.dispatchDragEvent',{type:'drop',...suggestion,data:externalData});await delay(30);assert.equal(await evaluate('window.__client.stagedTexts.length'),before,'clipboard suggestion does not accept queue drops');
+ evidence.push({case:'device-feedback-direct-send',sources:['external-cross-window','os-disk-file','internal-card'],preservedDrafts:true,clipboardExcluded:true});
  const screenshot=await page('Page.captureScreenshot',{format:'jpeg',quality:72,captureBeyondViewport:false});await mkdir(join(root,'artifacts/screenshots'),{recursive:true});const shot=join(root,'artifacts/screenshots/web-drop-fixed.preview.jpg');await writeFile(shot,Buffer.from(screenshot.data,'base64'));
  assert.deepEqual(await evaluate('window.__errors'),[]);
  const report={run,profile:browserProfile,passed:true,diskFiles:3,stagedTexts:await evaluate('window.__client.stagedTexts.map(item=>item.text)'),evidence,screenshot:shot,scope:'Trusted Chromium drag/drop with actual disk files and native-format text, plus nested-element and rerender feedback. Physical Windows OLE gesture not exercised.'};

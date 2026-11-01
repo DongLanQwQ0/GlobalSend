@@ -3,6 +3,7 @@ import UIKit
 import Intents
 import UniformTypeIdentifiers
 import ImageIO
+import Photos
 
 final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionDelegate {
   static let shared = FileSharing()
@@ -18,6 +19,7 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   private var pressedImage: UIImage?
   private var dragVisuals: [ObjectIdentifier: NativeDragVisual] = [:]
   private var dragClipboardRevision: String?
+  private var dragMediaAssetId: String?
   private lazy var dropInteraction = UIDropInteraction(delegate: self)
   private lazy var dragInteraction: UIDragInteraction = {
     let value = UIDragInteraction(delegate: self); value.isEnabled = true; return value
@@ -184,10 +186,15 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
     if sourceID == pressedSource && pressedControl { return [] }
     var items: [UIDragItem]
     dragClipboardRevision = source["clipboardRevision"] as? String
+    dragMediaAssetId = source["mediaAssetId"] as? String
     if dragClipboardRevision != nil {
       // Resolve the real providers at the native gesture, not a suggestion's
       // placeholder label, and leave the unconfirmed sending queue untouched.
       items = UIPasteboard.general.itemProviders.map { UIDragItem(itemProvider: $0) }
+    } else if let assetId = dragMediaAssetId {
+      // Hand UIKit a lazy file provider, not a converted UIImage or a placeholder.
+      // Photos delivers the original bytes only when the drop target requests them.
+      items = mediaProvider(assetId).map { [UIDragItem(itemProvider: $0)] } ?? []
     } else {
       items = (source["paths"] as? [String] ?? []).compactMap { path -> UIDragItem? in
         guard let provider = NSItemProvider(contentsOf: URL(fileURLWithPath: path)) else { return nil }
@@ -241,10 +248,52 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
       event["clipboardRevision"] = revision
       event["operation"] = operation == .copy || operation == .move ? "copy" : "cancel"
     }
+    if let assetId = dragMediaAssetId {
+      event["mediaAssetId"] = assetId
+      event["operation"] = operation == .copy || operation == .move ? "copy" : "cancel"
+    }
     channel?.invokeMethod("nativeDrag", arguments: event)
     dragVisuals.removeAll()
     pressedImage = nil
     dragClipboardRevision = nil
+    dragMediaAssetId = nil
+  }
+  private func mediaProvider(_ assetId: String) -> NSItemProvider? {
+    guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject else { return nil }
+    let resources = PHAssetResource.assetResources(for: asset)
+    let preferred: PHAssetResourceType = asset.mediaType == .video ? .fullSizeVideo : .fullSizePhoto
+    guard let resource = resources.first(where: { $0.type == preferred }) ?? resources.first(where: { $0.type == .photo || $0.type == .video }) else { return nil }
+    let provider = NSItemProvider()
+    var name = URL(fileURLWithPath: resource.originalFilename).lastPathComponent
+    let existingSuffix = (name as NSString).pathExtension
+    if let type = UTType(resource.uniformTypeIdentifier), let ext = type.preferredFilenameExtension {
+      let namedType = UTType(filenameExtension: existingSuffix)
+      let matches = namedType.map { $0.conforms(to: type) || type.conforms(to: $0) } ?? false
+      if !matches {
+        name = (existingSuffix.isEmpty ? name : (name as NSString).deletingPathExtension) + "." + ext
+      }
+    }
+    provider.suggestedName = name
+    let fileName = name
+    let exports = NativeMediaDragExports()
+    provider.registerFileRepresentation(forTypeIdentifier: resource.uniformTypeIdentifier, fileOptions: [], visibility: .all) { completion in
+      // Consumers may load one provider repeatedly or concurrently. Photos
+      // requires a new destination for each write; never overwrite an earlier
+      // load's file while that consumer is still reading it.
+      let export = exports.make(name: fileName)
+      let progress = Progress(totalUnitCount: 1)
+      do {
+        try FileManager.default.createDirectory(at: export.directory, withIntermediateDirectories: true)
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = false
+        PHAssetResourceManager.default().writeData(for: resource, toFile: export.file, options: options) { error in
+          progress.completedUnitCount = 1
+          completion(error == nil ? export.file : nil, false, error)
+        }
+      } catch { completion(nil, false, error) }
+      return progress
+    }
+    return provider
   }
   private func donate(_ target: SharedSendTarget, completed: @escaping (Error?) -> Void) {
     let name = target.name?.isEmpty == false ? target.name! : "设备"
@@ -328,6 +377,27 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
     }
     host.present(sheet, animated: true) { result(nil) }
   }
+}
+
+/// The provider and any in-flight Photos request retain this export. Its
+/// temporary original is removed when the native drag/provider has finished.
+private final class NativeMediaDragExports {
+  private let lock = NSLock()
+  private var files: [NativeMediaDragFile] = []
+  func make(name: String) -> NativeMediaDragFile {
+    let file = NativeMediaDragFile(name: name)
+    lock.lock(); files.append(file); lock.unlock()
+    return file
+  }
+}
+private final class NativeMediaDragFile {
+  let directory: URL
+  let file: URL
+  init(name: String) {
+    directory = FileManager.default.temporaryDirectory.appendingPathComponent("GlobalSend/media-drag/" + UUID().uuidString, isDirectory: true)
+    file = directory.appendingPathComponent(name)
+  }
+  deinit { try? FileManager.default.removeItem(at: directory) }
 }
 
 /// UIKit needs a real raster view, not a snapshot of Flutter's GPU surface.

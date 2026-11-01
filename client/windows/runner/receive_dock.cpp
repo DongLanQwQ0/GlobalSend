@@ -6,6 +6,7 @@
 #include <flutter/standard_method_codec.h>
 #include <flutter_windows.h>
 #include <dwmapi.h>
+#include <commctrl.h>
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -46,9 +47,25 @@ int64_t Number(const flutter::EncodableMap& map, const char* key) {
 }
 
 GlobalSendReceiveDock::GlobalSendReceiveDock(Map payload, Action action,
-    Drag drag, std::function<void()> shown, std::function<void(int64_t)> closed)
+    Drag drag, std::function<void()> shown, std::function<void(int64_t)> closed,
+    std::function<void(bool)> interaction)
     : payload_(std::move(payload)), action_(std::move(action)), drag_(std::move(drag)),
-      first_frame_(std::move(shown)), closed_(std::move(closed)), frame_token_(++next_frame_token), instance_token_(frame_token_) {}
+      first_frame_(std::move(shown)), closed_(std::move(closed)),
+      interaction_changed_(std::move(interaction)), interaction_([this] { NotifyInteraction(); }),
+      frame_token_(++next_frame_token), instance_token_(frame_token_) {}
+
+void GlobalSendReceiveDock::NotifyInteraction() {
+  const bool active = Interacting();
+  if (active == interaction_published_) return;
+  interaction_published_ = active;
+  if (interaction_changed_) interaction_changed_(active);
+}
+
+LRESULT CALLBACK GlobalSendReceiveDock::InteractionObserver(HWND window, UINT message,
+    WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
+  reinterpret_cast<GlobalSendReceiveDock*>(data)->interaction_.Observe(window, message, wp);
+  return DefSubclassProc(window, message, wp, lp);
+}
 
 GlobalSendReceiveDock::~GlobalSendReceiveDock() { Destroy(); }
 
@@ -139,10 +156,18 @@ bool GlobalSendReceiveDock::OnCreate() {
       if (arguments) BeginMove(*arguments);
       return;
     }
+    if (call.method_name() == "interaction") {
+      const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+      const auto active = args ? args->find(Value("active")) : Map::const_iterator{};
+      const bool busy = args && active != args->end() && std::get_if<bool>(&active->second) && std::get<bool>(active->second);
+      interaction_.Set(GlobalSendUpdateInteraction::flutter_operation, busy);
+      result->Success(); return;
+    }
     if (call.method_name() == "dragOut") {
       const auto* arguments = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
       if (!arguments || !drag_) { result->Error("BAD_ARGUMENT", "Expected drag data"); return; }
       dragging_ = true;
+      NotifyInteraction();
       const HWND handle = GetHandle();
       const auto instance = instance_token_;
       auto reply = std::make_unique<GlobalSendDockDragReply>(std::move(result), [handle, instance] {
@@ -162,6 +187,7 @@ bool GlobalSendReceiveDock::OnCreate() {
     result->NotImplemented();
   });
   const HWND view = controller_->view()->GetNativeWindow();
+  SetWindowSubclass(view, InteractionObserver, 0x4753494e, reinterpret_cast<DWORD_PTR>(this));
   SetChildContent(view, false);
   AttachGlobalSendTouchDragWindow(view, window);
   drop_target_ = CreateGlobalSendDropTarget({{}, [this](GlobalSendDroppedContent content) {
@@ -248,6 +274,7 @@ std::string GlobalSendReceiveDock::DropDeviceAt(POINTL screen) const {
 void GlobalSendReceiveDock::TrackDrop(bool active, POINTL screen) {
   const bool changed = hovering_drop_ != active;
   hovering_drop_ = active; drop_pointer_ = screen;
+  NotifyInteraction();
   if (!active) drop_devices_.clear();
   if (!channel_ || !controller_ || (!active && !changed)) return;
   POINT point{screen.x,screen.y};
@@ -275,6 +302,7 @@ void GlobalSendReceiveDock::BeginMove(const Map& args) {
   const auto touch = args.find(Value("touch"));
   moving_touch_ = touch != args.end() && std::get_if<bool>(&touch->second) && std::get<bool>(touch->second);
   moving_ = true;
+  NotifyInteraction();
   if (!moving_touch_) SetCapture(GetHandle());
   SetTimer(GetHandle(), kMovePointer, 15, nullptr);
   TickMove();
@@ -299,6 +327,7 @@ void GlobalSendReceiveDock::TickMove() {
 
 void GlobalSendReceiveDock::EndMove() {
   moving_ = false;
+  NotifyInteraction();
   KillTimer(GetHandle(), kMovePointer);
   if (GetCapture() == GetHandle()) ReleaseCapture();
   GetWindowRect(GetHandle(), &resting_);
@@ -343,6 +372,7 @@ void GlobalSendReceiveDock::OnDestroy() {
   KillTimer(GetHandle(), kAnimation);
   KillTimer(GetHandle(), kMovePointer);
   moving_ = false;
+  if (controller_) RemoveWindowSubclass(controller_->view()->GetNativeWindow(), InteractionObserver, 0x4753494e);
   if (GetCapture() == GetHandle()) ReleaseCapture();
   DetachGlobalSendTouchDragWindow(GetHandle());
   for (const HWND target : drop_windows_) RevokeDragDrop(target);
@@ -356,6 +386,7 @@ void GlobalSendReceiveDock::OnDestroy() {
 
 LRESULT GlobalSendReceiveDock::MessageHandler(HWND hwnd, UINT message,
     WPARAM wp, LPARAM lp) noexcept {
+  interaction_.Observe(hwnd, message, wp);
   if (message == WM_NCCALCSIZE && wp) return 0;
   if (message == WM_ERASEBKGND) return 1;
   if (message == kFrameReady) {
@@ -373,6 +404,8 @@ LRESULT GlobalSendReceiveDock::MessageHandler(HWND hwnd, UINT message,
   if (message == kDragFinished) {
     if (wp == instance_token_) {
       dragging_ = false;
+      interaction_.ReleasePointers();
+      NotifyInteraction();
       if (closing_finished_ && closed_) closed_(Generation());
     }
     return 0;

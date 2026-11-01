@@ -102,6 +102,46 @@ void main() {
   );
 
   testWidgets(
+    'iOS media suggestion registers a lazy original asset and dismisses only accepted drops',
+    (tester) async {
+      var accepted = 0;
+      await mount(
+        tester,
+        IOSDragSource.media(
+          assetId: 'photo-library-id',
+          enabled: true,
+          onDragAccepted: () => accepted++,
+          child: const SizedBox(width: 120, height: 120, child: Text('图片建议')),
+        ),
+      );
+      expect(source()['mediaAssetId'], 'photo-library-id');
+      expect(source()['label'], '媒体');
+      expect(source()['paths'], isEmpty);
+      expect(source()['texts'], isEmpty);
+      for (final operation in ['cancel', 'copy']) {
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          FileShareBridge.channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('nativeDrag', {
+              'active': false,
+              'local': true,
+              'sessionActive': false,
+              'mediaAssetId': 'photo-library-id',
+              'operation': operation,
+            }),
+          ),
+          (_) {},
+        );
+        await tester.pump();
+        expect(accepted, operation == 'copy' ? 1 : 0);
+      }
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets(
     'iOS clipboard drag dismisses only after an accepted native drop',
     (tester) async {
       var accepted = 0;

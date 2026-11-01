@@ -109,6 +109,7 @@
 .target-device.selected{border-color:var(--green);background:color-mix(in srgb,var(--green) 8%,var(--surface));color:var(--green)}
 .target-device[aria-pressed=true]{border-color:var(--green);background:color-mix(in srgb,var(--green) 8%,var(--surface));color:var(--green)}
 .target-device.selected:hover{background:color-mix(in srgb,var(--green) 12%,var(--surface))}
+.target-device.device-drop-active{border:2px dashed var(--green);background:var(--soft);color:var(--green);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--green) 20%,transparent)}
 .target-device:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
 .target-device:disabled{opacity:.45;cursor:not-allowed}
 .target-icon{display:flex;align-items:center;justify-content:center;flex-shrink:0}

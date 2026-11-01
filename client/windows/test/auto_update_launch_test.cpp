@@ -11,7 +11,9 @@
 int wmain(int count, wchar_t** arguments) {
   assert(count == 2);
   winrt::init_apartment(winrt::apartment_type::multi_threaded);
-  auto launch = GlobalSendUpdateLaunch::Start(std::filesystem::absolute(arguments[1]), "1.2.3", 400, nullptr, true);
+  auto launch = GlobalSendUpdateLaunch::Start(std::filesystem::absolute(arguments[1]), "1.2.3", 400, nullptr, true, 17);
+  assert(launch->ExitToken() == 17);
+  assert(launch->ResultPath().filename() != L"windows-update-result.json");
   assert(launch->Running());
   launch->Cancel();
   for (int i = 0; i < 500 && launch->Running(); ++i)

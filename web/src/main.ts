@@ -21,7 +21,8 @@ import { LocalLibraryView } from './library_view';
 import type { LocalFileEntry } from './library';
 import { RtcProbeMonitor, orientedProbeAddresses } from './rtc_probe';
 import { droppedFiles, completeFolderParts, directoryParts } from './folder';
-import { acceptsWindowDrop, droppedText, WindowDropFeedback } from './drop';
+import { acceptsWindowDrop, droppedText, dropTargetAt, DropFeedback } from './drop';
+import type { DropTarget } from './drop';
 import { prepareFolderSend, emptyFileHash } from './folder_send';
 import { imageFileMetadata } from './image_file_name';
 import type { OfferFile } from './folder_send';
@@ -78,6 +79,13 @@ interface TextView {
 }
 
 class GlobalSend {
+  private dropTarget:DropTarget|null=null;
+  paintDropFeedback(){
+    this.windowDropVisible=this.dropTarget?.kind==='window';
+    document.querySelector('#window-drop')?.classList.toggle('visible',this.windowDropVisible);
+    document.querySelector('[data-queue-drop]')?.classList.toggle('queue-drop-active',this.dropTarget?.kind==='queue');
+    for(const node of document.querySelectorAll<HTMLElement>('[data-target]'))node.classList.toggle('device-drop-active',this.dropTarget?.kind==='device' && node.dataset.target===this.dropTarget.deviceId);
+  }
   copiedFiles=new CopiedFilesReceiver((...args)=>this.api.request(...args),()=>this.render());
   refreshCopiedFiles(){if(this.session && this.info?.features.copiedFiles)return this.copiedFiles.refresh();return Promise.resolve();}
   clipboardSuggestion: ClipboardSuggestionKind | null = null;
@@ -727,25 +735,32 @@ class GlobalSend {
       else if(this.exitSelection())event.preventDefault();
       else if(this.contentView!=='receive'){event.preventDefault();this.contentView='receive';this.render();}
     });
-    const show=(visible:boolean)=>{this.windowDropVisible=visible;document.querySelector('#window-drop')?.classList.toggle('visible',visible);};
-    const feedback=new WindowDropFeedback(show);
-    const queue=(event:Event)=>(event.target as Element).closest?.('[data-queue-drop],[data-target]');
-    const dropDevice=(event:DragEvent)=>(event.target as Element).closest<HTMLElement>('[data-target]')?.dataset.target || '';
+    const feedback=new DropFeedback(target=>{this.dropTarget=target;this.paintDropFeedback();});
+    const targetAt=(event:Event)=>dropTargetAt(event.target);
+    const queue=(event:Event)=>{const target=targetAt(event);return target.kind==='queue' || target.kind==='device';};
+    const dropDevice=(event:DragEvent)=>{const target=targetAt(event);return target.kind==='device'?target.deviceId:'';};
     const external=(event:DragEvent)=>acceptsWindowDrop(event.dataTransfer);
-    document.addEventListener('dragstart',event=>{const field=(event.target as Element).closest<HTMLElement>('[data-drag-shared]');if(field)this.beginContentDrag(event,field);});
-    document.addEventListener('dragenter',event=>{if(!this.session)return;if(this.isInternalDrag(event)){if(queue(event))event.preventDefault();return;}if(!external(event))return;event.preventDefault();this.endContentDrag();feedback.enter();},true);
-    document.addEventListener('dragover',event=>{
+    const hover=(event:DragEvent)=>{
       if(!this.session)return;
-      if(this.isInternalDrag(event)){const target=queue(event);document.querySelector('[data-queue-drop]')?.classList.toggle('queue-drop-active',!!target);if(target){event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='copy';}return;}
-      if(!external(event))return;event.preventDefault();this.endContentDrag();if(event.dataTransfer)event.dataTransfer.dropEffect='copy';feedback.enter();
-    },true);
-    document.addEventListener('dragleave',event=>{if(!this.session)return;if(!event.relatedTarget || !document.documentElement.contains(event.relatedTarget as Node))feedback.leave();const target=queue(event);if(target && !target.contains(event.relatedTarget as Node))target.classList.remove('queue-drop-active');},true);
+      const internal=this.isInternalDrag(event);
+      if(!internal && !external(event))return;
+      const target=targetAt(event);
+      if(!internal)this.endContentDrag();
+      feedback.enter(internal && target.kind==='window'?{kind:'blocked'}:target);
+      event.preventDefault();
+      if(event.dataTransfer)event.dataTransfer.dropEffect=target.kind==='blocked' || internal && target.kind==='window'?'none':'copy';
+    };
+    document.addEventListener('dragstart',event=>{const field=(event.target as Element).closest<HTMLElement>('[data-drag-shared]');if(field)this.beginContentDrag(event,field);});
+    document.addEventListener('dragenter',hover,true);
+    document.addEventListener('dragover',hover,true);
+    document.addEventListener('dragleave',event=>{if(this.session && (!event.relatedTarget || !document.documentElement.contains(event.relatedTarget as Node)))feedback.leave();},true);
     document.addEventListener('dragend',()=>{feedback.reset();this.endContentDrag();},true);
     document.addEventListener('keydown',event=>{if(event.key==='Escape'){feedback.reset();this.endContentDrag();}},true);
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){feedback.reset();this.endContentDrag();}});
     document.addEventListener('drop',event=>{
       feedback.reset();
       if(!this.session)return;
+      if(targetAt(event).kind==='blocked'){event.preventDefault();event.stopPropagation();this.endContentDrag();return;}
       if(this.isInternalDrag(event)){
         const payload=this.internalPayload,target=queue(event),device=dropDevice(event);this.endContentDrag();
         if(!target || !payload)return;event.preventDefault();event.stopPropagation();
@@ -2357,7 +2372,7 @@ class GlobalSend {
     if (this.loading) app.innerHTML = `<div class="loading-view"><span class="spinner"></span>连接中…</div>`;
     else if (!this.session) app.innerHTML = this.onboarding();
     else app.innerHTML = this.workspace() + (heldReceipt?'':this.modalHtml()) + this.cardMenuHtml();
-    document.querySelector('#window-drop')?.classList.toggle('visible',this.windowDropVisible);
+    this.paintDropFeedback();
     if(heldReceipt)this.updateReceiptDom(heldReceipt);
     else if(this.modal==='receipt'){const receipt=document.querySelector('.receipt-backdrop');if(receipt)document.body.append(receipt);}
     this.mountEditor();this.mountTextViewer();this.mountAutoAcceptLimit();this.shared.mount();this.bind();this.fileLibrary.bind();this.mountPreviews();

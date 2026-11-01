@@ -68,6 +68,17 @@ Future<void> settle() async {
 
 void main() {
   RealUpdateBinding();
+  setUp(
+    () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AppUpdates.channel, (call) async {
+          if (call.method == 'cancelUpdateInstall') return null;
+          throw MissingPluginException();
+        }),
+  );
+  tearDown(
+    () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AppUpdates.channel, null),
+  );
   test('native exit handoff flushes the current window state before final idle decision', () async {
     final root = await stateFile(),
         window = File('${root.parent.path}/window.json');

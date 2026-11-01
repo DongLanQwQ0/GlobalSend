@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/app_update_ui.dart';
+import 'package:globalsend/app_updates.dart';
 import 'package:globalsend/github_updates.dart';
 import 'package:globalsend/ui_tokens.dart';
 import 'package:globalsend/system_bridge.dart';
@@ -13,10 +14,53 @@ import 'package:globalsend/system_bridge.dart';
 import 'app_updates_test.dart' show Feed, service;
 import 'github_updates_test.dart' show asset, release;
 import 'system_font_fixture.dart';
+import 'auto_update_engine_test.dart' as engine;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadSystemTestFonts);
+  testWidgets(
+    'waiting native helper disables install and keeps cancel in the same action row',
+    (tester) async {
+      late AppUpdates updates;
+      await tester.runAsync(() async {
+        updates = AppUpdates(
+          build: engine.build(UpdatePlatform.windows),
+          feed: engine.feed(UpdatePlatform.windows),
+          automaticDownload: false,
+          downloader: engine.DownloadFixture(),
+          cancelInstall: ({required automaticOnly}) async {},
+          install: (_, __, {required explicit}) async => {'state': 'started'},
+        );
+        await updates.initialize(await engine.stateFile());
+        await updates.check();
+        await updates.downloadAndInstall(explicit: true);
+      });
+      expect(updates.installing, isFalse);
+      expect(updates.installPending, isTrue);
+      await tester.pumpWidget(
+        AppUpdatesScope(
+          updates: updates,
+          child: MaterialApp(
+            theme: Ui.theme(),
+            home: const Scaffold(body: UpdateCheckControl()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final install = find.byKey(const ValueKey('install-update'));
+      final cancel = find.byKey(const ValueKey('cancel-update'));
+      expect(tester.widget<TextButton>(install).onPressed, isNull);
+      expect(find.text('更新中…'), findsOneWidget);
+      expect(tester.getCenter(install).dy, tester.getCenter(cancel).dy);
+      await tester.runAsync(updates.cancelUpdate);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextButton>(install).onPressed, isNotNull);
+      expect(cancel, findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      updates.dispose();
+    },
+  );
   testWidgets(
     'manual iPad update preserves editing focus and opens only its IPA',
     (tester) async {

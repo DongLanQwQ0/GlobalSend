@@ -54,7 +54,7 @@ bool GlobalSendUpdateLaunch::Running() const {
 
 std::shared_ptr<GlobalSendUpdateLaunch> GlobalSendUpdateLaunch::Start(
     const std::filesystem::path& package, const std::string& version,
-    int64_t build, HWND window, bool background) {
+    int64_t build, HWND window, bool background, uintptr_t request_token) {
   using namespace winrt::Windows::Data::Json;
   if (!package.is_absolute() || package.extension() != L".zip")
     throw std::invalid_argument("Windows automatic updates require an absolute ZIP path");
@@ -70,9 +70,9 @@ std::shared_ptr<GlobalSendUpdateLaunch> GlobalSendUpdateLaunch::Start(
   const auto helper = work / L"Install-WindowsUpdate.ps1";
   std::filesystem::copy_file(script, helper, std::filesystem::copy_options::overwrite_existing);
   auto launch = std::make_shared<GlobalSendUpdateLaunch>();
-  launch->result_path_ = work / L"windows-update-result.json";
-  std::filesystem::remove(launch->result_path_);
   const auto token = std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetTickCount64());
+  launch->result_path_ = work / (L"windows-update-result." + token + L".json");
+  launch->exit_token_ = request_token;
   const auto prefix = L"Local\\GlobalSend.Update." + token;
   launch->ready_ = CreateEventW(nullptr, TRUE, FALSE, (prefix + L".ready").c_str());
   launch->proceed_ = CreateEventW(nullptr, TRUE, FALSE, (prefix + L".proceed").c_str());
@@ -86,6 +86,8 @@ std::shared_ptr<GlobalSendUpdateLaunch> GlobalSendUpdateLaunch::Start(
   request.SetNamedValue(L"build", JsonValue::CreateNumberValue(static_cast<double>(build)));
   request.SetNamedValue(L"processId", JsonValue::CreateNumberValue(GetCurrentProcessId()));
   request.SetNamedValue(L"window", JsonValue::CreateStringValue(std::to_wstring(reinterpret_cast<intptr_t>(window))));
+  request.SetNamedValue(L"requestToken", JsonValue::CreateStringValue(std::to_wstring(request_token)));
+  request.SetNamedValue(L"resultPath", JsonValue::CreateStringValue(launch->result_path_.wstring()));
   request.SetNamedValue(L"background", JsonValue::CreateBooleanValue(background));
   request.SetNamedValue(L"readyEvent", JsonValue::CreateStringValue(prefix + L".ready"));
   request.SetNamedValue(L"proceedEvent", JsonValue::CreateStringValue(prefix + L".proceed"));

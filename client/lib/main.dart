@@ -51,6 +51,15 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   bool shareAgain = false;
   bool windowVisible = true;
   bool updateDraftsReady = false;
+  final updatePointers = <int>{};
+  bool publishedUpdatePointer = false;
+  void publishUpdatePointer() {
+    final active = updatePointers.isNotEmpty;
+    if (active == publishedUpdatePointer) return;
+    publishedUpdatePointer = active;
+    unawaited(SystemBridge.setMainUpdateInteraction(active));
+  }
+
   int receiptSerial = 0;
   String receiptPayload = '';
   int presentationRequest = 0;
@@ -155,6 +164,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   }
 
   Future<void> dockAction(Map<String, dynamic> action) async {
+    pendingDockUpdateActions++;
     try {
       final id = action['id'] as String?;
       final entry = collapseFolderCards(controller.historyDock)
@@ -251,6 +261,9 @@ class _GlobalSendAppState extends State<GlobalSendApp>
       if (!mounted) return;
       controller.message = '操作未完成：$error';
       controller.changed();
+    } finally {
+      pendingDockUpdateActions--;
+      controller.updates.activityChanged();
     }
   }
 
@@ -339,7 +352,10 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   void configureUpdateHandoff() {
     updateDraftsReady = false;
     controller.updates.canInstall = () =>
-        updateDraftsReady && controller.updateIdle;
+        updateDraftsReady &&
+        pendingDockUpdateActions == 0 &&
+        !SystemBridge.updateInteracting &&
+        controller.updateIdle;
     controller.updates.beforeInstall = () async {
       final root = controller.root;
       if (root == null) return;
@@ -353,10 +369,24 @@ class _GlobalSendAppState extends State<GlobalSendApp>
       await controller.saveForUpdate();
     };
     if (Platform.isWindows)
-      SystemBridge.beforeUpdateExit = controller.updates.prepareExit;
+      SystemBridge.beforeUpdateExit = () {
+        controller.updates.nativeInteractionChanged(
+          SystemBridge.updateInteracting,
+          retry: false,
+        );
+        return controller.updates.prepareExit();
+      };
   }
 
+  int pendingDockUpdateActions = 0;
+
   void windowEvent(Map<String, dynamic> event) {
+    if (event['updateInteraction'] is bool) {
+      controller.updates.nativeInteractionChanged(
+        event['updateInteraction'] as bool,
+      );
+      return;
+    }
     if (event['updateInstallDeferred'] == true) {
       controller.updates.installDeferred();
       return;
@@ -436,6 +466,10 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         windowVisible && (state == null || state == AppLifecycleState.resumed);
     controller.setAppForeground(active);
     controller.updates.setForeground(active);
+    if (!active) {
+      updatePointers.clear();
+      publishUpdatePointer();
+    }
     controller.setProbeForeground(
       windowVisible && (state == null || state == AppLifecycleState.resumed),
     );
@@ -515,17 +549,32 @@ class _GlobalSendAppState extends State<GlobalSendApp>
                 // never snaps between palettes.
                 themeAnimationDuration: Ui.durationNormal,
                 themeAnimationCurve: Ui.ease,
-                builder: (context, navigator) => AnimatedBuilder(
-                  animation: controller,
-                  child: navigator,
-                  builder: (context, child) => IosBackSwipe(
-                    navigatorKey: navigatorKey,
-                    child: NativeDropFeedback(
-                      active: controller.nativeDragActive,
-                      importing: controller.nativeImporting,
-                      child: UrlIntentNotice(
-                        integration: controller.urlIntents,
-                        child: AppUpdateNotice(child: child!),
+                builder: (context, navigator) => Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (event) {
+                    updatePointers.add(event.pointer);
+                    publishUpdatePointer();
+                  },
+                  onPointerUp: (event) {
+                    updatePointers.remove(event.pointer);
+                    publishUpdatePointer();
+                  },
+                  onPointerCancel: (event) {
+                    updatePointers.remove(event.pointer);
+                    publishUpdatePointer();
+                  },
+                  child: AnimatedBuilder(
+                    animation: controller,
+                    child: navigator,
+                    builder: (context, child) => IosBackSwipe(
+                      navigatorKey: navigatorKey,
+                      child: NativeDropFeedback(
+                        active: controller.nativeDragActive,
+                        importing: controller.nativeImporting,
+                        child: UrlIntentNotice(
+                          integration: controller.urlIntents,
+                          child: AppUpdateNotice(child: child!),
+                        ),
                       ),
                     ),
                   ),

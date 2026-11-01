@@ -18,6 +18,12 @@ class Gallery extends RecentPhotoLibrary {
   final requests = <bool>[];
   int reads = 0, fullFiles = 0;
   Completer<void>? scanGate;
+  final updates = StreamController<void>.broadcast();
+  @override
+  Stream<void> get changes => updates.stream;
+  @override
+  Future<Set<String>> availableIds(Set<String> ids) async =>
+      ids.intersection(photos.map((photo) => photo.id).toSet());
   final photos = [
     SuggestedPhoto('one', Uint8List(0)),
     SuggestedPhoto('two', Uint8List(0)),
@@ -113,6 +119,7 @@ void main() {
   });
   tearDown(() async {
     photos.dispose();
+    await gallery.updates.close();
     await photos.pendingWrites;
     final root = Directory('${Directory.current.path}/../artifacts/tmp')
         .absolute
@@ -160,6 +167,31 @@ void main() {
       await feed.updates.close();
     },
   );
+
+  test('suggestions discovered in one batch preserve media order on equal timestamps', () async {
+    gallery.photos
+      ..clear()
+      ..addAll([
+        SuggestedPhoto('newer-in-batch', Uint8List(0), suggestedAt: 100),
+        SuggestedPhoto('older-in-batch', Uint8List(0), suggestedAt: 100),
+      ]);
+    photos.setVisible(true);
+    await until(() => photos.items.length == 2);
+    expect(photos.items.map((item) => item.id), [
+      'newer-in-batch',
+      'older-in-batch',
+    ]);
+    gallery.photos.add(
+      SuggestedPhoto('later-batch', Uint8List(0), suggestedAt: 200),
+    );
+    await photos.refresh();
+    await until(() => photos.items.length == 3);
+    expect(photos.items.map((item) => item.id), [
+      'later-batch',
+      'newer-in-batch',
+      'older-in-batch',
+    ]);
+  });
 
   test(
     'foreground finds photos; no full image is loaded until explicitly added',
@@ -276,7 +308,7 @@ void main() {
   );
 
   test(
-    'suggests once per opening and clears itself without manual dismissal',
+    'new media is discovered on library changes after the first batch',
     () async {
       photos.dispose();
       photos = RecentPhotos(
@@ -287,25 +319,145 @@ void main() {
       );
       photos.setVisible(true);
       await until(() => photos.items.isNotEmpty);
+      photos.setShowing({'one', 'two'});
       await until(() => photos.items.isEmpty);
       gallery.photos.add(SuggestedPhoto('later', Uint8List(0)));
-      await photos.refresh();
-      photos.setVisible(false);
+      gallery.updates.add(null);
+      await until(() => photos.items.any((item) => item.id == 'later'));
+      expect(photos.items.map((item) => item.id), ['later']);
+      expect(gallery.fullFiles, 0);
+    },
+  );
+
+  test('only visible idle time expires each suggestion; hidden and interaction pause it', () async {
+    photos.dispose();
+    photos = RecentPhotos(
+      library: gallery,
+      directory: () async => folder,
+      supported: true,
+      suggestionDuration: const Duration(milliseconds: 100),
+    );
+    photos.setVisible(true);
+    await until(() => photos.items.length == 2);
+    await Future<void>.delayed(const Duration(milliseconds: 140));
+    expect(photos.items, hasLength(2)); // discovered but not seen
+    photos.setShowing({'one'});
+    await Future<void>.delayed(const Duration(milliseconds: 25));
+    photos.setShowing({'one'}, interacting: true);
+    await Future<void>.delayed(const Duration(milliseconds: 140));
+    expect(photos.items, hasLength(2));
+    photos.setShowing({'one'});
+    await until(() => photos.items.length == 1);
+    expect(photos.items.single.id, 'two'); // offscreen keeps its whole budget
+    photos.setShowing({'two'});
+    photos.setVisible(false);
+    await Future<void>.delayed(const Duration(milliseconds: 140));
+    expect(photos.items.single.id, 'two');
+    photos.setVisible(true);
+    await photos.refresh();
+    photos.setShowing({'two'});
+    await until(() => photos.items.isEmpty);
+    await photos.refresh();
+    expect(photos.items, isEmpty); // consumed suggestions never reappear
+  });
+
+  test(
+    'library deletion removes a suggestion and newer items sort first',
+    () async {
       photos.setVisible(true);
-      await photos.refresh();
-      expect(photos.items, isEmpty);
-      expect(gallery.reads, 1);
+      await until(() => photos.items.length == 2);
+      gallery.photos.removeWhere((photo) => photo.id == 'one');
+      gallery.photos.add(
+        SuggestedPhoto(
+          'new',
+          Uint8List(0),
+          suggestedAt: DateTime.now().millisecondsSinceEpoch + 1000,
+        ),
+      );
+      gallery.updates.add(null);
+      await until(() => photos.items.any((photo) => photo.id == 'new'));
+      expect(photos.items.map((photo) => photo.id), ['new', 'two']);
+      expect(gallery.fullFiles, 0);
+    },
+  );
+
+  test(
+    'reopening restores unconsumed suggestions and remaining visible time',
+    () async {
       photos.dispose();
       photos = RecentPhotos(
         library: gallery,
         directory: () async => folder,
         supported: true,
+        suggestionDuration: const Duration(milliseconds: 150),
       );
       photos.setVisible(true);
-      await until(() => photos.items.isNotEmpty);
-      expect(photos.items.map((item) => item.id), ['later']);
+      await until(() => photos.items.length == 2);
+      photos.setShowing({'one'});
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      photos.setVisible(false);
+      await photos.pendingWrites;
+      photos.dispose();
+      photos = RecentPhotos(
+        library: gallery,
+        directory: () async => folder,
+        supported: true,
+        suggestionDuration: const Duration(milliseconds: 150),
+      );
+      photos.setVisible(true);
+      await until(() => photos.items.length == 2);
+      photos.setShowing({'one'});
+      await until(() => photos.items.length == 1);
+      expect(photos.items.single.id, 'two');
     },
   );
+
+  test('direct disposal saves visible budget and restores it on recreation', () async {
+    photos.dispose();
+    photos = RecentPhotos(
+      library: gallery,
+      directory: () async => folder,
+      supported: true,
+      suggestionDuration: const Duration(seconds: 10),
+    );
+    photos.setVisible(true);
+    await until(() => photos.items.length == 2);
+    await photos.pendingWrites;
+    photos.setShowing({'one'});
+    await Future<void>.delayed(const Duration(milliseconds: 25));
+    // This is SendScreen.dispose's actual path: no preceding visibility event.
+    photos.dispose();
+    final closingWrites = photos.pendingWrites;
+    // The next screen is allowed to start immediately, without knowing the
+    // previous model's write Future.
+    photos = RecentPhotos(
+      library: gallery,
+      directory: () async => folder,
+      supported: true,
+    );
+    photos.setVisible(true);
+    await closingWrites;
+    final file = File('${folder.path}/recent-photo-suggestions.json');
+    final saved = jsonDecode(await file.readAsString()) as Map;
+    final pending = (saved['pending'] as List).cast<Map>();
+    final remaining =
+        pending.singleWhere((item) => item['id'] == 'one')['remainingMs']
+            as int;
+    expect(remaining, inExclusiveRange(0, 10000));
+    expect(
+      pending.singleWhere((item) => item['id'] == 'two')['remainingMs'],
+      10000,
+    );
+    await until(() => photos.items.length == 2);
+    await photos.pendingWrites;
+    final restored = jsonDecode(await file.readAsString()) as Map;
+    expect(
+      (restored['pending'] as List).cast<Map>().singleWhere(
+        (item) => item['id'] == 'one',
+      )['remainingMs'],
+      remaining,
+    );
+  });
 
   test('failed staging keeps the suggestion for retry', () async {
     photos.setVisible(true);

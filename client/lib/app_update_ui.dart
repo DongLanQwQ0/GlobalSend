@@ -87,34 +87,41 @@ class UpdateCheckControl extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: Ui.space1),
             child: LinearProgressIndicator(value: updates.progress),
           ),
-        if (updates.available != null)
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: updates.downloading || updates.installing
-                  ? null
-                  : () => openUpdate(context, updates),
-              child: Text(
-                updates.build.platform == UpdatePlatform.ios
-                    ? '下载 IPA'
-                    : updates.actionLabel,
-                style: const TextStyle(fontFamilyFallback: Ui.fontFallback),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: Ui.space1,
+          children: [
+            if (updates.canCancel)
+              TextButton(
+                key: const ValueKey('cancel-update'),
+                onPressed: updates.cancelUpdate,
+                child: const Text('取消更新'),
               ),
-            ),
-          ),
-        if (updates.ready && updates.error.isNotEmpty)
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: updates.downloading || updates.installing
-                  ? null
-                  : updates.redownload,
-              child: const Text(
-                '重新下载',
-                style: TextStyle(fontFamilyFallback: Ui.fontFallback),
+            if (updates.available != null)
+              TextButton(
+                key: const ValueKey('install-update'),
+                onPressed: updates.downloading || updates.installPending
+                    ? null
+                    : () => openUpdate(context, updates),
+                child: Text(
+                  updates.build.platform == UpdatePlatform.ios
+                      ? '下载 IPA'
+                      : updates.actionLabel,
+                  style: const TextStyle(fontFamilyFallback: Ui.fontFallback),
+                ),
               ),
-            ),
-          ),
+            if (updates.ready && updates.error.isNotEmpty)
+              TextButton(
+                onPressed: updates.downloading || updates.installPending
+                    ? null
+                    : updates.redownload,
+                child: const Text(
+                  '重新下载',
+                  style: TextStyle(fontFamilyFallback: Ui.fontFallback),
+                ),
+              ),
+          ],
+        ),
         if (updates.build.platform == UpdatePlatform.ios &&
             updates.notificationsAllowed == false)
           Align(
@@ -198,7 +205,7 @@ class AppUpdateNotice extends StatelessWidget {
                             ),
                             TextButton(
                               onPressed:
-                                  updates.downloading || updates.installing
+                                  updates.downloading || updates.installPending
                                   ? null
                                   : () => openUpdate(context, updates),
                               child: Text(

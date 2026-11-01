@@ -13,8 +13,9 @@ abstract final class ClipboardSuggestionBridge {
         : 'dev.globalsend/system',
   );
   static Future<Map<String, dynamic>> read() async {
-    if (!Platform.isAndroid && !Platform.isIOS && !Platform.isWindows)
+    if (!Platform.isAndroid && !Platform.isIOS && !Platform.isWindows) {
       return {};
+    }
     return Map<String, dynamic>.from(
       await channel.invokeMapMethod(
             'clipboardSuggestion',
@@ -50,9 +51,11 @@ class ClipboardSuggestions extends ChangeNotifier {
   ClipboardSuggestions({
     this.read = ClipboardSuggestionBridge.read,
     this.acknowledge = ClipboardSuggestionBridge.dismiss,
-  });
+    DateTime Function()? now,
+  }) : now = now ?? DateTime.now;
   final Future<Map<String, dynamic>> Function() read;
   final Future<void> Function(String revision) acknowledge;
+  final DateTime Function() now;
   ClipboardSuggestion? item;
   String? _handledRevision;
   Timer? _timer;
@@ -76,15 +79,22 @@ class ClipboardSuggestions extends ChangeNotifier {
       if (_disposed || status['available'] != true) return;
       final revision = status['revision'] as String? ?? '';
       final kind = status['kind'] as String? ?? 'empty';
+      final nativeTime = status['suggestedAt'] as int? ?? 0;
+      // UIKit and Windows expose a clipboard revision but not its copy time.
+      // Stamp the first observation once; polling must not keep moving it ahead
+      // of newer media, and missing time must not pin it behind every photo.
+      final suggestedAt = nativeTime > 0
+          ? nativeTime
+          : item?.revision == revision
+          ? item!.suggestedAt
+          : now().millisecondsSinceEpoch;
       final next =
           revision.isEmpty || kind == 'empty' || _handledRevision == revision
           ? null
-          : ClipboardSuggestion(
-              revision,
-              kind,
-              suggestedAt: status['suggestedAt'] as int? ?? 0,
-            );
-      if (item?.revision != next?.revision || item?.kind != next?.kind) {
+          : ClipboardSuggestion(revision, kind, suggestedAt: suggestedAt);
+      if (item?.revision != next?.revision ||
+          item?.kind != next?.kind ||
+          item?.suggestedAt != next?.suggestedAt) {
         item = next;
         notifyListeners();
       }

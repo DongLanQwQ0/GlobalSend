@@ -20,6 +20,7 @@ class IOSDragSource extends StatefulWidget {
     required this.enabled,
     required this.child,
   }) : clipboardRevision = null,
+       mediaAssetId = null,
        onDragAccepted = null;
   const IOSDragSource.clipboard({
     super.key,
@@ -28,9 +29,20 @@ class IOSDragSource extends StatefulWidget {
     required this.child,
     this.onDragAccepted,
   }) : entry = null,
+       mediaAssetId = null,
        clipboardRevision = revision;
+  const IOSDragSource.media({
+    super.key,
+    required String assetId,
+    required this.enabled,
+    required this.child,
+    this.onDragAccepted,
+  }) : entry = null,
+       clipboardRevision = null,
+       mediaAssetId = assetId;
   final DockEntry? entry;
   final String? clipboardRevision;
+  final String? mediaAssetId;
   final VoidCallback? onDragAccepted;
   final bool enabled;
   final Widget child;
@@ -97,8 +109,11 @@ class _IOSDragSourceState extends State<IOSDragSource> {
           'previewHeight': fullArea.height * scale,
           'paths': entry?.dragPaths ?? <String>[],
           'texts': entry?.kind == 'text' ? [entry!.text] : <String>[],
-          'label': entry?.title ?? '剪贴板',
+          'label':
+              entry?.title ??
+              (source.widget.mediaAssetId == null ? '剪贴板' : '媒体'),
           'clipboardRevision': ?source.widget.clipboardRevision,
+          'mediaAssetId': ?source.widget.mediaAssetId,
         });
       }
       final signature = '$surface:$values';
@@ -174,14 +189,18 @@ class _IOSDragSourceState extends State<IOSDragSource> {
   }
 
   void syncClipboardEvents() {
-    if (widget.clipboardRevision != null && clipboardDragEvents == null) {
+    if ((widget.clipboardRevision != null || widget.mediaAssetId != null) &&
+        clipboardDragEvents == null) {
       clipboardDragEvents = FileShareBridge.dragEvents.listen((event) {
-        if (event['clipboardRevision'] == widget.clipboardRevision &&
-            event['operation'] == 'copy') {
+        final matches = widget.clipboardRevision != null
+            ? event['clipboardRevision'] == widget.clipboardRevision
+            : event['mediaAssetId'] == widget.mediaAssetId;
+        if (matches && event['operation'] == 'copy') {
           widget.onDragAccepted?.call();
         }
       });
     } else if (widget.clipboardRevision == null &&
+        widget.mediaAssetId == null &&
         clipboardDragEvents != null) {
       unawaited(clipboardDragEvents!.cancel());
       clipboardDragEvents = null;

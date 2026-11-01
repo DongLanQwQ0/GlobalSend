@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'directories.dart';
@@ -71,12 +72,41 @@ class AndroidRecentPhotoFeed implements RecentPhotoFeed {
 }
 
 abstract class RecentPhotoLibrary {
+  Stream<void> get changes => const Stream.empty();
+  Future<Set<String>> availableIds(Set<String> ids) async => ids;
   Future<bool> permission({required bool request});
   Future<List<SuggestedPhoto>> readSince(DateTime since, Set<String> handled);
   Future<String?> filePath(String id);
 }
 
 class DevicePhotoLibrary implements RecentPhotoLibrary {
+  late final _changes = StreamController<void>.broadcast(
+    onListen: () {
+      PhotoManager.addChangeCallback(_libraryChanged);
+      unawaited(PhotoManager.startChangeNotify());
+    },
+    onCancel: () {
+      PhotoManager.removeChangeCallback(_libraryChanged);
+      unawaited(PhotoManager.stopChangeNotify());
+    },
+  );
+  void _libraryChanged(MethodCall _) => _changes.add(null);
+  @override
+  Stream<void> get changes => _changes.stream;
+  @override
+  Future<Set<String>> availableIds(Set<String> ids) async {
+    final available = <String>{};
+    for (final id in ids) {
+      final asset = await AssetEntity.fromId(id);
+      if (asset != null &&
+          await asset.exists &&
+          await asset.isLocallyAvailable()) {
+        available.add(id);
+      }
+    }
+    return available;
+  }
+
   static const permissionOption = PermissionRequestOption(
     androidPermission: AndroidPermission(
       type: RequestType.common,
@@ -101,35 +131,40 @@ class DevicePhotoLibrary implements RecentPhotoLibrary {
     DateTime since,
     Set<String> handled,
   ) async {
-    final assets = await PhotoManager.getAssetListPaged(
-      page: 0,
-      pageCount: 24,
-      type: RequestType.common,
-      filterOption: FilterOptionGroup(
-        createTimeCond: DateTimeCond(min: since, max: DateTime.now()),
-        orders: [
-          const OrderOption(type: OrderOptionType.createDate, asc: false),
-        ],
-      ),
-    );
     final suggestions = <SuggestedPhoto>[];
-    for (final asset in assets) {
-      if (handled.contains(asset.id) || !await asset.isLocallyAvailable()) {
-        continue;
-      }
-      final thumbnail = await asset.thumbnailDataWithSize(
-        const ThumbnailSize(180, 180),
+    final suggestedAt = DateTime.now().millisecondsSinceEpoch;
+    for (var page = 0; suggestions.length < 6; page++) {
+      final assets = await PhotoManager.getAssetListPaged(
+        page: page,
+        pageCount: 24,
+        type: RequestType.common,
+        filterOption: FilterOptionGroup(
+          createTimeCond: DateTimeCond(min: since, max: DateTime.now()),
+          orders: [
+            const OrderOption(type: OrderOptionType.createDate, asc: false),
+          ],
+        ),
       );
-      if (thumbnail != null) {
-        suggestions.add(
-          SuggestedPhoto(
-            asset.id,
-            thumbnail,
-            suggestedAt: DateTime.now().millisecondsSinceEpoch,
-          ),
+      for (final asset in assets) {
+        if (handled.contains(asset.id) || !await asset.isLocallyAvailable()) {
+          continue;
+        }
+        final thumbnail = await asset.thumbnailDataWithSize(
+          const ThumbnailSize(180, 180),
         );
+        if (thumbnail != null) {
+          suggestions.add(
+            SuggestedPhoto(
+              asset.id,
+              thumbnail,
+              name: await asset.titleAsync,
+              suggestedAt: suggestedAt,
+            ),
+          );
+        }
+        if (suggestions.length == 6) break;
       }
-      if (suggestions.length == 6) break;
+      if (assets.length < 24) break;
     }
     return suggestions;
   }
@@ -137,7 +172,9 @@ class DevicePhotoLibrary implements RecentPhotoLibrary {
   @override
   Future<String?> filePath(String id) async {
     final asset = await AssetEntity.fromId(id);
-    return (await asset?.file)?.path;
+    // Keep HEIC/video bytes and their original suffix, rather than requesting
+    // PhotoManager's converted JPEG representation.
+    return (await asset?.originFile)?.path;
   }
 }
 
@@ -175,9 +212,14 @@ class RecentPhotos extends ChangeNotifier {
   bool _busy = false, _again = false;
   DateTime? _since;
   Future<void>? _loaded;
-  Timer? _timer;
   Timer? _suggestionTimer;
-  bool _suggestedThisRun = false;
+  final _remaining = <String, int>{};
+  final _suggestedAt = <String, int>{};
+  final _clock = Stopwatch()..start();
+  int? _visibleSince;
+  // A replacement screen can start loading before the disposed screen's last
+  // asynchronous write completes. Keep that handoff ordered across instances.
+  static Future<void> _stateWrites = Future.value();
   Future<void> _writes = Future.value();
 
   @visibleForTesting
@@ -187,8 +229,8 @@ class RecentPhotos extends ChangeNotifier {
 
   void setVisible(bool visible) {
     if (!supported || _disposed || _visible == visible) return;
+    _spendVisibleTime();
     _visible = visible;
-    _timer?.cancel();
     if (feed != null) {
       if (visible) {
         _feedChanges = feed!.changes.listen((_) => unawaited(refresh()));
@@ -203,9 +245,13 @@ class RecentPhotos extends ChangeNotifier {
     }
     if (visible) {
       unawaited(refresh());
-      _timer = Timer.periodic(const Duration(seconds: 30), (_) {
-        if (enabled) unawaited(refresh());
-      });
+    } else {
+      _showing = {};
+      _interacting = false;
+      _rescheduleExpiry();
+      unawaited(_feedChanges?.cancel());
+      _feedChanges = null;
+      unawaited(_save());
     }
   }
 
@@ -213,6 +259,7 @@ class RecentPhotos extends ChangeNotifier {
       File('${(await directory()).path}/recent-photo-suggestions.json');
 
   Future<void> _load() async {
+    await _stateWrites;
     final file = await _stateFile();
     if (await file.exists()) {
       final state = jsonDecode(await file.readAsString()) as Map;
@@ -224,24 +271,40 @@ class RecentPhotos extends ChangeNotifier {
       }
       _since = DateTime.parse(state['since'] as String);
       _handled.addAll((state['handled'] as List).cast<String>());
+      for (final pending in state['pending'] as List? ?? const []) {
+        final id = pending['id'] as String;
+        _remaining[id] = pending['remainingMs'] as int;
+        _suggestedAt[id] = pending['suggestedAt'] as int;
+      }
     } else {
       _since = now().subtract(const Duration(minutes: 10));
     }
   }
 
   Future<void> _save() {
+    if (_since == null) return Future.value();
     final contents = jsonEncode({
       'enabled': enabled,
       'asked': _asked,
       'mediaPermissionVersion': 2,
       'since': _since!.toIso8601String(),
       'handled': _handled.toList(),
+      'pending': [
+        for (final id in _remaining.keys)
+          {
+            'id': id,
+            'remainingMs': _remaining[id],
+            'suggestedAt': _suggestedAt[id],
+          },
+      ],
     });
-    return _writes = _writes.catchError((Object _) {}).then((_) async {
-      final file = await _stateFile();
-      await file.parent.create(recursive: true);
-      await file.writeAsString(contents, flush: true);
-    });
+    return _writes = _stateWrites = _stateWrites.catchError((Object _) {}).then(
+      (_) async {
+        final file = await _stateFile();
+        await file.parent.create(recursive: true);
+        await file.writeAsString(contents, flush: true);
+      },
+    );
   }
 
   Future<void> setEnabled(bool value) async {
@@ -253,6 +316,10 @@ class RecentPhotos extends ChangeNotifier {
         await _deactivateFeed();
       }
       items = [];
+      _remaining.clear();
+      _suggestedAt.clear();
+      _showing = {};
+      _rescheduleExpiry();
       problem = null;
     }
     await _save();
@@ -261,11 +328,7 @@ class RecentPhotos extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
-    if (!supported ||
-        !_visible ||
-        _disposed ||
-        feed == null && _suggestedThisRun)
-      return;
+    if (!supported || !_visible || _disposed) return;
     if (_busy) {
       _again = true;
       return;
@@ -273,11 +336,7 @@ class RecentPhotos extends ChangeNotifier {
     _busy = true;
     try {
       await (_loaded ??= _load());
-      if (!enabled ||
-          !_visible ||
-          _disposed ||
-          feed == null && _suggestedThisRun)
-        return;
+      if (!enabled || !_visible || _disposed) return;
       final request = !_asked;
       if (request) {
         await _save();
@@ -288,6 +347,7 @@ class RecentPhotos extends ChangeNotifier {
       if (request) await _save();
       if (!permissionGranted) {
         items = [];
+        setShowing({});
         problem = '未获得照片访问权限';
         return;
       }
@@ -307,25 +367,56 @@ class RecentPhotos extends ChangeNotifier {
         return;
       }
       if (!enabled || !_visible || _disposed) return;
+      _feedChanges ??= library.changes.listen((_) => unawaited(refresh()));
+      final available = await library.availableIds(_remaining.keys.toSet());
+      if (!_visible || !enabled || _disposed) return;
+      final removed = _remaining.keys.toSet().difference(available);
+      _forget(removed);
       final oldest = now().subtract(const Duration(days: 1));
       final since = _since!.isAfter(oldest) ? _since! : oldest;
-      final found = await library.readSince(since, Set.of(_handled));
+      final found = await library.readSince(
+        since,
+        _handled.difference(_remaining.keys.toSet())
+          ..addAll(items.map((item) => item.id)),
+      );
       if (_visible && enabled && !_disposed) {
-        items = found.where((item) => !_handled.contains(item.id)).toList();
-        problem = null;
-        if (items.isNotEmpty) {
-          _suggestedThisRun = true;
-          _handled.addAll(items.map((item) => item.id));
-          while (_handled.length > 256) {
-            _handled.remove(_handled.first);
+        for (final photo in found) {
+          // A dismissal can happen while Photos is answering the scan.
+          if (_handled.contains(photo.id) &&
+              !_remaining.containsKey(photo.id)) {
+            continue;
           }
-          _since = now();
-          _suggestionTimer = Timer(suggestionDuration, () {
-            items = [];
-            _changed();
-          });
-          await _save();
+          if (items.any((item) => item.id == photo.id)) continue;
+          _remaining.putIfAbsent(
+            photo.id,
+            () => suggestionDuration.inMilliseconds,
+          );
+          final stamp = _suggestedAt.putIfAbsent(
+            photo.id,
+            () => photo.suggestedAt > 0
+                ? photo.suggestedAt
+                : now().millisecondsSinceEpoch,
+          );
+          items.add(
+            SuggestedPhoto(
+              photo.id,
+              photo.thumbnail,
+              path: photo.path,
+              name: photo.name,
+              suggestedAt: stamp,
+            ),
+          );
+          _handled.add(photo.id);
         }
+        final order = {for (var i = 0; i < items.length; i++) items[i].id: i};
+        items.sort((a, b) {
+          final byTime = b.suggestedAt.compareTo(a.suggestedAt);
+          return byTime != 0 ? byTime : order[a.id]!.compareTo(order[b.id]!);
+        });
+        problem = null;
+        _trimHandled();
+        _rescheduleExpiry();
+        await _save();
       }
     } catch (_) {
       problem = '暂时无法检查新图片';
@@ -347,11 +438,11 @@ class RecentPhotos extends ChangeNotifier {
       _changed();
       return;
     }
+    _spendVisibleTime();
     _handled.addAll(dismissed);
-    while (_handled.length > 256) {
-      _handled.remove(_handled.first);
-    }
-    items.removeWhere((item) => dismissed.contains(item.id));
+    _forget(dismissed);
+    _trimHandled();
+    _rescheduleExpiry();
     _changed();
     await _save();
   }
@@ -373,11 +464,66 @@ class RecentPhotos extends ChangeNotifier {
       (feed == null ? await library.filePath(id) : null);
 
   void setShowing(Set<String> ids, {bool interacting = false}) {
-    if (feed == null || setEquals(ids, _showing) && interacting == _interacting)
-      return;
+    if (setEquals(ids, _showing) && interacting == _interacting) return;
+    _spendVisibleTime();
     _showing = Set.of(ids);
     _interacting = interacting;
-    unawaited(_reportShowing());
+    if (feed != null) {
+      unawaited(_reportShowing());
+    } else {
+      _rescheduleExpiry();
+    }
+  }
+
+  void _trimHandled() {
+    while (_handled.length > 256) {
+      final old = _handled
+          .where((id) => !_remaining.containsKey(id))
+          .firstOrNull;
+      if (old == null) break;
+      _handled.remove(old);
+    }
+  }
+
+  void _forget(Set<String> ids) {
+    items.removeWhere((item) => ids.contains(item.id));
+    for (final id in ids) {
+      _remaining.remove(id);
+      _suggestedAt.remove(id);
+    }
+  }
+
+  void _spendVisibleTime() {
+    final start = _visibleSince;
+    _visibleSince = null;
+    if (start == null) return;
+    final elapsed = _clock.elapsedMilliseconds - start;
+    for (final id in _showing) {
+      if (_remaining.containsKey(id)) {
+        _remaining[id] = _remaining[id]! - elapsed;
+      }
+    }
+  }
+
+  void _rescheduleExpiry() {
+    _suggestionTimer?.cancel();
+    if (feed != null) return;
+    _spendVisibleTime();
+    final expired = _remaining.keys.where((id) => _remaining[id]! <= 0).toSet();
+    _forget(expired);
+    final active = _showing.where(_remaining.containsKey);
+    if (!_visible || !enabled || _interacting || active.isEmpty || _disposed) {
+      return;
+    }
+    _visibleSince = _clock.elapsedMilliseconds;
+    final delay = active
+        .map((id) => _remaining[id]!)
+        .reduce((a, b) => a < b ? a : b);
+    _suggestionTimer = Timer(Duration(milliseconds: delay), () {
+      _rescheduleExpiry();
+      _changed();
+      unawaited(_save());
+    });
   }
 
   Future<void> _reportShowing() async {
@@ -408,8 +554,11 @@ class RecentPhotos extends ChangeNotifier {
 
   @override
   void dispose() {
+    _spendVisibleTime();
+    // Screen disposal can bypass setVisible(false). Persist the last visible
+    // interval through the same serialized writer before releasing the model.
+    if (feed == null) unawaited(_save());
     _disposed = true;
-    _timer?.cancel();
     _suggestionTimer?.cancel();
     unawaited(_feedChanges?.cancel());
     if (feed != null) unawaited(_deactivateFeed());

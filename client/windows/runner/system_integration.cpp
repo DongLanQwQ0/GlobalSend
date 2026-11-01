@@ -8,6 +8,7 @@
 #include "window_lifecycle.h"
 #include "autostart.h"
 #include "auto_update.h"
+#include "update_interaction.h"
 #include <system_error>
 #include "single_instance.h"
 #include "drag_preview.h"
@@ -46,6 +47,10 @@ bool outgoing_drag = false;
 HWND outgoing_source_window = nullptr;
 HWND import_view = nullptr;
 bool native_paste_key_down = false;
+void UpdateInteractionChanged();
+GlobalSendUpdateInteraction update_interaction(UpdateInteractionChanged);
+GlobalSendUpdateExitGate update_exit;
+bool update_interaction_published = false, last_update_interaction = false;
 constexpr UINT_PTR kPasteSubclass = 0x47535041;
 
 bool HandleNativePaste(UINT message, WPARAM key) {
@@ -70,6 +75,7 @@ bool HandleNativePaste(UINT message, WPARAM key) {
 
 LRESULT CALLBACK PasteSubclass(HWND window, UINT message, WPARAM key, LPARAM data,
     UINT_PTR, DWORD_PTR) {
+  update_interaction.Observe(window, message, key);
   if (HandleNativePaste(message, key)) return 0;
   return DefSubclassProc(window, message, key, data);
 }
@@ -82,9 +88,33 @@ uint64_t system_generation = 0;
 uint64_t clipboard_write_generation = 0;
 std::shared_ptr<GlobalSendUpdateLaunch> update_launch;
 bool update_starting = false;
+bool update_explicit = false;
+uint64_t update_request = 0;
 constexpr UINT kDestroyReceiveDock = WM_APP + 119;
 constexpr UINT kCompleteUpdateExit = WM_APP + 120;
+constexpr UINT kResumeUpdateExit = WM_APP + 121;
 std::unique_ptr<GlobalSendReceiveDock> receive_dock;
+bool UpdateInteracting() {
+  return update_interaction.Busy() || outgoing_drag || (receive_dock && receive_dock->Interacting());
+}
+void UpdateInteractionChanged() {
+  const bool busy = UpdateInteracting();
+  if (busy && (!update_interaction_published || !last_update_interaction)) update_exit.InteractionBegan();
+  if (channel && (!update_interaction_published || last_update_interaction != busy)) {
+    update_interaction_published = true; last_update_interaction = busy;
+    channel->InvokeMethod("updateInteraction", std::make_unique<Value>(Map{{Value("active"), Value(busy)}}));
+  }
+  if (!busy && update_exit.Requested() && update_launch && owner)
+    PostMessageW(owner, kResumeUpdateExit, 0, 0);
+}
+void CancelUpdateAttempt(bool notify) {
+  update_exit.Cancel();
+  ++update_request;
+  if (update_launch) update_launch->Cancel();
+  update_launch.reset();
+  update_starting = false;
+  if (notify && channel) channel->InvokeMethod("updateInstallDeferred", std::make_unique<Value>());
+}
 int64_t receive_serial = -1;
 int64_t copied_reference_revision = -1;
 struct DockReply {
@@ -321,7 +351,7 @@ winrt::fire_and_forget OpenWebUrl(std::string url, HWND parent,
 }
 
 winrt::fire_and_forget InstallUpdate(std::wstring package, std::string version,
-    int64_t build, HWND window, bool background,
+    int64_t build, HWND window, bool background, uint64_t request,
     std::shared_ptr<flutter::MethodResult<Value>> result) {
   const winrt::apartment_context platform_thread;
   const auto generation = system_generation;
@@ -331,7 +361,7 @@ winrt::fire_and_forget InstallUpdate(std::wstring package, std::string version,
   std::string error;
   try {
     if (FAILED(runtime) && runtime != RPC_E_CHANGED_MODE) winrt::check_hresult(runtime);
-    launch = GlobalSendUpdateLaunch::Start(package, version, build, window, background);
+    launch = GlobalSendUpdateLaunch::Start(package, version, build, window, background, request);
   }
   catch (const winrt::hresult_error& failure) { error = winrt::to_string(failure.message()); }
   catch (const std::exception& failure) { error = failure.what(); }
@@ -339,6 +369,11 @@ winrt::fire_and_forget InstallUpdate(std::wstring package, std::string version,
   co_await platform_thread;
   if (!channel || generation != system_generation) {
     if (launch) launch->Cancel();
+    co_return;
+  }
+  if (request != update_request) {
+    if (launch) launch->Cancel();
+    result->Success(Value(Map{{Value("state"), Value("cancelled")}}));
     co_return;
   }
   update_starting = false;
@@ -425,6 +460,7 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
   const bool pointer_export = pointer_kind == "touch" || pointer_kind == "stylus" ||
       pointer_kind == "invertedStylus";
   if (pointer_export || (pointer_kind != "mouse" && HasGlobalSendTouchContact())) {
+    update_interaction.Set(GlobalSendUpdateInteraction::export_operation, true);
       // A held native primary contact drives this explicit desktop adapter.
       // Do not retry the WinRT CoreWindow path or use the plain mouse path.
       auto data = std::shared_ptr<IDataObject>(payload,
@@ -449,6 +485,8 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
         PublishDrag(false);
         if (error.empty()) completion->Success(Value(copied));
         else completion->Error("TOUCH_DRAG_FAILED", error);
+        update_interaction.ReleasePointers();
+        update_interaction.Set(GlobalSendUpdateInteraction::export_operation, false);
       }, std::move(prepare_preview));
     return;
   }
@@ -457,6 +495,7 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
   InitializeGlobalSendDragPreviewFromBitmap(data, source_window, bitmap);
   if (bitmap) DeleteObject(bitmap);
   DWORD effect = DROPEFFECT_NONE;
+  update_interaction.Set(GlobalSendUpdateInteraction::export_operation, true);
   outgoing_drag = true;
   outgoing_source_window = source_window;
   HRESULT status = DoDragDrop(data, source, DROPEFFECT_COPY, &effect);
@@ -466,6 +505,8 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
   data->Release(); source->Release();
   if (status == DRAGDROP_S_DROP || status == DRAGDROP_S_CANCEL) result->Success(Value(status == DRAGDROP_S_DROP && effect == DROPEFFECT_COPY));
   else result->Error("DRAG_FAILED", "Windows OLE drag could not start");
+  update_interaction.ReleasePointers();
+  update_interaction.Set(GlobalSendUpdateInteraction::export_operation, false);
 }
 bool PrepareReceiveDock(Map payload) {
   if (receive_dock) return true;
@@ -477,7 +518,7 @@ bool PrepareReceiveDock(Map payload) {
       Drag(values, std::move(completion), window);
     }, [] { CompleteDockReplies(); }, [](int64_t generation) {
       PostMessageW(owner, kDestroyReceiveDock, static_cast<WPARAM>(generation), 0);
-    });
+    }, [](bool) { UpdateInteractionChanged(); });
   if (receive_dock->Open()) return true;
   receive_dock.reset();
   return false;
@@ -564,11 +605,23 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
     }
     const auto* arguments = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
     if (!arguments) { result->Error("BAD_ARGUMENT", "Expected operation map"); return; }
+    if (call.method_name() == "mainUpdateInteraction") {
+      update_interaction.Set(GlobalSendUpdateInteraction::flutter_operation, Bool(*arguments, "active"));
+      result->Success(); return;
+    }
+    if (call.method_name() == "cancelUpdateInstall") {
+      if (!Bool(*arguments, "automaticOnly") || !update_explicit) CancelUpdateAttempt(false);
+      result->Success(); return;
+    }
     if (call.method_name() == "installUpdate") {
       if (update_launch && !update_launch->Running()) update_launch.reset();
       if (update_starting || update_launch) {
         result->Success(Value(Map{{Value("state"), Value("started")}}));
         return;
+      }
+      if (UpdateInteracting()) {
+        UpdateInteractionChanged();
+        result->Success(Value(Map{{Value("state"), Value("interaction-pending")}})); return;
       }
       const auto path = Wide(String(*arguments, "path"));
       const auto version = String(*arguments, "version");
@@ -578,8 +631,10 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       const bool explicit_install = explicit_value && *explicit_value;
       if (path.empty() || version.empty() || build <= 0) { result->Error("BAD_ARGUMENT", "Missing update package or version"); return; }
       update_starting = true;
+      update_explicit = explicit_install;
       InstallUpdate(path, version, build, owner,
           GlobalSendUpdateBackground(explicit_install, window_lifecycle && window_lifecycle->Visible()),
+          ++update_request,
           std::shared_ptr<flutter::MethodResult<Value>>(std::move(result)));
     } else if (call.method_name() == "presentReceiveDock") {
       auto payload = *arguments;
@@ -748,7 +803,8 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
   });
   if (ole_initialized) {
     drop_target = CreateGlobalSendDropTarget({PublishDrag, PublishDrop,
-      [] { return outgoing_drag; }, LocalDropAt, PublishDragAt, ExcludedDropAt}, window);
+      [] { return outgoing_drag; }, LocalDropAt, PublishDragAt, ExcludedDropAt,
+      [](bool active, POINTL) { update_interaction.Set(GlobalSendUpdateInteraction::drop_hover, active); }}, window);
     // The registered desktop_drop plugin owns this same Flutter child HWND.
     // It remains installed for its normal lifecycle, but imports are handled
     // here for both Unicode text and files across the complete client area.
@@ -759,23 +815,31 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
     }
   }
   if (import_view) SetWindowSubclass(import_view, PasteSubclass, kPasteSubclass, 0);
+  UpdateInteractionChanged();
 }
 
 bool HandleGlobalSendWindowMessage(UINT message, WPARAM wparam, LPARAM lparam,
                                   LRESULT* result) {
+  update_interaction.Observe(owner, message, wparam);
   if (message == kCompleteUpdateExit && update_launch && owner) {
-    DestroyWindow(owner);
+    if (update_exit.Complete(UpdateInteracting())) DestroyWindow(owner);
     *result = 0;
     return true;
   }
-  if (message == GlobalSendUpdateExitMessage()) {
-    if (channel && window_lifecycle && update_launch) {
+  if (message == GlobalSendUpdateExitMessage() || message == kResumeUpdateExit) {
+    // A cancelled helper can finish extraction after a manual retry began.
+    // Only the helper belonging to this attempt may request process shutdown.
+    if (message == GlobalSendUpdateExitMessage() &&
+        (!update_launch || wparam != update_launch->ExitToken())) {
+      *result = 0;
+      return true;
+    }
+    if (message == GlobalSendUpdateExitMessage() && update_launch) update_exit.Request();
+    if (channel && window_lifecycle && update_launch && update_exit.Prepare(UpdateInteracting())) {
       const auto attempt = update_launch;
       const auto state = window_lifecycle->State();
       auto cancel = [attempt] {
-        attempt->Cancel();
-        if (update_launch == attempt) update_launch.reset();
-        if (channel) channel->InvokeMethod("updateInstallDeferred", std::make_unique<Value>());
+        if (update_launch == attempt) CancelUpdateAttempt(true);
       };
       channel->InvokeMethod("prepareUpdateExit", std::make_unique<Value>(Map{
           {Value("left"), Value(state.left)}, {Value("top"), Value(state.top)},
@@ -783,8 +847,12 @@ bool HandleGlobalSendWindowMessage(UINT message, WPARAM wparam, LPARAM lparam,
           {Value("maximized"), Value(state.maximized)}}),
           std::make_unique<flutter::MethodResultFunctions<Value>>(
             [attempt, cancel](const Value* value) {
+              if (update_launch != attempt) return;
               const auto* accepted = value ? std::get_if<bool>(value) : nullptr;
-              if (accepted && *accepted && update_launch == attempt && owner) PostMessageW(owner, kCompleteUpdateExit, 0, 0);
+              const bool interacting = UpdateInteracting();
+              if (update_exit.Resolve(accepted && *accepted, interacting) && owner)
+                PostMessageW(owner, kCompleteUpdateExit, 0, 0);
+              else if (interacting || update_exit.FreshCheckNeeded()) UpdateInteractionChanged();
               else cancel();
             },
             [cancel](const std::string&, const std::string&, const Value*) { cancel(); },
@@ -837,6 +905,8 @@ bool HandleGlobalSendMessage(UINT message) {
 }
 
 void UnregisterGlobalSendSystem() {
+  update_exit.Cancel();
+  ++update_request;
   if (import_view) RemoveWindowSubclass(import_view, PasteSubclass, kPasteSubclass);
   native_paste_key_down = false;
   CompleteDockReplies();

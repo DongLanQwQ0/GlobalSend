@@ -21,6 +21,7 @@ public static class GlobalSendUpdateNative {
 $request = [IO.File]::ReadAllText($RequestPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
 $work = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($RequestPath))
 $resultPath = Join-Path $work 'windows-update-result.json'
+if ($request.resultPath) { $resultPath = [IO.Path]::GetFullPath($request.resultPath) }
 $stage = Join-Path $work ('windows-update-stage-' + [Guid]::NewGuid().ToString('N'))
 $install = [IO.Path]::GetFullPath($request.installDirectory).TrimEnd('\')
 $backup = Join-Path $install ('.globalsend-update-backup-' + [Guid]::NewGuid().ToString('N'))
@@ -86,7 +87,8 @@ try {
     $cancel = [GlobalSendUpdateNative]::OpenEvent(0x00100000,$false,$request.cancelEvent)
     if ($proceed -eq [IntPtr]::Zero -or $cancel -eq [IntPtr]::Zero) { throw 'Update launch handshake is incomplete' }
     $gate = [GlobalSendUpdateNative]::WaitForMultipleObjects(2,@($proceed,$cancel),$false,15000)
-    if ($gate -ne 0) { throw 'Update launch was cancelled before extraction' }
+    if ($gate -eq 1) { Save-Result 'ready' 'Update cancelled before extraction'; return }
+    if ($gate -ne 0) { throw 'Update launch did not continue' }
   }
   Save-Result 'preparing'
   New-Item -ItemType Directory -Path $stage -Force | Out-Null
@@ -109,15 +111,22 @@ try {
   if (Test-Path -LiteralPath (Join-Path $stage 'globalsend-data.json')) { Remove-Item -LiteralPath (Join-Path $stage 'globalsend-data.json') -Force }
   # Establish that the installed directory is writable before closing the app.
   New-Item -ItemType Directory -Path $backup -Force | Out-Null
+  if ($cancel -ne [IntPtr]::Zero -and [GlobalSendUpdateNative]::WaitForSingleObject($cancel,0) -eq 0) {
+    Save-Result 'ready' 'Update cancelled before apply'; return
+  }
   Save-Result 'prepared'
   $sourceProcess = Get-Process -Id ([int]$request.processId) -ErrorAction SilentlyContinue
   if ($sourceProcess) {
     if ([int64]$request.window -ne 0) {
       $message = [GlobalSendUpdateNative]::RegisterWindowMessage('GlobalSend.UpdateExit.v1')
-      if (-not [GlobalSendUpdateNative]::PostMessage([IntPtr]([int64]$request.window),$message,[IntPtr]::Zero,[IntPtr]::Zero)) { throw 'Unable to request the current app to exit' }
+      $requestToken = [IntPtr]::Zero
+      if ($request.requestToken) { $requestToken = [IntPtr]([int64]$request.requestToken) }
+      if (-not [GlobalSendUpdateNative]::PostMessage([IntPtr]([int64]$request.window),$message,$requestToken,[IntPtr]::Zero)) { throw 'Unable to request the current app to exit' }
     }
     if ($cancel -ne [IntPtr]::Zero) {
-      $wait = [GlobalSendUpdateNative]::WaitForMultipleObjects(2,@($sourceProcess.Handle,$cancel),$false,30000)
+      # A drag/menu can outlive a timeout. Sleep in the OS until this exact
+      # process exits or the application explicitly cancels this one helper.
+      $wait = [GlobalSendUpdateNative]::WaitForMultipleObjects(2,@($sourceProcess.Handle,$cancel),$false,[uint32]::MaxValue)
       if ($wait -eq 1) { Save-Result 'ready' 'The app is busy; the downloaded update remains ready'; return }
       if ($wait -ne 0) { throw 'The current application did not finish closing' }
     } elseif (-not $sourceProcess.WaitForExit(30000)) { throw 'The current application did not finish closing' }

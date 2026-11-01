@@ -4,6 +4,28 @@ export function acceptsWindowDrop(transfer:DataTransfer|null):boolean {
     ['files','text/plain','text/uri-list','text/html','text'].includes(type.toLowerCase())) || !!transfer.files?.length);
 }
 
+export type DropTarget = {kind:'device';deviceId:string}|{kind:'queue'}|{kind:'window'}|{kind:'blocked'};
+
+/** Use the actual leaf hit, not the surrounding device strip or send pane. */
+export function dropTargetAt(target:EventTarget|null):DropTarget {
+  const element=target as Element|null;
+  if(element?.closest?.('.clipboard-suggestion'))return {kind:'blocked'};
+  const device=element?.closest?.<HTMLButtonElement>('[data-target]');
+  if(device)return device.disabled?{kind:'blocked'}:{kind:'device',deviceId:device.dataset.target!};
+  if(element?.closest?.('[data-queue-drop]'))return {kind:'queue'};
+  return {kind:'window'};
+}
+
+export class DropFeedback {
+  private leaving:ReturnType<typeof setTimeout>|undefined;
+  private show:(target:DropTarget|null)=>void;
+  constructor(show:(target:DropTarget|null)=>void){this.show=show;}
+  enter(target:DropTarget){this.cancelLeave();this.show(target);}
+  leave(){this.cancelLeave();this.leaving=setTimeout(()=>{this.leaving=undefined;this.show(null);},100);}
+  reset(){this.cancelLeave();this.show(null);}
+  private cancelLeave(){if(this.leaving!==undefined)clearTimeout(this.leaving);this.leaving=undefined;}
+}
+
 /** Call synchronously from drop: the browser closes its data store afterwards. */
 export function droppedText(transfer:DataTransfer):Promise<string> {
   const plain=transfer.getData('text/plain') || transfer.getData('Text');

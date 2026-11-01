@@ -1,6 +1,7 @@
 #ifndef GLOBALSEND_RECEIVE_DOCK_H_
 #define GLOBALSEND_RECEIVE_DOCK_H_
 #include "win32_window.h"
+#include "update_interaction.h"
 #include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
@@ -56,7 +57,7 @@ class GlobalSendReceiveDock final : public Win32Window {
   using Drag = std::function<void(const Map&,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>, HWND)>;
   GlobalSendReceiveDock(Map payload, Action action, Drag drag, std::function<void()> shown,
-      std::function<void(int64_t)> closed);
+      std::function<void(int64_t)> closed, std::function<void(bool)> interaction = {});
   ~GlobalSendReceiveDock() override;
   bool Open();
   void Update(Map payload);
@@ -65,7 +66,7 @@ class GlobalSendReceiveDock final : public Win32Window {
   bool Shown() const { return shown_; }
   bool Ready() const { return ready_; }
   bool ClosingFinished() const { return closing_finished_; }
-  bool Interacting() const { return dragging_ || moving_ || hovering_drop_; }
+  bool Interacting() const { return dragging_ || moving_ || hovering_drop_ || interaction_.Busy(); }
   int64_t Generation() const;
  protected:
   bool OnCreate() override;
@@ -81,11 +82,16 @@ class GlobalSendReceiveDock final : public Win32Window {
   void TrackDrop(bool active, POINTL point);
   std::string DropDeviceAt(POINTL point) const;
   void SetDropRegions(const Map& regions);
+  void NotifyInteraction();
+  static LRESULT CALLBACK InteractionObserver(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
   Map payload_;
   Action action_;
   Drag drag_;
   std::function<void()> first_frame_;
   std::function<void(int64_t)> closed_;
+  std::function<void(bool)> interaction_changed_;
+  GlobalSendUpdateInteraction interaction_;
+  bool interaction_published_ = false;
   std::unique_ptr<flutter::FlutterViewController> controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> system_channel_;

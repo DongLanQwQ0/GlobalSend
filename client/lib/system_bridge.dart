@@ -201,6 +201,18 @@ class SystemBridge {
   static Future<void> _windowSave = Future<void>.value();
   static Future<bool> Function()? beforeUpdateExit;
   static bool _installed = false;
+  static bool updateInteracting = false;
+  static Future<void> setMainUpdateInteraction(bool active) async {
+    if (!Platform.isWindows) return;
+    try {
+      await channel.invokeMethod<void>('mainUpdateInteraction', {
+        'active': active,
+      });
+    } on MissingPluginException {
+      /* No Windows host in isolated widget tests. */
+    }
+  }
+
   static Stream<Map<String, dynamic>> get clipboardEvents {
     _install();
     return _clipboard.stream;
@@ -269,6 +281,11 @@ class SystemBridge {
         }
         if (call.method == 'updateInstallDeferred') {
           _windows.add({'updateInstallDeferred': true});
+          return null;
+        }
+        if (call.method == 'updateInteraction') {
+          updateInteracting = (call.arguments as Map)['active'] == true;
+          _windows.add({'updateInteraction': updateInteracting});
           return null;
         }
         if (call.method == 'clipboardChanged') {

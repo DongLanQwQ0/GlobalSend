@@ -25,6 +25,29 @@ import 'android_queue_drop_host.dart';
 final _batchDragMarker = Object();
 final _dockContentMarker = Object();
 
+class _DockPopupObserver extends NavigatorObserver {
+  _DockPopupObserver(this.changed);
+  final ValueChanged<bool> changed;
+  final popups = <Route<dynamic>>{};
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute) {
+      popups.add(route);
+      changed(true);
+    }
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (popups.remove(route)) changed(popups.isNotEmpty);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (popups.remove(route)) changed(popups.isNotEmpty);
+  }
+}
+
 /// The native dock launches this UI-only app before main creates a controller.
 /// Content and user actions go through the primary engine; no session is opened.
 void runGlobalSendReceiveDock() {
@@ -48,6 +71,30 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
   final scroll = ScrollController();
   final deviceScroll = ScrollController();
   final deviceKeys = <String, GlobalKey>{};
+  final interactionPointers = <int>{};
+  final interactionScrolls = <BuildContext>{};
+  bool popupInteraction = false, publishedInteraction = false;
+  int pendingActions = 0;
+  late final popupObserver = _DockPopupObserver((active) {
+    popupInteraction = active;
+    publishInteraction();
+  });
+  void publishInteraction() {
+    interactionScrolls.removeWhere((context) => !context.mounted);
+    final active =
+        popupInteraction ||
+        pendingActions > 0 ||
+        interactionPointers.isNotEmpty ||
+        interactionScrolls.isNotEmpty;
+    if (active == publishedInteraction) return;
+    publishedInteraction = active;
+    unawaited(
+      ReceiveDockApp.channel.invokeMethod<void>('interaction', {
+        'active': active,
+      }),
+    );
+  }
+
   final dropQueueKey = GlobalKey();
   Timer? hoverTimer;
   bool dropInside = false, deviceMode = false;
@@ -419,6 +466,8 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
   }
 
   Future<void> action(String action, [String? id]) async {
+    pendingActions++;
+    publishInteraction();
     final snapshot = payload;
     final ids = items.map((item) => item['id']).toList();
     try {
@@ -433,6 +482,9 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
       });
     } on PlatformException catch (failure) {
       if (mounted) setState(() => error = failure.message ?? '操作未完成');
+    } finally {
+      pendingActions--;
+      publishInteraction();
     }
   }
 
@@ -580,6 +632,12 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
 
   @override
   void dispose() {
+    if (publishedInteraction)
+      unawaited(
+        ReceiveDockApp.channel.invokeMethod<void>('interaction', {
+          'active': false,
+        }),
+      );
     WidgetsBinding.instance.removeObserver(this);
     scroll.dispose();
     hoverTimer?.cancel();
@@ -597,6 +655,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
     final theme = Ui.theme(appearance), palette = UiPalette.from(appearance);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      navigatorObservers: [popupObserver],
       theme: theme.copyWith(
         popupMenuTheme: theme.popupMenuTheme.copyWith(
           color: palette.accentSoft,
@@ -617,9 +676,37 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
         enabled: deviceMode,
         deviceTargets: deviceKeys,
         serverKey: payload['serverKey'] as String? ?? '',
-        child: Opacity(
-          opacity: .7,
-          child: TooltipVisibility(visible: false, child: child!),
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            final source = notification.context;
+            if (source != null) {
+              if (notification is ScrollStartNotification)
+                interactionScrolls.add(source);
+              if (notification is ScrollEndNotification)
+                interactionScrolls.remove(source);
+              publishInteraction();
+            }
+            return false;
+          },
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (event) {
+              interactionPointers.add(event.pointer);
+              publishInteraction();
+            },
+            onPointerUp: (event) {
+              interactionPointers.remove(event.pointer);
+              publishInteraction();
+            },
+            onPointerCancel: (event) {
+              interactionPointers.remove(event.pointer);
+              publishInteraction();
+            },
+            child: Opacity(
+              opacity: .7,
+              child: TooltipVisibility(visible: false, child: child!),
+            ),
+          ),
         ),
       ),
       home: CallbackShortcuts(

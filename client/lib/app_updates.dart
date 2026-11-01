@@ -55,6 +55,9 @@ typedef UpdateReadyNotifier = Future<bool> Function(
   PlatformUpdate update,
   File package,
 );
+typedef UpdateInstallCanceler = Future<void> Function({
+  required bool automaticOnly,
+});
 
 class AppUpdates extends ChangeNotifier {
   AppUpdates({
@@ -64,6 +67,7 @@ class AppUpdates extends ChangeNotifier {
     UpdateDownloader? downloader,
     UpdateInstaller? install,
     UpdateReadyNotifier? notifyReady,
+    UpdateInstallCanceler? cancelInstall,
     bool automaticDownload = true,
     DateTime Function()? now,
   }) : build = build ?? AppBuildInfo.current(),
@@ -72,6 +76,7 @@ class AppUpdates extends ChangeNotifier {
        downloader = downloader ?? HttpUpdateDownloader(),
        _install = install ?? _nativeInstall,
        _notifyReady = notifyReady ?? _nativeReadyNotify,
+       _cancelInstall = cancelInstall ?? _nativeCancelInstall,
        autoDownload = automaticDownload,
        now = now ?? DateTime.now;
   static const channel = MethodChannel('dev.globalsend/system');
@@ -82,6 +87,7 @@ class AppUpdates extends ChangeNotifier {
   final UpdateDownloader downloader;
   final UpdateInstaller _install;
   final UpdateReadyNotifier _notifyReady;
+  final UpdateInstallCanceler _cancelInstall;
   final DateTime Function() now;
   PlatformUpdate? available;
   bool busy = false, foreground = true, _disposed = false, _started = false;
@@ -101,10 +107,21 @@ class AppUpdates extends ChangeNotifier {
   bool _permissionPending = false, _downloadExplicit = false;
   bool _waitingForForeground = false, _exitExplicit = false;
   bool _manualInstallRequested = false;
+  bool _nativeInteracting = false, _nativeInstallPending = false;
+  bool _retryAfterInteraction = false, _cancelledInstall = false;
+  String _cancelledOffer = '';
+  String _windowsResultPath = '';
+  int _installRequest = 0;
   Future<void>? _downloading, _installing;
   DateTime? _progressAt;
   bool Function()? canInstall;
   Future<void> Function()? beforeInstall;
+  bool get canCancel =>
+      downloading ||
+      installing ||
+      _nativeInstallPending ||
+      _manualInstallRequested;
+  bool get installPending => installing || _nativeInstallPending;
 
   bool get supportsInstall =>
       build.platform == UpdatePlatform.android ||
@@ -121,7 +138,7 @@ class AppUpdates extends ChangeNotifier {
       downloadBytes > 0 ? downloadedBytes / downloadBytes : null;
   String get actionLabel => downloading
       ? '下载中…'
-      : installing
+      : installPending
       ? '更新中…'
       : error.isNotEmpty
       ? ready
@@ -139,6 +156,10 @@ class AppUpdates extends ChangeNotifier {
       ? '正在下载 ${(100 * (progress ?? 0)).floor()}%'
       : installing
       ? '正在准备更新…'
+      : _nativeInstallPending
+      ? _nativeInteracting
+            ? '等待操作结束后更新'
+            : '正在准备更新…'
       : ready && _permissionPending
       ? '请允许安装本应用，然后返回继续'
       : ready && _waitingForForeground
@@ -195,6 +216,10 @@ class AppUpdates extends ChangeNotifier {
         }) ??
         const {'state': 'ready'},
   );
+  static Future<void> _nativeCancelInstall({required bool automaticOnly}) =>
+      channel.invokeMethod<void>('cancelUpdateInstall', {
+        'automaticOnly': automaticOnly,
+      });
 
   File? _packageFile(PlatformUpdate offer) {
     final file = _file;
@@ -225,6 +250,9 @@ class AppUpdates extends ChangeNotifier {
           _permissionPending = value['permissionPending'] == true;
           _waitingForForeground = value['waitingForForeground'] == true;
           _manualInstallRequested = value['manualInstallRequested'] == true;
+          _cancelledOffer = value['cancelledOffer'] as String? ?? '';
+          _windowsResultPath = value['windowsResultPath'] as String? ?? '';
+          _cancelledInstall = _cancelledOffer.isNotEmpty;
           final saved = value['package'];
           if (saved is Map &&
               build.version != null &&
@@ -330,6 +358,11 @@ class AppUpdates extends ChangeNotifier {
       );
       if (_disposed) return;
       available = offer ?? (ready ? _packageOffer : null);
+      if (_cancelledOffer.isNotEmpty &&
+          available?.notificationKey != _cancelledOffer) {
+        _cancelledOffer = '';
+        _cancelledInstall = false;
+      }
       checkedAt = now();
       if (manual) _dismissed = '';
       notifyListeners();
@@ -368,6 +401,18 @@ class AppUpdates extends ChangeNotifier {
   Future<void> setAutoDownload(bool value) async {
     autoDownload = value;
     if (!value && !_downloadExplicit) downloader.cancel();
+    if (!value && build.platform == UpdatePlatform.windows) {
+      if (!_exitExplicit) {
+        ++_installRequest;
+        _nativeInstallPending = false;
+      }
+      await _cancelInstall(automaticOnly: true);
+    }
+    if (value) {
+      _cancelledInstall = false;
+      _cancelledOffer = '';
+      _installedAttempt = '';
+    }
     notifyListeners();
     await _save();
     if (value) unawaited(_processAvailable());
@@ -378,17 +423,50 @@ class AppUpdates extends ChangeNotifier {
     if (!_disposed) unawaited(_tryInstall());
   }
 
+  void nativeInteractionChanged(bool active, {bool retry = true}) {
+    final changed = active != _nativeInteracting;
+    _nativeInteracting = active;
+    if (changed && !_disposed) notifyListeners();
+    if (!active && retry) {
+      _retryAfterInteraction = true;
+      activityChanged();
+    }
+  }
+
+  Future<void> cancelUpdate() async {
+    ++_installRequest;
+    _cancelledInstall = true;
+    _cancelledOffer = available?.notificationKey ?? '';
+    _manualInstallRequested = false;
+    _nativeInstallPending = false;
+    _retryAfterInteraction = false;
+    _installedAttempt = available?.notificationKey ?? '';
+    downloader.cancel();
+    if (build.platform == UpdatePlatform.windows)
+      await _cancelInstall(automaticOnly: false);
+    await _save();
+    if (!_disposed) notifyListeners();
+  }
+
   void installDeferred() {
+    _nativeInstallPending = false;
+    if (!_cancelledInstall) _manualInstallRequested = _exitExplicit;
     _installedAttempt = '';
     unawaited(_save());
     if (!_disposed) notifyListeners();
   }
 
   Future<bool> prepareExit() async {
-    if (_disposed || canInstall?.call() == false) return false;
+    if (_disposed ||
+        _nativeInteracting ||
+        _cancelledInstall ||
+        canInstall?.call() == false)
+      return false;
     if (!_exitExplicit && (!autoDownload || foreground)) return false;
     await beforeInstall?.call();
     return !_disposed &&
+        !_nativeInteracting &&
+        !_cancelledInstall &&
         canInstall?.call() != false &&
         (_exitExplicit || autoDownload && !foreground);
   }
@@ -404,6 +482,8 @@ class AppUpdates extends ChangeNotifier {
   Future<void> downloadAndInstall({bool explicit = false}) {
     if (_disposed || !installable || _file == null) return Future.value();
     if (explicit) {
+      _cancelledInstall = false;
+      _cancelledOffer = '';
       _manualInstallRequested = true;
       unawaited(_save());
     }
@@ -421,7 +501,7 @@ class AppUpdates extends ChangeNotifier {
   }
 
   Future<void> redownload() async {
-    if (_disposed || downloading || installing || !installable) return;
+    if (_disposed || downloading || installPending || !installable) return;
     final old = package ?? _packageFile(available!);
     package = null;
     _packageOffer = null;
@@ -502,7 +582,10 @@ class AppUpdates extends ChangeNotifier {
         !ready ||
         !installable ||
         _installing != null ||
-        downloading)
+        downloading ||
+        _nativeInteracting ||
+        _nativeInstallPending ||
+        _cancelledInstall)
       return _installing ?? Future.value();
     if ((_permissionPending || _waitingForForeground) && !resumed && !explicit)
       return Future.value();
@@ -520,10 +603,16 @@ class AppUpdates extends ChangeNotifier {
     _installing = work;
     return work.whenComplete(() {
       if (identical(_installing, work)) _installing = null;
+      if (_retryAfterInteraction && !_nativeInteracting && !_disposed) {
+        _retryAfterInteraction = false;
+        unawaited(_tryInstall());
+      }
     });
   }
 
   Future<void> _apply(bool explicit) async {
+    final request = ++_installRequest;
+    _exitExplicit = explicit;
     final offer = available!, local = package!;
     installing = true;
     error = '';
@@ -531,7 +620,11 @@ class AppUpdates extends ChangeNotifier {
     try {
       if (canInstall?.call() == false) return;
       await beforeInstall?.call();
-      if (_disposed || canInstall?.call() == false) return;
+      if (_disposed ||
+          request != _installRequest ||
+          _nativeInteracting ||
+          canInstall?.call() == false)
+        return;
       if (!explicit &&
           (!autoDownload ||
               build.platform == UpdatePlatform.windows && foreground ||
@@ -542,6 +635,23 @@ class AppUpdates extends ChangeNotifier {
       _installedAttempt = offer.notificationKey;
       await _save();
       final result = await _install(offer, local, explicit: explicit);
+      if (request != _installRequest || _disposed) return;
+      if (build.platform == UpdatePlatform.windows &&
+          result['resultPath'] is String) {
+        _windowsResultPath = result['resultPath'] as String;
+      }
+      _nativeInstallPending =
+          result['state'] == 'started' &&
+          build.platform == UpdatePlatform.windows;
+      if (result['state'] == 'interaction-pending') {
+        _installedAttempt = '';
+        _manualInstallRequested = explicit;
+        _retryAfterInteraction = true;
+      }
+      if (result['state'] == 'cancelled') {
+        _installedAttempt = '';
+        _manualInstallRequested = false;
+      }
       _permissionPending = result['state'] == 'permission-required';
       _waitingForForeground =
           result['state'] == 'ready' &&
@@ -567,7 +677,9 @@ class AppUpdates extends ChangeNotifier {
   Future<void> _readWindowsResult() async {
     if (build.platform != UpdatePlatform.windows || _file == null) return;
     final receipt = File(
-      '${_file!.parent.path}/updates/windows-update-result.json',
+      _windowsResultPath.isNotEmpty
+          ? _windowsResultPath
+          : '${_file!.parent.path}/updates/windows-update-result.json',
     );
     if (!await receipt.exists()) return;
     try {
@@ -576,11 +688,13 @@ class AppUpdates extends ChangeNotifier {
           value['version'] == _packageOffer?.version.name &&
           value['build'] == _packageOffer?.version.build) {
         _installedAttempt = '';
+        _nativeInstallPending = false;
       }
       if ((value['state'] == 'failed' || value['state'] == 'rolled-back') &&
           value['version'] == _packageOffer?.version.name &&
           value['build'] == _packageOffer?.version.build) {
         error = value['message'] as String? ?? '更新未完成，可重试';
+        _nativeInstallPending = false;
         if (!_disposed) notifyListeners();
       }
     } on FormatException {
@@ -641,6 +755,8 @@ class AppUpdates extends ChangeNotifier {
       'permissionPending': _permissionPending,
       'waitingForForeground': _waitingForForeground,
       'manualInstallRequested': _manualInstallRequested,
+      'cancelledOffer': _cancelledOffer,
+      'windowsResultPath': _windowsResultPath,
       if (_packageOffer != null) 'package': _packageOffer!.toJson(),
     });
     return _writes = _writes

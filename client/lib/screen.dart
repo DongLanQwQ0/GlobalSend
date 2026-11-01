@@ -931,7 +931,14 @@ class _SendScreenState extends State<SendScreen>
     );
     return KeyedSubtree(
       key: _photoKeys.putIfAbsent(photo.id, GlobalKey.new),
-      child: Theme.of(context).platform != TargetPlatform.windows
+      child: Theme.of(context).platform == TargetPlatform.iOS
+          ? IOSDragSource.media(
+              assetId: photo.id,
+              enabled: !working,
+              onDragAccepted: () => unawaited(recentPhotos.dismiss([photo.id])),
+              child: tile,
+            )
+          : Theme.of(context).platform != TargetPlatform.windows
           ? tile
           : ContentDragSurface(
               entry: DockEntry(

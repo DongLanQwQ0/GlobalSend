@@ -19,14 +19,16 @@ class GlobalSendUpdateLaunch {
   void Cancel();
   bool Running() const;
   const std::filesystem::path& ResultPath() const { return result_path_; }
+  uintptr_t ExitToken() const { return exit_token_; }
   static std::shared_ptr<GlobalSendUpdateLaunch> Start(
       const std::filesystem::path& package, const std::string& version,
-      int64_t build, HWND window, bool background);
+      int64_t build, HWND window, bool background, uintptr_t request_token = 0);
  private:
   HANDLE ready_ = nullptr;
   HANDLE proceed_ = nullptr;
   HANDLE cancel_ = nullptr;
   HANDLE process_ = nullptr;
   std::filesystem::path result_path_;
+  uintptr_t exit_token_ = 0;
 };
 #endif
