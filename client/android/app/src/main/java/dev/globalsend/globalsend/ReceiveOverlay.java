@@ -632,7 +632,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         });
         installEdgeMove(handle);
         handle.setVisibility(View.GONE);
-        surface.addView(handle, new FrameLayout.LayoutParams(dp(18), dp(72), Gravity.CENTER_VERTICAL | Gravity.RIGHT));
+        surface.addView(handle, new FrameLayout.LayoutParams(dp(18), dp(72), handleGravity()));
         root.setOnDragListener((view, event) -> receiveDrop(event));
         layout = new WindowManager.LayoutParams(dp(232), dp(116),
             Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
@@ -729,15 +729,19 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         shelf.setVisibleSuggestions(visible);
     }
     private void placeControlRail() {
-        // The controls stay on the attached edge; the viewport opens inward.
+        // Put the grip and controls toward the screen center, away from the
+        // attached edge, so the user need not reach across the whole panel.
         // Reorder the existing views so gestures, content and scroll survive.
-        int index=edgeRight?1:0;
+        int index=edgeRight?0:1;
         if(expanded.indexOfChild(rail)!=index) {
             expanded.removeView(rail);
             expanded.addView(rail,index,new LinearLayout.LayoutParams(dp(38),-1));
         }
-        expanded.setPadding(edgeRight?0:dp(1),dp(4),edgeRight?dp(1):0,dp(4));
-        scroll.setPadding(edgeRight?dp(4):0,0,edgeRight?0:dp(4),0);
+        expanded.setPadding(edgeRight?dp(1):0,dp(4),edgeRight?0:dp(1),dp(4));
+        scroll.setPadding(edgeRight?0:dp(4),0,edgeRight?dp(4):0,0);
+    }
+    private int handleGravity() {
+        return Gravity.CENTER_VERTICAL | (edgeRight ? Gravity.LEFT : Gravity.RIGHT);
     }
     private void render(boolean animateChanges) {
         shelf.setVisibleSuggestions(java.util.Collections.emptySet());
@@ -756,8 +760,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         styleHandle();
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
             Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
-        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(18), dp(72),
-            Gravity.CENTER_VERTICAL | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
+        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(18), dp(72), handleGravity()));
         Map<String,Integer> oldPositions=new LinkedHashMap<>();
         boolean animateCards=animateChanges && root.isLaidOut() && root.getAlpha()>.9f;
         for(int i=row.getChildCount()-1;i>=0;i--) {
@@ -1019,8 +1022,8 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private int glass(int color,int alpha) { return (color&0x00ffffff)|(alpha<<24); }
     private void styleHandle() {
         android.graphics.drawable.LayerDrawable layers=new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{
-            new InsetDrawable(shape(glass(appearance.surface,0x33),6),dp(edgeRight?6:0),dp(12),dp(edgeRight?0:6),dp(12)),
-            new InsetDrawable(shape(glass(appearance.accent,0x80),2),dp(edgeRight?10:4),dp(24),dp(edgeRight?4:10),dp(24))
+            new InsetDrawable(shape(glass(appearance.surface,0x33),6),dp(edgeRight?0:6),dp(12),dp(edgeRight?6:0),dp(12)),
+            new InsetDrawable(shape(glass(appearance.accent,0x80),2),dp(edgeRight?4:10),dp(24),dp(edgeRight?10:4),dp(24))
         });
         layers.setPaddingMode(android.graphics.drawable.LayerDrawable.PADDING_MODE_STACK);
         handle.setBackground(layers);
@@ -1607,8 +1610,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth, expandedHeight,
             Gravity.TOP | (edgeRight ? Gravity.LEFT : Gravity.RIGHT)));
-        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(18), dp(72),
-            Gravity.CENTER_VERTICAL | (edgeRight ? Gravity.RIGHT : Gravity.LEFT)));
+        handle.setLayoutParams(new FrameLayout.LayoutParams(dp(18), dp(72), handleGravity()));
         float initialExpansion=expansion;
         expanded.setVisibility(View.VISIBLE); handle.setVisibility(View.VISIBLE);
         handle.setEnabled(false); handle.setClickable(false);

@@ -281,14 +281,47 @@ public class ReceiveOverlayHeaderDragTest {
     private void assertRailSide(ReceiveOverlay overlay,boolean right) throws Exception {
         LinearLayout panel=(LinearLayout)field(overlay,"expanded");
         View rail=(View)field(overlay,"rail"), viewport=(View)field(overlay,"scroll");
-        assertSame("controls follow the attached edge",rail,panel.getChildAt(right?1:0));
-        assertSame("viewport stays inward",viewport,panel.getChildAt(right?0:1));
+        assertSame("controls face the screen center",rail,panel.getChildAt(right?0:1));
+        assertSame("viewport stays toward the attached edge",viewport,panel.getChildAt(right?1:0));
         assertSame("do not recreate gesture controls",field(overlay,"header"),((LinearLayout)rail).getChildAt(0));
-        assertEquals(right?0:1,panel.getPaddingLeft());
-        assertEquals(right?1:0,panel.getPaddingRight());
+        assertEquals(right?1:0,panel.getPaddingLeft());
+        assertEquals(right?0:1,panel.getPaddingRight());
         if(panel.getVisibility()==View.VISIBLE) {
-            assertTrue("actual control coordinates mirror",right?rail.getLeft()>=viewport.getRight():rail.getRight()<=viewport.getLeft());
+            assertTrue("actual control coordinates mirror inward",right?rail.getRight()<=viewport.getLeft():rail.getLeft()>=viewport.getRight());
         }
+    }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    @org.robolectric.annotation.LooperMode(org.robolectric.annotation.LooperMode.Mode.PAUSED)
+    public void innerGripMirrorsBothEdgesWithoutChangingAttachmentOrReplacingControls() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        View root=(View)field(overlay,"root"), handle=(View)field(overlay,"handle");
+        View header=(View)field(overlay,"header"), viewport=(View)field(overlay,"scroll");
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        android.graphics.Rect bounds=(android.graphics.Rect)field(overlay,"lastBounds");
+        for(boolean right:new boolean[]{true,false}) {
+            window.x=right?bounds.right-window.width:bounds.left;
+            overlay.setCollapsed(true);advanceGeometry(overlay,80);
+            android.widget.FrameLayout.LayoutParams grip=(android.widget.FrameLayout.LayoutParams)handle.getLayoutParams();
+            assertEquals(right?android.view.Gravity.LEFT:android.view.Gravity.RIGHT,
+                grip.gravity & android.view.Gravity.HORIZONTAL_GRAVITY_MASK);
+            advanceGeometry(overlay,240);
+            assertEquals("window stays on its chosen edge",right?bounds.right-window.width:bounds.left,window.x);
+            android.graphics.drawable.LayerDrawable layers=(android.graphics.drawable.LayerDrawable)handle.getBackground();
+            android.graphics.Bitmap gripPixels=android.graphics.Bitmap.createBitmap(handle.getWidth(),handle.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);
+            handle.draw(new android.graphics.Canvas(gripPixels));gripPixels.recycle();
+            android.graphics.Rect bar=((android.graphics.drawable.InsetDrawable)layers.getDrawable(1)).getDrawable().getBounds();
+            assertTrue("visible grip is toward the screen interior",right?bar.centerX()<handle.getWidth()/2:bar.centerX()>handle.getWidth()/2);
+            capture(overlay,right?"inward-right-collapsed":"inward-left-collapsed");
+            handle.performClick();advanceGeometry(overlay,240);
+            assertRailSide(overlay,right);
+            assertSame(header,field(overlay,"header"));assertSame(viewport,field(overlay,"scroll"));
+            capture(overlay,right?"inward-right-expanded":"inward-left-expanded");
+        }
+        overlay.hide();
+        ReceiveOverlay restored=create(new int[3]);
+        assertFalse("restore left placement without swapping sides",(Boolean)field(restored,"edgeRight"));
+        assertRailSide(restored,false);restored.hide();
     }
     @Test public void backgroundFollowsPressedOffsetButControlsAndFileDragKeepTheirGestures() throws Exception {
         int[] actions=new int[3];ReceiveOverlay overlay=create(actions);View root=(View)field(overlay,"root");
@@ -346,14 +379,18 @@ public class ReceiveOverlayHeaderDragTest {
         assertEquals(width+20,window.width);assertEquals(x-20,window.x);
         assertEquals(0f,((View)field(overlay,"surface")).getElevation(),0f);
         android.widget.HorizontalScrollView viewport=(android.widget.HorizontalScrollView)field(overlay,"scroll");
-        assertEquals(0,((View)field(overlay,"expanded")).getPaddingLeft());
-        assertFalse(viewport.getClipToPadding());assertEquals(4,viewport.getPaddingLeft());
+        assertEquals(0,((View)field(overlay,"expanded")).getPaddingRight());
+        assertFalse(viewport.getClipToPadding());assertEquals(4,viewport.getPaddingRight());
         overlay.hide();
     }
     @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
     @Config(qualifiers="w393dp-h851dp-xxhdpi")
     public void scrolledCardsReachTheOuterGlassInsteadOfAnInsetRectangle() throws Exception {
         ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
+        // A left-attached dock has the viewport at the outer left glass and
+        // its controls on the inward (right) side.
+        setField(overlay,"edgeRight",false);
+        java.lang.reflect.Method render=ReceiveOverlay.class.getDeclaredMethod("render");render.setAccessible(true);render.invoke(overlay);draw(root);
         LinearLayout row=(LinearLayout)field(overlay,"row");
         View first=row.getChildAt(0);first.setBackgroundColor(0xff208fc6);
         ((android.widget.FrameLayout)first).getChildAt(0).setVisibility(View.INVISIBLE);
@@ -369,7 +406,7 @@ public class ReceiveOverlayHeaderDragTest {
         ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
         LinearLayout header=(LinearLayout)field(overlay,"header");assertEquals(LinearLayout.VERTICAL,header.getOrientation());
         android.graphics.Rect rail=new android.graphics.Rect();header.getDrawingRect(rail);((android.view.ViewGroup)root).offsetDescendantRectToMyCoords(header,rail);
-        assertTrue("controls are at the right edge",rail.left>root.getWidth()/2);
+        assertTrue("right-attached dock has inward controls",rail.right<root.getWidth()/2);
         overlay.show(new ReceiveNotifications.Receipt("new","1","probe","new card",null,null,0),2,ignored -> {});
         LinearLayout row=(LinearLayout)field(overlay,"row");View incoming=row.getChildAt(0);
         assertEquals(0,incoming.getAlpha(),.001f);assertTrue(incoming.getTranslationY()<0);
