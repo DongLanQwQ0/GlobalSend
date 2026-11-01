@@ -6,9 +6,9 @@
 
 若当前版本/构建号已有 Windows 或 Android Release，应选择它的源码 Tag 运行，让各平台对应同一源码提交。不要在已有版本号下从另一个提交覆盖包；新源码先增加构建号再触发。
 
-最新为 **1.0.75（99）**，源码 `c78de30`：[构建记录](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41307291358) / [GitHub 下载](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.75-build99)。本地文件：`artifacts/releases/ios-1.0.75-build99/GlobalSend-iPad-unsigned.ipa`，14,846,945 字节。已检查实际包：主应用与分享扩展均为99版真机 arm64，App Group 模板匹配，无内置字体；未签名，需用原账号手动覆盖安装。核对记录：`artifacts/tmp/copied-files-client/ios99-verified.json`。
+最新为 **1.0.76（100）**，源码 `921bae5`：[构建记录](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41309364210) / [GitHub 下载](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.76-build100)。本地文件：`artifacts/releases/ios-1.0.76-build100/GlobalSend-iPad-unsigned.ipa`，14,848,004 字节。已检查实际包：主应用与分享扩展均为100版真机 arm64，App Group 模板匹配，无内置字体；未签名，需用原账号手动覆盖安装。核对记录：`artifacts/tmp/copied-files-client/ios100-verified.json`。
 
-本版保留 UIKit 原生拖入、拖出、目标设备局部高亮和图片后缀补齐。发送页的剪贴板建议点击后才加入待发送，图片和文件复用系统提供方导入器，不自动发送。文件夹按原目录结构传输、列表只展示根卡片；已发送文本保存成功即关闭。新增接收指定设备文件复制引用，点按后通过原有传输流程拉取；不提前传输文件、不修改原有草稿。99与已更新的Windows/Android使用同一源码，iPad新交互仍需签名安装后验收。
+本版保留 UIKit 原生拖入、拖出、目标设备局部高亮和图片后缀补齐。发送页的剪贴板建议点击后才加入待发送，图片和文件复用系统提供方导入器，不自动发送。文件夹按原目录结构传输、列表只展示根卡片；已发送文本保存成功即关闭。可接收指定设备文件复制引用，点按后通过原有传输流程拉取，不提前传输文件、不修改原有草稿；100版复用统一卡片样式，支持右上角忽略。100与已更新的Windows/Android使用同一源码，iPad新交互仍需签名安装后验收。
 
 安装后先分享一张图片，确认打开GlobalSend并显示在待发送。需要直接发给设备时，先在GlobalSend给该设备正常发送一次，再到其他应用打开系统分享面板，选择第一排带GlobalSend标记的设备建议。建议是否显示及顺序由iPadOS决定；点击普通GlobalSend应用图标仍只加入待发送，不读取旧默认目标。指定设备分享应只发送本批，不包含原有草稿。详细入口及接口见[系统分享设备快捷项](MOBILE_SHARING.md#系统分享面板里的设备快捷项ios--ipados-53版)。
 
