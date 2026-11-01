@@ -7,6 +7,7 @@
 #include "shell_file.h"
 #include "window_lifecycle.h"
 #include "autostart.h"
+#include "auto_update.h"
 #include <system_error>
 #include "single_instance.h"
 #include "drag_preview.h"
@@ -15,7 +16,9 @@
 #include "local_ip_interfaces.h"
 #include <winrt/Windows.Foundation.h>
 #include <flutter/method_channel.h>
+#include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
+#include <roapi.h>
 #include <ole2.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -77,7 +80,10 @@ std::string DeviceDropAt(POINTL screen);
 uint64_t drop_sequence = 0;
 uint64_t system_generation = 0;
 uint64_t clipboard_write_generation = 0;
+std::shared_ptr<GlobalSendUpdateLaunch> update_launch;
+bool update_starting = false;
 constexpr UINT kDestroyReceiveDock = WM_APP + 119;
+constexpr UINT kCompleteUpdateExit = WM_APP + 120;
 std::unique_ptr<GlobalSendReceiveDock> receive_dock;
 int64_t receive_serial = -1;
 int64_t copied_reference_revision = -1;
@@ -314,6 +320,35 @@ winrt::fire_and_forget OpenWebUrl(std::string url, HWND parent,
   else result->Error("OPEN_URL_FAILED", "无法打开网址");
 }
 
+winrt::fire_and_forget InstallUpdate(std::wstring package, std::string version,
+    int64_t build, HWND window, bool background,
+    std::shared_ptr<flutter::MethodResult<Value>> result) {
+  const winrt::apartment_context platform_thread;
+  const auto generation = system_generation;
+  co_await winrt::resume_background();
+  const HRESULT runtime = RoInitialize(RO_INIT_MULTITHREADED);
+  std::shared_ptr<GlobalSendUpdateLaunch> launch;
+  std::string error;
+  try {
+    if (FAILED(runtime) && runtime != RPC_E_CHANGED_MODE) winrt::check_hresult(runtime);
+    launch = GlobalSendUpdateLaunch::Start(package, version, build, window, background);
+  }
+  catch (const winrt::hresult_error& failure) { error = winrt::to_string(failure.message()); }
+  catch (const std::exception& failure) { error = failure.what(); }
+  if (SUCCEEDED(runtime)) RoUninitialize();
+  co_await platform_thread;
+  if (!channel || generation != system_generation) {
+    if (launch) launch->Cancel();
+    co_return;
+  }
+  update_starting = false;
+  if (!error.empty()) { result->Error("UPDATE_INSTALL", "无法启动更新，当前版本未修改", Value(error)); co_return; }
+  update_launch = launch;
+  result->Success(Value(Map{{Value("state"), Value("started")},
+      {Value("resultPath"), Value(Utf8FromUtf16(launch->ResultPath().c_str()))}}));
+  launch->Continue();
+}
+
 class DragSource final : public IDropSource {
  public:
   explicit DragSource(bool touch = false) : touch_(touch) {}
@@ -520,13 +555,33 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
     }
     if (call.method_name() == "notifyUpdate") {
       const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+      const auto ready = args ? args->find(Value("ready")) : Map::const_iterator{};
+      const bool downloaded = args && ready != args->end() && std::get_if<bool>(&ready->second) && std::get<bool>(ready->second);
       result->Success(Value(args && window_lifecycle && window_lifecycle->NotifyReceived(
-          L"GlobalSend 有新版本", Wide(String(*args, "version")) + L" 可更新，点击查看", true)));
+          downloaded ? L"GlobalSend 更新已下载" : L"GlobalSend 有新版本",
+          Wide(String(*args, "version")) + (downloaded ? L" 已就绪，点击打开 GlobalSend" : L" 可更新，点击查看"), true)));
       return;
     }
     const auto* arguments = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
     if (!arguments) { result->Error("BAD_ARGUMENT", "Expected operation map"); return; }
-    if (call.method_name() == "presentReceiveDock") {
+    if (call.method_name() == "installUpdate") {
+      if (update_launch && !update_launch->Running()) update_launch.reset();
+      if (update_starting || update_launch) {
+        result->Success(Value(Map{{Value("state"), Value("started")}}));
+        return;
+      }
+      const auto path = Wide(String(*arguments, "path"));
+      const auto version = String(*arguments, "version");
+      const auto build = Integer(*arguments, "build");
+      const auto requested = arguments->find(Value("explicit"));
+      const auto* explicit_value = requested == arguments->end() ? nullptr : std::get_if<bool>(&requested->second);
+      const bool explicit_install = explicit_value && *explicit_value;
+      if (path.empty() || version.empty() || build <= 0) { result->Error("BAD_ARGUMENT", "Missing update package or version"); return; }
+      update_starting = true;
+      InstallUpdate(path, version, build, owner,
+          GlobalSendUpdateBackground(explicit_install, window_lifecycle && window_lifecycle->Visible()),
+          std::shared_ptr<flutter::MethodResult<Value>>(std::move(result)));
+    } else if (call.method_name() == "presentReceiveDock") {
       auto payload = *arguments;
       const auto serial = Integer(payload, "serial");
       const auto reference_revision = Integer(payload, "referenceRevision");
@@ -708,6 +763,36 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
 
 bool HandleGlobalSendWindowMessage(UINT message, WPARAM wparam, LPARAM lparam,
                                   LRESULT* result) {
+  if (message == kCompleteUpdateExit && update_launch && owner) {
+    DestroyWindow(owner);
+    *result = 0;
+    return true;
+  }
+  if (message == GlobalSendUpdateExitMessage()) {
+    if (channel && window_lifecycle && update_launch) {
+      const auto attempt = update_launch;
+      const auto state = window_lifecycle->State();
+      auto cancel = [attempt] {
+        attempt->Cancel();
+        if (update_launch == attempt) update_launch.reset();
+        if (channel) channel->InvokeMethod("updateInstallDeferred", std::make_unique<Value>());
+      };
+      channel->InvokeMethod("prepareUpdateExit", std::make_unique<Value>(Map{
+          {Value("left"), Value(state.left)}, {Value("top"), Value(state.top)},
+          {Value("width"), Value(state.width)}, {Value("height"), Value(state.height)},
+          {Value("maximized"), Value(state.maximized)}}),
+          std::make_unique<flutter::MethodResultFunctions<Value>>(
+            [attempt, cancel](const Value* value) {
+              const auto* accepted = value ? std::get_if<bool>(value) : nullptr;
+              if (accepted && *accepted && update_launch == attempt && owner) PostMessageW(owner, kCompleteUpdateExit, 0, 0);
+              else cancel();
+            },
+            [cancel](const std::string&, const std::string&, const Value*) { cancel(); },
+            cancel));
+    }
+    *result = 0;
+    return true;
+  }
   if (HandleNativePaste(message, wparam)) { *result = 0; return true; }
   if (message == kDestroyReceiveDock) {
     if (receive_dock && receive_dock->Generation() == static_cast<int64_t>(wparam)) {
@@ -730,6 +815,7 @@ bool HandleGlobalSendWindowMessage(UINT message, WPARAM wparam, LPARAM lparam,
 }
 
 void ShowGlobalSendWindowOnFirstFrame() {
+  SignalGlobalSendUpdateReady();
   if (window_lifecycle) window_lifecycle->ShowOnFirstFrame();
 }
 
@@ -759,6 +845,8 @@ void UnregisterGlobalSendSystem() {
   copied_reference_revision = -1;
   SetGlobalSendLaunchConsumer({});
   window_lifecycle.reset();
+  update_launch.reset();
+  update_starting = false;
   ++system_generation;
   UnregisterGlobalSendTouchDrag();
   for (HWND target : drop_windows) RevokeDragDrop(target);

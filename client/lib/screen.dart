@@ -171,6 +171,7 @@ class _SendScreenState extends State<SendScreen>
   @override
   void initState() {
     super.initState();
+    ui.captureUpdateDrafts = captureUpdateDrafts;
     WidgetsBinding.instance.addObserver(this);
     c.addListener(refresh);
     recentPhotos.addListener(refreshPhotoSuggestions);
@@ -250,6 +251,12 @@ class _SendScreenState extends State<SendScreen>
     'retention': retention,
     'cleanupSize': cleanupSize,
   };
+
+  void captureUpdateDrafts() {
+    ui.page = page;
+    ui.contentTab = contentTab;
+    ui.fields['compose'] = text.value;
+  }
 
   @override
   void didChangeDependencies() {
@@ -731,6 +738,7 @@ class _SendScreenState extends State<SendScreen>
 
   @override
   void dispose() {
+    if (ui.captureUpdateDrafts == captureUpdateDrafts) ui.captureUpdateDrafts = null;
     WidgetsBinding.instance.removeObserver(this);
     if (Platform.isWindows) {
       FocusManager.instance.removeEarlyKeyEventHandler(windowPasteKey);

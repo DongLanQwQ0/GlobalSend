@@ -49,6 +49,7 @@ final class NativeReceiveRuntime {
     final long createdAt = SystemClock.elapsedRealtime();
     final BackgroundReceiveBridge background;
     private java.lang.ref.WeakReference<MainActivity> attachedActivity = new java.lang.ref.WeakReference<>(null);
+    private boolean activityVisible;
     private static final String CONNECTIVITY_SERVICE = Context.CONNECTIVITY_SERVICE;
     private NativeReceiveRuntime(Context context) {
         this.context = context;
@@ -61,16 +62,20 @@ final class NativeReceiveRuntime {
     private void runOnUiThread(Runnable work) { main.post(work); }
     void attach(MainActivity activity) {
         attachedActivity = new java.lang.ref.WeakReference<>(activity);
+        activityVisible = false;
         dockCoordinator.attach(activity); receiveDirectory.attach(activity); receivedNotifications.attach(activity);
         background.attach(activity);
     }
     void detach(MainActivity activity) {
-        if (attachedActivity.get() == activity) attachedActivity.clear();
+        if (attachedActivity.get() == activity) { attachedActivity.clear(); activityVisible = false; }
         dockCoordinator.detach(activity); receiveDirectory.detach(activity); receivedNotifications.detach(activity);
         background.detach(activity);
     }
     void resumed() { dockCoordinator.resumed(); ReceiveOverlay.restoreShelf(); }
-    void visible(Activity activity, boolean foreground) { receivedNotifications.visible(activity, foreground); }
+    void visible(Activity activity, boolean foreground) {
+        if (attachedActivity.get() == activity) activityVisible = foreground;
+        receivedNotifications.visible(activity, foreground);
+    }
     void presentationRejected(boolean rejected) { receivedNotifications.presentationRejected(rejected); }
     void presentationResult(MainActivity activity, String id, boolean converted, boolean resumed) {
         if (attachedActivity.get() == activity) receivedNotifications.presentationResult(id, converted, resumed);
@@ -114,7 +119,24 @@ final class NativeReceiveRuntime {
         receivedNotifications = new ReceiveNotificationBridge(context, engine.getDartExecutor().getBinaryMessenger());
         new MethodChannel(engine.getDartExecutor().getBinaryMessenger(), "dev.globalsend/system").setMethodCallHandler((call, result) -> {
             if ("deviceName".equals(call.method)) result.success(AndroidDeviceName.read(context));
-            else if ("notifyUpdate".equals(call.method)) result.success(AppUpdateNotifications.show(context, call.argument("version"), call.argument("downloadUrl")));
+            else if ("notifyUpdate".equals(call.method)) result.success(AppUpdateNotifications.show(context,
+                call.argument("version"), call.argument("downloadUrl"), Boolean.TRUE.equals(call.argument("ready")), call.argument("path")));
+            else if ("installUpdate".equals(call.method)) {
+                String path = call.argument("path"), version = call.argument("version");
+                Number build = call.argument("build");
+                boolean explicit = Boolean.TRUE.equals(call.argument("explicit"));
+                transfers.execute(() -> {
+                    try {
+                        AndroidAppUpdateInstaller.Package update = AndroidAppUpdateInstaller.inspect(context, path, version, build);
+                        main.post(() -> {
+                            try {
+                                result.success(AndroidAppUpdateInstaller.launch(context,
+                                    activityVisible ? attachedActivity.get() : null, update, explicit));
+                            } catch (Exception error) { result.error("UPDATE_INSTALL", error.getMessage(), null); }
+                        });
+                    } catch (Exception error) { main.post(() -> result.error("UPDATE_INSTALL", error.getMessage(), null)); }
+                });
+            }
             else if ("localIpInterfaces".equals(call.method)) {
                 try { result.success(LocalIpInterfaces.read(context)); }
                 catch (java.net.SocketException error) { result.error("IP_INTERFACES", "无法读取网卡地址", null); }

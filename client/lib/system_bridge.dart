@@ -199,6 +199,7 @@ class SystemBridge {
 
   static String? _windowStatePath;
   static Future<void> _windowSave = Future<void>.value();
+  static Future<bool> Function()? beforeUpdateExit;
   static bool _installed = false;
   static Stream<Map<String, dynamic>> get clipboardEvents {
     _install();
@@ -255,6 +256,21 @@ class SystemBridge {
     if (!_installed) {
       _installed = true;
       channel.setMethodCallHandler((call) async {
+        if (call.method == 'prepareUpdateExit') {
+          final path = _windowStatePath;
+          if (path != null && call.arguments is Map) {
+            final state = Map<String, dynamic>.from(call.arguments);
+            _windowSave = _windowSave.catchError((Object _) {}).then((_) async {
+              await File(path).writeAsString(jsonEncode(state), flush: true);
+            });
+          }
+          await _windowSave;
+          return await beforeUpdateExit?.call() ?? false;
+        }
+        if (call.method == 'updateInstallDeferred') {
+          _windows.add({'updateInstallDeferred': true});
+          return null;
+        }
         if (call.method == 'clipboardChanged') {
           _clipboard.add(Map<String, dynamic>.from(call.arguments));
         } else if (call.method == 'pasteRequested') {

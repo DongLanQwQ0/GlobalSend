@@ -41,4 +41,15 @@ public class AppUpdateNotificationsTest {
         assertFalse(AppUpdateNotifications.show(app, "1.0.27", "https://github.com/download.apk"));
         assertTrue(Shadows.shadowOf(manager).getAllNotifications().isEmpty());
     }
+    @Test public void downloadedPackageNotificationOpensGlobalSendNotBrowserOrReceivePopup() {
+        assertTrue(AppUpdateNotifications.show(app, "1.0.79", "https://github.com/download.apk", true,
+            new java.io.File(app.getFilesDir(), "updates/GlobalSend.apk").getPath()));
+        Notification notice = Shadows.shadowOf(manager).getNotification(AppUpdateNotifications.ID);
+        Intent open = Shadows.shadowOf(notice.contentIntent).getSavedIntent();
+        assertNotNull(open.getComponent());
+        assertEquals(MainActivity.class.getName(), open.getComponent().getClassName());
+        assertTrue(open.getBooleanExtra("updateReady", false));
+        assertNotEquals(Intent.ACTION_VIEW, open.getAction());
+        assertNull(notice.fullScreenIntent);
+    }
 }

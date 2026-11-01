@@ -42,6 +42,7 @@ AppUpdates service(
   feed: feed,
   notify: notify ?? (_) async => true,
   now: now,
+  automaticDownload: false,
 );
 Future<File> cache() async {
   final parent = await Directory('build/test-tmp/updates')

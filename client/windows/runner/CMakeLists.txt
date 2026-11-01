@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME} WIN32
   "window_lifecycle.cpp"
   "window_startup.cpp"
   "autostart.cpp"
+  "auto_update.cpp"
   "single_instance.cpp"
   "system_integration.cpp"
   "local_ip_interfaces.cpp"

@@ -194,6 +194,8 @@ class SendController extends ChangeNotifier {
        _providedBackgroundReceive = backgroundReceive,
        updates = updates ?? AppUpdates(),
        vault = vault ?? PlatformVault() {
+    this.updates.canInstall = () => updateIdle;
+    this.updates.beforeInstall = saveForUpdate;
     this.reachability =
         reachability ??
         ReachabilityMonitor(
@@ -209,6 +211,20 @@ class SendController extends ChangeNotifier {
   final Future<List<LocalIpAddress>> Function() _readIpAddresses;
   Future<List<LocalIpAddress>> localIpAddresses() => _readIpAddresses();
   bool _reachabilityStarted = false;
+  bool _updateStateRestored = false;
+  bool get updateIdle =>
+      _updateStateRestored &&
+      !disposed &&
+      busyFiles.isEmpty &&
+      nativeOperations.isEmpty &&
+      _sendingPush.isEmpty &&
+      _sendingRtc.isEmpty &&
+      !_sendingStaged;
+  Future<void> saveForUpdate() async {
+    await save();
+    await persistenceIdle;
+  }
+
   final Future<Directory> Function() documentsDirectory;
   final Future<Directory> Function() stateDirectory;
   bool cellularUploads = true;
@@ -1153,6 +1169,7 @@ class SendController extends ChangeNotifier {
   }
 
   void changed() {
+    updates.activityChanged();
     for (final entry in pendingReceipts.entries.toList()) {
       pendingReceipts[entry.key] = _folderPresentation(entry.value);
     }
@@ -1365,7 +1382,6 @@ class SendController extends ChangeNotifier {
       await networkSettings.load(File('${root!.path}/network.json'));
       await urlIntents.initialize(File('${root!.path}/url-intents.json'));
       await appearance.load(File('${root!.path}/appearance.json'));
-      unawaited(updates.initialize(File('${root!.path}/updates.json')));
       await _loadStagedOutbox(restoreQueue: true);
       final file = File('${root!.path}/profiles.json');
       if (await file.exists()) {
@@ -1422,6 +1438,8 @@ class SendController extends ChangeNotifier {
       }
       changed();
       unawaited(refreshLocalLibrary(migrate: true));
+      _updateStateRestored = true;
+      unawaited(updates.initialize(File('${root!.path}/updates.json')));
       if (recent != null && _connectRequest == 0) await _restoreRecent(recent);
     } catch (e) {
       message = '本地配置读取失败：$e';

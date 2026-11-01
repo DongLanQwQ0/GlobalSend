@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/app_update_ui.dart';
+import 'package:globalsend/github_updates.dart';
 import 'package:globalsend/ui_tokens.dart';
 import 'package:globalsend/system_bridge.dart';
 
@@ -17,7 +18,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadSystemTestFonts);
   testWidgets(
-    'update offer preserves editing focus and opens only its matching package',
+    'manual iPad update preserves editing focus and opens only its IPA',
     (tester) async {
       final oldShadows = debugDisableShadows;
       debugDisableShadows = false;
@@ -28,9 +29,9 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final feed = Feed()
         ..rows = [
-          release('v1.0.30', [asset('GlobalSend-1.0.30-windows-x64.zip')]),
+          release('v1.0.30', [asset('GlobalSend-1.0.30.ipa')]),
         ];
-      final updates = service(feed),
+      final updates = service(feed, platform: UpdatePlatform.ios),
           focus = FocusNode(),
           text = TextEditingController(),
           capture = GlobalKey();
@@ -92,9 +93,9 @@ void main() {
             );
         picture.dispose();
       });
-      await tester.tap(find.text('下载'));
+      await tester.tap(find.text('下载 IPA').first);
       await tester.pumpAndSettle();
-      expect(urls.single, endsWith('GlobalSend-1.0.30-windows-x64.zip'));
+      expect(urls.single, endsWith('GlobalSend-1.0.30.ipa'));
       await tester.tap(find.byTooltip('稍后'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('update-notice')), findsNothing);

@@ -50,6 +50,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   Future<void>? shareWork;
   bool shareAgain = false;
   bool windowVisible = true;
+  bool updateDraftsReady = false;
   int receiptSerial = 0;
   String receiptPayload = '';
   int presentationRequest = 0;
@@ -257,6 +258,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    configureUpdateHandoff();
     receiptSerial = controller.receiptSerial;
     controller.addListener(receiptChanged);
     controller.appearance.addListener(appearanceChanged);
@@ -276,6 +278,27 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   Future<void> initialize() async {
     await controller.init();
     if (!mounted) return;
+    if (controller.root != null) {
+      final restored = SendUiSession();
+      try {
+        if (await restored.loadUpdateDrafts(
+          File('${controller.root!.path}/update-drafts.json'),
+        )) {
+          if (!mounted) return;
+          setState(() => session = restored);
+          if (restored.sharedDraftScope ==
+              '${controller.profile?.storageKey}:${controller.profile?.groupId}') {
+            controller.setSharedTextDraft(restored.sharedDraft);
+          }
+        }
+      } on FormatException {
+        /* A legacy handoff must not block app startup. */
+      } on FileSystemException {
+        /* Local files remain usable if the handoff is unavailable. */
+      }
+    }
+    updateDraftsReady = true;
+    controller.updates.activityChanged();
     if (FileShareBridge.supported) {
       shareSubscription ??= FileShareBridge.incoming.listen(
         (_) => unawaited(drainSharedInputs()),
@@ -313,7 +336,31 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     receiptChanged();
   }
 
+  void configureUpdateHandoff() {
+    updateDraftsReady = false;
+    controller.updates.canInstall = () =>
+        updateDraftsReady && controller.updateIdle;
+    controller.updates.beforeInstall = () async {
+      final root = controller.root;
+      if (root == null) return;
+      session.sharedDraftScope = controller.sharedTextDirty
+          ? '${controller.profile?.storageKey}:${controller.profile?.groupId}'
+          : '';
+      session.sharedDraft = controller.sharedTextDirty
+          ? controller.sharedText
+          : '';
+      await session.saveUpdateDrafts(File('${root.path}/update-drafts.json'));
+      await controller.saveForUpdate();
+    };
+    if (Platform.isWindows)
+      SystemBridge.beforeUpdateExit = controller.updates.prepareExit;
+  }
+
   void windowEvent(Map<String, dynamic> event) {
+    if (event['updateInstallDeferred'] == true) {
+      controller.updates.installDeferred();
+      return;
+    }
     if (event['dockAction'] is Map) {
       unawaited(dockAction(Map<String, dynamic>.from(event['dockAction'])));
       return;
@@ -420,12 +467,14 @@ class _GlobalSendAppState extends State<GlobalSendApp>
       controller.addListener(receiptChanged);
       controller.appearance.addListener(appearanceChanged);
       session = SendUiSession();
+      configureUpdateHandoff();
       initialize();
     }
   }
 
   @override
   void dispose() {
+    if (Platform.isWindows) SystemBridge.beforeUpdateExit = null;
     windowSubscription?.cancel();
     shareSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -481,7 +530,11 @@ class _GlobalSendAppState extends State<GlobalSendApp>
                     ),
                   ),
                 ),
-                home: SendScreen(controller: controller, session: session),
+                home: SendScreen(
+                  key: ObjectKey(session),
+                  controller: controller,
+                  session: session,
+                ),
               ),
             ),
           ),

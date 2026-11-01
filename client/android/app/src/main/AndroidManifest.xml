@@ -65,6 +65,9 @@
             android:name="flutterEmbedding"
             android:value="2" />
         <provider android:name=".DockShareProvider" android:authorities="${applicationId}.dock-files" android:exported="false" android:grantUriPermissions="true" />
+        <provider android:name=".UpdateFileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
         <receiver android:name=".ReceiveNotificationCopyReceiver" android:exported="false" />
         <service android:name=".BackgroundReceiveService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="remoteMessaging|connectedDevice" />
         <receiver android:name=".BackgroundReceiveRestart" android:exported="false">

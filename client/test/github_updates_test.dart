@@ -37,6 +37,12 @@ Future<PlatformUpdate?> select(
   loadManifest: (url) async => manifests[url.split('/').last]!,
 );
 void main() {
+  test('Windows prefers a complete ZIP over an installer in the same platform release', () async {
+    final result = await select([
+      release('v1.0.30', [asset('GlobalSend-1.0.30-windows-x64.exe'), asset('GlobalSend-1.0.30-windows-x64.zip')]),
+    ], UpdatePlatform.windows, arch: 'x64');
+    expect(result!.assetName, endsWith('.zip'));
+  });
   test('version compares numeric semver and same-version build', () {
     expect(
       AppReleaseVersion.parse('1.0.10')!

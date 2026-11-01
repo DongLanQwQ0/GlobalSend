@@ -1,0 +1,30 @@
+# Windows 自动替换
+
+自动更新使用匹配 Windows 架构的完整 ZIP，不只替换 EXE。下载、偏好与空闲判断由 `AppUpdates` 管理；原生 `installUpdate` 桥启动安装包缓存中的隐藏辅助进程。
+
+## 更新顺序
+
+1. 从当前运行 EXE 推导安装目录，将随包提供的 `Install-WindowsUpdate.ps1` 复制到下载缓存后运行。辅助进程确认启动前，原应用不退出。
+2. 在缓存中解压，检查完整 Flutter bundle、实际 EXE 的版本/构建号和架构，并在安装目录创建本轮备份目录以确认可写。
+3. 原生向 Dart 请求 `prepareUpdateExit`，写完当前窗口位置并再次确认没有传输、保存最新内容。若有新任务，保留下载包并延后，不强杀进程。
+4. 正常销毁本应用窗口，释放其托盘、引擎和单实例互斥；辅助进程只等待本次 PID。
+5. 将被替换的程序项移动至本轮备份，复制完整新程序，完整替换 `data/flutter_assets`，避免遗留已移除的字体或资源。`globalsend-data.json`、无关根目录文件与 `data` 中的无关文件保留。
+6. 自动安装始终使用 `--background`，包括 Alt+Tab 后旧窗口仍可见的情况，不重新抢占焦点。手动点击安装才按此前主窗口可见性重启。新程序第一帧确认启动后，记录成功并清除该次程序备份。替换或启动失败则恢复旧程序项并按同一后台规则重启旧程序。
+
+不申请管理员权限，不绕过执行策略，不结束其他进程。无法写入或启动时保留已下载的包供重试。更新清单仍按平台区分；iOS 的 IPA 不会进入 Windows 自动安装。
+
+## 安装结果
+
+`installUpdate` 返回 `{state:"started",resultPath:...}` 仅表示隐藏辅助进程已启动。结果位于下载 ZIP 同目录的 `windows-update-result.json`：
+
+```json
+{"state":"installed","version":"1.0.79","build":103,"message":"","at":"..."}
+```
+
+状态为 `preparing`、`prepared`、`ready`、`installed`、`failed` 或 `rolled-back`。`ready` 表示退出前出现新任务，尚未替换。失败、回滚与重新启动旧版本不会被当作更新成功。
+
+## 本地检查
+
+`client/windows/test/auto_update_test.ps1` 使用独立无界面的测试 EXE 和项目临时目录，覆盖完整替换、淘汰资源、后台参数、数据保留、退出前版本失败和新程序启动失败回滚。`auto_update_launch_test.cpp` 实际运行隐藏 PowerShell 辅助进程，检查启动握手、取消与第一帧确认事件。
+
+检查记录在 `artifacts/tmp/windows-update103`。这些检查不操作用户正在运行的 Windows 窗口、系统剪贴板或真实安装目录；最终发行由项目发布流程完成。

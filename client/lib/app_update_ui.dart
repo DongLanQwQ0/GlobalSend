@@ -20,7 +20,11 @@ Future<void> openUpdate(BuildContext context, AppUpdates updates) async {
   final offer = updates.available;
   if (offer == null) return;
   try {
-    await SystemBridge.openWebUrl(Uri.parse(offer.downloadUrl));
+    if (updates.installable) {
+      await updates.downloadAndInstall(explicit: true);
+    } else {
+      await SystemBridge.openWebUrl(Uri.parse(offer.downloadUrl));
+    }
   } catch (_) {
     if (context.mounted)
       ScaffoldMessenger.maybeOf(context)
@@ -37,6 +41,22 @@ class UpdateCheckControl extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (updates.supportsInstall) ...[
+          SwitchListTile.adaptive(
+            key: const ValueKey('auto-check-updates'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('自动检查更新'),
+            value: updates.autoCheck,
+            onChanged: updates.setAutoCheck,
+          ),
+          SwitchListTile.adaptive(
+            key: const ValueKey('auto-install-updates'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('自动下载并更新'),
+            value: updates.autoDownload,
+            onChanged: updates.setAutoDownload,
+          ),
+        ],
         Row(
           children: [
             Expanded(
@@ -55,19 +75,43 @@ class UpdateCheckControl extends StatelessWidget {
               onPressed: updates.busy
                   ? null
                   : () => updates.check(manual: true),
-              child: const Text('检查更新'),
+              child: const Text(
+                '检查更新',
+                style: TextStyle(fontFamilyFallback: Ui.fontFallback),
+              ),
             ),
           ],
         ),
+        if (updates.downloading)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: Ui.space1),
+            child: LinearProgressIndicator(value: updates.progress),
+          ),
         if (updates.available != null)
           Align(
             alignment: Alignment.centerRight,
             child: TextButton(
-              onPressed: () => openUpdate(context, updates),
+              onPressed: updates.downloading || updates.installing
+                  ? null
+                  : () => openUpdate(context, updates),
               child: Text(
                 updates.build.platform == UpdatePlatform.ios
                     ? '下载 IPA'
-                    : '下载新版',
+                    : updates.actionLabel,
+                style: const TextStyle(fontFamilyFallback: Ui.fontFallback),
+              ),
+            ),
+          ),
+        if (updates.ready && updates.error.isNotEmpty)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: updates.downloading || updates.installing
+                  ? null
+                  : updates.redownload,
+              child: const Text(
+                '重新下载',
+                style: TextStyle(fontFamilyFallback: Ui.fontFallback),
               ),
             ),
           ),
@@ -144,16 +188,26 @@ class AppUpdateNotice extends StatelessWidget {
                           children: [
                             Expanded(
                               child: Text(
-                                'GlobalSend ${offer.version.display} 可更新',
+                                updates.downloading ||
+                                        updates.ready ||
+                                        updates.error.isNotEmpty
+                                    ? updates.status
+                                    : 'GlobalSend ${offer.version.display} 可更新',
                                 style: const TextStyle(fontSize: Ui.textSm),
                               ),
                             ),
                             TextButton(
-                              onPressed: () => openUpdate(context, updates),
+                              onPressed:
+                                  updates.downloading || updates.installing
+                                  ? null
+                                  : () => openUpdate(context, updates),
                               child: Text(
                                 updates.build.platform == UpdatePlatform.ios
                                     ? '下载 IPA'
-                                    : '下载',
+                                    : updates.actionLabel,
+                                style: const TextStyle(
+                                  fontFamilyFallback: Ui.fontFallback,
+                                ),
                               ),
                             ),
                             IconButton(

@@ -120,6 +120,17 @@ Future<PlatformUpdate?> selectPlatformUpdate({
     final packages = assets
         .where((asset) => _compatible(asset['name'], platform, architecture))
         .toList();
+    if (platform == UpdatePlatform.windows) {
+      packages.sort(
+        (a, b) => (a['name'] as String).toLowerCase().endsWith('.zip')
+            ? (b['name'] as String).toLowerCase().endsWith('.zip')
+                  ? 0
+                  : -1
+            : (b['name'] as String).toLowerCase().endsWith('.zip')
+            ? 1
+            : 0,
+      );
+    }
     if (packages.isEmpty) continue;
     final metadata = assets
         .where(
