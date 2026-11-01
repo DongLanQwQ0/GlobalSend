@@ -42,6 +42,6 @@ Windows 独立接收坞和 Web 共享区已接通相同引用。Windows 坞分�
 
 中心/Web 已部署至 `https://123.207.180.163/globalsend/app/`，容器 `globalsend:copied-files-1.0.75-20261101` 健康；公开 info 已包含 copiedFiles，实际 JS/CSS 返回 200、MIME 正常，安装包目录仍为 404，未上传安装包。实例 ID 保持不变，旧镜像作为部署脚本的回退目标。部署证据在 `artifacts/tmp/copied-files-deploy/`。
 
-手机安装仍 pending：同一设备正在运行另一个任务的后台总结，已在构建期间交还，不打断该服务；待明确安全点仅覆盖安装、读回版本并启动。手机实际拉取仍待交互验收；不能用浏览器或原生组件检查冒充真机通过。发布状态见 `artifacts/releases/latest-local.json`。
+手机已在明确交接后完成流式覆盖安装并启动：`10.197.184.141:39343`，安装返回 Success，读回 `versionCode=98`、`versionName=1.0.75`、`lastUpdateTime=2026-11-01 20:08:16`。仅安装、读回版本和启动一次，未触控其它页面、操作另一应用、访问共享模拟器或创建手机测试文件；完成即交还设备。日志位于 `artifacts/tmp/copied-files-client/phone-install98.log`、`phone-version98.txt`、`phone-launch98.log`。手机实际拉取仍待交互验收；不能用浏览器或原生组件检查冒充真机通过。发布状态见 `artifacts/releases/latest-local.json`。
 
 本轮误建的空部署包 `server/artifacts/tmp/copied-files-deploy/source.tar`（0 B）删除被执行策略拦截，留在项目内等待清理；未改换工具绕过拦截。正确源包位于 `artifacts/tmp/copied-files-deploy/source.tar`，不含安装包。
