@@ -12,9 +12,9 @@
 
 Windows / Android 最新本地版为 **1.0.74+97**。Windows 完整客户端已更新并运行于 `E:\Programs\GlobalSend`；手机已保留数据覆盖安装、读回 97 版并启动。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.75+98 完整 ZIP](artifacts/releases/GlobalSend-1.0.75-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.75+99 完整 ZIP](artifacts/releases/GlobalSend-1.0.75-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。
 
-Android [1.0.75+98 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.75-android-arm64-v8a.apk)已验签、覆盖安装并启动，不打包字体，保留现有数据。98 新增指定设备的文件复制引用拉取，真机交互待验；97 的物理贴边、接收媒体不重复建议与把手阻尼继续保留。此前的[接收文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)已由用户确认，文件选择器与最近文件均可见。图片／视频和剪贴板建议按建议时间排序，清空与建议之间保留双击空白；建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留。实际安装状态以[本机发布记录](artifacts/releases/latest-local.json)为准，本轮说明见[文件复制推送](docs/COPIED_FILES.md)。
+Android [1.0.75+99 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.75-android-arm64-v8a.apk)已验签、覆盖安装并启动，不打包字体，保留现有数据。98 的指定设备文件引用显示与点击拉取已由用户确认，99 修正设置开关和目标下拉框的联动；97 的物理贴边、接收媒体不重复建议与把手阻尼继续保留。此前的[接收文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)已由用户确认，文件选择器与最近文件均可见。图片／视频和剪贴板建议按建议时间排序，清空与建议之间保留双击空白；建议不参与全部拖出，仍可逐项拖出。[Chrona 普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留。实际安装状态以[本机发布记录](artifacts/releases/latest-local.json)为准，本轮说明见[文件复制推送](docs/COPIED_FILES.md)。
 
 iPad / iPhone 的[**1.0.59 (76) 未签名 IPA，约14.8 MB**](artifacts/releases/ios-1.0.59-build76/GlobalSend-iPad-unsigned.ipa)已构建，不打包字体。接入 UIKit 原生拖入、拖出；普通系统分享唤起待发送，选系统设备建议才按唯一 ID 自动发送本批。由用户用 iloader 手动签名安装，76版真机交互待确认，见[iPad说明](docs/IPAD.md)。**中心不托管安装包；[Windows/Android 1.0.68+85 公开分发](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.68-build85)与[iOS 1.0.59+76](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.59-build76)分别提供对应平台包和更新清单。**
 

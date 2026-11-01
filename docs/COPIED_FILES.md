@@ -48,4 +48,6 @@ Windows 独立接收坞和 Web 共享区已接通相同引用。Windows 坞分�
 
 用户已确认98版实际“复制 → 手机显示条目 → 点按拉取”成功。继续遵守不测试真实 Windows 的限制。随后追加的99版设置调整：两个目标下拉框均随各自开关禁用/启用，关闭不丢失已选设备；文件复制推送首次允许先开启、再选目标，未选目标不监听、不发布。状态、持久化、实际组件点按和深色渲染检查通过，证据在 `artifacts/tmp/copied-files-switch-targets99*` 与 `artifacts/tmp/copied-files-client/render/switch-targets99.jpg`。这次不改中心或Web。99版本地构建更新后再完成最后的IPA，当前公开IPA仍为76版。
 
+99已完成Windows和Android完整构建，源提交 `c78de30`；Windows完整覆盖并重启，读回 `1.0.75+99`。APK 16,383,628 B，验签通过、两端无内置字体；在同设备任务明确让出后，流式覆盖安装Success，读回 `versionCode=99`、`versionName=1.0.75`、`lastUpdateTime=2026-11-01 20:36:54` 并启动一次，保留数据，立即交还设备。手机日志在 `artifacts/tmp/copied-files-client/phone-*99.*`。IPA最后使用相同源码的手动工作流 [41307291358](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41307291358)，构建状态与产物另行核实，不在这里预记为成功。
+
 本轮误建的空部署包 `server/artifacts/tmp/copied-files-deploy/source.tar`（0 B）删除被执行策略拦截，留在项目内等待清理；未改换工具绕过拦截。正确源包位于 `artifacts/tmp/copied-files-deploy/source.tar`，不含安装包。
