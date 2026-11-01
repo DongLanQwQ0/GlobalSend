@@ -1,6 +1,6 @@
 ## 当前交付：统一文件引用卡片 1.0.76+100
 
-100使用同一Flutter组件呈现主界面和Windows坞的复制文件引用，Android/Web同步圆角、主题、来源与角落操作。主界面/独立坞动作、三种主题实际绘制、Web四项检查与固定配置的真实浏览器拉取、Android原生窗口检查通过。完整Windows/Android构建通过，两端无字体；Windows已更新并重启为1.0.76+100，Web已部署并healthy。APK已构建验签，16,383,024 B；真机仍由另一任务持有且存在用户前台使用冲突，手机保留99，已请求明确交接后再覆盖，不操作Windows界面。IPA保持最后已验证的99版，100不提前构建。详情与准确证据见 `docs/COPIED_FILES.md`、`artifacts/releases/latest-local.json`。
+100使用同一Flutter组件呈现主界面和Windows坞的复制文件引用，Android/Web同步圆角、主题、来源与角落操作。主界面/独立坞动作、三种主题实际绘制、Web四项检查与固定配置的真实浏览器拉取、Android原生窗口检查通过。完整Windows/Android构建通过，两端无字体；Windows已更新并重启为1.0.76+100，Web已部署并healthy。APK 16,383,024 B，验签通过；明确交接后手机覆盖安装Success，读回1.0.76/code100、21:02:10更新并启动，立即交还，不操作Windows界面。最后从相同源码tag手动启动IPA100工作流41309364210，等待实际产物后更新公开通道，不预记成功。详情与准确证据见 `docs/COPIED_FILES.md`、`artifacts/releases/latest-local.json`。
 
 ## 历史交付：设置开关联动与文件复制推送 1.0.75+99
 

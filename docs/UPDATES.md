@@ -28,7 +28,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows已覆盖更新并启动 **1.0.76+100**，Web同步上线统一文件引用卡片。Android100已构建验签，待同设备任务明确让出安装窗口，手机最近确认仍是 **1.0.75+99**；不把已构建当成已安装。98版指定设备引用显示与点击拉取已由用户确认，99修复开关关闭时目标下拉禁用并保留选择。生产原生控制器直传、实际浏览器拉取及新卡片绘制/动作检查通过；实体Windows界面按用户要求不测试。GitHub Windows/Android公开通道为[1.0.68+85](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.68-build85)，iOS通道为已构建并发布的[1.0.75+99](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.75-build99)，由用户手动签名安装。99的Release仅含IPA与iOS清单，不向Windows/Android通知不存在的平台更新。中心不托管安装包。版本、功能和证据见[文件复制推送](COPIED_FILES.md)、[iPad说明](IPAD.md)及[本机发布记录](../artifacts/releases/latest-local.json)。
+Windows与Android均已覆盖更新并启动 **1.0.76+100**，Web同步上线统一文件引用卡片。手机安装Success并读回100版，保留数据；不操作Windows界面。98版指定设备引用显示与点击拉取已由用户确认，99修复开关关闭时目标下拉禁用并保留选择。生产原生控制器直传、实际浏览器拉取及新卡片绘制/动作检查通过。GitHub Windows/Android公开通道为[1.0.68+85](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.68-build85)，iOS通道为已构建并发布的[1.0.75+99](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.75-build99)，100的IPA手动工作流已最后启动，尚待完成；由用户手动签名安装。99的Release仅含IPA与iOS清单，不向Windows/Android通知不存在的平台更新。中心不托管安装包。版本、功能和证据见[文件复制推送](COPIED_FILES.md)、[iPad说明](IPAD.md)及[本机发布记录](../artifacts/releases/latest-local.json)。
 
 ### 历史交付：1.0.57+68
 
