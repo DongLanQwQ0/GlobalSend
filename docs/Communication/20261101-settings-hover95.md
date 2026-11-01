@@ -14,3 +14,5 @@
 本轮用户另问截图为什么没有同步：已核对当前原生事件仅读取 `CF_UNICODETEXT`，自动同步走 `/texts`，图片读取只接入 Ctrl+V 和建议入口。已说明缺少图片自动同步及接收端写回图像的链路，本补丁没有改变剪贴板自动发送范围。
 
 仅通过 `npm run release:local -- -WindowsOnly` 更新 Windows；手机维持已确认的 build 93，不操作 ADB、不再占用手机；服务器和 IPA 不变。
+
+Windows 已完整覆盖并重启，实际文件版本 `1.0.74+95`，字体文件数为 0。`delivery.json` 与本地发布记录已明确 Windows build 95、Android build 93；本版包含上一补丁的窗口内即启动原生拖放修复。没有进行真实 Windows 界面操作。
