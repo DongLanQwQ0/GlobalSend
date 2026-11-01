@@ -34,12 +34,13 @@ public class RecentMediaSuggestionsTest {
         final java.util.Set<String> deleted=new java.util.HashSet<>();
         final java.util.Set<String> trashed=new java.util.HashSet<>();
         java.io.File original;
+        final java.util.Map<String,String> paths=new java.util.HashMap<>();
         boolean extra;
         public boolean onCreate() {return true;}
         public Cursor query(Uri uri,String[] columns,String selection,String[] args,String sort) {
             if(selection==null) {
                 MatrixCursor row=new MatrixCursor(columns);Object[] values=new Object[columns.length];
-                for(int i=0;i<columns.length;i++)values[i]=columns[i].equals(MediaStore.MediaColumns._ID)?Long.parseLong(uri.getLastPathSegment()):trashed.contains(uri.getLastPathSegment())?1:0;
+                for(int i=0;i<columns.length;i++)values[i]=columns[i].equals(MediaStore.MediaColumns.DATA)?paths.get(uri.getLastPathSegment()):columns[i].equals(MediaStore.MediaColumns._ID)?Long.parseLong(uri.getLastPathSegment()):trashed.contains(uri.getLastPathSegment())?1:0;
                 row.addRow(values);return row;
             }
             assertTrue(selection.contains("date_added>=?"));assertTrue(selection.contains("is_pending=0"));
@@ -47,9 +48,9 @@ public class RecentMediaSuggestionsTest {
             MatrixCursor rows=new MatrixCursor(columns);
             long seconds=System.currentTimeMillis()/1000;
             if(uri.toString().contains("images")) {
-                rows.addRow(new Object[]{101,"camera.jpg",seconds});
-                if(extra)rows.addRow(new Object[]{103,"new.jpg",seconds+1});
-            } else rows.addRow(new Object[]{102,"camera.mp4",seconds});
+                rows.addRow(new Object[]{101,"camera.jpg",seconds,paths.get("101")});
+                if(extra)rows.addRow(new Object[]{103,"new.jpg",seconds+1,paths.get("103")});
+            } else rows.addRow(new Object[]{102,"camera.mp4",seconds,paths.get("102")});
             return rows;
         }
         public String getType(Uri uri) {return "image/jpeg";}
@@ -74,6 +75,7 @@ public class RecentMediaSuggestionsTest {
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES,Manifest.permission.READ_MEDIA_VIDEO);
         Files.deleteIfExists(new java.io.File(context.getFilesDir(),"recent-photo-suggestions.json").toPath());
         context.getSharedPreferences("dock-media-suggestions",0).edit().clear().commit();
+        context.getSharedPreferences("received-media-origins",0).edit().clear().commit();
         feed=create();
     }
     RecentMediaSuggestions create() {return new RecentMediaSuggestions(context,items -> {batches.incrementAndGet();suggested.addAll(items);},disabled::incrementAndGet);}
@@ -91,6 +93,32 @@ public class RecentMediaSuggestionsTest {
         feed.refresh();until(() -> gallery.reads.get()>=4);assertEquals(1,batches.get());
         feed.stop();feed=create();gallery.extra=true;feed.start();until(() -> batches.get()==2);
         assertEquals(3,suggested.size());assertEquals("new.jpg",suggested.get(2).name);
+    }
+    @Test public void receivedMediaIsExcludedByOriginAndSurvivesFeedRestart() throws Exception {
+        java.io.File received=new java.io.File(context.getFilesDir(),"received/camera.jpg");
+        gallery.paths.put("101",received.getCanonicalPath());
+        gallery.paths.put("102",new java.io.File(context.getFilesDir(),"camera.mp4").getCanonicalPath());
+        // Same basename in another directory is not a received file.
+        gallery.paths.put("103",new java.io.File(context.getFilesDir(),"camera/camera.jpg").getCanonicalPath());
+        ReceivedFilePublication.remember(context,received);
+        gallery.extra=true;feed.start();until(() -> batches.get()==1);
+        assertEquals(2,suggested.size());
+        assertFalse(suggested.stream().anyMatch(m -> m.uri.endsWith("/101")));
+        assertTrue(suggested.stream().anyMatch(m -> m.uri.endsWith("/103")));
+        feed.stop();context.getSharedPreferences("dock-media-suggestions",0).edit().clear().commit();
+        suggested.clear();feed=create();feed.start();until(() -> batches.get()==2);
+        assertEquals(2,suggested.size());assertFalse(suggested.stream().anyMatch(m -> m.uri.endsWith("/101")));
+    }
+    @Test public void recordedReceiptAlsoRemovesAnAlreadySuggestedMediaWithoutDeletingItsFile() throws Exception {
+        List<String> current=new ArrayList<>();
+        feed=new RecentMediaSuggestions(context,items -> {for(var item:items)current.add(item.uri);},
+            disabled::incrementAndGet,() -> new ArrayList<>(current),current::removeAll);
+        gallery.paths.put("101",gallery.original.getCanonicalPath());
+        feed.start();until(() -> current.size()==2);
+        ReceivedFilePublication.remember(context,gallery.original);feed.refresh();
+        until(() -> current.size()==1);
+        assertEquals(List.of(MediaStore.Video.Media.EXTERNAL_CONTENT_URI+"/102"),current);
+        assertTrue(gallery.original.isFile());
     }
     @Test public void existingSwitchDisablesDockSuggestionsAndObserverStopsWithWindow() throws Exception {
         Files.write(new java.io.File(context.getFilesDir(),"recent-photo-suggestions.json").toPath(),"{\"enabled\":false}".getBytes(java.nio.charset.StandardCharsets.UTF_8));

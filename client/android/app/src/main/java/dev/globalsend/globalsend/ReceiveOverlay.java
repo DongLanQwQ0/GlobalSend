@@ -642,6 +642,14 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT);
         layout.gravity = Gravity.TOP | Gravity.LEFT;
+        if(Build.VERSION.SDK_INT>=30) {
+            // Positions use physical left/right edges, including landscape
+            // cutouts. Keep only vertical system-bar insets in availableBounds.
+            layout.setFitInsetsTypes(0);
+            layout.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        } else if(Build.VERSION.SDK_INT>=28) {
+            layout.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
         layout.windowAnimations=0;
         // Otherwise tightening a right-edge envelope starts a second system
         // move animation after our child-surface animation has already ended.
@@ -1766,11 +1774,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             Rect bounds = new Rect(metrics.getBounds());
             android.graphics.Insets insets = metrics.getWindowInsets().getInsetsIgnoringVisibility(
                 WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-            bounds.inset(insets.left, insets.top, insets.right, insets.bottom);
-            return bounds;
+            return edgeBounds(bounds,insets);
         }
         android.util.DisplayMetrics metrics = context.getResources().getDisplayMetrics();
         return new Rect(0, 0, metrics.widthPixels, metrics.heightPixels);
+    }
+    static Rect edgeBounds(Rect display,android.graphics.Insets insets) {
+        return new Rect(display.left,display.top+insets.top,display.right,display.bottom-insets.bottom);
     }
     private TextView control(String text, String description, Runnable action) {
         TextView button = label(text, 13, appearance.accent);

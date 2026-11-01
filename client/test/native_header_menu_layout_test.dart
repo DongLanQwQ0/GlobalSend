@@ -1,12 +1,15 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/main.dart';
+import 'package:globalsend/appearance.dart';
 import 'package:globalsend/models.dart';
 import 'package:globalsend/saved_files.dart';
 import 'package:globalsend/saved_files_screen.dart';
@@ -60,7 +63,11 @@ void onPlatform(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUpAll(loadSystemTestFonts);
+  setUpAll(() async {
+    debugPrintSynchronously('header fonts begin');
+    await loadSystemTestFonts();
+    debugPrintSynchronously('header fonts ready');
+  });
   setUp(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
@@ -85,28 +92,37 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     final key = GlobalKey();
+    debugPrintSynchronously('mount $scale before pumpWidget');
     await tester.pumpWidget(RepaintBoundary(key: key, child: child));
+    debugPrintSynchronously('mount $scale first frame');
     await tester.pumpAndSettle();
+    debugPrintSynchronously('mount $scale settled');
     return key;
   }
 
-  Future<void> capture(WidgetTester tester, GlobalKey key, String name) async =>
-      tester.runAsync(() async {
-        final image =
-            await (key.currentContext!.findRenderObject()!
-                    as RenderRepaintBoundary)
-                .toImage();
-        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await Directory('../artifacts/screenshots/header-menu')
-            .create(recursive: true);
-        await File('../artifacts/screenshots/header-menu/$name.png')
-            .writeAsBytes(bytes!.buffer.asUint8List());
-        image.dispose();
-      });
+  Future<void> capture(
+    WidgetTester tester,
+    GlobalKey key,
+    String name,
+  ) async => tester.runAsync(() async {
+    final image =
+        await (key.currentContext!.findRenderObject()! as RenderRepaintBoundary)
+            .toImage();
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    await Directory('../artifacts/tmp/edge-alignment97/render')
+        .create(recursive: true);
+    await File('../artifacts/tmp/edge-alignment97/render/$name.rgba')
+        .writeAsBytes(bytes!.buffer.asUint8List());
+    await File(
+      '../artifacts/tmp/edge-alignment97/render/$name.json',
+    ).writeAsString(jsonEncode({'width': image.width, 'height': image.height}));
+    image.dispose();
+  });
   for (final scale in [1.0, 1.3])
     onPlatform(
       '950 by 650 header tabs align with right content and keep touch controls $scale',
       (tester) async {
+        debugPrintSynchronously('header $scale body entered');
         final c = fixture.signedIn()
           ..dock = [
             DockEntry(
@@ -117,6 +133,12 @@ void main() {
               text: '收到的文本内容，清晰直接。',
             ),
           ];
+        if (scale > 1) {
+          await c.appearance.set(
+            mode: AppearanceMode.dark,
+            accent: AccentColor.rose,
+          );
+        }
         final key = await mount(
           tester,
           GlobalSendApp(controller: c),
@@ -124,6 +146,7 @@ void main() {
           scale: scale,
         );
         final tabs = find.byKey(const ValueKey('content-tabs'));
+        debugPrintSynchronously('header $scale mounted');
         expect(
           find.ancestor(of: tabs, matching: find.byType(AppBar)),
           findsOneWidget,
@@ -131,10 +154,19 @@ void main() {
         final right = tester.getRect(
           find.byKey(const ValueKey('receive-scroll')),
         );
-        expect(tester.getTopLeft(tabs).dx, closeTo(right.left, 1));
+        final pane = tester.getRect(
+          find.byKey(const ValueKey('desktop-content-pane')),
+        );
+        expect(
+          tester.getTopLeft(tabs).dx,
+          closeTo(pane.left, .01),
+          reason: 'The tab must not overhang the pane by a few pixels.',
+        );
         expect(
           tester.getBottomRight(tabs).dy,
-          tester.getTopLeft(find.byKey(const ValueKey('desktop-content-pane'))).dy,
+          tester
+              .getTopLeft(find.byKey(const ValueKey('desktop-content-pane')))
+              .dy,
           reason: 'Desktop tabs connect directly to their content pane.',
         );
         expect(tester.getBottomRight(tabs).dy, lessThan(right.top));
@@ -151,7 +183,9 @@ void main() {
           find.byKey(const ValueKey('send-workspace-scroll')),
           findsNothing,
         );
+        debugPrintSynchronously('header $scale geometry checked; capturing');
         await capture(tester, key, 'desktop-$scale');
+        debugPrintSynchronously('header $scale captured; checking tab changes');
         await tester.tap(find.byKey(const ValueKey('content-tab-1')));
         await tester.pumpAndSettle();
         expect(find.text('暂无发送记录'), findsOneWidget);
@@ -159,6 +193,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('receive-scroll')), findsOneWidget);
         expect(tester.takeException(), isNull);
+        debugPrintSynchronously('header $scale complete');
       },
     );
   onPlatform(

@@ -41,6 +41,7 @@ public class ReceivedFilePublicationTest {
             Files.write(partial.toPath(), bytes);
             Files.move(partial.toPath(), complete.toPath());
             assertTrue(ReceivedFilePublication.publish(app, complete.getPath(), null));
+            assertTrue(ReceivedFilePublication.receivedPaths(app).contains(complete.getCanonicalPath()));
             assertTrue(ShadowMediaScannerConnection.getSavedPaths().contains(complete.getPath()));
             assertFalse(ShadowMediaScannerConnection.getSavedPaths().contains(partial.getPath()));
             assertArrayEquals(bytes, Files.readAllBytes(complete.toPath()));

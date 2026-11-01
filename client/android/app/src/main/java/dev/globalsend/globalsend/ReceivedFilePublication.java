@@ -18,6 +18,7 @@ final class ReceivedFilePublication {
             MediaScannerConnection.OnScanCompletedListener completed) throws IOException {
         File file = sharedFile(context, location);
         if (file == null) return false;
+        remember(context,file);
         // Use the final name: scanning the .part file records the wrong type/path.
         // The scanner updates MediaStore.Files/Downloads as well as media collections.
         MediaScannerConnection.scanFile(context, new String[]{file.getPath()}, null, (path, uri) -> {
@@ -25,6 +26,24 @@ final class ReceivedFilePublication {
             if (completed != null) completed.onScanCompleted(path, uri);
         });
         return true;
+    }
+
+    // Record before scanning: the media observer may run before onScanCompleted.
+    // Paths, rather than display names or a whole folder, distinguish our receipt
+    // from unrelated camera/screenshot files in the same destination.
+    private static final Object RECEIPTS_LOCK=new Object();
+    static void remember(Context context,File file) throws IOException {
+        synchronized(RECEIPTS_LOCK) {
+            var state=context.getSharedPreferences("received-media-origins",Context.MODE_PRIVATE);
+            var paths=new java.util.HashSet<>(state.getStringSet("paths",java.util.Set.of()));
+            if(paths.add(file.getCanonicalPath()))state.edit().putStringSet("paths",paths).apply();
+        }
+    }
+    static java.util.Set<String> receivedPaths(Context context) {
+        synchronized(RECEIPTS_LOCK) {
+            return new java.util.HashSet<>(context.getSharedPreferences("received-media-origins",Context.MODE_PRIVATE)
+                .getStringSet("paths",java.util.Set.of()));
+        }
     }
 
     static File sharedFile(Context context, String location) throws IOException {

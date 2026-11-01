@@ -99,8 +99,9 @@ final class RecentMediaSuggestions {
                     collect(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,Manifest.permission.READ_MEDIA_IMAGES,since,seen,handled,media);
                     collect(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,Manifest.permission.READ_MEDIA_VIDEO,since,seen,handled,media);
                     media.sort(Comparator.comparingLong((Media m)->m.added).reversed());
+                    Set<String> received=ReceivedFilePublication.receivedPaths(context);
                     for(String uri:current)
-                        if(handled.contains(Uri.parse(uri).getLastPathSegment()) || missing(uri))missing.add(uri);
+                        if(handled.contains(Uri.parse(uri).getLastPathSegment()) || received(uri,received) || missing(uri))missing.add(uri);
                 }
                 final boolean active=enabled;
                 final long initialSince=since;
@@ -155,6 +156,13 @@ final class RecentMediaSuggestions {
             return false;
         }
     }
+    private boolean received(String value,Set<String> paths) {
+        if(paths.isEmpty())return false;
+        try(Cursor row=context.getContentResolver().query(Uri.parse(value),
+                new String[]{MediaStore.MediaColumns.DATA},null,null,null)) {
+            return row!=null && row.moveToFirst() && paths.contains(row.getString(0));
+        }
+    }
     private boolean canRead(String permission) {
         boolean granted=context.checkSelfPermission(Build.VERSION.SDK_INT>=33?permission:Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED;
         if(Build.VERSION.SDK_INT>=34)granted|=context.checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)==PackageManager.PERMISSION_GRANTED;
@@ -162,16 +170,17 @@ final class RecentMediaSuggestions {
     }
     private void collect(Uri collection,String permission,long since,Set<String> seen,Set<String> handled,List<Media> result) {
         if(!canRead(permission))return;
+        Set<String> received=ReceivedFilePublication.receivedPaths(context);
         String selection=MediaStore.MediaColumns.DATE_ADDED+">=?";
         if(Build.VERSION.SDK_INT>=29)selection+=" AND "+MediaStore.MediaColumns.IS_PENDING+"=0";
         try(Cursor cursor=context.getContentResolver().query(collection,
-                new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.DISPLAY_NAME,MediaStore.MediaColumns.DATE_ADDED},
+                new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.DISPLAY_NAME,MediaStore.MediaColumns.DATE_ADDED,MediaStore.MediaColumns.DATA},
                 selection,new String[]{Long.toString(since/1000)},MediaStore.MediaColumns.DATE_ADDED+" DESC")) {
             if(cursor==null)return;
             int visited=0;
             while(visited++<24 && cursor.moveToNext()) {
                 String id=cursor.getString(0),uri=ContentUris.withAppendedId(collection,Long.parseLong(id)).toString();
-                if(!seen.contains(uri) && !handled.contains(id)) {
+                if(!seen.contains(uri) && !handled.contains(id) && !received.contains(cursor.getString(3))) {
                     String name=cursor.getString(1);
                     if(MediaFileName.needsSuffix(name))name=MediaFileName.withType(name,context.getContentResolver().getType(Uri.parse(uri)));
                     result.add(new Media(uri,name,cursor.getLong(2)));

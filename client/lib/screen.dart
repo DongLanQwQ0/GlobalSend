@@ -1084,22 +1084,26 @@ class _SendScreenState extends State<SendScreen>
                   ),
                 )
               else
-                TextButton(
-                  key: const ValueKey('local-ip-menu'),
-                  onPressed: working ? null : chooseLocalIp,
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: Ui.space0,
-                      vertical: wide ? Ui.space1 : Ui.space0,
+                Flexible(
+                  child: TextButton(
+                    key: const ValueKey('local-ip-menu'),
+                    onPressed: working ? null : chooseLocalIp,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: Ui.space0,
+                        vertical: wide ? Ui.space1 : Ui.space0,
+                      ),
+                      minimumSize: const Size(0, Ui.rowHeight),
+                      foregroundColor: Ui.colors(context).textPrimary,
                     ),
-                    minimumSize: const Size(0, Ui.rowHeight),
-                    foregroundColor: Ui.colors(context).textPrimary,
-                  ),
-                  child: const Text(
-                    'GlobalSend',
-                    style: TextStyle(
-                      fontSize: Ui.textXl,
-                      fontWeight: Ui.weightLabel,
+                    child: const Text(
+                      'GlobalSend',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: Ui.textXl,
+                        fontWeight: Ui.weightLabel,
+                      ),
                     ),
                   ),
                 ),
@@ -1158,7 +1162,12 @@ class _SendScreenState extends State<SendScreen>
                 padding: const EdgeInsets.only(right: Ui.space4),
                 child: SizedBox(
                   key: const ValueKey('desktop-content-navigation'),
-                  width: (MediaQuery.sizeOf(context).width - 56) * 11 / 21,
+                  width:
+                      (MediaQuery.sizeOf(context).width -
+                          Ui.space4 * 2 -
+                          Ui.space3) *
+                      11 /
+                      21,
                   child: Row(
                     children: [
                       Expanded(child: desktopContentTabs()),
@@ -1212,99 +1221,114 @@ class _SendScreenState extends State<SendScreen>
               top: false,
               child: Column(
                 children: [
-                  // Always mounted at a fixed height so the 2px bar never
-                  // pushes the workspace down; only its opacity animates.
-                  SizedBox(
-                    height: 2,
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween<double>(end: working ? 1 : 0),
-                      duration: Ui.durationFast,
-                      curve: Ui.ease,
-                      builder: (context, appear, child) => appear <= 0
-                          ? const SizedBox.shrink()
-                          : Opacity(opacity: appear, child: child),
-                      child: const LinearProgressIndicator(minHeight: 2),
-                    ),
-                  ),
+                  // The progress line overlays the workspace instead of
+                  // separating the header tabs from their content border.
                   Expanded(
-                    child: AnimatedSwitcher(
-                      // A breakpoint reparents the same native drop targets;
-                      // do not keep a second keyed workspace alive while fading.
-                      key: ValueKey(wide),
-                      duration: Ui.durationNormal,
-                      switchInCurve: Ui.ease,
-                      switchOutCurve: Ui.ease,
-                      layoutBuilder: (currentChild, previousChildren) => Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          ...previousChildren,
-                          if (currentChild != null) currentChild,
-                        ],
-                      ),
-                      transitionBuilder: (child, animation) {
-                        final key =
-                            (child.key as ValueKey?)?.value.toString() ?? '';
-                        final mobile = key.startsWith('workspace-mobile-');
-                        return FadeTransition(
-                          opacity: animation,
-                          child: mobile
-                              ? SlideTransition(
-                                  position: Tween<Offset>(
-                                    begin: Offset(
-                                      key.endsWith('-send') ? -.05 : .05,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        AnimatedSwitcher(
+                          // A breakpoint reparents the same native drop targets;
+                          // do not keep a second keyed workspace alive while fading.
+                          key: ValueKey(wide),
+                          duration: Ui.durationNormal,
+                          switchInCurve: Ui.ease,
+                          switchOutCurve: Ui.ease,
+                          layoutBuilder: (currentChild, previousChildren) =>
+                              Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  ...previousChildren,
+                                  if (currentChild != null) currentChild,
+                                ],
+                              ),
+                          transitionBuilder: (child, animation) {
+                            final key =
+                                (child.key as ValueKey?)?.value.toString() ??
+                                '';
+                            final mobile = key.startsWith('workspace-mobile-');
+                            return FadeTransition(
+                              opacity: animation,
+                              child: mobile
+                                  ? SlideTransition(
+                                      position: Tween<Offset>(
+                                        begin: Offset(
+                                          key.endsWith('-send') ? -.05 : .05,
+                                          0,
+                                        ),
+                                        end: Offset.zero,
+                                      ).animate(animation),
+                                      child: child,
+                                    )
+                                  : child,
+                            );
+                          },
+                          child: KeyedSubtree(
+                            key: ValueKey(
+                              !loggedIn
+                                  ? 'connect-page'
+                                  : settingsOpen
+                                  ? 'settings-page'
+                                  : wide
+                                  ? 'workspace-page'
+                                  : 'workspace-mobile-${page == 1 ? 'send' : 'content-$contentTab'}',
+                            ),
+                            child: !loggedIn
+                                ? connectionPage()
+                                : settingsOpen
+                                ? settingsPage()
+                                : wide
+                                ? Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      Ui.space4,
                                       0,
+                                      Ui.space4,
+                                      Ui.space4,
                                     ),
-                                    end: Offset.zero,
-                                  ).animate(animation),
-                                  child: child,
-                                )
-                              : child,
-                        );
-                      },
-                      child: KeyedSubtree(
-                        key: ValueKey(
-                          !loggedIn
-                              ? 'connect-page'
-                              : settingsOpen
-                              ? 'settings-page'
-                              : wide
-                              ? 'workspace-page'
-                              : 'workspace-mobile-${page == 1 ? 'send' : 'content-$contentTab'}',
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          flex: 10,
+                                          child: workspacePane(sendPage()),
+                                        ),
+                                        const SizedBox(width: Ui.space3),
+                                        Expanded(
+                                          flex: 11,
+                                          child: workspacePane(
+                                            contentPane(),
+                                            joined: true,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : page == 0
+                                ? contentPane()
+                                : sendPage(),
+                          ),
                         ),
-                        child: !loggedIn
-                            ? connectionPage()
-                            : settingsOpen
-                            ? settingsPage()
-                            : wide
-                            ? Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  Ui.space4,
-                                  0,
-                                  Ui.space4,
-                                  Ui.space4,
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      flex: 10,
-                                      child: workspacePane(sendPage()),
-                                    ),
-                                    const SizedBox(width: Ui.space3),
-                                    Expanded(
-                                      flex: 11,
-                                      child: workspacePane(
-                                        contentPane(),
-                                        joined: true,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : page == 0
-                            ? contentPane()
-                            : sendPage(),
-                      ),
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: 2,
+                          child: IgnorePointer(
+                            child: TweenAnimationBuilder<double>(
+                              tween: Tween<double>(end: working ? 1 : 0),
+                              duration: Ui.durationFast,
+                              curve: Ui.ease,
+                              builder: (context, appear, child) => appear <= 0
+                                  ? const SizedBox.shrink()
+                                  : Opacity(opacity: appear, child: child),
+                              child: const LinearProgressIndicator(
+                                minHeight: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

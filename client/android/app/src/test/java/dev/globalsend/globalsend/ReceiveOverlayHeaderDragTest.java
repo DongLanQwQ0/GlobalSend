@@ -632,6 +632,27 @@ public class ReceiveOverlayHeaderDragTest {
         assertTrue(((android.graphics.Rect)field(overlay,"lastBounds")).width()>((android.graphics.Rect)field(overlay,"lastBounds")).height());
         overlay.hide();
     }
+    @Test public void physicalHorizontalEdgesIgnoreSideCutoutsWhileKeepingVerticalBars() throws Exception {
+        android.graphics.Rect display=new android.graphics.Rect(0,0,1200,800);
+        android.graphics.Rect bounds=ReceiveOverlay.edgeBounds(display,android.graphics.Insets.of(100,24,60,40));
+        assertEquals(new android.graphics.Rect(0,24,1200,760),bounds);
+        RuntimeEnvironment.setQualifiers("w1200dp-h800dp-land");
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)((View)field(overlay,"root")).getLayoutParams();
+        assertEquals(0,window.getFitInsetsTypes());
+        assertEquals(WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,window.layoutInDisplayCutoutMode);
+        reflow(overlay,bounds);
+        for(boolean right:new boolean[]{false,true}) {
+            window.x=right?bounds.right-window.width:bounds.left;
+            window.y=100;draw((View)field(overlay,"root"));
+            overlay.setCollapsed(true);advanceGeometry(overlay,240);
+            assertEquals(right?display.right-window.width:display.left,window.x);
+            assertInside(window,bounds);
+            overlay.setCollapsed(false);advanceGeometry(overlay,240);
+        }
+        overlay.hide();
+    }
     @Test public void rotationKeepsCollapsedHandleOnItsChosenEdge() throws Exception {
         ReceiveOverlay overlay=create(new int[3]);
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
