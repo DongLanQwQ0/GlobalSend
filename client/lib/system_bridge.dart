@@ -85,6 +85,8 @@ class SystemBridge {
     Map<String, String>? appearance,
     List<Map<String, dynamic>> devices = const [],
     String serverKey = '',
+    List<Map<String, String>> copiedFiles = const [],
+    int referenceRevision = 0,
   }) async {
     if (!Platform.isWindows) {
       return const {'presentation': 'main', 'shown': true};
@@ -96,6 +98,8 @@ class SystemBridge {
             'serverKey': serverKey,
             'items': items,
             'serial': serial,
+            if (copiedFiles.isNotEmpty) 'copiedFiles': copiedFiles,
+            if (referenceRevision != 0) 'referenceRevision': referenceRevision,
             if (appearance != null) 'appearance': appearance,
           }) ??
           {},

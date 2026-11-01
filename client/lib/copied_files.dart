@@ -247,18 +247,50 @@ class CopiedFilesClient {
   ) async {
     final api = _api;
     if (api == null) throw StateError('请先连接中心');
+    final existing = pulls.values
+        .where(
+          (value) =>
+              value['sourceDeviceId'] == offer['sourceDeviceId'] &&
+              value['offerId'] == offer['offerId'] &&
+              (value['state'] == 'pending' || value['state'] == 'sending') &&
+              itemIds.every((id) => (value['itemIds'] as List).contains(id)),
+        )
+        .firstOrNull;
+    if (existing != null) return existing;
     final session = _session, requestId = newId();
-    final response = await api.call(
-      'POST',
-      '/clipboard/files/${offer['sourceDeviceId']}/pull',
-      {'offerId': offer['offerId'], 'requestId': requestId, 'itemIds': itemIds},
-    );
-    if (_current(session, api)) {
-      // A source's socket result can arrive before this HTTP response.
-      pulls.putIfAbsent(requestId, () => response);
-      changed();
+    final pending = <String, dynamic>{
+      'requestId': requestId,
+      'offerId': offer['offerId'],
+      'sourceDeviceId': offer['sourceDeviceId'],
+      'targetDeviceId': _self,
+      'itemIds': itemIds.toList(),
+      'state': 'pending',
+    };
+    pulls[requestId] = pending;
+    changed();
+    try {
+      final response = await api.call(
+        'POST',
+        '/clipboard/files/${offer['sourceDeviceId']}/pull',
+        {
+          'offerId': offer['offerId'],
+          'requestId': requestId,
+          'itemIds': itemIds,
+        },
+      );
+      if (_current(session, api)) {
+        // A source's socket result can arrive before this HTTP response.
+        if (identical(pulls[requestId], pending)) pulls[requestId] = response;
+        changed();
+      }
+      return response;
+    } catch (failure) {
+      if (_current(session, api) && identical(pulls[requestId], pending)) {
+        pulls[requestId] = {...pending, 'state': 'failed', 'error': '$failure'};
+        changed();
+      }
+      rethrow;
     }
-    return response;
   }
 
   Future<void> handle(Map<String, dynamic> message) async {
@@ -312,7 +344,9 @@ class CopiedFilesClient {
           if (!_current(session, api)) return;
           await api.call('PUT', route, {'state': 'sending'});
           if (!_current(session, api)) return;
-          if (!enabled || !targets.contains(request['targetDeviceId'])) {
+          if (!enabled ||
+              request['offerId'] != _local?['offerId'] ||
+              !targets.contains(request['targetDeviceId'])) {
             throw StateError('目标设备已取消文件复制推送');
           }
           await sendFiles(request['targetDeviceId'] as String, paths);

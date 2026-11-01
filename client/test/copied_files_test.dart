@@ -207,4 +207,18 @@ void main() {
     expect(response['state'], 'pending');
     expect(copied.pulls[response['requestId']]?['state'], 'sent');
   });
+  test('a second tap while pull acknowledgement is pending does not request a second transfer', () async {
+    final gate = Completer<void>();
+    api.onPull = (_) => gate.future;
+    final offer = {'offerId': 'remote', 'sourceDeviceId': 'source'};
+    final first = copied.pull(offer, ['file']);
+    expect(copied.pulls.values.single['state'], 'pending');
+    await copied.pull(offer, ['file']);
+    expect(
+      api.calls.where((call) => call.$1 == 'POST' && call.$2.endsWith('/pull')),
+      hasLength(1),
+    );
+    gate.complete();
+    await first;
+  });
 }

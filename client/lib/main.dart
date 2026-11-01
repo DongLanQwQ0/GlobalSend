@@ -53,6 +53,8 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   int receiptSerial = 0;
   String receiptPayload = '';
   int presentationRequest = 0;
+  Set<String> copiedReferenceIds = {};
+  int copiedReferenceRevision = 0;
 
   void receiptChanged() {
     if (!Platform.isWindows) return;
@@ -75,11 +77,20 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           },
         )
         .toList();
+    final references = controller.copiedFiles.references;
+    final referenceIds = references
+        .map((reference) => reference['id']!)
+        .toSet();
+    if (referenceIds.difference(copiedReferenceIds).isNotEmpty) {
+      copiedReferenceRevision++;
+    }
+    copiedReferenceIds = referenceIds;
     final encoded = jsonEncode({
       'items': items,
       'devices': controller.sendablePeers,
       'serverKey': controller.profile?.key ?? '',
       'appearance': controller.appearance.value.toJson(),
+      'copiedFiles': references,
     });
     if (controller.receiptSerial == receiptSerial &&
         encoded == receiptPayload) {
@@ -90,7 +101,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     receiptSerial = controller.receiptSerial;
     receiptPayload = encoded;
     final request = ++presentationRequest;
-    if (items.isEmpty) {
+    if (items.isEmpty && references.isEmpty) {
       controller.receiptPresentedExternally = false;
       final generation = SystemBridge.receiptArrivalGeneration;
       if (generation != null) {
@@ -117,10 +128,13 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         appearance: controller.appearance.value.toJson(),
         devices: controller.sendablePeers,
         serverKey: controller.profile?.key ?? '',
+        copiedFiles: controller.copiedFiles.references,
+        referenceRevision: copiedReferenceRevision,
       );
       if (!mounted ||
           request != presentationRequest ||
-          controller.pendingReceipts.isEmpty ||
+          controller.pendingReceipts.isEmpty &&
+              controller.copiedFiles.references.isEmpty ||
           serial != controller.receiptSerial ||
           state['presentation'] == 'superseded') {
         return;
@@ -146,6 +160,17 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           .where((item) => item.id == id)
           .firstOrNull;
       switch (action['action']) {
+        case 'pullCopiedFile':
+          await controller.pullCopiedFileSelection({
+            'id': id,
+            'serverKey': action['serverKey'],
+          });
+        case 'dismissCopiedFile':
+          await controller.pullCopiedFileSelection({
+            'id': id,
+            'serverKey': action['serverKey'],
+            'dismiss': true,
+          });
         case 'dropToDevice':
           await controller.handleNativeDockEvent({
             ...action,

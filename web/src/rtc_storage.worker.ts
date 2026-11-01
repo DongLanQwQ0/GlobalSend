@@ -322,7 +322,11 @@ async function execute(command:string,data:any):Promise<unknown> {
     }
     case 'finish': {
       const entry=opened.get(data.key);if(!entry || entry.offset!==entry.meta.size)throw new Error('接收文件不完整');
-      await close(data.key);return {file:await entry.handle.getFile()};
+      await close(data.key);
+      const saved=await entry.handle.getFile();
+      // OPFS object names are internal storage keys, not the received filename.
+      // Keep the original name/type for immediate drag-out and forwarding too.
+      return {file:new File([saved],entry.meta.name,{type:entry.meta.mimeType || '',lastModified:saved.lastModified})};
     }
     case 'confirm': {
       const meta=await readMeta(data.key);meta.complete=true;meta.receivedAt ||= Date.now();meta.expires=meta.receivedAt+86400000;await metadata(meta);const rules=await cleanupPreferences();return {receivedAt:meta.receivedAt,expires:cleanupMatches(meta,rules)?meta.receivedAt+rules.retentionHours*3600000:Infinity};

@@ -78,6 +78,7 @@ uint64_t system_generation = 0;
 constexpr UINT kDestroyReceiveDock = WM_APP + 119;
 std::unique_ptr<GlobalSendReceiveDock> receive_dock;
 int64_t receive_serial = -1;
+int64_t copied_reference_revision = -1;
 struct DockReply {
   int64_t generation;
   std::unique_ptr<flutter::MethodResult<Value>> result;
@@ -472,8 +473,10 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
     if (call.method_name() == "presentReceiveDock") {
       auto payload = *arguments;
       const auto serial = Integer(payload, "serial");
-      if (serial != receive_serial) {
+      const auto reference_revision = Integer(payload, "referenceRevision");
+      if (serial != receive_serial || reference_revision != copied_reference_revision) {
         receive_serial = serial;
+        copied_reference_revision = reference_revision;
         if (window_lifecycle) window_lifecycle->ShowReceived();
       }
       const auto generation = static_cast<int64_t>(window_lifecycle
@@ -482,7 +485,9 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       const auto items = payload.find(Value("items"));
       const auto* entries = items == payload.end() ? nullptr :
           std::get_if<flutter::EncodableList>(&items->second);
-      if (!entries || entries->empty()) {
+      const auto references = payload.find(Value("copiedFiles"));
+      const auto* copied = references == payload.end() ? nullptr : std::get_if<flutter::EncodableList>(&references->second);
+      if ((!entries || entries->empty()) && (!copied || copied->empty())) {
         if (receive_dock) CloseDockLater(receive_dock->Generation());
         result->Success(Value(DockState("main", generation, false)));
       } else if (window_lifecycle && window_lifecycle->Focused()) {
@@ -689,6 +694,7 @@ void UnregisterGlobalSendSystem() {
   CompleteDockReplies();
   receive_dock.reset();
   receive_serial = -1;
+  copied_reference_revision = -1;
   SetGlobalSendLaunchConsumer({});
   window_lifecycle.reset();
   ++system_generation;

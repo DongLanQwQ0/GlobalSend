@@ -61,9 +61,12 @@ bool GlobalSendReceiveDock::Open() {
 
 void GlobalSendReceiveDock::Position() {
   const auto entries = payload_.find(Value("items"));
-  const bool multiple = entries != payload_.end() &&
-      std::get_if<flutter::EncodableList>(&entries->second) &&
-      std::get<flutter::EncodableList>(entries->second).size() > 1;
+  const auto references = payload_.find(Value("copiedFiles"));
+  const auto count = (entries != payload_.end() && std::get_if<flutter::EncodableList>(&entries->second)
+      ? std::get<flutter::EncodableList>(entries->second).size() : 0) +
+      (references != payload_.end() && std::get_if<flutter::EncodableList>(&references->second)
+      ? std::get<flutter::EncodableList>(references->second).size() : 0);
+  const bool multiple = count > 1;
   MONITORINFO monitor{sizeof(monitor)};
   const auto target = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY);
   if (!GetMonitorInfoW(target, &monitor)) return;

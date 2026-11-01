@@ -209,7 +209,7 @@ export interface ServerInfo {
     ttlSeconds: number;
     maxTextLength: number;
   };
-  features: { relay: true; relayStreaming?: boolean; multiGroup?: boolean; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean; openUrlIntents?: boolean };
+  features: { relay: true; relayStreaming?: boolean; multiGroup?: boolean; direct: boolean; routePreference?: boolean; directPush?: boolean; rtcDataChannels?: boolean; rtcProbes?: boolean; rtcProbeAddresses?: boolean; httpsPeerProbes?: boolean; rtcParallelProbes?: boolean; groupSharedText?: boolean; folderTransfer?: boolean; receiveErrorReporting?: boolean; fileReuse?: boolean; folderReuse?: boolean; openUrlIntents?: boolean; copiedFiles?: boolean };
   rtc?: { iceServers: { urls: string | string[] }[] };
   enrollment?: {
     mode?: "group-password";
@@ -246,6 +246,9 @@ export type ServerMessage =
   | { type: "hello"; deviceId: string; protocolVersion: 1 }
   | { type: "presence"; deviceId: string; online: boolean }
   | { type: "devices.changed" }
+  | { type: "clipboard.files.changed" }
+  | ({ type: "clipboard.files.pull" } & CopiedFilePull)
+  | ({ type: "clipboard.files.pull.updated" } & CopiedFilePull)
   | { type: "url_intents.changed" }
   | { type: "rtc.changed"; transferId: string; fileId: string; attemptId: string }
   | { type: "rtc.probes.changed" }

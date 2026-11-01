@@ -274,7 +274,11 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                 )
                 .toList()
               ..sort(compareReceivedNewestFirst);
-        final ids = receiptDisplayOrder(order, entries);
+        final references = (next['copiedFiles'] as List? ?? []).cast<Map>();
+        final ids = [
+          ...receiptDisplayOrder(order, entries),
+          ...references.map((reference) => reference['id'] as String),
+        ];
         final added = ids.where((id) => !order.contains(id)).toList();
         entering = order.isEmpty ? {} : added.toSet();
         final frontChanged =
@@ -305,7 +309,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
         }
       });
       unawaited(refreshExportableFiles(next));
-      if (items.isEmpty) {
+      if (items.isEmpty && copiedReferences.isEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || !identical(payload, next)) return;
           // This engine belongs only to the dock. Keeping it warm should not
@@ -314,7 +318,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
           PaintingBinding.instance.imageCache.clearLiveImages();
         });
       }
-      if (!presented && items.isNotEmpty) {
+      if (!presented && (items.isNotEmpty || copiedReferences.isNotEmpty)) {
         presented = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
@@ -328,6 +332,16 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
   List<Map<String, dynamic>> get items =>
       (payload['items'] as List? ?? const [])
           .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+
+  List<Map<String, dynamic>> get copiedReferences =>
+      (payload['copiedFiles'] as List? ?? [])
+          .map(
+            (value) => <String, dynamic>{
+              ...Map<String, dynamic>.from(value as Map),
+              'copiedReference': true,
+            },
+          )
           .toList();
 
   Future<void> refreshExportableFiles(Map<String, dynamic> snapshot) async {
@@ -413,6 +427,8 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
         'serial': snapshot['serial'],
         'arrivalGeneration': snapshot['arrivalGeneration'],
         'itemIds': ids,
+        if (action == 'pullCopiedFile' || action == 'dismissCopiedFile')
+          'serverKey': snapshot['serverKey'],
       });
     } on PlatformException catch (failure) {
       if (mounted) setState(() => error = failure.message ?? '操作未完成');
@@ -436,6 +452,77 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
   }
 
   Widget card(Map<String, dynamic> value) {
+    if (value['copiedReference'] == true) {
+      final busy = value['state'] == 'pending' || value['state'] == 'sending';
+      return Builder(
+        builder: (context) => MetaData(
+          metaData: _dockContentMarker,
+          behavior: HitTestBehavior.translucent,
+          child: Material(
+            color: Ui.colors(context).surfaceMuted,
+            borderRadius: Ui.fieldRadius,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: InkWell(
+                    borderRadius: Ui.fieldRadius,
+                    onTap: busy
+                        ? null
+                        : () => action('pullCopiedFile', value['id'] as String),
+                    child: Padding(
+                      padding: const EdgeInsets.all(Ui.space1),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          AppIcon(
+                            value['kind'] == 'directory'
+                                ? Icons.folder_outlined
+                                : Icons.insert_drive_file_outlined,
+                            size: 28,
+                          ),
+                          const SizedBox(height: Ui.space1),
+                          Text(
+                            value['name'] as String,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: Ui.textSm),
+                          ),
+                          const SizedBox(height: Ui.space0),
+                          Text(
+                            busy
+                                ? '正在准备'
+                                : value['state'] == 'failed'
+                                ? '拉取失败，点击重试'
+                                : '拉取 · ${value['sourceName']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: Ui.text2xs,
+                              color: Ui.colors(context).textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: IconButton(
+                    tooltip: '忽略此条目',
+                    icon: const AppIcon(Icons.close, size: 18),
+                    onPressed: () =>
+                        action('dismissCopiedFile', value['id'] as String),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final entry = DockEntry.fromJson(value);
     entry.progress = (value['progress'] as num?)?.toDouble() ?? 0;
     final time = entry.receivedAtMillis > 0
@@ -661,7 +748,11 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                         child: Text(
                                           deviceMode
                                               ? '发送至设备'
-                                              : '收到 ${items.length} 项',
+                                              : copiedReferences.isEmpty
+                                              ? '收到 ${items.length} 项'
+                                              : items.isEmpty
+                                              ? '可拉取 ${copiedReferences.length} 项'
+                                              : '收到 ${items.length} 项 · 可拉取 ${copiedReferences.length} 项',
                                           style: const TextStyle(
                                             fontSize: Ui.text2xs,
                                             fontWeight: Ui.weightLabel,
@@ -746,6 +837,9 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                       final values = {
                                         for (final item in items)
                                           item['id'] as String: item,
+                                        for (final reference
+                                            in copiedReferences)
+                                          reference['id'] as String: reference,
                                       };
                                       return Listener(
                                         onPointerSignal: (event) {

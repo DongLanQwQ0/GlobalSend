@@ -1,6 +1,7 @@
 import './style.css';
 import {QueueMotion} from './queue_motion';
 import { clipboardSuggestion } from './clipboard_suggestion';
+import { CopiedFilesReceiver } from './copied_files';
 import type { ClipboardSuggestionKind } from './clipboard_suggestion';
 import { folderCards, folderMembers, folderRoot, isFolderRoot, summarizeFolder } from './folder_cards';
 import { centeredDragImage } from './drag_image';
@@ -75,6 +76,8 @@ interface TextView {
 }
 
 class GlobalSend {
+  copiedFiles=new CopiedFilesReceiver((...args)=>this.api.request(...args),()=>this.render());
+  refreshCopiedFiles(){if(this.session && this.info?.features.copiedFiles)return this.copiedFiles.refresh();return Promise.resolve();}
   clipboardSuggestion: ClipboardSuggestionKind | null = null;
   private clipboardSuggestionDismissed=false;
   private clipboardSuggestionBusy=false;
@@ -415,6 +418,7 @@ class GlobalSend {
     rememberedSet(this.key + ':session',this.rememberDevice ? value : '');
   }
   loadPreferences() {
+    this.copiedFiles.reset();
     for(const editor of this.groupEditors.values())editor.reset();this.groupEditors.clear();
     this.receivedAt={};
     this.autoAcceptLimitDraft=null;this.autoAcceptLimitElement=null;
@@ -1372,6 +1376,7 @@ class GlobalSend {
     finally { if(generation===this.generation){this.pairBusy = false; this.render();} }
   }
   signOut() {
+    this.copiedFiles.reset();
     this.archiveLocalContent();
     this.formComposing=null;
     clearTimeout(this.deviceGraceTimer);this.recentDevices.clear();
@@ -1446,6 +1451,7 @@ class GlobalSend {
       this.receiptsInitialized=true;this.openNotificationReceipt();
       this.initializeConsent(); this.render(); this.startReadyUploads();
       if((this.info?.features as {groupSharedText?:boolean}|undefined)?.groupSharedText)void this.shared.refresh();
+      void this.refreshCopiedFiles();
       void this.ensureRtc();void this.ensureFolderCapability();
       this.syncProbeMonitor();
       void this.acceptIncoming();
@@ -1482,7 +1488,7 @@ class GlobalSend {
           try {
             const data = JSON.parse(String(message.data));
             if(data.type==='hello') {
-              this.connected=true;this.helloReceived=true;this.deviceSnapshotRevision++;this.reconnectAttempt=0;this.rtcRegisteredAt=0;this.discoveryRefreshedAt=0;this.folderRegisteredScope='';this.render();void this.ensureFolderCapability();
+              this.connected=true;this.helloReceived=true;this.deviceSnapshotRevision++;this.reconnectAttempt=0;this.rtcRegisteredAt=0;this.discoveryRefreshedAt=0;this.folderRegisteredScope='';this.render();void this.ensureFolderCapability();void this.refreshCopiedFiles();
               if(this.discoveryRefresh)void this.discoveryRefresh.finally(()=>{if(generation===this.generation && this.connected){this.discoveryRefreshedAt=0;void this.refreshDiscovery();}});
               else void this.refreshDiscovery();
             }
@@ -1493,6 +1499,8 @@ class GlobalSend {
               else {if(device){this.recentDevices.deadlines.delete(device.deviceId);device.online=true;this.scheduleDeviceExpiry();this.render();}void this.refresh();}
             }
             else if (data.type === 'devices.changed') {this.deviceSnapshotRevision++;void this.refresh();}
+            else if(data.type==='clipboard.files.changed')void this.refreshCopiedFiles();
+            else if(data.type==='clipboard.files.pull.updated')this.copiedFiles.receive(data);
             else if(data.type==='sharedText.updated'){const groupId=data.groupId || this.session?.groupId;if(!this.info?.features?.multiGroup || this.session?.groups?.some(group=>group.groupId===groupId))this.sharedForGroup(groupId || '').receive(data as SharedDocument);}
             else if(data.type==='rtc.probes.changed')void this.rtcProbes?.changed();
             else if (data.type === 'rtc.changed') {
@@ -2469,6 +2477,9 @@ class GlobalSend {
     on('.modal-backdrop','click',(event,node)=>{if(event.target===node){if(this.modal==='editor')this.toggleEditor(false);else this.closeModal();}});
     on('[data-action]','click',(_event,node)=> {
       const action = node.dataset.action;
+      if(action==='pull-copied-file')void this.copiedFiles.pull(node.dataset.copiedId!);
+      if(action==='dismiss-copied-file')this.copiedFiles.dismiss(node.dataset.copiedId!);
+      if(action==='refresh-copied-files')void this.refreshCopiedFiles();
       if(action==='ip-addresses')void this.openIpAddresses();
       if (action==='reload') location.reload();
       if (action==='settings' || action==='connection') this.openSettings();

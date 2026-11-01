@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/receive_dock_window.dart';
 import 'package:globalsend/models.dart';
+import 'package:globalsend/system_bridge.dart';
 
 import 'native_drag_render_fixture.dart';
 import 'system_font_fixture.dart';
@@ -24,14 +25,16 @@ void main() {
   late List<String> paths;
 
   setUp(() async {
+    messenger.setMockMethodCallHandler(SystemBridge.channel, (_) async => null);
     calls.clear();
     await fixtures.create(recursive: true);
     paths = [for (var i = 0; i < 40; i++) '${fixtures.path}/file-$i.bin'];
     await Future.wait(paths.map((path) => File(path).writeAsBytes([1, 2])));
   });
-  tearDown(
-    () => messenger.setMockMethodCallHandler(ReceiveDockApp.channel, null),
-  );
+  tearDown(() {
+    messenger.setMockMethodCallHandler(ReceiveDockApp.channel, null);
+    messenger.setMockMethodCallHandler(SystemBridge.channel, null);
+  });
 
   Map<String, dynamic> content({bool files = true}) => {
     'arrivalGeneration': 1,
@@ -131,13 +134,8 @@ void main() {
           await tester.pump(const Duration(milliseconds: 650));
         await drag.moveBy(const Offset(25, 0));
         await pumpNativeDrag(tester);
-        expect(find.text('复制 40 项'), findsOneWidget);
-        expect(
-          tester.getSize(
-            find.byKey(const ValueKey('drag-feedback-bulk-file-drag')),
-          ),
-          const Size(184, 140),
-        );
+        // Windows promotes the card bitmap to OLE immediately, not on exit.
+        expect(calls.where((call) => call.method == 'dragOut'), hasLength(1));
         if (kind == PointerDeviceKind.mouse) {
           final updated = content()..['serial'] = 2;
           await messenger.handlePlatformMessage(
@@ -148,7 +146,7 @@ void main() {
             (_) {},
           );
           await pumpNativeDrag(tester);
-          expect(find.text('复制 40 项'), findsOneWidget);
+          expect(calls.where((call) => call.method == 'dragOut'), hasLength(1));
         }
         await drag.moveTo(const Offset(510, 90));
         await pumpNativeDrag(tester);
