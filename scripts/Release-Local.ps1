@@ -99,6 +99,7 @@ function Publish-PhonePackage([string]$Device, [string]$Package, [hashtable]$Rep
     $Report.completedAt=(Get-Date).ToString('o')
 }
 try {
+    Invoke-Checked 'node' @((Join-Path $root 'scripts\generate-user-guides.mjs'),'--check')
     $env:APPDATA = $config
     $env:TEMP = $temp; $env:TMP = $temp
     $env:PUB_CACHE = 'F:\Caches\PubCache'

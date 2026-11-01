@@ -48,7 +48,7 @@ export function diskWorkerFactory(code:string,root:DiskDirectory,indexedDB=index
     private context:any;
     constructor(_url:unknown,_options?:unknown){
       const self={postMessage:(message:unknown)=>queueMicrotask(()=>{if(!this.closed)this.onmessage?.({data:message});})};
-      this.context={self,navigator:{storage:{getDirectory:async()=>root}},indexedDB,TextEncoder,TextDecoder,Uint8Array,Map,Set,JSON,Error,Infinity,Promise,Number,String,Date,decodeURIComponent,encodeURIComponent};
+      this.context={self,navigator:{storage:{getDirectory:async()=>root}},indexedDB,File,Blob,TextEncoder,TextDecoder,Uint8Array,Map,Set,JSON,Error,Infinity,Promise,Number,String,Date,decodeURIComponent,encodeURIComponent};
       runInNewContext(code,this.context);
     }
     postMessage(message:unknown){this.context.self.onmessage({data:message});}

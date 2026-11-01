@@ -1,0 +1,13 @@
+.user-guide-modal{width:100%;max-width:760px}
+.user-guide-platform{color:var(--green);font-size:var(--text-sm);font-weight:600;margin:0 0 var(--space-1)}
+.user-guide-intro{margin:0;line-height:1.6}
+.user-guide-topics{display:flex;flex-wrap:wrap;gap:var(--space-1);margin:var(--space-4) 0 var(--space-3)}
+.user-guide-topics>button{min-height:40px;padding:var(--space-1) var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface);color:var(--text)}
+.user-guide-topics>button.selected{color:var(--green);background:var(--soft);border-color:var(--green)}
+.user-guide-section{padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface)}
+.user-guide-section>h3{margin:0 0 var(--space-3);font-size:var(--text-base)}
+.user-guide-section>ol{margin:0;padding-left:var(--space-4);line-height:1.65}
+.user-guide-section li+li{margin-top:var(--space-3)}
+.user-guide-section li::marker{color:var(--green);font-weight:600}
+.user-guide-entry{display:flex;align-items:center;gap:var(--space-1);width:100%;justify-content:space-between}
+@media(max-width:600px){.user-guide-section{padding:var(--space-3)}.user-guide-topics{margin-top:var(--space-3)}}

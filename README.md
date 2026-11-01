@@ -4,6 +4,8 @@
 
 ## 开始使用
 
+应用内 **设置 → 使用指南** 按平台说明核心操作：[Android](docs/guides/android.md)、[iPad](docs/guides/ipad.md)、[Windows](docs/guides/windows.md)、[Web](docs/guides/web.md)。Android 指南重点讲解悬浮暂存坞；未连接时原生首页也提供指南入口。
+
 网页版：[GlobalSend](https://123.207.180.163/globalsend/app/)。Windows/Android 的中心地址为 `https://123.207.180.163/globalsend`。
 
 新版入组只需同一中心和**至少 10 位的相同组密码**，设备名称自动获取，也可修改。不需要邀请码、互相配对或首次建组确认。发现只通过中心完成；仅在线组员互换 IPv4/IPv6 地址，地址上传后 30 分钟到期，最后一个连接断开立即撤下。文件仍按局域网 → 公网 → 中继传输，复用已测通路径并保留手动选择；最后使用的中继已支持边上传边接收，不再等待整份上传。

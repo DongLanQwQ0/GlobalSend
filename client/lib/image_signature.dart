@@ -5,7 +5,38 @@ bool knownImageName(String name) => const {
   'webp',
   'gif',
   'bmp',
+  'heic',
+  'heif',
+  'avif',
 }.contains(name.split('.').last.toLowerCase());
+
+/// A provider's display name may be suffixless or use a placeholder such as
+/// .pic. Name the transferred copy from its container; never rename the source.
+String imageFileName(String name, (String, String)? type) {
+  if (type == null) return name;
+  final dot = name.lastIndexOf('.');
+  final suffix = dot > 0 ? name.substring(dot + 1).toLowerCase() : '';
+  final actual = type.$2;
+  if (suffix == actual ||
+      (actual == 'jpg' && suffix == 'jpeg') ||
+      (actual == 'heic' && suffix == 'heif'))
+    return name;
+  final replace =
+      knownImageName(name) ||
+      const {'pic', 'image', 'img', 'bin', 'tmp', 'dat'}.contains(suffix);
+  return '${replace && dot > 0 ? name.substring(0, dot) : name}.$actual';
+}
+
+bool ambiguousImageName(String name) =>
+    !name.contains('.') ||
+    const {
+      'pic',
+      'image',
+      'img',
+      'bin',
+      'tmp',
+      'dat',
+    }.contains(name.split('.').last.toLowerCase());
 
 (String, String)? imageTypeHeader(List<int> bytes) {
   bool prefix(List<int> value, [int offset = 0]) {
@@ -24,6 +55,19 @@ bool knownImageName(String name) => const {
   if (prefix('BM'.codeUnits)) return ('image/bmp', 'bmp');
   if (prefix('RIFF'.codeUnits) && prefix('WEBP'.codeUnits, 8)) {
     return ('image/webp', 'webp');
+  }
+  if (prefix('ftyp'.codeUnits, 4)) {
+    final brands = <String>[
+      if (bytes.length >= 12) String.fromCharCodes(bytes.sublist(8, 12)),
+      for (var i = 16; i + 4 <= bytes.length; i += 4)
+        String.fromCharCodes(bytes.sublist(i, i + 4)),
+    ];
+    if (brands.any(const {'avif', 'avis'}.contains))
+      return ('image/avif', 'avif');
+    if (brands.any(const {'heic', 'heix', 'hevc', 'hevx'}.contains))
+      return ('image/heic', 'heic');
+    if (brands.any(const {'mif1', 'msf1'}.contains))
+      return ('image/heif', 'heif');
   }
   return null;
 }

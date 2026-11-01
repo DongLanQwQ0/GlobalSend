@@ -2,6 +2,7 @@ import Flutter
 import UIKit
 import Intents
 import UniformTypeIdentifiers
+import ImageIO
 
 final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionDelegate {
   static let shared = FileSharing()
@@ -11,6 +12,12 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   private weak var dragView: UIView?
   private var dropRegions: [String: Any] = [:]
   private var dragSources: [String: Any] = [:]
+  private var pressedSource = ""
+  private var pressedGeneration = 0
+  private var pressedControl = false
+  private var pressedImage: UIImage?
+  private var dragVisuals: [ObjectIdentifier: NativeDragVisual] = [:]
+  private var dragClipboardRevision: String?
   private lazy var dropInteraction = UIDropInteraction(delegate: self)
   private lazy var dragInteraction: UIDragInteraction = {
     let value = UIDragInteraction(delegate: self); value.isEnabled = true; return value
@@ -25,6 +32,20 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
         if call.method == "setDropRegions" { self.dropRegions = args }
         else { self.dragSources = args }
         self.attachToForegroundScene()
+        result(nil)
+      } else if call.method == "prepareDragSource" {
+        let args = call.arguments as? [String: Any] ?? [:]
+        self.pressedSource = args["sourceId"] as? String ?? ""
+        self.pressedGeneration = args["generation"] as? Int ?? 0
+        self.pressedControl = args["blocked"] as? Bool == true
+        self.pressedImage = nil
+        result(nil)
+      } else if call.method == "setDragPreview" {
+        let args = call.arguments as? [String: Any] ?? [:]
+        if args["sourceId"] as? String == self.pressedSource,
+           args["generation"] as? Int == self.pressedGeneration {
+          self.pressedImage = NativeDragVisual.image(args)
+        }
         result(nil)
       } else if call.method == "clipboardSuggestion" {
         let clipboard=UIPasteboard.general
@@ -159,31 +180,71 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
     guard let view = dragView else { return [] }
     let point = session.location(in: view)
     guard let source = (dragSources["sources"] as? [[String: Any]] ?? []).reversed().first(where: { rect($0, in: view, surface: dragSources).contains(point) }) else { return [] }
-    var items = (source["paths"] as? [String] ?? []).compactMap { path -> UIDragItem? in
-      guard let provider = NSItemProvider(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-      provider.suggestedName = URL(fileURLWithPath: path).lastPathComponent
-      let item = UIDragItem(itemProvider: provider); item.localObject = ["path": path]; return item
+    let sourceID = source["sourceId"] as? String ?? ""
+    if sourceID == pressedSource && pressedControl { return [] }
+    var items: [UIDragItem]
+    dragClipboardRevision = source["clipboardRevision"] as? String
+    if dragClipboardRevision != nil {
+      // Resolve the real providers at the native gesture, not a suggestion's
+      // placeholder label, and leave the unconfirmed sending queue untouched.
+      items = UIPasteboard.general.itemProviders.map { UIDragItem(itemProvider: $0) }
+    } else {
+      items = (source["paths"] as? [String] ?? []).compactMap { path -> UIDragItem? in
+        guard let provider = NSItemProvider(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        provider.suggestedName = URL(fileURLWithPath: path).lastPathComponent
+        let item = UIDragItem(itemProvider: provider)
+        item.localObject = ["path": path]
+        return item
+      }
+      items += (source["texts"] as? [String] ?? []).map { text in
+        let item = UIDragItem(itemProvider: NSItemProvider(object: text as NSString))
+        item.localObject = ["text": text]
+        return item
+      }
     }
-    items += (source["texts"] as? [String] ?? []).map { text in
-      let item = UIDragItem(itemProvider: NSItemProvider(object: text as NSString)); item.localObject = ["text": text]; return item
-    }
-    let area = rect(source, in: view, surface: dragSources)
+    let scaleX = view.bounds.width / CGFloat((dragSources["surfaceWidth"] as? NSNumber)?.doubleValue ?? 1)
+    let scaleY = view.bounds.height / CGFloat((dragSources["surfaceHeight"] as? NSNumber)?.doubleValue ?? 1)
+    let area = CGRect(x: CGFloat((source["previewLeft"] as? NSNumber)?.doubleValue ?? 0) * scaleX,
+                      y: CGFloat((source["previewTop"] as? NSNumber)?.doubleValue ?? 0) * scaleY,
+                      width: CGFloat((source["previewWidth"] as? NSNumber)?.doubleValue ?? 0) * scaleX,
+                      height: CGFloat((source["previewHeight"] as? NSNumber)?.doubleValue ?? 0) * scaleY)
+    let image = sourceID == pressedSource ? pressedImage : nil
     for item in items {
-      item.previewProvider = { [weak view] in
-        guard let snapshot = view?.resizableSnapshotView(from: area, afterScreenUpdates: false, withCapInsets: .zero) else { return nil }
-        let parameters = UIDragPreviewParameters(); parameters.backgroundColor = .clear
-        parameters.visiblePath = UIBezierPath(roundedRect: CGRect(origin: .zero, size: area.size), cornerRadius: 16)
-        return UIDragPreview(view: snapshot, parameters: parameters)
+      let visual = NativeDragVisual(image: image ?? NativeDragVisual.fallback(source, size: area.size), area: area)
+      dragVisuals[ObjectIdentifier(item)] = visual
+      item.previewProvider = {
+        // The session and the initial lift share the exact card pixels. A
+        // snapshot of Flutter's root UIView is neither the card nor its texture.
+        UIDragPreview(view: visual.view(), parameters: visual.parameters())
       }
     }
     return items
+  }
+  func dragInteraction(_ interaction: UIDragInteraction, previewForLifting item: UIDragItem, session: UIDragSession) -> UITargetedDragPreview? {
+    targetedPreview(item)
+  }
+  func dragInteraction(_ interaction: UIDragInteraction, previewForCancelling item: UIDragItem, withDefault defaultPreview: UITargetedDragPreview) -> UITargetedDragPreview? {
+    targetedPreview(item)
+  }
+  private func targetedPreview(_ item: UIDragItem) -> UITargetedDragPreview? {
+    guard let container = dragView, let visual = dragVisuals[ObjectIdentifier(item)] else { return nil }
+    return UITargetedDragPreview(view: visual.view(), parameters: visual.parameters(),
+      target: UIDragPreviewTarget(container: container, center: CGPoint(x: visual.area.midX, y: visual.area.midY)))
   }
   func dragInteraction(_ interaction: UIDragInteraction, sessionAllowsMoveOperation session: UIDragSession) -> Bool { false }
   func dragInteraction(_ interaction: UIDragInteraction, sessionWillBegin session: UIDragSession) {
     channel?.invokeMethod("nativeDrag", arguments: ["active": false, "local": true, "sessionActive": true, "importing": false])
   }
-  func dragInteraction(_ interaction: UIDragInteraction, sessionDidEnd session: UIDragSession) {
-    channel?.invokeMethod("nativeDrag", arguments: ["active": false, "local": true, "sessionActive": false, "importing": false])
+  func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
+    var event: [String: Any] = ["active": false, "local": true, "sessionActive": false, "importing": false]
+    if let revision = dragClipboardRevision {
+      event["clipboardRevision"] = revision
+      event["operation"] = operation == .copy || operation == .move ? "copy" : "cancel"
+    }
+    channel?.invokeMethod("nativeDrag", arguments: event)
+    dragVisuals.removeAll()
+    pressedImage = nil
+    dragClipboardRevision = nil
   }
   private func donate(_ target: SharedSendTarget, completed: @escaping (Error?) -> Void) {
     let name = target.name?.isEmpty == false ? target.name! : "设备"
@@ -269,6 +330,64 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   }
 }
 
+/// UIKit needs a real raster view, not a snapshot of Flutter's GPU surface.
+private struct NativeDragVisual {
+  let image: UIImage
+  let area: CGRect
+  func view() -> UIView {
+    let view = UIImageView(image: image)
+    view.frame = CGRect(origin: .zero, size: area.size)
+    view.contentMode = .scaleToFill
+    view.layer.cornerRadius = 14
+    view.clipsToBounds = true
+    return view
+  }
+  func parameters() -> UIDragPreviewParameters {
+    let parameters = UIDragPreviewParameters()
+    parameters.backgroundColor = .clear
+    parameters.visiblePath = UIBezierPath(roundedRect: CGRect(origin: .zero, size: area.size), cornerRadius: 14)
+    return parameters
+  }
+  static func image(_ args: [String: Any]) -> UIImage? {
+    guard let pixels = args["rgba"] as? FlutterStandardTypedData,
+          let width = args["width"] as? Int, let height = args["height"] as? Int,
+          width > 0, height > 0, pixels.data.count == width * height * 4,
+          let provider = CGDataProvider(data: pixels.data as CFData),
+          let raster = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { return nil }
+    return UIImage(cgImage: raster)
+  }
+  static func fallback(_ source: [String: Any], size: CGSize) -> UIImage {
+    // A rapid native lift can precede Flutter's readback. Render actual text or
+    // the file thumbnail rather than allowing UIKit to lift the entire page.
+    let size = CGSize(width: max(1, size.width), height: max(1, size.height))
+    let paths = source["paths"] as? [String] ?? []
+    var thumbnail: UIImage?
+    if let path = paths.first,
+       let image = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+       let raster = CGImageSourceCreateThumbnailAtIndex(image, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
+         kCGImageSourceThumbnailMaxPixelSize: 600, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) {
+      thumbnail = UIImage(cgImage: raster)
+    }
+    return UIGraphicsImageRenderer(size: size).image { _ in
+      UIColor.secondarySystemBackground.setFill()
+      UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 14).fill()
+      if let thumbnail = thumbnail {
+        let ratio = max(size.width / thumbnail.size.width, size.height / thumbnail.size.height)
+        thumbnail.draw(in: CGRect(x: (size.width - thumbnail.size.width * ratio) / 2,
+          y: (size.height - thumbnail.size.height * ratio) / 2,
+          width: thumbnail.size.width * ratio, height: thumbnail.size.height * ratio))
+      } else {
+        let text = (source["texts"] as? [String])?.first ?? (paths.first.map { URL(fileURLWithPath: $0).lastPathComponent }) ?? (source["label"] as? String ?? "剪贴板")
+        (text as NSString).draw(in: CGRect(origin: .zero, size: size).insetBy(dx: 14, dy: 14),
+          withAttributes: [.font: UIFont.systemFont(ofSize: 16), .foregroundColor: UIColor.label])
+      }
+    }
+  }
+}
+
 final class BulkDragFactory: NSObject, FlutterPlatformViewFactory {
   private let messenger: FlutterBinaryMessenger
   init(messenger: FlutterBinaryMessenger) { self.messenger = messenger; super.init() }
@@ -282,6 +401,7 @@ final class BulkDragView: NSObject, FlutterPlatformView, UIDragInteractionDelega
   private let channel: FlutterMethodChannel
   private var dragging = false
   private var pending: [String: Any]?
+  private var visuals: [ObjectIdentifier: NativeDragVisual] = [:]
   init(frame: CGRect, identifier: Int64, messenger: FlutterBinaryMessenger, arguments: [String: Any]) {
     paths = arguments["paths"] as? [String] ?? []
     texts = arguments["texts"] as? [String] ?? []
@@ -310,15 +430,38 @@ final class BulkDragView: NSObject, FlutterPlatformView, UIDragInteractionDelega
     var items = paths.compactMap { path -> UIDragItem? in
       guard let provider = NSItemProvider(contentsOf: URL(fileURLWithPath: path)) else { return nil }
       provider.suggestedName = URL(fileURLWithPath: path).lastPathComponent
-      return UIDragItem(itemProvider: provider)
+      let item = UIDragItem(itemProvider: provider)
+      item.localObject = ["path": path]
+      return item
     }
-    items += texts.map { UIDragItem(itemProvider: NSItemProvider(object: $0 as NSString)) }
+    items += texts.map { text in
+      let item = UIDragItem(itemProvider: NSItemProvider(object: text as NSString))
+      item.localObject = ["text": text]
+      return item
+    }
+    for item in items {
+      let local = item.localObject as? [String: String] ?? [:]
+      let source: [String: Any] = local["path"].map { ["paths": [$0]] } ?? ["texts": [local["text"] ?? ""]]
+      let size = CGSize(width: 184, height: 140)
+      let visual = NativeDragVisual(image: NativeDragVisual.fallback(source, size: size),
+        area: CGRect(origin: .zero, size: size))
+      visuals[ObjectIdentifier(item)] = visual
+      item.previewProvider = { UIDragPreview(view: visual.view(), parameters: visual.parameters()) }
+    }
     return items
+  }
+  func dragInteraction(_ interaction: UIDragInteraction, previewForLifting item: UIDragItem, session: UIDragSession) -> UITargetedDragPreview? { preview(item) }
+  func dragInteraction(_ interaction: UIDragInteraction, previewForCancelling item: UIDragItem, withDefault defaultPreview: UITargetedDragPreview) -> UITargetedDragPreview? { preview(item) }
+  private func preview(_ item: UIDragItem) -> UITargetedDragPreview? {
+    guard let visual = visuals[ObjectIdentifier(item)] else { return nil }
+    return UITargetedDragPreview(view: visual.view(), parameters: visual.parameters(),
+      target: UIDragPreviewTarget(container: button, center: CGPoint(x: button.bounds.midX, y: button.bounds.midY)))
   }
   func dragInteraction(_ interaction: UIDragInteraction, sessionAllowsMoveOperation session: UIDragSession) -> Bool { false }
   func dragInteraction(_ interaction: UIDragInteraction, sessionWillBegin session: UIDragSession) { dragging = true }
-  func dragInteraction(_ interaction: UIDragInteraction, sessionDidEnd session: UIDragSession) {
+  func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
     dragging = false
+    visuals.removeAll()
     if let value = pending { paths = value["paths"] as? [String] ?? []; texts = value["texts"] as? [String] ?? []; pending = nil }
   }
   deinit { channel.setMethodCallHandler(nil) }

@@ -3158,13 +3158,13 @@ class SendController extends ChangeNotifier {
         final metadata = await ReceiveDestination.stat(path);
         if (!metadata.exists) throw FileSystemException('文件已不存在', path);
         var name = metadata.displayName ?? metadata.name;
-        if (!name.contains('.')) {
+        if (ambiguousImageName(name)) {
           final source = await ReceivedFileAccess.open(path);
           try {
             final reader = await source.file.open();
             try {
               final media = imageTypeHeader(await reader.read(32));
-              if (media != null) name += '.${media.$2}';
+              name = imageFileName(name, media);
             } finally {
               await reader.close();
             }
@@ -3175,6 +3175,18 @@ class SendController extends ChangeNotifier {
         stagedFileNames[path] = name;
         prepared.add(path);
       } else if (await ReceivedFileAccess.exists(path)) {
+        final name = safeName(path);
+        if (ambiguousImageName(name)) {
+          final reader = await File(path).open();
+          try {
+            stagedFileNames[path] = imageFileName(
+              name,
+              imageTypeHeader(await reader.read(32)),
+            );
+          } finally {
+            await reader.close();
+          }
+        }
         prepared.add(path);
       } else {
         throw FileSystemException('文件已不存在', path);
@@ -4104,20 +4116,16 @@ class SendController extends ChangeNotifier {
             ? entry.name
             : displayNames?[path] ?? stagedFileNames[path] ?? safeName(path);
         (String, String)? media;
-        if (clipboardImage || !name.contains('.')) {
+        if (clipboardImage || entry.relativePath.isEmpty) {
           final reader = await file.open();
           try {
             media = imageTypeHeader(await reader.read(32));
           } finally {
             await reader.close();
           }
-          // Standalone gallery names may omit their suffix. Directory names
-          // remain byte-for-byte the source tree, including extensionless leaves.
-          if (media != null &&
-              entry.relativePath.isEmpty &&
-              !name.contains('.')) {
-            name += '.${media.$2}';
-          }
+          // Preserve folder trees exactly; standalone images use their actual
+          // container rather than an iPad provider's .pic/extensionless label.
+          if (entry.relativePath.isEmpty) name = imageFileName(name, media);
         }
         files.add({
           'fileId': id,

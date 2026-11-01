@@ -46,6 +46,8 @@ import 'copied_files_view.dart';
 import 'recent_photos_view.dart';
 import 'installed_apps_picker.dart';
 import 'windows_startup_control.dart';
+import 'user_guide_screen.dart';
+import 'ios_drag_source.dart';
 
 const defaultCenterAddress = String.fromEnvironment(
   'GLOBALSEND_DEFAULT_CENTER',
@@ -1190,6 +1192,15 @@ class _SendScreenState extends State<SendScreen>
                     ],
                   ),
                 ),
+              ),
+            if (!loggedIn)
+              IconButton(
+                key: const ValueKey('open-user-guide'),
+                tooltip: '使用指南',
+                onPressed: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(builder: (_) => const UserGuideScreen()),
+                ),
+                icon: const AppIcon(Icons.info_outline_rounded, size: 22),
               ),
             if (!loggedIn &&
                 (c.profile?.deviceId.isNotEmpty == true ||
@@ -2759,6 +2770,16 @@ class _SendScreenState extends State<SendScreen>
         ),
       ),
     );
+    if (Theme.of(context).platform == TargetPlatform.iOS) {
+      return IOSDragSource.clipboard(
+        revision: suggestion.revision,
+        enabled: !working,
+        onDragAccepted: () => unawaited(
+          clipboardSuggestions.dismissRevision(suggestion.revision),
+        ),
+        child: tile,
+      );
+    }
     if (Theme.of(context).platform != TargetPlatform.windows) return tile;
     return ContentDragSurface(
       entry: DockEntry(
@@ -4990,6 +5011,17 @@ class _SendScreenState extends State<SendScreen>
           if (Platform.isWindows)
             settingsSection('启动', [const WindowsStartupControl()]),
           settingsSection('更新', [const UpdateCheckControl()]),
+          settingsSection('帮助', [
+            ListTile(
+              key: const ValueKey('open-user-guide'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: Ui.space3),
+              title: const Text('使用指南'),
+              trailing: const AppIcon(Icons.chevron_right, size: 20),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(builder: (_) => const UserGuideScreen()),
+              ),
+            ),
+          ]),
           settingsSection('本机', [
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: name,

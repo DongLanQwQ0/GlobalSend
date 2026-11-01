@@ -1,11 +1,14 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/rendering.dart';
 
 import 'file_share.dart';
 import 'models.dart';
+import 'text_selection_surface.dart';
 
 /// UIKit owns the gesture and cross-app drag session. No pointer simulation or
 /// platform-view overlay is placed over Flutter's buttons and text fields.
@@ -16,8 +19,19 @@ class IOSDragSource extends StatefulWidget {
     required this.entry,
     required this.enabled,
     required this.child,
-  });
-  final DockEntry entry;
+  }) : clipboardRevision = null,
+       onDragAccepted = null;
+  const IOSDragSource.clipboard({
+    super.key,
+    required String revision,
+    required this.enabled,
+    required this.child,
+    this.onDragAccepted,
+  }) : entry = null,
+       clipboardRevision = revision;
+  final DockEntry? entry;
+  final String? clipboardRevision;
+  final VoidCallback? onDragAccepted;
   final bool enabled;
   final Widget child;
   @override
@@ -28,9 +42,15 @@ class _IOSDragSourceState extends State<IOSDragSource> {
   static final sources = <_IOSDragSourceState>{};
   static bool scheduled = false;
   static String last = '';
+  static int nextId = 0;
+  final sourceId = 'ios-drag-${nextId++}';
   final bounds = GlobalKey();
+  int pointerGeneration = 0;
+  StreamSubscription<Map<String, dynamic>>? clipboardDragEvents;
   static void schedule() {
-    if (!Platform.isIOS || scheduled) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS || scheduled) {
+      return;
+    }
     scheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       scheduled = false;
@@ -43,10 +63,11 @@ class _IOSDragSourceState extends State<IOSDragSource> {
         if (box is! RenderBox || !box.attached || !box.hasSize) continue;
         final view = View.of(source.context), scale = view.devicePixelRatio;
         surface = view.physicalSize;
-        var area = MatrixUtils.transformRect(
+        final fullArea = MatrixUtils.transformRect(
           box.getTransformTo(null),
           Offset.zero & box.size,
         );
+        var area = fullArea;
         RenderObject child = box;
         for (
           var parent = child.parent;
@@ -54,23 +75,30 @@ class _IOSDragSourceState extends State<IOSDragSource> {
           parent = child.parent
         ) {
           final clip = parent.describeApproximatePaintClip(child);
-          if (clip != null)
+          if (clip != null) {
             area = area.intersect(
               MatrixUtils.transformRect(parent.getTransformTo(null), clip),
             );
+          }
           child = parent;
         }
         area = area.intersect(Offset.zero & (view.physicalSize / scale));
         if (area.isEmpty) continue;
         final entry = source.widget.entry;
         values.add({
+          'sourceId': source.sourceId,
           'left': area.left * scale,
           'top': area.top * scale,
           'right': area.right * scale,
           'bottom': area.bottom * scale,
-          'paths': entry.dragPaths,
-          'texts': entry.kind == 'text' ? [entry.text] : <String>[],
-          'label': entry.title,
+          'previewLeft': fullArea.left * scale,
+          'previewTop': fullArea.top * scale,
+          'previewWidth': fullArea.width * scale,
+          'previewHeight': fullArea.height * scale,
+          'paths': entry?.dragPaths ?? <String>[],
+          'texts': entry?.kind == 'text' ? [entry!.text] : <String>[],
+          'label': entry?.title ?? '剪贴板',
+          'clipboardRevision': ?source.widget.clipboardRevision,
         });
       }
       final signature = '$surface:$values';
@@ -88,15 +116,82 @@ class _IOSDragSourceState extends State<IOSDragSource> {
     });
   }
 
+  Future<void> prepare(PointerDownEvent event) async {
+    if (!widget.enabled || defaultTargetPlatform != TargetPlatform.iOS) return;
+    final generation = ++pointerGeneration;
+    final blocked = isContentDragControlPosition(event.position, event.viewId);
+    await FileShareBridge.channel.invokeMethod<void>('prepareDragSource', {
+      'sourceId': sourceId,
+      'generation': generation,
+      'blocked': blocked,
+    });
+    if (blocked || !mounted) return;
+    var boundary = bounds.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary || boundary.debugNeedsPaint) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      boundary = bounds.currentContext?.findRenderObject();
+    }
+    if (boundary is! RenderRepaintBoundary ||
+        !boundary.attached ||
+        boundary.debugNeedsPaint) {
+      return;
+    }
+    // Flutter is a GPU-backed view: UIView snapshots can be empty. Read only
+    // this card once per press, before UIKit begins its native long-press lift.
+    final image = await boundary.toImage(
+      pixelRatio: math.min(
+        MediaQuery.devicePixelRatioOf(context),
+        1024 / boundary.size.longestSide,
+      ),
+    );
+    try {
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (bytes == null || !mounted || generation != pointerGeneration) return;
+      await FileShareBridge.channel.invokeMethod<void>('setDragPreview', {
+        'sourceId': sourceId,
+        'generation': generation,
+        'width': image.width,
+        'height': image.height,
+        'rgba': bytes.buffer.asUint8List(),
+      });
+    } finally {
+      image.dispose();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     sources.add(this);
+    syncClipboardEvents();
+  }
+
+  @override
+  void didUpdateWidget(IOSDragSource oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    syncClipboardEvents();
+  }
+
+  void syncClipboardEvents() {
+    if (widget.clipboardRevision != null && clipboardDragEvents == null) {
+      clipboardDragEvents = FileShareBridge.dragEvents.listen((event) {
+        if (event['clipboardRevision'] == widget.clipboardRevision &&
+            event['operation'] == 'copy') {
+          widget.onDragAccepted?.call();
+        }
+      });
+    } else if (widget.clipboardRevision == null &&
+        clipboardDragEvents != null) {
+      unawaited(clipboardDragEvents!.cancel());
+      clipboardDragEvents = null;
+    }
   }
 
   @override
   void dispose() {
     sources.remove(this);
+    unawaited(clipboardDragEvents?.cancel());
     schedule();
     super.dispose();
   }
@@ -104,7 +199,11 @@ class _IOSDragSourceState extends State<IOSDragSource> {
   @override
   Widget build(BuildContext context) => _SourcePaint(
     onPaint: schedule,
-    child: KeyedSubtree(key: bounds, child: widget.child),
+    child: Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) => unawaited(prepare(event)),
+      child: RepaintBoundary(key: bounds, child: widget.child),
+    ),
   );
 }
 

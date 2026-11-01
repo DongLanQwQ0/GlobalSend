@@ -6,7 +6,9 @@
   "engines": { "node": ">=24.19.0 <25" },
   "scripts": {
     "setup": "node scripts/run-npm.mjs server ci && node scripts/run-npm.mjs web ci",
-    "build": "node scripts/run-npm.mjs web run build && node scripts/run-npm.mjs server run build",
+    "guides:generate": "node scripts/generate-user-guides.mjs",
+    "guides:check": "node scripts/generate-user-guides.mjs --check",
+    "build": "node scripts/generate-user-guides.mjs --check && node scripts/run-npm.mjs web run build && node scripts/run-npm.mjs server run build",
     "test": "node scripts/run-npm.mjs server test && node scripts/run-npm.mjs web test",
     "dev": "node scripts/dev.mjs",
     "start": "node scripts/start.mjs",

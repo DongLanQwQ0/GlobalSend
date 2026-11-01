@@ -74,16 +74,20 @@ enum SharedImportedFileName {
   static func resolve(source: URL, suggestedName: String?, typeIdentifiers: [String] = []) -> String {
     let name = (suggestedName?.isEmpty == false ? suggestedName! : source.lastPathComponent) as NSString
     let leaf = name.lastPathComponent.isEmpty ? "shared-file" : name.lastPathComponent
-    if !(leaf as NSString).pathExtension.isEmpty ||
-        (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { return leaf }
+    if (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { return leaf }
+    let originalSuffix = (leaf as NSString).pathExtension
     var suffix = source.pathExtension
     #if canImport(ImageIO) && canImport(UniformTypeIdentifiers)
     // Photos often supplies public.file-url first, with a suffixless name.
     // Inspect the image container, without decoding pixels or transcoding it.
     if let image = CGImageSourceCreateWithURL(source as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
        let identifier = CGImageSourceGetType(image),
-       let actual = UTType(identifier as String)?.preferredFilenameExtension {
-      suffix = actual
+       let type = UTType(identifier as String), let actual = type.preferredFilenameExtension {
+      if UTType(filenameExtension: originalSuffix) == type { return leaf }
+      let placeholder = ["pic", "image", "img", "bin", "tmp", "dat"].contains(originalSuffix.lowercased())
+      let imageSuffix = UTType(filenameExtension: originalSuffix)?.conforms(to: .image) == true
+      let stem = placeholder || imageSuffix ? (leaf as NSString).deletingPathExtension : leaf
+      return stem + "." + actual
     }
     if suffix.isEmpty {
       suffix = typeIdentifiers.compactMap { UTType($0)?.preferredFilenameExtension }.first ?? ""
@@ -92,6 +96,7 @@ enum SharedImportedFileName {
       suffix = (try? source.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.preferredFilenameExtension ?? ""
     }
     #endif
+    if !originalSuffix.isEmpty { return leaf }
     return suffix.isEmpty ? leaf : leaf + "." + suffix
   }
 }

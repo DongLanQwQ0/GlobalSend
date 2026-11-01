@@ -65,6 +65,14 @@ struct SharedInboxGroupTests {
     precondition(importedBytes == png, "Keep image bytes unchanged")
     precondition(SharedImportedFileName.resolve(source: suffixless, suggestedName: nil) == "provider-image.png")
     precondition(SharedImportedFileName.resolve(source: suffixless, suggestedName: "original.PNG") == "original.PNG")
+    let pic = fixture.appendingPathComponent("977.pic")
+    try png.write(to: pic)
+    let importedPic = try store.copy(pic, to: importedFolder, suggestedName: "977.pic")
+    precondition(URL(fileURLWithPath: importedPic).lastPathComponent == "977.png")
+    let picBytes = try Data(contentsOf: URL(fileURLWithPath: importedPic))
+    precondition(picBytes == png && FileManager.default.fileExists(atPath: pic.path))
+    precondition(SharedImportedFileName.resolve(source: pic, suggestedName: "wrong.jpg") == "wrong.png")
+    precondition(SharedImportedFileName.resolve(source: pic, suggestedName: "notes.final") == "notes.final.png")
     let jpegSource = fixture.appendingPathComponent("provider-photo")
     let sourceImage = CGImageSourceCreateWithData(png as CFData, nil)!
     let jpeg = CGImageDestinationCreateWithURL(jpegSource as CFURL, UTType.jpeg.identifier as CFString, 1, nil)!

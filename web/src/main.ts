@@ -1,4 +1,5 @@
 import './style.css';
+import {userGuideHtml} from './user_guide';
 import {QueueMotion} from './queue_motion';
 import { clipboardSuggestion } from './clipboard_suggestion';
 import { CopiedFilesReceiver } from './copied_files';
@@ -22,6 +23,7 @@ import { RtcProbeMonitor, orientedProbeAddresses } from './rtc_probe';
 import { droppedFiles, completeFolderParts, directoryParts } from './folder';
 import { acceptsWindowDrop, droppedText, WindowDropFeedback } from './drop';
 import { prepareFolderSend, emptyFileHash } from './folder_send';
+import { imageFileMetadata } from './image_file_name';
 import type { OfferFile } from './folder_send';
 import type { QueueOffer } from './send_batch';
 import { localStorageSupported } from './storage';
@@ -270,7 +272,8 @@ class GlobalSend {
   generation = 0;
   refreshTimer = 0;
   acked = new Set<string>();
-  modal: 'settings'|'pair'|'reader'|'editor'|'library'|'history'|'file-preview'|'receipt'|'ip-addresses'|'device-network'|null = null;
+  guideTopic=0;
+  modal: 'settings'|'pair'|'reader'|'editor'|'library'|'history'|'file-preview'|'receipt'|'ip-addresses'|'device-network'|'user-guide'|null = null;
   private networkDevice='';
   private deviceHold:ReturnType<typeof setTimeout>|null=null;
   private heldDevice='';
@@ -1616,7 +1619,8 @@ class GlobalSend {
         const source=local || await this.fileLibrary.service.get(entry.id),fileId=id();
         const sha256=entry.sha256 || await this.digest(source);
         if(generation!==this.generation)return;
-        files.push({fileId,name:entry.name,size:source.size,mimeType:entry.mimeType || source.type || 'application/octet-stream',sha256,...(entry.relativePath?{relativePath:entry.relativePath,entryKind:'file' as const}:{})});
+        const description=entry.relativePath?{name:entry.name,mimeType:entry.mimeType || source.type || 'application/octet-stream'}:await imageFileMetadata(source,entry.name,entry.mimeType || source.type);
+        files.push({fileId,...description,size:source.size,sha256,...(entry.relativePath?{relativePath:entry.relativePath,entryKind:'file' as const}:{})});
       }
       this.requireFolderReceiver(target,files);
       offer={transferId,targetDeviceId:target,routePreference:this.rtcEnabled?this.routePreference:'relay',entryIds:ids,files};
@@ -2445,6 +2449,7 @@ class GlobalSend {
     return `<section class="transfer-list">${active.length || pending?`<h3>发送中</h3>${pending}${active.join('')}`:''}${finished.length?`<details class="recent-activity advanced-join"><summary>发送记录 <span>${finished.length}</span></summary>${finished.join('')}</details>`:''}</section>`;
   }
   modalHtml() {
+    if(this.modal==='user-guide')return userGuideHtml(this.guideTopic);
     if(this.modal==='device-network')return this.deviceNetworkHtml();
     if(!this.modal)return '';
     if(this.modal==='ip-addresses')return `<div class="modal-backdrop"><section class="modal ip-address-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="ip-address-title"><div class="modal-header"><h2 id="ip-address-title">本机地址</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭地址列表">${icon('close')}</button></div><div class="ip-address-list">${this.ipSources.map(source=>`<section class="ip-address-source"><h3>${e(source.label)}</h3>${source.groups.map(group=>`<section class="ip-address-group"><h4>${group.label}</h4>${group.addresses.map(address=>`<button type="button" class="ip-address" data-stage-ip="${e(address)}"><code>${e(address)}</code>${icon('plus')}</button>`).join('')}</section>`).join('')}</section>`).join('')}${this.ipLoading?'<p class="muted" role="status">正在读取地址…</p>':!this.ipSources.length?`<p class="muted" role="status">${this.ipError || '浏览器未提供可用 IP 地址'}</p>`:''}</div></section></div>`;
@@ -2465,12 +2470,13 @@ class GlobalSend {
       return `<div class="modal-backdrop"><section class="modal reader-modal" draggable="true" data-drag-text="${e(event.eventId)}" role="dialog" aria-modal="true" aria-labelledby="reader-title"><div class="modal-header"><div><h2 id="reader-title">${editable?'编辑已发送文字':'收到的文字'}</h2><p class="reader-meta">${editable?'发给 ':''}${e(this.deviceLabel(editable?event.targetDeviceId:event.sourceDeviceId))} · ${time(event.createdAt)}${event.payload.editedAt?' · 已修改':''}</p></div><button class="icon-button quiet" data-action="close-modal" aria-label="关闭文字">${icon('close')}</button></div><div class="editor-sheet"><div class="editor-host" data-reader-host></div><div class="web-link-list" data-reader-links></div><div class="editor-tools"><span id="reader-count">${characterCount(view.draft)} 字符</span><span>${editable?'Ctrl / ⌘ + Enter 保存':'只读'}</span></div></div><div class="reader-footer"><div class="item-actions"><button class="copy-button" data-action="copy-reader">${icon('copy')} 复制</button></div>${editable?'<button class="primary" data-action="save-reader" aria-keyshortcuts="Control+Enter Meta+Enter">保存</button>':''}</div>${editable?'<p id="reader-status" class="reader-status" role="status" aria-live="polite"></p>':''}</section></div>`;
     }
     return `<div class="modal-backdrop"><section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-header"><h2 id="modal-title">设置</h2><button class="icon-button quiet" data-action="close-modal" aria-label="关闭设置">${icon('close')}</button></div>
-      ${this.appearance.html()}${this.session?this.deviceSettingsHtml()+this.groupsHtml():''}<section class="settings-card server-settings" data-server-settings><label class="settings-field-label" for="server-url">服务器地址</label><form id="server-form" class="server-change"><input id="server-url" type="url" aria-label="服务器地址" placeholder="https://send.example.com" value="${e(this.serverDraft)}"><button class="secondary" type="submit">前往</button></form></section>${this.session?`<div class="settings-footer"><button class="quiet" data-action="signout">断开服务器</button></div>`:''}</section></div>`;
+      <section class="settings-card"><button class="quiet user-guide-entry" data-action="user-guide"><span>使用指南</span>${icon('arrow')}</button></section>${this.appearance.html()}${this.session?this.deviceSettingsHtml()+this.groupsHtml():''}<section class="settings-card server-settings" data-server-settings><label class="settings-field-label" for="server-url">服务器地址</label><form id="server-form" class="server-change"><input id="server-url" type="url" aria-label="服务器地址" placeholder="https://send.example.com" value="${e(this.serverDraft)}"><button class="secondary" type="submit">前往</button></form></section>${this.session?`<div class="settings-footer"><button class="quiet" data-action="signout">断开服务器</button></div>`:''}</section></div>`;
   }
   bind() {
     const on = (selector: string,event: string,handler: (event: Event,node: HTMLElement)=>void) => document.querySelectorAll<HTMLElement>(selector).forEach(node=>{if(node.closest('.receipt-backdrop')){const key=selector+':'+event,bound=this.receiptBindings.get(node) || new Set<string>();if(bound.has(key))return;bound.add(key);this.receiptBindings.set(node,bound);}node.addEventListener(event,event=>handler(event,node));});
     on('[data-appearance-mode]','click',(_event,node)=>this.appearance.set({mode:node.dataset.appearanceMode as AppearanceMode}));
     on('[data-appearance-accent]','click',(_event,node)=>this.appearance.set({accent:node.dataset.appearanceAccent as AccentColor}));
+    on('[data-guide-topic]','click',(_event,node)=>{this.guideTopic=Number(node.dataset.guideTopic);this.render();document.querySelector<HTMLElement>(`[data-guide-topic="${this.guideTopic}"]`)?.focus({preventScroll:true});});
     // Keep the title button alive until its click; a shared-editor blur can
     // otherwise replace the workspace between pointer-down and pointer-up.
     on('[data-action="ip-addresses"]','pointerdown',event=>{if(this.shared.focusedActive && !this.shared.composingActive)event.preventDefault();});
@@ -2483,6 +2489,7 @@ class GlobalSend {
       if(action==='ip-addresses')void this.openIpAddresses();
       if (action==='reload') location.reload();
       if (action==='settings' || action==='connection') this.openSettings();
+      if (action==='user-guide') {this.guideTopic=0;this.modal='user-guide';this.render();}
       if (action==='server-modal') this.openSettings();
       if (action==='open-editor') {this.editingStagedId='';this.toggleEditor(true);}
       if (action==='stage-text') this.stageDraft();
