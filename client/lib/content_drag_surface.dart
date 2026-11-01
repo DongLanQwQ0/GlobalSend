@@ -14,8 +14,9 @@ import 'system_bridge.dart';
 import 'text_selection_surface.dart';
 import 'ui_tokens.dart';
 
-/// Desktop uses an in-window preview before native export. Android hands the
-/// original long press directly to the system, preserving its drag shadow.
+/// Windows hands the first painted preview to native export at drag start,
+/// before its source window can be hidden by a virtual-desktop switch. Android
+/// hands the original long press directly to the system, preserving its shadow.
 class ContentDragSurface extends StatefulWidget {
   static const previewSize = Size(184, 140);
   const ContentDragSurface({
@@ -102,6 +103,11 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
 
   void preparePreview() {
     external.value = false;
+    if (Theme.of(context).platform == TargetPlatform.windows) {
+      // The avatar is already mounted by Draggable. Capture its first paint,
+      // then let OLE own the drag even if the pointer never leaves this window.
+      promoteNativeDrag();
+    }
   }
 
   @override
@@ -111,16 +117,19 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   }
 
   void update(DragUpdateDetails details) {
-    final desktopTouch =
-        Theme.of(context).platform == TargetPlatform.windows &&
-        pointerKind != 'mouse';
+    final nativeDesktop = Theme.of(context).platform == TargetPlatform.windows;
     if (nativePending ||
         external.value ||
-        (!desktopTouch &&
+        (!nativeDesktop &&
             (Offset.zero & MediaQuery.sizeOf(context))
                 .inflate(2)
                 .contains(details.globalPosition)))
       return;
+    promoteNativeDrag();
+  }
+
+  void promoteNativeDrag() {
+    if (nativePending || external.value) return;
     nativePending = true;
     // OLE owns the physical pointer from here. Retire only Flutter's pointer
     // stream so its avatar/recognizer cannot wait forever for an OS-consumed up.

@@ -10,6 +10,7 @@ import 'package:globalsend/system_bridge.dart';
 import 'package:globalsend/text_selection_surface.dart';
 
 import 'widget_test.dart' as fixture;
+import 'native_drag_render_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,7 +24,7 @@ void main() {
   });
 
   testWidgets(
-    'saved file and image preview and metadata hand off outside the window with actual pointer kind',
+    'saved file and image preview and metadata enter native dragging inside the window with actual pointer kind',
     (tester) async {
       final directory = Directory('../artifacts/tmp/windows-export-surface');
       final document = File('${directory.path}/已保存.pdf');
@@ -95,6 +96,8 @@ void main() {
             await tester.pump(
               kLongPressTimeout + const Duration(milliseconds: 30),
             );
+            await pumpNativeDrag(tester);
+            expect(controller.dragged.last, id);
             await input.moveTo(const Offset(1300, 450));
             await input.up();
             await tester.pumpAndSettle();
@@ -104,6 +107,9 @@ void main() {
         }
         final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
         await mouse.down(tester.getCenter(preview));
+        await mouse.moveBy(const Offset(30, 0));
+        await pumpNativeDrag(tester);
+        expect(controller.dragged.last, id);
         await mouse.moveTo(const Offset(1300, 450));
         await mouse.up();
         await tester.pumpAndSettle();

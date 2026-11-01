@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/content_drag_surface.dart';
 import 'package:globalsend/models.dart';
+import 'package:globalsend/system_bridge.dart';
 import 'package:globalsend/text_viewer.dart';
 import 'package:globalsend/web_links.dart';
 
@@ -56,9 +57,16 @@ void main() {
   );
 
   testWidgets(
-    'desktop uses internal feedback then exports once with the original pointer kind',
+    'Windows exports its painted card inside the window before desktop hiding, without waiting for another move',
     (tester) async {
       final exports = <String>[];
+      final previews = <Map<String, Object>>[];
+      final native = Completer<void>();
+      addTearDown(
+        () => tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        ),
+      );
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData(platform: TargetPlatform.windows),
@@ -72,7 +80,11 @@ void main() {
                   source: '',
                   text: 'native',
                 ),
-                onExport: (kind) async => exports.add(kind),
+                onExport: (kind) {
+                  exports.add(kind);
+                  previews.add(SystemBridge.dragPreviewArguments);
+                  return native.future;
+                },
                 child: const SizedBox(
                   key: ValueKey('source'),
                   width: 160,
@@ -89,16 +101,26 @@ void main() {
       );
       await gesture.moveBy(const Offset(35, 10));
       await pumpNativeDrag(tester);
-      expect(exports, isEmpty);
+      expect(exports, ['mouse']);
+      expect(find.byKey(const ValueKey('drag-feedback-desktop')), findsNothing);
+      expect(previews.single['previewRgba'], isNotEmpty);
       expect(
-        find.byKey(const ValueKey('drag-feedback-desktop')),
-        findsOneWidget,
+        previews.single['previewWidth'],
+        (ContentDragSurface.previewSize.width * tester.view.devicePixelRatio)
+            .round(),
       );
       expect(
-        tester.getCenter(find.byKey(const ValueKey('drag-feedback-desktop'))),
-        tester.getCenter(find.byKey(const ValueKey('source'))) +
-            const Offset(35, 10),
+        previews.single['previewHeight'],
+        (ContentDragSurface.previewSize.height * tester.view.devicePixelRatio)
+            .round(),
       );
+      // No real desktop manipulation: simulate source lifecycle hiding only
+      // after proving native ownership started while the pointer was inside.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      await pumpNativeDrag(tester);
+      expect(exports, ['mouse']);
+      expect(native.isCompleted, false);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await gesture.moveTo(const Offset(820, 250));
       await pumpNativeDrag(tester);
       expect(exports, ['mouse']);
@@ -106,6 +128,8 @@ void main() {
       await gesture.moveTo(const Offset(850, 260));
       await pumpNativeDrag(tester);
       expect(exports, ['mouse']);
+      native.complete();
+      await pumpNativeDrag(tester);
       await gesture.up();
     },
   );
@@ -152,9 +176,10 @@ void main() {
       );
       await old.moveBy(const Offset(30, 0));
       await pumpNativeDrag(tester);
+      expect(exports, ['mouse']);
       expect(
         find.byKey(const ValueKey('drag-feedback-returning')),
-        findsOneWidget,
+        findsNothing,
       );
       await old.moveTo(const Offset(830, 250));
       await pumpNativeDrag(tester);
@@ -182,9 +207,10 @@ void main() {
       );
       await next.moveBy(const Offset(30, 0));
       await pumpNativeDrag(tester);
+      expect(exports, ['mouse', 'mouse']);
       expect(
         find.byKey(const ValueKey('drag-feedback-returning')),
-        findsOneWidget,
+        findsNothing,
       );
       await next.up();
       await pumpNativeDrag(tester);
@@ -229,6 +255,8 @@ void main() {
         kind: PointerDeviceKind.touch,
       );
       await tester.pump(const Duration(milliseconds: 650));
+      await pumpNativeDrag(tester);
+      expect(exports, ['touch']);
       await drag.moveTo(const Offset(830, 250));
       await pumpNativeDrag(tester);
       expect(exports, ['touch']);
