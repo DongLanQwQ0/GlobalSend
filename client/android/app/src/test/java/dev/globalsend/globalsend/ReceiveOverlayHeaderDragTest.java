@@ -309,9 +309,12 @@ public class ReceiveOverlayHeaderDragTest {
             assertEquals("window stays on its chosen edge",right?bounds.right-window.width:bounds.left,window.x);
             android.graphics.drawable.LayerDrawable layers=(android.graphics.drawable.LayerDrawable)handle.getBackground();
             android.graphics.Bitmap gripPixels=android.graphics.Bitmap.createBitmap(handle.getWidth(),handle.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);
-            handle.draw(new android.graphics.Canvas(gripPixels));gripPixels.recycle();
+            handle.draw(new android.graphics.Canvas(gripPixels));
             android.graphics.Rect bar=((android.graphics.drawable.InsetDrawable)layers.getDrawable(1)).getDrawable().getBounds();
-            assertTrue("visible grip is toward the screen interior",right?bar.centerX()<handle.getWidth()/2:bar.centerX()>handle.getWidth()/2);
+            assertEquals("accent reaches the attached screen edge",right?handle.getWidth():0,right?bar.right:bar.left);
+            int edgePixel=gripPixels.getPixel(right?handle.getWidth()-1:0,handle.getHeight()/2);
+            assertTrue("edge is visibly painted, not only the OS window",android.graphics.Color.alpha(edgePixel)>0);
+            gripPixels.recycle();
             capture(overlay,right?"inward-right-collapsed":"inward-left-collapsed");
             handle.performClick();advanceGeometry(overlay,240);
             assertRailSide(overlay,right);
@@ -707,6 +710,7 @@ public class ReceiveOverlayHeaderDragTest {
         assertEquals(android.view.HapticFeedbackConstants.CLOCK_TICK,haptics.lastHapticFeedbackPerformed());
         org.robolectric.util.ReflectionHelpers.setField(haptics,"hapticFeedbackPerformed",-1);
         handleTouch(handle,window,80,MotionEvent.ACTION_MOVE,540);
+        assertEquals("finger tracking has no added resistance",520,window.y);
         assertEquals(-1,haptics.lastHapticFeedbackPerformed());
         handleTouch(handle,window,90,MotionEvent.ACTION_UP,550);
         assertEquals(android.view.HapticFeedbackConstants.CONFIRM,haptics.lastHapticFeedbackPerformed());
@@ -733,6 +737,31 @@ public class ReceiveOverlayHeaderDragTest {
             assertTrue(scroller.isFinished());
             assertInside(window,(android.graphics.Rect)field(overlay,"lastBounds"));
         }
+        overlay.hide();
+    }
+    @Test public void handleInertiaHasStrongerFrictionThanTheSystemDefault() throws Exception {
+        ReceiveOverlay overlay=create(new int[3]);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        overlay.setCollapsed(true);advanceGeometry(overlay,240);
+        View root=(View)field(overlay,"root");
+        WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
+        window.y=400;draw(root);
+        android.graphics.Rect bounds=(android.graphics.Rect)field(overlay,"lastBounds");
+        android.widget.OverScroller baseline=new android.widget.OverScroller(RuntimeEnvironment.getApplication());
+        baseline.fling(window.x,window.y,0,1500,window.x,window.x,bounds.top,bounds.bottom-window.height);
+        java.lang.reflect.Method fling=ReceiveOverlay.class.getDeclaredMethod("flingHandle",int.class);fling.setAccessible(true);fling.invoke(overlay,1500);
+        android.widget.OverScroller damped=(android.widget.OverScroller)field(overlay,"handleScroller");
+        int normalDistance=baseline.getFinalY()-window.y, dampedDistance=damped.getFinalY()-window.y;
+        assertTrue("inertia remains available",dampedDistance>0);
+        assertTrue("same release velocity coasts less than 65% of default",dampedDistance<normalDistance*.65f);
+        int dampedFinish=0,normalFinish=0;
+        for(int elapsed=16;elapsed<=3000 && (normalFinish==0 || dampedFinish==0);elapsed+=16) {
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16));
+            baseline.computeScrollOffset();damped.computeScrollOffset();
+            if(damped.isFinished() && dampedFinish==0)dampedFinish=elapsed;
+            if(baseline.isFinished() && normalFinish==0)normalFinish=elapsed;
+        }
+        assertTrue("stronger damping also settles sooner",dampedFinish>0 && normalFinish>dampedFinish);
         overlay.hide();
     }
 }
