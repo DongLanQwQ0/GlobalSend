@@ -169,7 +169,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         this.actions = actions;
         handleScroller=new OverScroller(context);
         // Dampen only the release coast. Pointer tracking remains one-to-one.
-        handleScroller.setFriction(ViewConfiguration.getScrollFriction()*3f);
+        handleScroller.setFriction(ViewConfiguration.getScrollFriction()*8f);
         placement=context.getSharedPreferences("received-dock-placement",Context.MODE_PRIVATE);
         windows = context.getSystemService(WindowManager.class);
         shelf = new TemporaryShelf(context, this::shelfChanged);
@@ -1024,10 +1024,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private int glass(int color,int alpha) { return (color&0x00ffffff)|(alpha<<24); }
     private void styleHandle() {
         android.graphics.drawable.LayerDrawable layers=new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{
-            // Keep the full 18dp inward touch area, but paint through to the
-            // attached edge. Mirroring the controls must not leave a visible gap.
+            // Keep the capsule attached to the edge and its 18dp inward touch
+            // area. Center the accent inside the 12dp capsule, not the hit area.
             new InsetDrawable(shape(glass(appearance.surface,0x33),6),dp(edgeRight?6:0),dp(12),dp(edgeRight?0:6),dp(12)),
-            new InsetDrawable(shape(glass(appearance.accent,0x80),2),dp(edgeRight?14:0),dp(24),dp(edgeRight?0:14),dp(24))
+            new InsetDrawable(shape(glass(appearance.accent,0x80),2),dp(edgeRight?10:4),dp(24),dp(edgeRight?4:10),dp(24))
         });
         layers.setPaddingMode(android.graphics.drawable.LayerDrawable.PADDING_MODE_STACK);
         handle.setBackground(layers);

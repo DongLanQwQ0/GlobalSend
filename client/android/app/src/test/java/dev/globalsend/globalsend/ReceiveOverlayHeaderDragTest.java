@@ -311,7 +311,11 @@ public class ReceiveOverlayHeaderDragTest {
             android.graphics.Bitmap gripPixels=android.graphics.Bitmap.createBitmap(handle.getWidth(),handle.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);
             handle.draw(new android.graphics.Canvas(gripPixels));
             android.graphics.Rect bar=((android.graphics.drawable.InsetDrawable)layers.getDrawable(1)).getDrawable().getBounds();
-            assertEquals("accent reaches the attached screen edge",right?handle.getWidth():0,right?bar.right:bar.left);
+            android.graphics.Rect capsule=((android.graphics.drawable.InsetDrawable)layers.getDrawable(0)).getDrawable().getBounds();
+            assertEquals("capsule stays attached to the screen edge",right?handle.getWidth():0,right?capsule.right:capsule.left);
+            assertEquals("accent centered horizontally in capsule, not touch area",capsule.exactCenterX(),bar.exactCenterX(),.5f);
+            assertEquals("accent centered vertically in capsule",capsule.exactCenterY(),bar.exactCenterY(),.5f);
+            assertEquals("equal visible space on both sides",bar.left-capsule.left,capsule.right-bar.right);
             int edgePixel=gripPixels.getPixel(right?handle.getWidth()-1:0,handle.getHeight()/2);
             assertTrue("edge is visibly painted, not only the OS window",android.graphics.Color.alpha(edgePixel)>0);
             gripPixels.recycle();
@@ -749,11 +753,17 @@ public class ReceiveOverlayHeaderDragTest {
         android.graphics.Rect bounds=(android.graphics.Rect)field(overlay,"lastBounds");
         android.widget.OverScroller baseline=new android.widget.OverScroller(RuntimeEnvironment.getApplication());
         baseline.fling(window.x,window.y,0,1500,window.x,window.x,bounds.top,bounds.bottom-window.height);
+        android.widget.OverScroller previous=new android.widget.OverScroller(RuntimeEnvironment.getApplication());
+        previous.setFriction(ViewConfiguration.getScrollFriction()*3f);
+        previous.fling(window.x,window.y,0,1500,window.x,window.x,bounds.top,bounds.bottom-window.height);
         java.lang.reflect.Method fling=ReceiveOverlay.class.getDeclaredMethod("flingHandle",int.class);fling.setAccessible(true);fling.invoke(overlay,1500);
         android.widget.OverScroller damped=(android.widget.OverScroller)field(overlay,"handleScroller");
         int normalDistance=baseline.getFinalY()-window.y, dampedDistance=damped.getFinalY()-window.y;
         assertTrue("inertia remains available",dampedDistance>0);
-        assertTrue("same release velocity coasts less than 65% of default",dampedDistance<normalDistance*.65f);
+        int previousDistance=previous.getFinalY()-window.y;
+        assertTrue("same release velocity coasts less than 30% of default",dampedDistance<normalDistance*.3f);
+        assertTrue("coast is visibly shorter than the previous 3x release",dampedDistance<previousDistance*.6f);
+        System.out.println("handle coast at 1500 px/s: default="+normalDistance+", previous3x="+previousDistance+", current8x="+dampedDistance);
         int dampedFinish=0,normalFinish=0;
         for(int elapsed=16;elapsed<=3000 && (normalFinish==0 || dampedFinish==0);elapsed+=16) {
             Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16));
