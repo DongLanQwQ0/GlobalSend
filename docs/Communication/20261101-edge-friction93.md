@@ -19,3 +19,5 @@
 ## 交付
 
 使用 `npm run release:local -- -DeferPhone` 构建完整本地包，手机安装与 Chrona 的同机使用串行交接。没有测试真实 Windows 界面、没有操作共享模拟器，也没有修改服务器、网页版或构建 IPA。
+
+构建已完成，Windows 已同步更新运行至 `1.0.74+93`。Chrona 明确让出后，V2527A 的流式覆盖安装成功，包管理器确认 `versionCode=93`，已启动并交还手机；没有触控测试。安装包未上传中心。交付证据位于本任务目录的 `delivery.json`、`install.log`、`installed-version.txt` 和 `launch.log`。
