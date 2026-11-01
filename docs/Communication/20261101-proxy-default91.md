@@ -19,4 +19,10 @@
 
 ## 交付
 
-使用 `npm run release:local -- -DeferPhone` 构建 Windows/APK；Windows 完整覆盖并重启，手机安装待有设备后继续。安装包不上传中心服务器；不构建 IPA，不发布 GitHub Release。
+使用 `npm run release:local -- -DeferPhone` 完成 Windows/APK 构建。Windows 已完整覆盖至 `E:\Programs\GlobalSend` 并重启，实际文件版本 `1.0.74+91`。
+
+用户随后提供 `10.197.184.141:40137`，已连接 vivo V2527A，使用 `adb install -r` 流式覆盖成功并启动；包管理器确认 `versionName=1.0.74`、`versionCode=91`。保留应用数据，没有向手机常用目录另存 APK，没有进行手机触控或真实 Windows 界面测试。
+
+APK：`artifacts/releases/GlobalSend-1.0.74-android-arm64-v8a.apk`，16,369,268 字节。Windows 和 APK 均确认没有字体文件。证据集中在 `artifacts/tmp/proxy-default/`；发布状态已记入 `artifacts/releases/latest-local.json`。
+
+安装包未上传中心服务器；没有构建 IPA、部署 Web 或发布 GitHub Release。
