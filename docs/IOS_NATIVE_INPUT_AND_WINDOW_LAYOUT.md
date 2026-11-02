@@ -52,5 +52,6 @@ iOS/iPadOS 26 之前仍使用既有系统 SafeArea，不加固定的大块顶栏
 - 新顶栏和进度组件的聚焦分析无问题。包含既有大型页面的分析仅有原有风格提示，无编译错误或警告。
 - 检查了工作区与设置页的实际 Flutter 渲染。测试注入窗口控制指标，验证标题避让、正文全宽、缩放后撤销避让；这不是实际 iPad 系统控制的测量结果。Windows 测试宿主不能完整替代 Apple 字体与 UIKit 窗口呈现。
 - `SharedItemLoader` 的 Foundation/UTI 文件、Data 和 URL 共用路径可以直接在 macOS 编译，只有 `UIImage` 后备留在 UIKit 条件分支。现有手动 IPA 工作流在完整 iOS 构建前实际编译并执行 `client/ios/Tests/SharedItemProviderTests.swift`，使用真实 `NSItemProvider` 验证图片优先、file 失败后 Data 后备、普通链接、图像 Data URL 及 blob 拒绝；不创建模拟器，不需要签名，也不替换 UIKit/provider。
-- `RunnerTests.swift` 中的 iOS XCTest 不会因 `flutter build ios` 自动执行，不能把 IPA 编译成功当作那些测试已通过。当前 Windows 环境没有 Xcode，新增 macOS 原生检查的入口已接入但此处尚未运行，由根任务最后单次触发工作流取得结果；UIKit 完整编译和 iPad 实测仍独立保留。
+- macOS 工作流 [41395794956](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41395794956) 已实际执行共享容器与真实 `NSItemProvider` 检查，并完成 UIKit 宿主、分享扩展和 arm64 IPA107 构建。原始回调、handler 计数与通过结果在 `artifacts/tmp/receive106/ios107-ci-full.log`；产物检查在 `artifacts/tmp/receive106/ios107-verified.json`。`RunnerTests.swift` 的 iOS XCTest 并未执行，不把 IPA 编译当作它们通过。
+- 首次106工作流验证了原字节导入，但测试错误地要求同一 UTI 的 file 和 Data handler 都执行；Foundation 实际直接选 Data 并合成文件。107保留此真实路径，同时另用不同 UTI 严格验证 JPEG file 失败三次后 PNG Data 成功，两个 handler 均有实测计数。只改测试，没有为通过检查而改变产品导入行为。首次失败日志保留在 `artifacts/tmp/receive106/ios-native-failure106.log`。
 - 最终 iPad 手动验收仍需：Safari 普通图片与 GlobalSend Web 图片拖入空白发送区/设备卡；多文件分享提前唤起并连续导入；扩展被终止时不永久等待；窗口缩放、旋转后主界面和详情返回按钮不与系统控制重叠。

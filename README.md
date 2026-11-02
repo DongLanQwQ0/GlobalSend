@@ -12,13 +12,13 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows / Android 最新发布包为 **1.0.81+105**。Windows完整客户端已更新并运行于 `E:\Programs\GlobalSend`；手机尚待覆盖更新，实际版本见本机发布记录。自动检查和自动下载安装默认开启；Windows后台空闲时保存草稿、替换完整程序且不打断拖放，Android仍需系统安装确认，见[更新说明](docs/UPDATES.md)。设置“开机自启动”默认关闭；启用后仅后台运行。命令行也支持 `GlobalSend.exe --background`，重复后台启动不抢焦点，见[启动说明](docs/WINDOWS_STARTUP.md)。
+Windows / Android 最新发布包为 **1.0.82+106**。Windows完整客户端已更新并运行于 `E:\Programs\GlobalSend`；Android包已验签发布，手机仍最后确认103，当前无实机连接。自动检查和自动下载安装默认开启；Windows后台空闲替换且不打断拖放，Android需系统安装确认，见[更新说明](docs/UPDATES.md)。开机自启动与 `GlobalSend.exe --background` 见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.81+105 完整 ZIP](artifacts/releases/GlobalSend-1.0.81-windows-x64.zip)。不要单独复制 EXE；重复普通打开会唤起已有窗口。“发送到 GlobalSend”支持传入多个文件或文件夹，加入待发而不自动发送。开启“同步剪贴板”并指定目标后，文字与截图自动发送；Windows接收端选择同一来源并启用后可直接Ctrl+V图片，见[自动剪贴板同步](docs/CLIPBOARD_SYNC.md)。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.82+106 完整 ZIP](artifacts/releases/GlobalSend-1.0.82-windows-x64.zip)。不要单独复制 EXE。系统发送到、整卡拖放、指定设备文字/截图同步保留，见[自动剪贴板同步](docs/CLIPBOARD_SYNC.md)。
 
-Android [1.0.81+105 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.81-android-arm64-v8a.apk)已构建并验签，不打包字体。手机连接已断开，最后确认安装版本仍为103；保留新包，恢复授权连接后覆盖安装，不清数据。可接收Windows自动同步的截图、拉取指定设备的[复制文件引用](docs/COPIED_FILES.md)。[接收文件索引更新](docs/ANDROID_FILE_VISIBILITY.md)已由用户确认，文件选择器与最近文件均可见。图片／视频和剪贴板建议按建议时间排序，清空与建议之间保留双击空白；建议不参与全部拖出，仍可逐项拖出。[Chrona普通链接投递](docs/INTEGRATION_ABI_V1.md#ipad-等设备发送普通链接)继续保留。实际安装状态以[本机发布记录](artifacts/releases/latest-local.json)为准。
+Android [1.0.82+106 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.82-android-arm64-v8a.apk)已构建验签，无打包字体。悬浮坞可直接点开链接；应用生成、接收和拖放缓存图片不再重复进入媒体建议，系统文件选择器仍正常显示收件。当前没有可交接的实机连接，包已保留，恢复后覆盖安装不清数据；实际状态见[本机发布记录](artifacts/releases/latest-local.json)。
 
-iPad / iPhone 的[**1.0.81 (105) 未签名 IPA，约14.9 MB**](artifacts/releases/ios-1.0.81-build105/GlobalSend-iPad-unsigned.ipa)已最后构建并检查，不打包字体，与Windows/Android使用同一源码。剪贴板和媒体建议使用每卡原生拖影，媒体变化、删除及可见闲置30秒计时已补齐；按实际格式补齐 `.pic` 等占位后缀，不改原件。由用户用 iloader 手动签名安装，新拖影仍需真机确认，见[iPad说明](docs/IPAD.md)。**[GitHub 105版](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.81-build105)提供各平台包及独立更新清单；中心不托管安装包。**
+iPad / iPhone 的[**1.0.82 (107) 未签名 IPA，约15.0 MB**](artifacts/releases/ios-1.0.82-build107/GlobalSend-iPad-unsigned.ipa)已最后构建，真实 NSItemProvider 检查及完整 iOS 编译通过，无打包字体。网页图片优先读取实际图像数据；分享先请求打开宿主，再继续导入；顶栏随真实窗口控制区域避让。由用户用 iloader 手动签名安装并复验，见[iPad输入与窗口说明](docs/IOS_NATIVE_INPUT_AND_WINDOW_LAYOUT.md)。[Windows/Android106](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.82-build106)与[iOS107](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.82-build107)分平台发布；107仅修正测试，产品代码相同。**中心不托管安装包。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 
@@ -42,7 +42,7 @@ Web 的“本机文件”两列库支持图片/文本预览、排序、多选、
 - **新内容与窗口**：单项大预览、多项网格，支持拖出、复制和Esc。多选通过按钮进入，单击选择，长按仅拖放，返回退出多选；右键与更多共用菜单。Windows记住窗口bounds，托盘卸载主界面而保留接收核心；有焦点在主窗接收，失焦使用独立右下接收坞，不改主窗口尺寸位置。新版源码预热并复用坞的 UI-only engine，关闭后释放卡片和图片缓存，避免每次收件重新启动引擎。
 - **Android后台**：保留接收服务；使用独立有界系统悬浮窗，不以 Activity 的全屏透明遮罩模拟小窗。默认展开232×116dp，可移动/缩放、圆角，支持细把手及1.5倍透明触控区；双击内容区返回主应用，只在设置中关闭。悬浮窗无法显示时使用通知，文本通知支持复制。按用户选择不新增无障碍权限、不自动检测桌面；长期后台稳定性仍取决于系统调度。
 - **本地文件库**：两列显示本机全部已保存文件，离线、换中心或退出分组后仍可看，按时间、名称或大小排序；通过“多选”或“编辑”进入选择，可重命名、删除或显式转发。目录检查不再作为登录的前置步骤；缺失文件清理引用，暂不可读的目录保留记录。刚掉线的设备在 30 秒内也可尝试发送。图片支持缩略图和缩放预览。
-- **接收与清理**：在“设置 → 存储”选择 Windows 文件夹或 Android 系统目录，直接写入，不再保留第二份永久副本。默认保留 24 小时，可改小时/天，并按类别和大于/小于 MiB 筛选清理。清理会删除本应用接收的文件，包括自选目录内这些文件；不扫描目录中其他文件，不删除原发送文件或另行导出的副本。
+- **接收与清理**：普通收件平铺在接收目录，同名加 `(n)`，真实传输的文件夹仍保留目录树；旧编号目录只迁移已登记的文件及引用，见[目录布局](docs/RECEIVE_STORAGE_LAYOUT.md)。Windows或Android可在“设置 → 存储”选择目录，直接写入，不留第二份永久副本。默认保留24小时，可设置时长、类别和大小。清理仅删除本应用登记的接收文件，不删除原发送文件或用户其它文件。
 - **连接**：刷新、启动、恢复及获焦点重新发布自身 IPv4/IPv6 与 RTC 能力，中心通知同组。原生 HTTPS 地址对、反向 HTTPS 和可用 RTC 的只读检测并行；实际文件选择优先复用已测通形式，同范围按测量延迟排序，按 LAN→公网→中继回落。连接选择共用约一秒预算，未知形式不独占预算；只让一个文件写入器工作，关闭旧连接后才回落。已连传输不限一秒。保留手动选路、断点与大中继确认；真实蜂窝、校园网络仍需实机验收。
 
 本版构建、定向逻辑检查和原生渲染检查已完成，Web 新资源已上线。手机后台/系统回收、实体触屏跨应用拖放及当前浏览器交互仍待实际验收。短步骤见 [实机测试](docs/QUICK_TEST.md)。
