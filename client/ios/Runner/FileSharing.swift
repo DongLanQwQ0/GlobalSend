@@ -4,11 +4,15 @@ import Intents
 import UniformTypeIdentifiers
 import ImageIO
 import Photos
+import Darwin
 
 final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionDelegate {
   static let shared = FileSharing()
   private let work = DispatchQueue(label: "dev.globalsend.share-inbox")
   private var channel: FlutterMethodChannel?
+  private var inboxWatch: DispatchSourceFileSystemObject?
+  private var observedImportEnds = Set<String>()
+  private var windowLayout: [String: Double] = [:]
   private var recentlyOpened: [String: Date] = [:]
   private weak var dragView: UIView?
   private var dropRegions: [String: Any] = [:]
@@ -27,6 +31,7 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   func install(_ messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {
     let bridge = FlutterMethodChannel(name: "dev.globalsend/share", binaryMessenger: messenger)
     channel = bridge
+    observeInbox()
     bridge.setMethodCallHandler { [weak self] call, result in
       guard let self = self else { return }
       if call.method == "setDropRegions" || call.method == "setDragSources" {
@@ -35,6 +40,8 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
         else { self.dragSources = args }
         self.attachToForegroundScene()
         result(nil)
+      } else if call.method == "windowLayout" {
+        result(self.windowLayout)
       } else if call.method == "prepareDragSource" {
         let args = call.arguments as? [String: Any] ?? [:]
         self.pressedSource = args["sourceId"] as? String ?? ""
@@ -80,7 +87,9 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
               try store.ack(args["batchId"] as? String ?? "")
               DispatchQueue.main.async { result(nil) }
             } else {
-              let values = try store.pending().map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
+              let pending = try store.pending()
+              self.observeImportEnds(pending, store: store)
+              let values = try pending.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
               DispatchQueue.main.async { result(values) }
             }
           } catch { DispatchQueue.main.async { result(FlutterError(code: "SHARE_INBOX", message: error.localizedDescription, details: nil)) } }
@@ -88,6 +97,52 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
       } else { result(FlutterMethodNotImplemented) }
     }
     return bridge
+  }
+  private func observeInbox() {
+    guard inboxWatch == nil, let store = try? SharedInboxStore() else { return }
+    let descriptor = open(store.root.path, O_EVTONLY)
+    guard descriptor >= 0 else { return }
+    let watch = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: [.write, .rename], queue: .main)
+    watch.setEventHandler { [weak self] in self?.channel?.invokeMethod("pendingChanged", arguments: nil) }
+    watch.setCancelHandler { close(descriptor) }
+    inboxWatch = watch; watch.resume()
+  }
+  /// Called on `work`. A blocking OS lock wait runs off the UI/manifest queue:
+  /// finish unlocks it, and process termination releases it even without a
+  /// directory write. Thus early handoff cannot leave a dead importer spinning.
+  private func observeImportEnds(_ pending: [SharedPayload], store: SharedInboxStore) {
+    observedImportEnds.formIntersection(Set(pending.filter { $0.importing == true }.map { $0.batchId }))
+    for batch in pending where batch.importing == true {
+      guard observedImportEnds.insert(batch.batchId).inserted else { continue }
+      let folder = store.root.appendingPathComponent(batch.batchId, isDirectory: true)
+      DispatchQueue.global(qos: .utility).async {
+        do { try SharedImportLease.waitForRelease(folder: folder) }
+        catch { DispatchQueue.main.async { self.importFailed(error, result: nil) }; return }
+        self.work.async {
+          self.observedImportEnds.remove(batch.batchId)
+          DispatchQueue.main.async { self.channel?.invokeMethod("pendingChanged", arguments: nil) }
+        }
+      }
+    }
+  }
+  func updateWindowLayout(_ view: UIView) {
+    var leading: CGFloat = 0, trailing: CGFloat = 0, controlsBottom: CGFloat = 0
+    if #available(iOS 26.0, *), UIDevice.current.userInterfaceIdiom == .pad {
+      // UIKit's public corner-adapting guides account for the actual scene's
+      // window controls and change during resize/rotation. Never guess from
+      // screen width or add a permanent tablet-only title offset.
+      let normal = view.layoutGuide(for: .margins()).layoutFrame
+      let horizontal = view.layoutGuide(for: .margins(cornerAdaptation: .horizontal)).layoutFrame
+      let vertical = view.layoutGuide(for: .margins(cornerAdaptation: .vertical)).layoutFrame
+      leading = max(0, horizontal.minX - normal.minX)
+      trailing = max(0, normal.maxX - horizontal.maxX)
+      controlsBottom = max(view.safeAreaInsets.top, vertical.minY)
+    }
+    let value = ["leading": Double(leading), "trailing": Double(trailing),
+      "controlsBottom": Double(controlsBottom), "width": Double(view.bounds.width), "height": Double(view.bounds.height)]
+    guard value != windowLayout else { return }
+    windowLayout = value
+    channel?.invokeMethod("windowLayoutChanged", arguments: value)
   }
   func attachToForegroundScene() {
     guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }),
@@ -118,7 +173,7 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
     session.items.contains { item in
       let provider = item.itemProvider
-      return provider.hasItemConformingToTypeIdentifier(UTType.item.identifier) || provider.canLoadObject(ofClass: UIImage.self)
+      return SharedItemLoader.canLoad(provider)
     }
   }
   func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
@@ -142,33 +197,33 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   private func importItems(_ items: [UIDragItem], device: String = "", result: FlutterResult? = nil) {
     let id = UUID().uuidString, server = dropRegions["serverKey"] as? String ?? ""
     do {
-      let store = try SharedInboxStore(), folder = try store.folder(id)
-      let group = DispatchGroup(), lock = NSLock()
-      var outcomes: [Int: (String?, String?, Error?, Bool)] = [:]
+      let store = try SharedInboxStore()
+      let target = device.isEmpty ? nil : SharedSendTarget(serverKey: server, deviceId: device)
+      let batch = try SharedImportBatch(store: store, id: id, total: items.count, target: target)
+      let group = DispatchGroup()
+      channel?.invokeMethod("pendingChanged", arguments: nil)
       // Start provider loads in performDrop; copy their temporary URLs before
       // each completion returns. The same loader handles the share extension.
       for (index, item) in items.enumerated() {
         if let local = item.localObject as? [String: String] {
-          lock.lock(); outcomes[index] = (local["path"], local["text"], nil, false); lock.unlock()
+          group.enter()
+          work.async {
+            do { try batch.record(index, path: local["path"], text: local["text"], error: nil, temporary: false) }
+            catch { DispatchQueue.main.async { self.importFailed(error, result: nil) } }
+            group.leave()
+          }
           continue
         }
         group.enter()
-        SharedItemLoader.load(item.itemProvider, store: store, folder: folder) { path, text, error in
-          lock.lock(); outcomes[index] = (path, text, error, true); lock.unlock(); group.leave()
+        SharedItemLoader.load(item.itemProvider, store: store, folder: batch.folder) { path, text, error in
+          do { try batch.record(index, path: path, text: text, error: error) }
+          catch { DispatchQueue.main.async { self.importFailed(error, result: nil) } }
+          group.leave()
         }
       }
-      let count = items.count
       group.notify(queue: work) {
-        var payload = SharedPayload(batchId: id, paths: [], texts: [], temporaryPaths: [])
-        for index in 0..<count {
-          guard let (path, text, error, temporary) = outcomes[index] else { continue }
-          if let path = path { payload.paths.append(path); if temporary { payload.temporaryPaths.append(path) } }
-          if let text = text { payload.texts.append(text) }
-          if let error = error { payload.error = error.localizedDescription }
-        }
-        if !device.isEmpty { payload.target = SharedSendTarget(serverKey: server, deviceId: device) }
         do {
-          try store.commit(payload)
+          _ = try batch.finish()
           DispatchQueue.main.async { self.channel?.invokeMethod("pendingChanged", arguments: nil); result?(nil) }
         } catch { DispatchQueue.main.async { self.importFailed(error, result: result) } }
       }
@@ -379,6 +434,18 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   }
 }
 
+/// One native root reports real window-control layout for every Flutter route.
+final class GlobalSendViewController: FlutterViewController {
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    FileSharing.shared.updateWindowLayout(view)
+  }
+  override func viewSafeAreaInsetsDidChange() {
+    super.viewSafeAreaInsetsDidChange()
+    FileSharing.shared.updateWindowLayout(view)
+  }
+}
+
 /// The provider and any in-flight Photos request retain this export. Its
 /// temporary original is removed when the native drag/provider has finished.
 private final class NativeMediaDragExports {
@@ -479,7 +546,7 @@ final class BulkDragView: NSObject, FlutterPlatformView, UIDragInteractionDelega
     channel = FlutterMethodChannel(name: "dev.globalsend/drag-handle/\(identifier)", binaryMessenger: messenger)
     super.init()
     button.frame = frame
-    button.tintColor = UIColor(red: 0.09, green: 0.42, blue: 0.31, alpha: 1)
+    apply(arguments)
     button.setImage(UIImage(systemName: "square.on.square"), for: .normal)
     button.accessibilityLabel = "全部拖拽"
     button.backgroundColor = .clear
@@ -491,9 +558,18 @@ final class BulkDragView: NSObject, FlutterPlatformView, UIDragInteractionDelega
       guard call.method == "update" else { result(FlutterMethodNotImplemented); return }
       let arguments = call.arguments as? [String: Any] ?? [:]
       if self.dragging { self.pending = arguments }
-      else { self.paths = arguments["paths"] as? [String] ?? []; self.texts = arguments["texts"] as? [String] ?? [] }
+      else { self.apply(arguments) }
       result(nil)
     }
+  }
+  private func apply(_ arguments: [String: Any]) {
+    paths = arguments["paths"] as? [String] ?? []
+    texts = arguments["texts"] as? [String] ?? []
+    if let color = (arguments["foreground"] as? NSNumber)?.uint32Value {
+      button.tintColor = UIColor(red: CGFloat((color >> 16) & 255) / 255,
+        green: CGFloat((color >> 8) & 255) / 255, blue: CGFloat(color & 255) / 255,
+        alpha: CGFloat((color >> 24) & 255) / 255)
+    } else { button.tintColor = .label }
   }
   func view() -> UIView { button }
   func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
@@ -532,7 +608,7 @@ final class BulkDragView: NSObject, FlutterPlatformView, UIDragInteractionDelega
   func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
     dragging = false
     visuals.removeAll()
-    if let value = pending { paths = value["paths"] as? [String] ?? []; texts = value["texts"] as? [String] ?? []; pending = nil }
+    if let value = pending { apply(value); pending = nil }
   }
   deinit { channel.setMethodCallHandler(nil) }
 }

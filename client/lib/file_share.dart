@@ -37,17 +37,25 @@ class SharedBatch {
     required this.temporaryPaths,
     this.error,
     this.target,
+    this.importing = false,
+    this.completedItems = 0,
+    this.totalItems = 0,
   });
   final String batchId;
   final List<String> paths, texts, temporaryPaths;
   final String? error;
   final SharedSendTarget? target;
+  final bool importing;
+  final int completedItems, totalItems;
   factory SharedBatch.fromMap(Map<Object?, Object?> value) => SharedBatch(
     batchId: value['batchId'] as String,
     paths: List<String>.from(value['paths'] as List? ?? []),
     texts: List<String>.from(value['texts'] as List? ?? []),
     temporaryPaths: List<String>.from(value['temporaryPaths'] as List? ?? []),
     error: value['error'] as String?,
+    importing: value['importing'] == true,
+    completedItems: value['completedItems'] as int? ?? 0,
+    totalItems: value['totalItems'] as int? ?? 0,
     target: value['target'] is Map
         ? SharedSendTarget.fromMap(value['target'] as Map)
         : null,
@@ -58,15 +66,29 @@ class SharedBatch {
 abstract final class FileShareBridge {
   static const channel = MethodChannel('dev.globalsend/share');
   static bool get supported => Platform.isAndroid || Platform.isIOS;
-  static Future<void> importClipboard() => channel.invokeMethod('importClipboard');
+  static Future<void> importClipboard() =>
+      channel.invokeMethod('importClipboard');
   static final _incoming = StreamController<void>.broadcast();
   static final _dragEvents = StreamController<Map<String, dynamic>>.broadcast();
   static bool _installed = false;
+  static final windowLayout = ValueNotifier<Map<String, dynamic>>(const {});
+  static Future<void> startWindowLayout() async {
+    if (!Platform.isIOS) return;
+    _install();
+    final value = await channel.invokeMapMethod<String, dynamic>(
+      'windowLayout',
+    );
+    if (value != null) windowLayout.value = value;
+  }
+
   static void _install() {
     if (_installed) return;
     _installed = true;
     channel.setMethodCallHandler((call) async {
       if (call.method == 'pendingChanged') _incoming.add(null);
+      if (call.method == 'windowLayoutChanged') {
+        windowLayout.value = Map<String, dynamic>.from(call.arguments as Map);
+      }
       if (call.method == 'nativeDrag')
         _dragEvents.add({
           'type': 'nativeDrag',
@@ -161,7 +183,14 @@ class _BulkDragHandleState extends State<BulkDragHandle> {
   Map<String, Object> get parameters => {
     'paths': widget.paths,
     'texts': widget.texts,
+    'foreground': Ui.colors(context).accent.toARGB32(),
   };
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    sync();
+  }
+
   @override
   void didUpdateWidget(BulkDragHandle oldWidget) {
     super.didUpdateWidget(oldWidget);

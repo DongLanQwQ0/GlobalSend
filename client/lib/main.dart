@@ -17,6 +17,7 @@ import 'app_update_ui.dart';
 import 'receive_dock_window.dart';
 import 'ios_back_swipe.dart';
 import 'file_share.dart';
+import 'shared_import_notice.dart';
 import 'url_intent_notice.dart';
 
 void main(List<String> args) {
@@ -49,6 +50,8 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   StreamSubscription<void>? shareSubscription;
   Future<void>? shareWork;
   bool shareAgain = false;
+  bool shareInputsReady = false;
+  final shareImports = ValueNotifier<List<SharedBatch>>([]);
   bool windowVisible = true;
   bool updateDraftsReady = false;
   final updatePointers = <int>{};
@@ -270,6 +273,19 @@ class _GlobalSendAppState extends State<GlobalSendApp>
   @override
   void initState() {
     super.initState();
+    unawaited(FileShareBridge.startWindowLayout());
+    if (FileShareBridge.supported) {
+      shareSubscription = FileShareBridge.incoming.listen(
+        (_) => unawaited(drainSharedInputs()),
+        onError: (Object error) {
+          if (mounted) {
+            controller.message = '未能导入分享内容：$error';
+            controller.changed();
+          }
+        },
+      );
+      unawaited(drainSharedInputs());
+    }
     WidgetsBinding.instance.addObserver(this);
     configureUpdateHandoff();
     receiptSerial = controller.receiptSerial;
@@ -311,17 +327,9 @@ class _GlobalSendAppState extends State<GlobalSendApp>
       }
     }
     updateDraftsReady = true;
+    shareInputsReady = true;
     controller.updates.activityChanged();
     if (FileShareBridge.supported) {
-      shareSubscription ??= FileShareBridge.incoming.listen(
-        (_) => unawaited(drainSharedInputs()),
-        onError: (Object error) {
-          if (mounted) {
-            controller.message = '未能导入分享内容：$error';
-            controller.changed();
-          }
-        },
-      );
       await drainSharedInputs();
     }
     if (Platform.isWindows) await SystemBridge.drainLaunchFiles();
@@ -424,12 +432,22 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         () async {
           do {
             shareAgain = false;
-            for (final batch in await FileShareBridge.pending()) {
+            final batches = await FileShareBridge.pending();
+            if (!mounted || !identical(owner, controller)) return;
+            shareImports.value = batches;
+            for (final batch in batches) {
               if (!mounted || !identical(owner, controller)) return;
+              if (batch.importing || !shareInputsReady) continue;
               if (batch.error != null) {
                 owner.message = batch.error!;
                 owner.changed();
-                continue;
+                if (batch.paths.isEmpty && batch.texts.isEmpty) {
+                  await FileShareBridge.ack(batch.batchId);
+                  shareImports.value = shareImports.value
+                      .where((item) => item.batchId != batch.batchId)
+                      .toList();
+                  continue;
+                }
               }
               final stored = await owner.stageSharedInputs(
                 batch.batchId,
@@ -440,6 +458,9 @@ class _GlobalSendAppState extends State<GlobalSendApp>
               );
               if (stored) {
                 await FileShareBridge.ack(batch.batchId);
+                shareImports.value = shareImports.value
+                    .where((item) => item.batchId != batch.batchId)
+                    .toList();
                 if (batch.target != null) {
                   try {
                     await owner.sendSharedBatch(batch);
@@ -453,6 +474,9 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           } while (shareAgain && mounted);
         }().catchError((Object error) {
           if (mounted && identical(owner, controller)) {
+            shareImports.value = shareImports.value
+                .where((batch) => batch.importing)
+                .toList();
             owner.message = '未能导入分享内容：$error';
             owner.changed();
           }
@@ -511,6 +535,7 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     if (Platform.isWindows) SystemBridge.beforeUpdateExit = null;
     windowSubscription?.cancel();
     shareSubscription?.cancel();
+    shareImports.dispose();
     WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(receiptChanged);
     controller.appearance.removeListener(appearanceChanged);
@@ -571,9 +596,12 @@ class _GlobalSendAppState extends State<GlobalSendApp>
                       child: NativeDropFeedback(
                         active: controller.nativeDragActive,
                         importing: controller.nativeImporting,
-                        child: UrlIntentNotice(
-                          integration: controller.urlIntents,
-                          child: AppUpdateNotice(child: child!),
+                        child: SharedImportNotice(
+                          batches: shareImports,
+                          child: UrlIntentNotice(
+                            integration: controller.urlIntents,
+                            child: AppUpdateNotice(child: child!),
+                          ),
                         ),
                       ),
                     ),

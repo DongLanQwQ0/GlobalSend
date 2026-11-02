@@ -1,4 +1,5 @@
 import 'app_icon.dart';
+import 'ios_window_header.dart';
 
 import 'dart:io';
 import 'dart:math' as math;
@@ -101,7 +102,7 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
         ),
         const SizedBox(width: Ui.space0),
       ],
-    ),
+    ).windowSafe(),
     body: LayoutBuilder(
       builder: (context, bounds) {
         viewport = bounds.biggest;

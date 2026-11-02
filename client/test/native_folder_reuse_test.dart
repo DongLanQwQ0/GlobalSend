@@ -240,7 +240,7 @@ void main() {
       await c.acceptSelected(
         incoming.first,
         feature
-            ? [incoming.first.fileId]
+            ? [incoming.last.fileId]
             : incoming.map((entry) => entry.fileId).toList(),
         reconcileAfter: false,
       );

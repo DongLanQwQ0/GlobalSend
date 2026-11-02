@@ -182,6 +182,17 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     static void restoreShelf() {
         ReceiveOverlay overlay=current.get();if(overlay!=null)overlay.restoreIfEnabled();
     }
+    static void referencesRelocated(android.content.Context context) {
+        ReceiveOverlay overlay=current.get();if(overlay==null)return;
+        boolean changed=false;
+        for(Map.Entry<String,ReceiveNotifications.Receipt> entry:overlay.items.entrySet()){
+            try {
+                ReceiveNotifications.Receipt next=ReceivedPathRelocations.resolve(context,entry.getValue());
+                if(next!=entry.getValue()){entry.setValue(next);changed=true;}
+            }catch(java.io.IOException unavailable){android.util.Log.w("GlobalSend","Cannot resolve receipt migration",unavailable);return;}
+        }
+        if(changed && overlay.root!=null)overlay.renderKeepingScroll();
+    }
     private void restoreIfEnabled() {
         if(root!=null || !context.getSharedPreferences("received-popup-settings",Context.MODE_PRIVATE).getBoolean("enabled",true) ||
             !android.provider.Settings.canDrawOverlays(context))return;
@@ -816,6 +827,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             card.setClipToOutline(true);
             boolean pending = shelfVisible && shelf.pendingRemoval(receipt.id);
             View content;
+            TextView linkBody=null;
             boolean picture=receipt.text == null && !receipt.localPath.isEmpty() &&
                 receipt.fileName.toLowerCase(java.util.Locale.ROOT).matches(".*\\.(png|jpe?g|webp|gif|bmp|heic|heif|mp4|mov|m4v|webm|mkv|3gp)$");
             if (picture) {
@@ -833,6 +845,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 text.setPadding(dp(8),dp(8),dp(8),dp(28));
                 text.setMaxLines(3);
                 text.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                if(receipt.text!=null) {DockWebLinks.decorate(text,appearance.accent);linkBody=text;}
                 if(receipt.text==null && !receipt.localPath.isEmpty() && !receipt.fileName.contains(".")) {
                     FrameLayout preview=new FrameLayout(context);
                     preview.addView(text,new FrameLayout.LayoutParams(-1,-1));
@@ -870,11 +883,29 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 card.addView(control("复制", "复制", () -> copy(receipt)),copySize);
             }
             styleCard(card,pending);
+            final TextView links=linkBody;
+            final float[] tap={Float.NaN,Float.NaN};
+            final float[] began={0,0};final boolean[] moved={false};
+            card.setOnTouchListener((view,event) -> {
+                if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
+                    began[0]=event.getX();began[1]=event.getY();moved[0]=false;
+                    tap[0]=tap[1]=Float.NaN;
+                } else if(event.getActionMasked()==MotionEvent.ACTION_MOVE &&
+                        Math.hypot(event.getX()-began[0],event.getY()-began[1])>ViewConfiguration.get(context).getScaledTouchSlop()) {
+                    moved[0]=true;
+                } else if(event.getActionMasked()==MotionEvent.ACTION_UP && !moved[0]) {
+                    tap[0]=event.getX();tap[1]=event.getY();
+                } else if(event.getActionMasked()==MotionEvent.ACTION_CANCEL) {
+                    moved[0]=true;tap[0]=tap[1]=Float.NaN;
+                }
+                return false;
+            });
             card.setOnClickListener(view -> {
+                if(moved[0])return;
                 feedback(HapticFeedbackConstants.VIRTUAL_KEY);
                 if(shelfVisible && shelf.isSuggested(receipt.id))
                     shelf.add(List.of(receipt.localPath),List.of(),Map.of(receipt.localPath,receipt.fileName));
-                else queueOpen(receipt);
+                else queueOpen(receipt,DockWebLinks.at(links,tap[0],tap[1]));
             });
             card.setOnLongClickListener(view -> {
                 return export(view, java.util.Collections.singletonList(receipt));
@@ -1102,9 +1133,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if(pendingOpen!=null)main.removeCallbacks(pendingOpen);
         pendingOpen=null;
     }
-    private void queueOpen(ReceiveNotifications.Receipt receipt) {
+    private void queueOpen(ReceiveNotifications.Receipt receipt,android.net.Uri link) {
         cancelPendingOpen();View owner=root;
-        pendingOpen=() -> {pendingOpen=null;if(root==owner)open(receipt);};
+        pendingOpen=() -> {pendingOpen=null;if(root==owner) {if(link!=null)openLink(link);else open(receipt);}};
         main.postDelayed(pendingOpen,ViewConfiguration.getDoubleTapTimeout());
     }
     private void refreshPendingStyles() {
@@ -1437,6 +1468,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 DockShareProvider.register(context, new java.io.File(receipt.localPath), receipt.fileName);
             AndroidFileOpener.open(context, uri);
         } catch (Exception unavailable) { feedbackResult(false);android.widget.Toast.makeText(context, "无法打开文件", android.widget.Toast.LENGTH_SHORT).show(); }
+    }
+    private void openLink(android.net.Uri link) {
+        try {DockWebLinks.open(context,link);}
+        catch(RuntimeException unavailable) {feedbackResult(false);android.widget.Toast.makeText(context,"无法打开网址",android.widget.Toast.LENGTH_SHORT).show();}
     }
 
     /** The whole title row moves the window; taps and stationary long presses

@@ -631,10 +631,11 @@ class SendController extends ChangeNotifier {
   }
 
   String _relocatedSavedPath(String path) =>
-      _savedFilesStore?.relocatedLocations[path] ?? path;
+      _savedFilesStore?.relocatedPath(path) ?? path;
 
   void _relocateSavedEntry(DockEntry entry) {
     entry.localPath = _relocatedSavedPath(entry.localPath);
+    entry.partialPath = _relocatedSavedPath(entry.partialPath);
     entry.sourceReference = _relocatedSavedPath(entry.sourceReference);
   }
 
@@ -686,6 +687,8 @@ class SendController extends ChangeNotifier {
       );
       await store.load();
       _savedFilesStore = store;
+      await store.flattenLegacyLayout();
+      _applyRelocatedSavedPaths();
       return store;
     }();
   }
@@ -719,11 +722,11 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> refreshSavedFiles({bool cleanup = false}) async {
-    await pruneSentReferences();
     final store = await _savedStore();
+    _applyRelocatedSavedPaths();
+    await pruneSentReferences();
     if (store == null) return;
     final current = profile;
-    _applyRelocatedSavedPaths();
     var stalePaths = false;
     if (current != null) {
       for (final entry
@@ -783,6 +786,9 @@ class SendController extends ChangeNotifier {
         }
       }
     }
+    await store.flattenLegacyLayout();
+    _applyRelocatedSavedPaths();
+    await save();
     await refreshSavedFiles(cleanup: true);
   }
 
@@ -6075,7 +6081,7 @@ class SendController extends ChangeNotifier {
     File? temporary;
     ReceiveFileHandle? destinationHandle;
     String managedTemporaryLocation = '';
-    File? destination;
+    var legacyManagedPartial = false;
     var directAttempt = false;
     var preparingDestination = false;
     var discardPartial = false;
@@ -6183,11 +6189,16 @@ class SendController extends ChangeNotifier {
       item.localPath = '';
       preparingDestination = true;
       final store = await _savedStore();
+      _relocateSavedEntry(item);
       final resumeManaged =
           item.partialPath.isNotEmpty &&
           await ReceiveDestination.isOwned(item.partialPath) &&
           (await ReceiveDestination.stat(item.partialPath)).exists;
       var customDirectory = store?.receiveDestinationLocation ?? '';
+      if (customDirectory.isEmpty) {
+        customDirectory = '${(await documentsDirectory()).path}/GlobalSend';
+        await Directory(customDirectory).create(recursive: true);
+      }
       if (item.relativePath.isNotEmpty) {
         if (customDirectory.isEmpty) {
           customDirectory = '${(await documentsDirectory()).path}/GlobalSend';
@@ -6205,56 +6216,51 @@ class SendController extends ChangeNotifier {
           : item.relativePath.isNotEmpty
           ? null
           : await _defaultPartial(item, p);
-      if (resumeManaged ||
-          customDirectory.isNotEmpty && defaultPartial == null) {
-        destinationHandle = resumeManaged
-            ? await ReceiveDestination.openHandle(
-                item.partialPath,
-                writable: true,
-              )
-            : await ReceiveDestination.create(
-                destinationLocation: customDirectory,
-                name: '${safeName(item.title)}.part',
-              );
-        managedTemporaryLocation = destinationHandle.location;
-        temporary = File(destinationHandle.ioPath);
-        item.partialPath = managedTemporaryLocation;
-      } else {
-        var dir = Directory(
-          '${(await documentsDirectory()).path}/GlobalSend/${p.key}/${safeName(p.deviceId)}/${safeName(item.fileId)}',
-        );
-        _requireSession(epoch, a, p);
-        await dir.create(recursive: true);
-        destination = File('${dir.path}/${safeName(item.title)}');
-        if (defaultPartial != null) {
-          destination = File(
-            defaultPartial.path.substring(0, defaultPartial.path.length - 5),
-          );
-        }
-        if (await destination.exists()) {
-          if (await destination.length() == item.size &&
-              (await sha256.bind(destination.openRead()).first).toString() ==
-                  remote['sha256']) {
-            item.localPath = destination.path;
-            await a.call('POST', '${fileRoute(item)}/received', {
-              'transport':
-                  remote['transport'] ??
-                  (['lan', 'public', 'direct'].contains(item.route)
-                      ? 'direct'
-                      : 'relay'),
-            });
-            item.status = 'received';
-            item.receivedBytes = item.size;
-            await _rememberSavedFile(item, p);
-            return;
+      destinationHandle = resumeManaged
+          ? await ReceiveDestination.openHandle(
+              item.partialPath,
+              writable: true,
+            )
+          : await ReceiveDestination.create(
+              destinationLocation: customDirectory,
+              name: safeName(item.title),
+            );
+      managedTemporaryLocation = destinationHandle.location;
+      temporary = File(destinationHandle.ioPath);
+      legacyManagedPartial =
+          resumeManaged &&
+          RegExp(
+            '^${RegExp.escape(safeName(item.title))}(?: \\([1-9][0-9]*\\))?\\.part\$',
+          ).hasMatch(destinationHandle.name);
+      if (defaultPartial != null) {
+        try {
+          await store?.beginPartialRelocation(managedTemporaryLocation);
+          await defaultPartial.openRead().pipe(temporary.openWrite());
+          if (store != null) {
+            await store.rememberPartialRelocation(
+              profile: p,
+              entry: item,
+              oldPath: defaultPartial.path,
+              newPath: managedTemporaryLocation,
+            );
+          } else {
+            // Embedded/in-memory callers have no saved-files index. Their
+            // existing entry remains the recovery reference for this receive.
+            item.partialPath = managedTemporaryLocation;
+            await save();
+            await defaultPartial.delete();
           }
-          dir = Directory('${dir.path}/attempt-${newId()}');
-          await dir.create(recursive: true);
-          destination = File('${dir.path}/${safeName(item.title)}');
+        } catch (_) {
+          await ReceiveDestination.closeHandle(destinationHandle.handle);
+          destinationHandle = null;
+          await ReceiveDestination.delete(managedTemporaryLocation);
+          await store?.abortPartialRelocation(managedTemporaryLocation);
+          managedTemporaryLocation = '';
+          temporary = null;
+          rethrow;
         }
-        temporary = File('${destination.path}.part');
-        item.partialPath = temporary.path;
       }
+      item.partialPath = managedTemporaryLocation;
       // Persist the canonical location before network I/O so a restarted client
       // can resume the same app-created partial in its chosen destination.
       await save();
@@ -6352,20 +6358,15 @@ class SendController extends ChangeNotifier {
         discardPartial = true;
         throw const FormatException('文件完整性校验失败');
       }
-      if (destinationHandle != null) {
-        await ReceiveDestination.closeHandle(destinationHandle.handle);
-        destinationHandle = null;
-        temporary = null;
-        final completed = await ReceiveDestination.rename(
-          managedTemporaryLocation,
-          safeName(item.title),
-        );
-        item.localPath = completed.location;
-      } else {
-        await temporary.rename(destination!.path);
-        item.localPath = destination.path;
-        temporary = null;
-      }
+      await ReceiveDestination.closeHandle(destinationHandle.handle);
+      destinationHandle = null;
+      temporary = null;
+      item.localPath = legacyManagedPartial
+          ? (await ReceiveDestination.rename(
+              managedTemporaryLocation,
+              safeName(item.title),
+            )).location
+          : managedTemporaryLocation;
       item.partialPath = '';
       item.receivedBytes = item.size;
       await _rememberSavedFile(

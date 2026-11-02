@@ -12,6 +12,7 @@ import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
+import android.provider.MediaStore;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.nio.file.Files;
@@ -61,6 +62,7 @@ public class LegacyDragFilesTest {
             assertEquals(original.getName(),cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)));
         }
         assertNotEquals(original.getPath(),path);assertArrayEquals(bytes,Files.readAllBytes(new File(path).toPath()));
+        assertTrue("Origin must be recorded before IS_PENDING clears",media.originRecordedAtPublish);
         assertEquals(1,media.inserted);assertFalse(media.copyThread.contains("main"));
         try(Cursor again=externalQuery(uri,null)){assertTrue(again.moveToFirst());assertEquals(path,again.getString(again.getColumnIndexOrThrow("_data")));}
         assertEquals(1,media.inserted);assertTrue(DockShareProvider.wasAccessedSince(original.getPath(),started));
@@ -156,7 +158,7 @@ public class LegacyDragFilesTest {
         assertEquals(0,media.deleted);assertTrue(original.exists());
     }
     public static final class Media extends ContentProvider {
-        final Map<Uri,File> files=new LinkedHashMap<>();final Map<Uri,Integer> types=new LinkedHashMap<>();int inserted,deleted;Uri last;boolean failOutput;String copyThread="";
+        final Map<Uri,File> files=new LinkedHashMap<>();final Map<Uri,Integer> types=new LinkedHashMap<>();int inserted,deleted;Uri last;boolean failOutput,originRecordedAtPublish;String copyThread="";
         @Override public boolean onCreate(){return true;}
         @Override public Uri insert(Uri collection,ContentValues values) {
             last=collection.buildUpon().appendPath(Integer.toString(++inserted)).build();
@@ -180,7 +182,13 @@ public class LegacyDragFilesTest {
             copyThread=Thread.currentThread().getName();if(failOutput)throw new FileNotFoundException("test output unavailable");
             return ParcelFileDescriptor.open(files.get(uri),ParcelFileDescriptor.MODE_READ_WRITE|ParcelFileDescriptor.MODE_CREATE|ParcelFileDescriptor.MODE_TRUNCATE);
         }
-        @Override public int update(Uri uri,ContentValues values,String selection,String[] args){return 1;}
+        @Override public int update(Uri uri,ContentValues values,String selection,String[] args){
+            if(Integer.valueOf(0).equals(values.getAsInteger(MediaStore.MediaColumns.IS_PENDING))) {
+                try {originRecordedAtPublish=ReceivedFilePublication.receivedPaths(getContext()).contains(files.get(uri).getCanonicalPath());}
+                catch(java.io.IOException unavailable){throw new RuntimeException(unavailable);}
+            }
+            return 1;
+        }
         @Override public int delete(Uri uri,String selection,String[] args){File file=files.remove(uri);if(file!=null){file.delete();deleted++;}return 1;}
     }
 }

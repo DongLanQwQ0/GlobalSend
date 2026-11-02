@@ -1,4 +1,5 @@
 import 'app_icon.dart';
+import 'ios_window_header.dart';
 
 import 'dart:async';
 import 'dart:io';
@@ -97,7 +98,7 @@ class _ReachabilityScreenState extends State<ReachabilityScreen> {
                   icon: const AppIcon(Icons.refresh),
                 ),
               ],
-            ),
+            ).windowSafe(),
             body: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 760),

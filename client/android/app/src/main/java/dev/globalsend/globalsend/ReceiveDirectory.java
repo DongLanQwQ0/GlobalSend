@@ -84,6 +84,12 @@ final class ReceiveDirectory {
                     ReceivedFilePublication.publish(context, call.argument("location"), null);
                     return null;
                 }); break;
+                case "rememberOrigin": submit(result, () -> {
+                    rememberOrigin(context,call.argument("location"));return null;
+                }); break;
+                case "relocateReferences": submit(result, () -> {
+                    relocateReferences(context,call.argument("locations"));return null;
+                }); break;
                 case "readDescriptor": submit(result, () -> readDescriptor(call.argument("handle"), ((Number)call.argument("offset")).longValue(), ((Number)call.argument("length")).intValue())); break;
                 case "close": submit(result, () -> { close(call.argument("handle"), call.argument("error")); return null; }); break;
                 case "isOwned": result.success(isOwned(context, call.argument("location"))); break;
@@ -102,6 +108,17 @@ final class ReceiveDirectory {
     }
 
     void attach(Activity activity) { attached = new java.lang.ref.WeakReference<>(activity); }
+    static void rememberOrigin(Context context,String location) throws IOException {
+        File file=ReceivedFilePublication.sharedFile(context,location);
+        if(file!=null)ReceivedFilePublication.remember(context,file);
+    }
+    static void relocateReferences(Context context,Map<String,String> locations) throws IOException {
+        ReceivedPathRelocations.commit(context,locations);
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            TemporaryShelf.referencesRelocated(context);
+            ReceiveOverlay.referencesRelocated(context);
+        });
+    }
     void openExternal(String location) throws Exception {
         String readable=readableLocation(context,location);
         // Reuse the packaged FileProvider, not the expiring drag capability.

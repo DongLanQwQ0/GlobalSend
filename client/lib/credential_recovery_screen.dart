@@ -1,4 +1,5 @@
 import 'app_icon.dart';
+import 'ios_window_header.dart';
 
 import 'package:flutter/material.dart';
 
@@ -17,7 +18,7 @@ class CredentialRecoveryScreen extends StatelessWidget {
   final Future<void> Function(DockEntry) onOpenFile;
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('旧身份记录')),
+    appBar: AppBar(title: const Text('旧身份记录')).windowSafe(),
     body: ListView(
       padding: Ui.insetPanel,
       children: [
@@ -68,7 +69,7 @@ class _CredentialHistoryState extends State<_CredentialHistory> {
   late final history = widget.record.history();
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('旧记录 · 只读')),
+    appBar: AppBar(title: const Text('旧记录 · 只读')).windowSafe(),
     body: FutureBuilder<Map<String, dynamic>>(
       future: history,
       builder: (context, snapshot) {

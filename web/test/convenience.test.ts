@@ -1362,6 +1362,31 @@ test('switching groups preserves local messages and File references without repl
   const archive=persistent.get('globalsend:local-history')!;assert.doesNotMatch(archive,/old-secret-token|new-secret-token|deviceToken/);
 });
 
+for(const view of ['receive','library'] as const)test(`web-to-native image drag from ${view} carries a real typed image File, not just a private blob URL`,async()=>{
+  const {c,document,render,Event}=fixture();c.render=render;c.preparePreview=async()=>{};
+  const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGPsitvMwMDAxAAGABNFAZ88YXPeAAAAAElFTkSuQmCC','base64');
+  const image=new File([bytes],'网页图片.png',{type:'image/png'});
+  let selector:string;
+  if(view==='receive'){
+    const item=transfer('safari-image','received');item.files[0].name=image.name;item.files[0].mimeType=image.type;item.files[0].size=image.size;
+    c.transfers=[item];c.rtcLocalFiles.set('safari-image:file-safari-image',image);selector='[data-drag-file="safari-image:file-safari-image"]';
+  }else{
+    const entry={...savedEntry('photos/native-image',image.name),mimeType:image.type,size:image.size};savedLibrary(c,[entry]);
+    c.fileLibrary.service.get=async()=>image;await c.openLibrary();c.fileLibrary.files.set(entry.id,image);selector='[data-drag-library="photos/native-image"]';
+  }
+  render();const files:File[]=[],values=new Map<string,string>();
+  const data={items:{add:(file:File)=>files.push(file)},effectAllowed:'',setData:(type:string,value:string)=>values.set(type,value),setDragImage:()=>{}};
+  const drag=new Event('dragstart',{bubbles:true,cancelable:true});Object.assign(drag,{dataTransfer:data});document.querySelector(selector)!.dispatchEvent(drag);
+  assert.equal(drag.defaultPrevented,false);assert.equal(data.effectAllowed,'copy');assert.equal(files.length,1);
+  assert.ok(files[0] instanceof File);assert.equal(files[0].name,image.name);assert.equal(files[0].type,'image/png');assert.deepEqual(Buffer.from(await files[0].arrayBuffer()),bytes);
+  assert.doesNotMatch(values.get('text/plain') || '',/^blob:/);assert.doesNotMatch(values.get('text/uri-list') || '',/^blob:/);
+  if(view==='receive'){
+    c.endContentDrag();files.length=0;
+    const bulk=new Event('dragstart',{bubbles:true,cancelable:true});Object.assign(bulk,{dataTransfer:data});document.querySelector('[data-drag-all="receive"]')!.dispatchEvent(bulk);
+    assert.equal(files.length,1);assert.equal(files[0],image);
+  }
+});
+
 test('internal card drag has a copy preview and only the queue accepts it for another send',()=>{
   const {c,document,render,Event}=fixture();c.render=render;c.events=[textEvent('again',false,'再发一次')];c.installWindowDrop();c.render();
   const transfer={types:[] as string[],values:new Map<string,string>(),effectAllowed:'',dropEffect:'',items:{add:()=>{}},setData(type:string,value:string){this.values.set(type,value);this.types.push(type);},getData(type:string){return this.values.get(type) || '';},setDragImage:()=>{}};

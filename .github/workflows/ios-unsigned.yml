@@ -34,12 +34,14 @@ jobs:
         run: |
           flutter --version
           xcodebuild -version
-      - name: Share container regression
+      - name: Share container and real provider regression
         run: |
           node scripts/generate-user-guides.mjs --check
           mkdir -p artifacts/tmp/ios-share-tests
           swiftc client/ios/Runner/SharedInboxStore.swift client/ios/Tests/SharedInboxGroupTests.swift -o artifacts/tmp/ios-share-tests/SharedInboxGroupTests
           artifacts/tmp/ios-share-tests/SharedInboxGroupTests
+          swiftc client/ios/Runner/SharedInboxStore.swift client/ios/Tests/SharedItemProviderTests.swift -o artifacts/tmp/ios-share-tests/SharedItemProviderTests
+          artifacts/tmp/ios-share-tests/SharedItemProviderTests
       - name: Resolve dependencies
         working-directory: client
         run: flutter pub get --enforce-lockfile

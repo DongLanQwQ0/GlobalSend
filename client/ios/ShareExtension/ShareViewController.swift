@@ -2,25 +2,28 @@ import UIKit
 import UniformTypeIdentifiers
 import Intents
 
-/// Commit the batch before the LocalSend-style responder-chain handoff.
+/// Publish a live batch and request the host immediately. Keep this extension
+/// request alive until its provider-owned files are safely copied.
 final class ShareViewController: UIViewController {
   private let label = UILabel()
   private let done = UIButton(type: .system)
+  private let progress = UIProgressView(progressViewStyle: .default)
   private var started = false
   private var finished = false
   private var cancelled = false
+  private var hostOpened = false
   private let cancellation = NSLock()
   override func viewDidLoad() {
     super.viewDidLoad()
     view.backgroundColor = .systemBackground
     label.numberOfLines = 0
     label.textAlignment = .center
-    label.text = "正在加入待发送…"
+    label.text = "正在打开 GlobalSend…"
     label.font = .preferredFont(forTextStyle: .body)
     done.setTitle("取消", for: .normal)
     done.addTarget(self, action: #selector(close), for: .touchUpInside)
-    let stack = UIStackView(arrangedSubviews: [label, done])
-    stack.axis = .vertical; stack.spacing = 24; stack.translatesAutoresizingMaskIntoConstraints = false
+    let stack = UIStackView(arrangedSubviews: [label, progress, done])
+    stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(stack)
     NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24), stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24), stack.centerYAnchor.constraint(equalTo: view.centerYAnchor)])
   }
@@ -36,37 +39,46 @@ final class ShareViewController: UIViewController {
   }
   private func importItems(_ inputs: [NSExtensionItem], providers: [NSItemProvider], target: SharedSendTarget?) {
     do {
-      let store = try SharedInboxStore(extensionOnly: true), id = UUID().uuidString
-      let folder = try store.folder(id)
-      let group = DispatchGroup(), lock = NSLock()
-      var payload = SharedPayload(batchId: id, paths: [], texts: [], temporaryPaths: [])
-      var outcomes: [Int: (String?, String?, Error?)] = [:]
-      if providers.isEmpty { payload.texts = inputs.compactMap { $0.attributedContentText?.string } }
+      let store = try SharedInboxStore(extensionOnly: true)
+      let texts = providers.isEmpty ? inputs.compactMap { $0.attributedContentText?.string } : []
+      let batch = try SharedImportBatch(store: store, total: providers.count, target: target, texts: texts)
+      // Do not wait for all copies before requesting the foreground handoff.
+      // The host sees importing=true and watches actual manifest changes.
+      DispatchQueue.main.async {
+        self.openHost(batchId: batch.id)
+        DispatchQueue.global(qos: .userInitiated).async { self.loadItems(providers, store: store, batch: batch) }
+      }
+    } catch {
+      DispatchQueue.main.async { self.label.text = error.localizedDescription; self.done.setTitle("关闭", for: .normal) }
+    }
+  }
+  private func loadItems(_ providers: [NSItemProvider], store: SharedInboxStore, batch: SharedImportBatch) {
+    do {
+      let group = DispatchGroup()
       for (index, provider) in providers.enumerated() {
         group.enter()
-        SharedItemLoader.load(provider, store: store, folder: folder) { path, text, error in
-          lock.lock()
-          outcomes[index] = (path, text, error)
-          lock.unlock(); group.leave()
+        SharedItemLoader.load(provider, store: store, folder: batch.folder) { path, text, error in
+          do {
+            let value = try batch.record(index, path: path, text: text, error: error)
+            DispatchQueue.main.async {
+              self.label.text = "正在导入 \(value.completedItems ?? 0)/\(value.totalItems ?? 0) 项"
+              self.progress.setProgress(Float(value.completedItems ?? 0) / Float(max(1, value.totalItems ?? 0)), animated: true)
+            }
+          } catch { DispatchQueue.main.async { self.label.text = error.localizedDescription } }
+          group.leave()
         }
       }
       group.wait()
       cancellation.lock(); let wasCancelled = cancelled; cancellation.unlock()
-      if wasCancelled { try? FileManager.default.removeItem(at: folder); return }
-      for index in providers.indices {
-        guard let (path, text, error) = outcomes[index] else { continue }
-        if let path = path { payload.paths.append(path) }
-        if let text = text, !payload.texts.contains(text) { payload.texts.append(text) }
-        if let error = error { payload.error = error.localizedDescription }
-      }
-      payload.temporaryPaths = payload.paths
-      payload.target = target
-      try store.commit(payload)
+      if wasCancelled { batch.cancel(); return }
+      let payload = try batch.finish()
       DispatchQueue.main.async {
         self.finished = true
-        self.label.text = payload.paths.isEmpty && payload.texts.isEmpty ? (payload.error ?? "没有可分享的内容") : "已加入待发送\n打开 GlobalSend 即可发送"
+        self.label.text = payload.error ?? (payload.paths.isEmpty && payload.texts.isEmpty ? "没有可分享的内容" : "导入完成")
+        self.progress.setProgress(1, animated: true)
         self.done.setTitle("完成", for: .normal)
-        if !payload.paths.isEmpty || !payload.texts.isEmpty { self.openHost(batchId: id) }
+        if self.hostOpened { self.extensionContext?.completeRequest(returningItems: nil) }
+        else if !payload.paths.isEmpty || !payload.texts.isEmpty { self.openHost(batchId: batch.id) }
       }
     } catch {
       DispatchQueue.main.async { self.label.text = error.localizedDescription; self.done.setTitle("关闭", for: .normal) }
@@ -78,13 +90,17 @@ final class ShareViewController: UIViewController {
     while let current = responder {
       if let application = current as? UIApplication {
         application.open(url, options: [:]) { opened in
-          if opened { self.extensionContext?.completeRequest(returningItems: nil) }
+          self.hostOpened = opened
+          if opened && self.finished { self.extensionContext?.completeRequest(returningItems: nil) }
+          else if !opened && self.finished { self.label.text = "导入完成，请打开 GlobalSend" }
         }
         return
       }
       responder = current.next
     }
-    // The durable batch remains available if this iPadOS version denies opening.
+    // Share extensions do not have an unconditional public host-launch API.
+    // Keep the durable batch when the responder-chain request is unavailable.
+    if finished { label.text = "导入完成，请打开 GlobalSend" }
   }
   @objc private func close() {
     if finished { extensionContext?.completeRequest(returningItems: nil) }

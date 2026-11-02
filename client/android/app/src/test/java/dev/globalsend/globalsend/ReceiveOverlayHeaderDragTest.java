@@ -52,6 +52,11 @@ public class ReceiveOverlayHeaderDragTest {
         MotionEvent event = MotionEvent.obtain(gestureStart, gestureStart + when, action, x, y, 0);
         try { return view.dispatchTouchEvent(event); } finally { event.recycle(); }
     }
+    private float[] center(ReceiveOverlay overlay,View child) throws Exception {
+        android.graphics.Rect bounds=new android.graphics.Rect();child.getDrawingRect(bounds);
+        ((android.view.ViewGroup)field(overlay,"root")).offsetDescendantRectToMyCoords(child,bounds);
+        return new float[]{bounds.exactCenterX(),bounds.exactCenterY()};
+    }
     @Test public void draggingFromEveryTitleRowControlMovesWithoutClickingOrJumping() throws Exception {
         int[] actions = new int[3];
         ReceiveOverlay overlay = create(actions);
@@ -222,14 +227,15 @@ public class ReceiveOverlayHeaderDragTest {
         assertEquals(View.VISIBLE,card.findViewWithTag("pending-removal").getVisibility());
         assertEquals(0xffffe4e6,((android.graphics.drawable.GradientDrawable)card.getBackground()).getColor().getDefaultColor());
         capture(overlay,"pending-red");
-        touch(root,0,MotionEvent.ACTION_DOWN,25,60);
+        float[] point=center(overlay,card);
+        touch(root,0,MotionEvent.ACTION_DOWN,point[0],point[1]);
         assertEquals(0,shelf.removalSeconds());
         assertSame("cancel must not rebuild away the touched drag source",card,((LinearLayout)field(overlay,"row")).getChildAt(0));
         assertEquals(View.GONE,card.findViewWithTag("pending-removal").getVisibility());
         capture(overlay,"pending-canceled");
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout()+100));
         assertEquals("long press still reaches the card's drag handler",1,held[0]);
-        touch(root,1000,MotionEvent.ACTION_CANCEL,25,60);
+        touch(root,1000,MotionEvent.ACTION_CANCEL,point[0],point[1]);
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4));
         assertEquals(2,shelf.items.size());
         overlay.hide();
@@ -339,9 +345,10 @@ public class ReceiveOverlayHeaderDragTest {
         ((View)field(overlay,"count")).performClick();
         draw(root);View card=((LinearLayout)field(overlay,"row")).getChildAt(0);int[] dragged={0};
         card.setOnLongClickListener(view -> {dragged[0]++;return true;});
-        touch(root,0,MotionEvent.ACTION_DOWN,20,40);
+        float[] point=center(overlay,card);
+        touch(root,0,MotionEvent.ACTION_DOWN,point[0],point[1]);
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout()+100));
-        touch(root,800,MotionEvent.ACTION_UP,20,40);
+        touch(root,800,MotionEvent.ACTION_UP,point[0],point[1]);
         assertEquals(1,dragged[0]);assertEquals(x-30,window.x);assertEquals(y-20,window.y);
         overlay.hide();
     }
@@ -349,13 +356,15 @@ public class ReceiveOverlayHeaderDragTest {
         ReceiveOverlay overlay=create(new int[3]);View root=(View)field(overlay,"root");
         WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
         int x=window.x,width=window.width;
-        touch(root,0,MotionEvent.ACTION_DOWN,1,50);touch(root,30,MotionEvent.ACTION_MOVE,-19,50);touch(root,60,MotionEvent.ACTION_UP,-19,50);
+        // The mirrored inward rail occupies the old (1,50) hit. Use the free
+        // corner, keeping dy zero, rather than trying to resize through a button.
+        touch(root,0,MotionEvent.ACTION_DOWN,1,1);touch(root,30,MotionEvent.ACTION_MOVE,-19,1);touch(root,60,MotionEvent.ACTION_UP,-19,1);
         assertEquals(x-20,window.x);assertEquals(width+20,window.width);assertEquals(x+width,window.x+window.width);
         draw(root);int height=window.height;
         touch(root,0,MotionEvent.ACTION_DOWN,50,height-1);touch(root,30,MotionEvent.ACTION_MOVE,50,height-101);touch(root,60,MotionEvent.ACTION_UP,50,height-101);
         assertEquals(92,window.height);
         LinearLayout header=(LinearLayout)field(overlay,"header");assertEquals(3,header.getChildCount());
-        assertEquals(1,((View)field(overlay,"expanded")).getPaddingRight());overlay.hide();
+        assertRailSide(overlay,(Boolean)field(overlay,"edgeRight"));overlay.hide();
     }
     @Test public void generousInvisibleResizeBandsLeaveButtonsAndCardCenterUsable() throws Exception {
         int[] actions=new int[3];ReceiveOverlay overlay=create(actions);View root=(View)field(overlay,"root");
@@ -367,7 +376,7 @@ public class ReceiveOverlayHeaderDragTest {
         assertEquals(0,edges.invoke(overlay,30f,50f,232,116));
         WindowManager.LayoutParams window=(WindowManager.LayoutParams)root.getLayoutParams();
         int width=window.width,x=window.x;
-        touch(root,0,MotionEvent.ACTION_DOWN,10,50);touch(root,30,MotionEvent.ACTION_MOVE,-10,50);touch(root,60,MotionEvent.ACTION_UP,-10,50);
+        touch(root,0,MotionEvent.ACTION_DOWN,10,1);touch(root,30,MotionEvent.ACTION_MOVE,-10,1);touch(root,60,MotionEvent.ACTION_UP,-10,1);
         assertEquals(width+20,window.width);assertEquals(x-20,window.x);draw(root);
         root.getViewTreeObserver().dispatchOnPreDraw();draw(root);
         View card=((LinearLayout)field(overlay,"row")).getChildAt(0);
@@ -490,9 +499,10 @@ public class ReceiveOverlayHeaderDragTest {
             new android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER).setPackage(context.getPackageName()),launcher);
         int[] actions=new int[3];ReceiveOverlay overlay=create(actions);
         View root=(View)field(overlay,"root");
-        touch(root,0,MotionEvent.ACTION_DOWN,25,60);touch(root,10,MotionEvent.ACTION_UP,25,60);
+        float[] point=center(overlay,((LinearLayout)field(overlay,"row")).getChildAt(0));
+        touch(root,0,MotionEvent.ACTION_DOWN,point[0],point[1]);touch(root,10,MotionEvent.ACTION_UP,point[0],point[1]);
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(50));
-        touch(root,0,MotionEvent.ACTION_DOWN,25,60);touch(root,10,MotionEvent.ACTION_UP,25,60);
+        touch(root,0,MotionEvent.ACTION_DOWN,point[0],point[1]);touch(root,10,MotionEvent.ACTION_UP,point[0],point[1]);
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
         android.content.Intent opened=Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity();
         assertNotNull(opened);assertEquals("test.GlobalSendActivity",opened.getComponent().getClassName());

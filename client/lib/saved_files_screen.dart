@@ -1,4 +1,5 @@
 import 'app_icon.dart';
+import 'ios_window_header.dart';
 
 import 'dart:math' as math;
 
@@ -374,7 +375,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                 ),
                 const SizedBox(width: Ui.space1),
               ],
-            ),
+            ).windowSafe(),
       body: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(

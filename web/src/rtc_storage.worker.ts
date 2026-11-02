@@ -3,7 +3,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { cleanupDue, cleanupMatches, defaultCleanup, validateCleanup } from './cleanup';
 import type { CleanupPreferences } from './cleanup';
-import { FolderStorage, destinationSetting, receivingDestination } from './folder_storage';
+import { FolderStorage, destinationSetting, receivingDestination, setReceivedStorageRoot } from './folder_storage';
 import type { StoredLocation } from './folder_storage';
 interface Access {
   getSize(): number|Promise<number>;
@@ -19,6 +19,8 @@ let appDirectory:Directory;
 let directory: Directory;
 const opened = new Map<string,{access:Access;handle:Handle;offset:number;meta:Metadata}>();
 const keyName = (key:string) => encodeURIComponent(key);
+async function* scopeDirectories(){for await(const handle of appDirectory.values())if(handle.kind==='directory' && handle.name!=='received')yield handle as Directory;}
+const folderFor=(meta:StoredLocation,target:Directory)=>new FolderStorage(target,meta.layout!==2);
 async function metadata(meta:Metadata,target:Directory=directory) {
   const handle=await target.getFileHandle(`${keyName(meta.key)}.json`,{create:true}) as Handle;
   const access=await handle.createSyncAccessHandle();
@@ -36,7 +38,7 @@ async function accessFile(handle:FileSystemFileHandle,external=false):Promise<Ac
   let writer=await handle.createWritable({keepExistingData:true}),size=(await handle.getFile()).size;
   return {getSize:()=>size,truncate:async n=>{await writer.truncate(n);size=n;},write:async(bytes,{at})=>{await writer.write({type:'write',position:at,data:bytes as Uint8Array<ArrayBuffer>});size=Math.max(size,at+bytes.length);return bytes.length;},flush:async()=>{await writer.close();writer=await handle.createWritable({keepExistingData:true});},close:()=>writer.close()};
 }
-async function dataHandle(meta:Metadata,target:Directory=directory,create=false){return meta.storagePath?new FolderStorage(target).file(meta,create):target.getFileHandle(`${keyName(meta.key)}.data`,{create});}
+async function dataHandle(meta:Metadata,target:Directory=directory,create=false){return meta.storagePath?folderFor(meta,target).file(meta,create):target.getFileHandle(`${keyName(meta.key)}.data`,{create});}
 async function canonical(meta:Metadata,target:Directory){
   if(!meta.alias)return {meta,target};
   target=await appDirectory.getDirectoryHandle(meta.alias.scope) as Directory;
@@ -45,12 +47,12 @@ async function canonical(meta:Metadata,target:Directory){
 }
 async function dataFile(meta:Metadata,target:Directory=directory){
   ({meta,target}=await canonical(meta,target));
-  if(meta.entryKind==='directory'){const folder=new FolderStorage(target);const {parent,name}=await folder.parent(meta);await parent.getDirectoryHandle(name);return null;}
+  if(meta.entryKind==='directory'){const folder=folderFor(meta,target);const {parent,name}=await folder.parent(meta);await parent.getDirectoryHandle(name);return null;}
   return (await dataHandle(meta,target)).getFile();
 }
 async function removeData(meta:Metadata,target:Directory=directory,cleanParents=false){
   if(meta.alias)return;
-  if(meta.storagePath)await new FolderStorage(target).remove(meta,cleanParents);
+  if(meta.storagePath)await folderFor(meta,target).remove(meta,cleanParents);
   else await target.removeEntry(keyName(meta.key)+'.data').catch(error=>{if(error.name!=='NotFoundError')throw error;});
 }
 async function close(key:string) {
@@ -107,7 +109,7 @@ async function removeLibraryFile(target:Directory,key:string) {
   const owner=await canonical(meta,target);
   // Every delivery references one physical file. Deleting it removes the
   // aliases too, rather than leaving cards pointing at a deleted source.
-  for await(const scope of appDirectory.values()){
+  for await(const scope of scopeDirectories()){
     if(scope.kind!=='directory')continue;
     const aliases=scope as Directory;
     for await(const handle of aliases.values()){
@@ -157,7 +159,8 @@ async function finishMigration(record:Migration){
         await folder.saveRoots(roots);
       }
     }
-    await destinationSetting('current',record.destinationId==='opfs'?'':record.destinationId,true);
+    if((await receivingDestination()).id!==record.destinationId)
+      await destinationSetting('current',record.destinationId==='opfs'?'':record.destinationId,true);
     // References now name durable new bytes. If an old directory temporarily
     // loses permission, keep the journal so the next attempt can finish moving.
     try{for(const entry of deepestFirst(record.entries,'old'))await removeData(entry.old,await appDirectory.getDirectoryHandle(entry.scope) as Directory,true);}
@@ -177,7 +180,7 @@ async function changeDestination(data:{id?:string;handle?:FileSystemDirectoryHan
   await writeMigration(record);
   const relocated:{scope:string;key:string}[]=[];
   try{
-    for await(const scopeHandle of appDirectory.values()){
+    for await(const scopeHandle of scopeDirectories()){
       if(scopeHandle.kind!=='directory')continue;
       const target=scopeHandle as Directory,folder=new FolderStorage(target),roots=new Map<string,string>();
       const metas:Metadata[]=[];
@@ -200,7 +203,7 @@ async function changeDestination(data:{id?:string;handle?:FileSystemDirectoryHan
           if(!root){root=await folder.reserveName(parts[0],destinationId);roots.set(key,root);}
           location={storagePath:[root,...parts.slice(1)].join('/'),destinationId};
         }else location=await folder.allocateFile(old.name,destinationId);
-        const next={...old,...location};
+        const next={...old,...location,layout:2 as const};
         record.entries.push({scope:scopeHandle.name,old,next});await writeMigration(record);
         if(old.entryKind==='directory')await folder.directory(next);
         else{
@@ -227,7 +230,7 @@ async function reuseFolder(incoming:Metadata[]) {
   const wanted=new Map(incoming.map(meta=>[suffix(meta),meta]));
   if(wanted.has(undefined) || wanted.size!==incoming.length)return {};
   const rules=await cleanupPreferences(),kind=(meta:Metadata)=>meta.entryKind==='directory'?'directory':'file';
-  for await(const scope of appDirectory.values()){
+  for await(const scope of scopeDirectories()){
     if(scope.kind!=='directory')continue;
     const target=scope as Directory,records:Metadata[]=[];
     for await(const handle of target.values()){
@@ -248,7 +251,7 @@ async function reuseFolder(incoming:Metadata[]) {
       // Matching metadata from separate old roots must never assemble a folder.
       const actual=new Map<string,File|null>();
       try {
-        const {parent,name}=await new FolderStorage(target).parent(root);
+        const {parent,name}=await folderFor(root,target).parent(root);
         const visit=async(folder:Directory,prefix:string)=>{
           actual.set(prefix,null);
           for await(const handle of folder.values()){
@@ -284,12 +287,71 @@ async function reuseFolder(incoming:Metadata[]) {
   return {};
 }
 
+/** Data lives in one human-named receive directory. Scope/key directories are
+ * private metadata only; legacy bytes move with their IDs and resume offsets. */
+async function flattenLegacyStorage(){
+  const destinationId=(await receivingDestination()).id;
+  const record:Migration={phase:'copying',destinationId,entries:[]};
+  const roots=new Map<string,string>();
+  try{
+    for await(const target of scopeDirectories()){
+      const metas:Metadata[]=[];
+      for await(const handle of target.values()){
+        if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
+        const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
+        if(typeof meta.key==='string' && handle.name===keyName(meta.key)+'.json' && !meta.alias)metas.push(meta);
+      }
+      metas.sort((a,b)=>(a.relativePath?.split('/').length || 0)-(b.relativePath?.split('/').length || 0));
+      const folder=new FolderStorage(target);
+      for(const old of metas){
+        const rootKey=old.relativePath?JSON.stringify([target.name,old.transferId,old.relativePath.split('/')[0]]):'';
+        if(old.layout===2 || old.destinationId && old.destinationId!=='opfs'){
+          if(rootKey && old.storagePath && old.destinationId===destinationId)roots.set(rootKey,old.storagePath.split('/')[0]);
+          continue;
+        }
+        let file:File|null;
+        try{
+          if(old.entryKind!=='directory'){
+            // Another live receiver may still own an old partial. It must keep
+            // writing that lease; its next startup can migrate the same prefix.
+            const handle=await dataHandle(old,target) as Handle;
+            if(typeof handle.createSyncAccessHandle==='function'){const lease=await handle.createSyncAccessHandle();await lease.close();}
+          }
+          file=await dataFile(old,target);
+        }catch(error){if(['NotFoundError','NoModificationAllowedError'].includes((error as Error).name))continue;throw error;}
+        let location:StoredLocation;
+        if(old.relativePath){
+          const parts=old.relativePath.split('/');let root=roots.get(rootKey);
+          if(!root){root=await folder.reserveName(parts[0],destinationId);roots.set(rootKey,root);}
+          location={storagePath:[root,...parts.slice(1)].join('/'),destinationId,layout:2};
+        }else location=await folder.allocateFile(old.name,destinationId);
+        const next:Metadata={...old,...location,layout:2};
+        record.entries.push({scope:target.name,old,next});await writeMigration(record);
+        if(old.entryKind==='directory')await folder.directory(next);
+        else{
+          const output=await folder.file(next,true),access=await accessFile(output,destinationId!=='opfs');
+          try{
+            await access.truncate(0);
+            for(let offset=0;offset<file!.size;offset+=262144){const bytes=new Uint8Array(await file!.slice(offset,offset+262144).arrayBuffer());if(await access.write(bytes,{at:offset})!==bytes.length)throw new Error('文件迁移未完成');}
+            await access.flush();
+          }finally{await access.close();}
+          if((await output.getFile()).size!==file!.size)throw new Error('文件迁移未完成');
+        }
+      }
+    }
+  }catch(error){if(record.entries.length)await finishMigration(record);throw error;}
+  if(!record.entries.length)return;
+  record.phase='commit';await writeMigration(record);await finishMigration(record);
+}
+
 async function execute(command:string,data:any):Promise<unknown> {
   switch(command) {
     case 'init': {
       const root=await navigator.storage.getDirectory();
       appDirectory=await root.getDirectoryHandle('globalsend-received-v1',{create:true}) as Directory;
+      setReceivedStorageRoot(appDirectory);
       const migration=await migrationRecord();if(migration)await finishMigration(migration);
+      await flattenLegacyStorage();
       if(data.scope){directory=await appDirectory.getDirectoryHandle(data.scope,{create:true}) as Directory;await cleanup();}
       return {};
     }
@@ -297,15 +359,15 @@ async function execute(command:string,data:any):Promise<unknown> {
     case 'destination-set': return changeDestination(data);
     case 'directory': {
       let previous:Metadata|undefined;try{previous=await readMeta(data.key);}catch(error){if(!((error as Error).name==='NotFoundError'))throw error;}
-      const location=previous?.storagePath?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId}:await new FolderStorage(directory).allocate(data.transferId,data.relativePath);
+      const location=previous?.storagePath?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId,layout:previous.layout}:await new FolderStorage(directory).allocate(data.transferId,data.relativePath);
       const meta={...data,...location,entryKind:'directory',complete:true,receivedAt:previous?.receivedAt || Date.now()} as Metadata;
-      meta.expires=meta.receivedAt!+86400000;await new FolderStorage(directory).directory(meta);await metadata(meta);return {meta};
+      meta.expires=meta.receivedAt!+86400000;await folderFor(meta,directory).directory(meta);await metadata(meta);return {meta};
     }
     case 'open': {
       await close(data.key);
       let previous:Metadata|undefined;
       try{previous=await readMeta(data.key);}catch(error){if((error as Error).name!=='NotFoundError')throw error;}
-      const location=previous?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId}:data.relativePath?await new FolderStorage(directory).allocate(data.transferId,data.relativePath):(await receivingDestination()).id==='opfs'?{}:await new FolderStorage(directory).allocateFile(data.name);
+      const location=previous?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId,layout:previous.layout}:data.relativePath?await new FolderStorage(directory).allocate(data.transferId,data.relativePath):await new FolderStorage(directory).allocateFile(data.name);
       const meta={...data,...location,complete:false} as Metadata;
       const handle=await dataHandle(meta,directory,true) as Handle;
       const access=await accessFile(handle,!!meta.destinationId && meta.destinationId!=='opfs');
@@ -353,7 +415,7 @@ async function execute(command:string,data:any):Promise<unknown> {
       if(data.relativePath || data.entryKind==='directory')return {};
       // Look up only committed local bytes. A relay-ready/download history is
       // not proof that the browser still owns a saved file.
-      for await(const scope of appDirectory.values()){
+      for await(const scope of scopeDirectories()){
         if(scope.kind!=='directory')continue;
         const target=scope as Directory;
         for await(const handle of target.values()){
@@ -385,7 +447,7 @@ async function execute(command:string,data:any):Promise<unknown> {
     case 'library-list': {
       const rules=await cleanupPreferences();
       const entries=[],aliases:{scope:string;key:string;alias:{scope:string;key:string}}[]=[];
-      for await(const scopeHandle of appDirectory.values()) {
+      for await(const scopeHandle of scopeDirectories()) {
         if(scopeHandle.kind!=='directory')continue;
         const target=scopeHandle as Directory;
         const expired:Metadata[]=[];
@@ -413,7 +475,7 @@ async function execute(command:string,data:any):Promise<unknown> {
     }
     case 'library-references': {
       const wanted=new Set<string>(data.keys),entries=[];
-      for await(const scope of appDirectory.values()){
+      for await(const scope of scopeDirectories()){
         if(scope.kind!=='directory')continue;
         const target=scope as Directory;
         for await(const handle of target.values()){

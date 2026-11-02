@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_icon.dart';
+import 'ios_window_header.dart';
 import 'ui_tokens.dart';
 import 'user_guide_content.g.dart';
 
@@ -44,7 +45,7 @@ class _UserGuideScreenState extends State<UserGuideScreen> {
               icon: const AppIcon(Icons.arrow_back),
             ),
             title: const Text('使用指南'),
-          ),
+          ).windowSafe(),
           body: SafeArea(
             top: false,
             child: Center(

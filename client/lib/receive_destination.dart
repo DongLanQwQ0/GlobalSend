@@ -63,6 +63,11 @@ class ReceiveDestination {
   static Future<void> _registryTail = Future<void>.value();
   @visibleForTesting
   static Future<Directory> Function()? registryDirectoryForTesting;
+  @visibleForTesting
+  static Future<void> Function(String)? originRecorderForTesting;
+  @visibleForTesting
+  static Future<void> Function(Map<String, String>)?
+  referenceRelocatorForTesting;
 
   static Future<Map<String, String>?> pick() async {
     if (Platform.isAndroid) {
@@ -117,14 +122,15 @@ class ReceiveDestination {
   }) async {
     final leaf = safeName(name);
     if (destinationLocation.startsWith('content://')) {
-      return ReceiveFileHandle.fromMap(
+      final handle = ReceiveFileHandle.fromMap(
         (await channel.invokeMapMethod<String, dynamic>('create', {
           'destinationLocation': destinationLocation,
           'name': leaf,
         }))!,
       );
+      return _recordAllocation(handle);
     }
-    return _windowsRegistry((owned) async {
+    final handle = await _localRegistry((owned) async {
       final file = await _reserve(Directory(destinationLocation), leaf);
       final location = await file.resolveSymbolicLinks();
       owned[location] = file.uri.pathSegments.last;
@@ -136,6 +142,44 @@ class ReceiveDestination {
         size: 0,
       );
     });
+    return _recordAllocation(handle);
+  }
+
+  static Future<ReceiveFileHandle> _recordAllocation(
+    ReceiveFileHandle handle,
+  ) async {
+    try {
+      await rememberOrigin(handle.location);
+      return handle;
+    } catch (_) {
+      await closeHandle(handle.handle);
+      await delete(handle.location);
+      rethrow;
+    }
+  }
+
+  /// Record app ownership before any image bytes become observable. Scanning
+  /// remains a separate completion step so pickers never index a partial file.
+  static Future<void> rememberOrigin(String location) async {
+    if (originRecorderForTesting != null) {
+      await originRecorderForTesting!(location);
+    } else if (Platform.isAndroid) {
+      await channel.invokeMethod<void>('rememberOrigin', {
+        'location': location,
+      });
+    }
+  }
+
+  static Future<void> relocateReferences(Map<String, String> locations) async {
+    if (locations.isEmpty) return;
+    await relocateFolderRoots(locations);
+    if (referenceRelocatorForTesting != null) {
+      await referenceRelocatorForTesting!(locations);
+    } else if (Platform.isAndroid) {
+      await channel.invokeMethod<void>('relocateReferences', {
+        'locations': locations,
+      });
+    }
   }
 
   /// One durable root per transfer/root-name, then exact nested directories.
@@ -149,7 +193,7 @@ class ReceiveDestination {
         .map(safeName)
         .toList();
     final key = '@folder-root:$transferKey:${parts.first}';
-    final root = await _windowsRegistry((owned) async {
+    final root = await _localRegistry((owned) async {
       final previous = owned[key];
       if (previous != null && (await stat(previous)).exists) return previous;
       final location = await _directory(
@@ -161,7 +205,7 @@ class ReceiveDestination {
       if (!location.startsWith('content://')) owned[location] = parts.first;
       return location;
     });
-    return _windowsRegistry((owned) async {
+    return _localRegistry((owned) async {
       var current = root;
       for (final part in parts.skip(1)) {
         current = await _directory(current, part);
@@ -174,7 +218,7 @@ class ReceiveDestination {
   /// Keep a continuing transfer attached to its migrated root, even if the
   /// user left unrelated files in the old directory.
   static Future<void> relocateFolderRoots(Map<String, String> locations) =>
-      _windowsRegistry((owned) async {
+      _localRegistry((owned) async {
         for (final key
             in owned.keys
                 .where((key) => key.startsWith('@folder-root:'))
@@ -216,18 +260,28 @@ class ReceiveDestination {
     bool writable = false,
   }) async {
     if (location.startsWith('content://')) {
-      return ReceiveFileHandle.fromMap(
+      final handle = ReceiveFileHandle.fromMap(
         (await channel.invokeMapMethod<String, dynamic>('open', {
           'location': location,
           'writable': writable,
         }))!,
       );
+      if (writable) {
+        try {
+          await rememberOrigin(handle.location);
+        } catch (_) {
+          await closeHandle(handle.handle);
+          rethrow;
+        }
+      }
+      return handle;
     }
     if (writable && !await isOwned(location)) {
       throw const FileSystemException('只能续写本应用创建的接收文件');
     }
     final info = await stat(location);
     if (!info.exists) throw FileSystemException('文件已不存在', location);
+    if (writable) await rememberOrigin(location);
     return ReceiveFileHandle(
       location: location,
       ioPath: location,
@@ -263,8 +317,7 @@ class ReceiveDestination {
         'location': location,
       }))!;
     }
-    if (!Platform.isWindows && !Platform.isAndroid) return false;
-    return _windowsRegistry(
+    return _localRegistry(
       (owned) async => owned.containsKey(location),
       persist: false,
     );
@@ -303,7 +356,7 @@ class ReceiveDestination {
         'location': location,
       }))!;
     }
-    return _windowsRegistry((owned) async {
+    return _localRegistry((owned) async {
       _requireOwned(owned, location);
       final file = File(location);
       final type = await FileSystemEntity.type(location);
@@ -336,7 +389,7 @@ class ReceiveDestination {
         }))!,
       );
     }
-    return _windowsRegistry((owned) async {
+    return _localRegistry((owned) async {
       _requireOwned(owned, location);
       final source = File(location);
       if (source.uri.pathSegments.last == leaf) return stat(location);
@@ -397,13 +450,10 @@ class ReceiveDestination {
     }
   }
 
-  static Future<T> _windowsRegistry<T>(
+  static Future<T> _localRegistry<T>(
     Future<T> Function(Map<String, String>) action, {
     bool persist = true,
   }) {
-    if (!Platform.isWindows && !Platform.isAndroid) {
-      throw UnsupportedError('此平台尚不支持接收保存目录');
-    }
     final result = Completer<T>();
     _registryTail = _registryTail.then((_) async {
       try {

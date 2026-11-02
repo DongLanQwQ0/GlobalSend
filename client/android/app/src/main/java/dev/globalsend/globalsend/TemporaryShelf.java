@@ -18,6 +18,8 @@ import org.json.JSONObject;
 
 /** Installation-local references, deliberately separate from received messages. */
 final class TemporaryShelf {
+    private static final Map<TemporaryShelf,Boolean> live=java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+    private final Context context;
     private static final long SUGGESTION_DURATION_MS=30_000;
     final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
     private final Map<String,Long> suggested = new LinkedHashMap<>();
@@ -36,6 +38,7 @@ final class TemporaryShelf {
     private boolean loaded;
 
     TemporaryShelf(Context context, Runnable changed) {
+        this.context=context.getApplicationContext();live.put(this,Boolean.TRUE);
         this.file = new File(context.getFilesDir(), "temporary-shelf.json");
         this.changed = changed;
         io.execute(() -> {
@@ -47,7 +50,7 @@ final class TemporaryShelf {
                     JSONArray records = new JSONArray(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
                     for (int i = 0; i < records.length(); i++) {
                         JSONObject record = records.getJSONObject(i);
-                        String path = record.optString("path");
+                        String path = ReceivedPathRelocations.resolve(this.context,record.optString("path"));
                         // External originals may have been removed while the app was stopped.
                         if (!path.isEmpty() && !path.startsWith("content://") && !new File(path).exists()) continue;
                         long offeredAt=record.optLong("suggestedAt",file.lastModified());
@@ -68,7 +71,11 @@ final class TemporaryShelf {
                 android.util.Log.w("GlobalSend", "Cannot restore temporary shelf", unavailable);
             }
             main.post(() -> {
-                for (ReceiveNotifications.Receipt receipt : restored)
+                for (ReceiveNotifications.Receipt original : restored) {
+                    ReceiveNotifications.Receipt receipt;
+                    try {receipt=ReceivedPathRelocations.resolve(this.context,original);}
+                    catch(java.io.IOException unavailable){android.util.Log.w("GlobalSend","Cannot resolve shelf migration",unavailable);continue;}
+                    if (!receipt.localPath.isEmpty() && !receipt.localPath.startsWith("content://") && !new File(receipt.localPath).exists())continue;
                     if (!contains(receipt.localPath, receipt.text)) {
                         items.put(receipt.id, receipt);
                         if(restoredSuggested.containsKey(receipt.id)) {
@@ -77,10 +84,32 @@ final class TemporaryShelf {
                             suggestionRemaining.put(receipt.id,restoredRemaining.get(receipt.id));
                         }
                     }
+                }
                 loaded = true;
                 save(); changed.run();
             });
         });
+    }
+
+    static void referencesRelocated(Context context) {
+        List<TemporaryShelf> shelves;
+        synchronized(live){shelves=new ArrayList<>(live.keySet());}
+        for(TemporaryShelf shelf:shelves)if(shelf.context.getFilesDir().equals(context.getFilesDir()))shelf.relocate();
+    }
+    private void relocate() {
+        boolean updated=false;
+        for(Map.Entry<String,ReceiveNotifications.Receipt> entry:items.entrySet()){
+            ReceiveNotifications.Receipt old=entry.getValue(),next;
+            try {next=ReceivedPathRelocations.resolve(context,old);}
+            catch(java.io.IOException unavailable){android.util.Log.w("GlobalSend","Cannot resolve shelf migration",unavailable);return;}
+            if(next==old)continue;
+            entry.setValue(next);updated=true;
+            if(pendingRemoval.containsKey(entry.getKey())){
+                java.util.function.Predicate<ReceiveNotifications.Receipt> consumed=pendingConsumed.get(entry.getKey());
+                pendingRemoval.put(entry.getKey(),next);pendingConsumed.put(entry.getKey(),ignored -> consumed.test(old));
+            }
+        }
+        if(updated){save();changed.run();}
     }
 
     boolean contains(String path, String text) {

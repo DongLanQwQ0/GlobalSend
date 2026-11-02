@@ -52,6 +52,36 @@ struct SharedInboxGroupTests {
     let fixture = URL(fileURLWithPath: "artifacts/tmp/ios-share-tests/" + UUID().uuidString, isDirectory: true)
     let store = try SharedInboxStore(root: fixture)
     defer { try? FileManager.default.removeItem(at: fixture) }
+    var live: SharedImportBatch? = try SharedImportBatch(store: store, total: 2, target: request.target)
+    let importingID = live!.id
+    try live!.record(0, path: nil, text: "first", error: nil)
+    try withExtendedLifetime(live) {
+      let partial = try store.pending().first { $0.batchId == importingID }!
+      precondition(partial.importing == true && partial.completedItems == 1 && partial.totalItems == 2)
+      precondition(partial.texts == ["first"] && partial.target?.deviceId == request.target?.deviceId)
+    }
+    live = nil // process/request ended before its final item completed
+    let interrupted = try store.pending().first { $0.batchId == importingID }!
+    precondition(interrupted.importing == false && interrupted.error != nil && interrupted.texts == ["first"])
+    try store.ack(importingID)
+    let complete = try SharedImportBatch(store: store, total: 1)
+    try complete.record(0, path: nil, text: "ready", error: nil)
+    _ = try complete.finish()
+    let completedBatch = try store.pending().first { $0.batchId == complete.id }!
+    precondition(completedBatch.importing == false && completedBatch.completedItems == 1)
+    try store.ack(complete.id)
+    let lockFolder = try store.folder(UUID().uuidString)
+    let lockLease = try SharedImportLease(folder: lockFolder)
+    let waiting = DispatchSemaphore(value: 0), released = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      waiting.signal()
+      try! SharedImportLease.waitForRelease(folder: lockFolder)
+      released.signal()
+    }
+    precondition(waiting.wait(timeout: .now() + 2) == .success)
+    precondition(released.wait(timeout: .now() + 0.05) == .timedOut, "A live importer must remain pending")
+    lockLease.release() // no manifest/directory write is needed to wake the host
+    precondition(released.wait(timeout: .now() + 2) == .success, "Unlock/process exit wakes the host without polling")
     #if canImport(ImageIO) && canImport(UniformTypeIdentifiers)
     let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNUCOhhYGBgYgADAAuOAQCntjSiAAAAAElFTkSuQmCC")!
     let suffixless = fixture.appendingPathComponent("provider-image")

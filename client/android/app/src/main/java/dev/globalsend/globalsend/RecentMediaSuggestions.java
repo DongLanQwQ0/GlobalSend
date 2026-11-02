@@ -29,9 +29,10 @@ import org.json.JSONObject;
 /** Metadata-only media discovery for the persistent dock. Never opens a permission dialog. */
 final class RecentMediaSuggestions {
     static final class Media {
-        final String uri,name;
+        final String uri,name,originPath;
         final long added;
-        Media(String uri,String name,long added) {this.uri=uri;this.name=name;this.added=added;}
+        Media(String uri,String name,long added) {this(uri,name,added,null);}
+        Media(String uri,String name,long added,String originPath) {this.uri=uri;this.name=name;this.added=added;this.originPath=originPath;}
     }
     private static final ExecutorService io=Executors.newSingleThreadExecutor();
     private final Context context;
@@ -111,6 +112,12 @@ final class RecentMediaSuggestions {
                         if(!active)disabled.run();
                         else {
                             if(!missing.isEmpty())removed.accept(missing);
+                            // Publication can register an origin while the
+                            // MediaStore query is in flight. Resolve that race
+                            // against the in-memory journal before delivering
+                            // the shared batch; no file reads on the UI thread.
+                            Set<String> published=ReceivedFilePublication.receivedPaths(context);
+                            media.removeIf(item -> item.originPath!=null && published.contains(item.originPath));
                             if(!media.isEmpty()) {
                                 found.accept(media);
                                 for(Media item:media)seen.add(item.uri);
@@ -157,10 +164,12 @@ final class RecentMediaSuggestions {
         }
     }
     private boolean received(String value,Set<String> paths) {
-        if(paths.isEmpty())return false;
-        try(Cursor row=context.getContentResolver().query(Uri.parse(value),
-                new String[]{MediaStore.MediaColumns.DATA},null,null,null)) {
-            return row!=null && row.moveToFirst() && paths.contains(row.getString(0));
+        String[] columns=Build.VERSION.SDK_INT>=29?
+            new String[]{MediaStore.MediaColumns.DATA,MediaStore.MediaColumns.OWNER_PACKAGE_NAME,MediaStore.MediaColumns.RELATIVE_PATH}:
+            new String[]{MediaStore.MediaColumns.DATA};
+        try(Cursor row=context.getContentResolver().query(Uri.parse(value),columns,null,null,null)) {
+            return row!=null && row.moveToFirst() && ReceivedFilePublication.applicationMedia(context,
+                row.getString(0),columns.length>1?row.getString(1):null,columns.length>1?row.getString(2):null,paths);
         }
     }
     private boolean canRead(String permission) {
@@ -173,17 +182,26 @@ final class RecentMediaSuggestions {
         Set<String> received=ReceivedFilePublication.receivedPaths(context);
         String selection=MediaStore.MediaColumns.DATE_ADDED+">=?";
         if(Build.VERSION.SDK_INT>=29)selection+=" AND "+MediaStore.MediaColumns.IS_PENDING+"=0";
-        try(Cursor cursor=context.getContentResolver().query(collection,
-                new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.DISPLAY_NAME,MediaStore.MediaColumns.DATE_ADDED,MediaStore.MediaColumns.DATA},
+        String[] columns=Build.VERSION.SDK_INT>=29?
+            new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.DISPLAY_NAME,MediaStore.MediaColumns.DATE_ADDED,MediaStore.MediaColumns.DATA,MediaStore.MediaColumns.OWNER_PACKAGE_NAME,MediaStore.MediaColumns.RELATIVE_PATH}:
+            new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.DISPLAY_NAME,MediaStore.MediaColumns.DATE_ADDED,MediaStore.MediaColumns.DATA};
+        try(Cursor cursor=context.getContentResolver().query(collection,columns,
                 selection,new String[]{Long.toString(since/1000)},MediaStore.MediaColumns.DATE_ADDED+" DESC")) {
             if(cursor==null)return;
-            int visited=0;
-            while(visited++<24 && cursor.moveToNext()) {
+            int added=0;
+            // Owned exports/seen rows do not consume the recommendation budget.
+            // Otherwise a burst of drag-cache rows hides the next real photo.
+            while(added<24 && cursor.moveToNext()) {
                 String id=cursor.getString(0),uri=ContentUris.withAppendedId(collection,Long.parseLong(id)).toString();
-                if(!seen.contains(uri) && !handled.contains(id) && !received.contains(cursor.getString(3))) {
+                if(!seen.contains(uri) && !handled.contains(id) && !ReceivedFilePublication.applicationMedia(context,
+                        cursor.getString(3),columns.length>4?cursor.getString(4):null,columns.length>4?cursor.getString(5):null,received)) {
                     String name=cursor.getString(1);
                     if(MediaFileName.needsSuffix(name))name=MediaFileName.withType(name,context.getContentResolver().getType(Uri.parse(uri)));
-                    result.add(new Media(uri,name,cursor.getLong(2)));
+                    String origin=cursor.getString(3);
+                    if(origin!=null)try {origin=new File(origin).getCanonicalPath();}
+                    catch(java.io.IOException unavailable) {origin=new File(origin).getAbsolutePath();}
+                    result.add(new Media(uri,name,cursor.getLong(2),origin));
+                    added++;
                 }
             }
         }

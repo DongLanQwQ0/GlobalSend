@@ -85,7 +85,7 @@ test('real Web controller + production OPFS worker + real center transfer a 70-f
     await drained(restarted);
     assert.equal(restarted.uploadErrors.size,0,[...restarted.uploadErrors].join(','));
     assert.ok(requests.some(request=>request.range==='bytes=3-'));
-    const scope=(await restarted.ensureFileStore()).scope,received=join(receiverRoot.path,'globalsend-received-v1',scope,'received');
+    const scope=(await restarted.ensureFileStore()).scope,received=join(receiverRoot.path,'globalsend-received-v1','received');
     assert.ok(existsSync(join(received,'资料','空目录')));assert.deepEqual(readFileSync(join(received,'资料','sub','resume.txt')),Buffer.from(resumeBytes));
     assert.equal(filesUnder(join(received,'资料')).length,71);assert.equal(readdirSync(received).length,1,'same transfer reused its reserved root across worker restart');
     assert.equal(filesUnder(join(receiverRoot.path,'globalsend-received-v1',scope)).filter(path=>path.endsWith('.data')).length,0,'folder payloads are real files, not encoded .data blobs');
@@ -145,7 +145,7 @@ test('chosen File System Access directory receives bytes directly and keeps its 
   await store.directory('transfer:root',directory);await store.open('transfer:text',file,Date.now()+86400000);await store.write('transfer:text',0,new TextEncoder().encode('abc').buffer);await store.close('transfer:text');await store.dispose();c.rtcStore=null;
   store=await c.ensureFileStore();assert.equal(await store.open('transfer:text',file,Date.now()+86400000),3);await store.write('transfer:text',3,new TextEncoder().encode('def').buffer);const saved=await store.finish('transfer:text');await store.confirm('transfer:text');
   assert.equal(await saved.text(),'abcdef');assert.equal(readFileSync(join(external.path,'项目 (1)','sub','文字.txt'),'utf8'),'abcdef');
-  assert.equal(existsSync(join(root.path,'globalsend-received-v1',store.scope,'received','项目 (1)','sub','文字.txt')),false,'no second OPFS payload copy');
+  assert.equal(existsSync(join(root.path,'globalsend-received-v1','received','项目 (1)','sub','文字.txt')),false,'no second OPFS payload copy');
   const scopeFiles=filesUnder(join(root.path,'globalsend-received-v1',store.scope));assert.ok(scopeFiles.every(path=>path.endsWith('.json')));
   assert.equal((await store.destination()).name,'chosen-directory');assert.equal(readdirSync(external.path).length,2);
   await store.dispose();console.log('external directory proof:',dir);

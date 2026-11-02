@@ -1,8 +1,10 @@
-export type StoredLocation={storagePath?:string;destinationId?:string;entryKind?:'file'|'directory';relativePath?:string;transferId?:string};
+export type StoredLocation={storagePath?:string;destinationId?:string;entryKind?:'file'|'directory';relativePath?:string;transferId?:string;layout?:2};
 type Directory=FileSystemDirectoryHandle & {values():AsyncIterable<FileSystemHandle>};
 type PermissionHandle=Directory & {queryPermission(options:{mode:string}):Promise<string>};
 type SyncFile=FileSystemFileHandle & {createSyncAccessHandle():Promise<{truncate(n:number):void|Promise<void>;write(b:Uint8Array,o:{at:number}):number|Promise<number>;flush():void|Promise<void>;close():void|Promise<void>}>};
 const missing=(error:unknown)=>(error as Error).name==='NotFoundError';
+let sharedStorage:Directory|undefined;
+export function setReceivedStorageRoot(root:Directory){sharedStorage=root;}
 export function pathSegments(path:string){const parts=path.replace(/\/$/,'').split('/');if(parts.some(value=>!value || value==='.' || value==='..'))throw new Error('文件夹路径不完整');return parts;}
 async function database() {
   return new Promise<IDBDatabase>((resolve,reject)=>{const open=indexedDB.open('globalsend-receive-destinations-v1',1);open.onupgradeneeded=()=>open.result.createObjectStore('handles');open.onsuccess=()=>resolve(open.result);open.onerror=()=>reject(open.error);});
@@ -17,9 +19,9 @@ export async function receivingDestination(){const id=await destinationSetting('
 async function json(directory:Directory,name:string){try{return JSON.parse(await (await (await directory.getFileHandle(name)).getFile()).text());}catch(error){if(missing(error))return {};throw error;}}
 async function saveJson(directory:Directory,name:string,data:unknown){const file=await directory.getFileHandle(name,{create:true}) as SyncFile,access=await file.createSyncAccessHandle();try{const bytes=new TextEncoder().encode(JSON.stringify(data));await access.truncate(0);await access.write(bytes,{at:0});await access.flush();}finally{await access.close();}}
 export class FolderStorage {
-  constructor(private scope:Directory){}
+  constructor(private scope:Directory,private legacyScope=false){}
   async base(destinationId='opfs'):Promise<Directory>{
-    if(destinationId==='opfs')return await this.scope.getDirectoryHandle('received',{create:true}) as Directory;
+    if(destinationId==='opfs')return await (this.legacyScope?this.scope:sharedStorage || this.scope).getDirectoryHandle('received',{create:true}) as Directory;
     const handle=await destinationSetting(destinationId) as PermissionHandle|undefined;
     if(!handle || await handle.queryPermission({mode:'readwrite'})!=='granted')throw Object.assign(new Error('请重新授权接收目录'),{name:'NotAllowedError'});
     return handle;
@@ -38,7 +40,7 @@ export class FolderStorage {
   }
   async allocateFile(name:string,destinationId?:string):Promise<StoredLocation>{
     const destination=destinationId ?? (await receivingDestination()).id;
-    return {storagePath:await this.reserveName(name,destination),destinationId:destination};
+    return {storagePath:await this.reserveName(name,destination),destinationId:destination,layout:2};
   }
   async allocate(transferId:string,relativePath:string):Promise<StoredLocation>{
     const destination=await receivingDestination();
@@ -53,7 +55,7 @@ export class FolderStorage {
       // reuses exactly this root, including an interrupted zero-byte directory.
       await saveJson(this.scope,'folder-roots.json',roots);
     }
-    return {storagePath:[reserved.name,...parts.slice(1)].join('/'),destinationId:reserved.destinationId,relativePath,transferId};
+    return {storagePath:[reserved.name,...parts.slice(1)].join('/'),destinationId:reserved.destinationId,relativePath,transferId,layout:2};
   }
   async parent(location:StoredLocation,create=false){const parts=pathSegments(location.storagePath!);let parent=await this.base(location.destinationId);for(const part of parts.slice(0,-1))parent=await parent.getDirectoryHandle(part,{create}) as Directory;return {parent,name:parts.at(-1)!};}
   async directory(location:StoredLocation){const {parent,name}=await this.parent(location,true);await parent.getDirectoryHandle(name,{create:true});}

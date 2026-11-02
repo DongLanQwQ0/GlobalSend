@@ -75,7 +75,7 @@ class MemoryDirectory {
 function workerFixture(root:MemoryDirectory,clock:()=>number) {
   let id=0;const pending=new Map<number,{resolve:(value:any)=>void;reject:(error:Error)=>void}>();
   const self:any={postMessage:({id,result,error,name}:any)=>{const p=pending.get(id)!;pending.delete(id);error?p.reject(Object.assign(new Error(error),{name})):p.resolve(result);}};
-  runInNewContext(compiled.outputFiles[0].text,{self,navigator:{storage:{getDirectory:async()=>root}},Date:class extends Date{static now(){return clock();}},TextEncoder,Uint8Array,Map,Set,JSON,Error,Infinity,Promise,Number,String,decodeURIComponent,encodeURIComponent});
+  runInNewContext(compiled.outputFiles[0].text,{self,navigator:{storage:{getDirectory:async()=>root}},Date:class extends Date{static now(){return clock();}},TextEncoder,File,Uint8Array,Map,Set,JSON,Error,Infinity,Promise,Number,String,decodeURIComponent,encodeURIComponent});
   return {call:(command:string,data:unknown={})=>new Promise<any>((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});self.onmessage({data:{id:n,command,data}});})};
 }
 async function save(worker:ReturnType<typeof workerFixture>,key:string,name:string,size=4) {
@@ -90,11 +90,12 @@ test('worker library spans session scopes, renames metadata only, and excludes a
   const app=await root.getDirectoryHandle('globalsend-received-v1'),one=await app.getDirectoryHandle('one');await one.getFileHandle('unmarked.data',{create:true});
   await library.call('init',{});const {entries}=await library.call('library-list');
   assert.equal(entries.length,2);assert.deepEqual(Array.from(entries,(entry:any)=>entry.scope).sort(),['one','two']);
-  const original=entries.find((entry:any)=>entry.scope==='one'),data=await one.getFileHandle('transfer%3Afile.data');
+  const received=await app.getDirectoryHandle('received');
+  const original=entries.find((entry:any)=>entry.scope==='one'),data=await received.getFileHandle('original.txt');
   await library.call('library-rename',{id:original.id,name:'重命名.txt'});
-  assert.equal((await library.call('library-get',{id:original.id})).entry.name,'重命名.txt');assert.equal(await one.getFileHandle('transfer%3Afile.data'),data);
+  assert.equal((await library.call('library-get',{id:original.id})).entry.name,'重命名.txt');assert.equal(await received.getFileHandle('original.txt'),data);
   await library.call('library-remove',{id:original.id});assert.equal((await library.call('library-list')).entries.length,1);
-  assert.equal((await one.getFileHandle('partial.data')).locked,true);assert.ok(await one.getFileHandle('unmarked.data'));
+  assert.equal((await received.getFileHandle('partial.txt')).locked,true);assert.ok(await one.getFileHandle('unmarked.data'));
   await first.call('shutdown');await second.call('shutdown');
 });
 test('worker cleanup settings persist and apply category plus strict size across existing scopes',async()=>{

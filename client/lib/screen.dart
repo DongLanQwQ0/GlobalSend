@@ -48,6 +48,7 @@ import 'installed_apps_picker.dart';
 import 'windows_startup_control.dart';
 import 'user_guide_screen.dart';
 import 'ios_drag_source.dart';
+import 'ios_window_header.dart';
 
 const defaultCenterAddress = String.fromEnvironment(
   'GLOBALSEND_DEFAULT_CENTER',
@@ -1241,7 +1242,7 @@ class _SendScreenState extends State<SendScreen>
                 icon: const AppIcon(Icons.settings_outlined, size: 22),
               ),
           ],
-        ),
+        ).windowSafe(),
         body: Stack(
           children: [
             SafeArea(

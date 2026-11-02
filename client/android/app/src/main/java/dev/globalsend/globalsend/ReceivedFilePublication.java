@@ -29,8 +29,8 @@ final class ReceivedFilePublication {
     }
 
     // Record before scanning: the media observer may run before onScanCompleted.
-    // Paths, rather than display names or a whole folder, distinguish our receipt
-    // from unrelated camera/screenshot files in the same destination.
+    // Paths, rather than display names or a whole receive folder, distinguish
+    // our receipts/exports from unrelated camera files in the same destination.
     private static final Object RECEIPTS_LOCK=new Object();
     static void remember(Context context,File file) throws IOException {
         synchronized(RECEIPTS_LOCK) {
@@ -44,6 +44,30 @@ final class ReceivedFilePublication {
             return new java.util.HashSet<>(context.getSharedPreferences("received-media-origins",Context.MODE_PRIVATE)
                 .getStringSet("paths",java.util.Set.of()));
         }
+    }
+
+    /** Media created by this application is not a new camera/media recommendation. */
+    static boolean applicationMedia(Context context,String path,String owner,String relativePath,
+            java.util.Set<String> recorded) {
+        if(context.getPackageName().equals(owner))return true;
+        if(path!=null) {
+            File file=new File(path);
+            try {file=file.getCanonicalFile();} catch(IOException unavailable) {file=file.getAbsoluteFile();}
+            if(recorded.contains(file.getPath()))return true;
+            if(inside(file,context.getFilesDir().getParentFile()) || inside(file,context.getCacheDir()))return true;
+            for(File root:context.getExternalFilesDirs(null))if(root!=null && inside(file,root.getParentFile()))return true;
+            for(File root:context.getExternalCacheDirs())if(root!=null && inside(file,root))return true;
+            String root=Environment.getExternalStorageDirectory().getAbsolutePath()+File.separator;
+            if(file.getPath().startsWith(root))relativePath=file.getPath().substring(root.length());
+        }
+        // Also catch exports made by an older build, or rows whose DATA is
+        // redacted. This is the app's one reserved public compatibility cache,
+        // not the chosen receive folder and not arbitrary folders called cache.
+        if(relativePath==null)return false;
+        String relative=relativePath.replace('\\','/').toLowerCase(java.util.Locale.ROOT);
+        String prefix=Environment.DIRECTORY_DOWNLOADS.toLowerCase(java.util.Locale.ROOT)+"/globalsend/";
+        return relative.startsWith(prefix+"drag-cache/") || relative.equals(prefix+"drag-cache") ||
+            relative.startsWith(prefix+"dragcache/") || relative.equals(prefix+"dragcache");
     }
 
     static File sharedFile(Context context, String location) throws IOException {

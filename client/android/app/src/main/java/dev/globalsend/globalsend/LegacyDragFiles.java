@@ -77,13 +77,16 @@ final class LegacyDragFiles {
                 byte[] bytes=new byte[65536];int count;
                 while((count=input.read(bytes))!=-1)output.write(bytes,0,count);
             }
-            values.clear();values.put(MediaStore.MediaColumns.IS_PENDING,0);
-            context.getContentResolver().update(uri,values,null,null);
             String path;int mediaType;
             try(Cursor cursor=context.getContentResolver().query(fileAccessUri(uri,0),new String[]{MediaStore.MediaColumns.DATA,MediaStore.Files.FileColumns.MEDIA_TYPE},null,null,null)) {
                 if(cursor==null || !cursor.moveToFirst() || cursor.isNull(0))throw new IOException("No exported file path");
                 path=cursor.getString(0);mediaType=cursor.getInt(1);
             }
+            // The media observer sees the row as soon as IS_PENDING clears.
+            // Record its origin first, not after it has already been suggested.
+            ReceivedFilePublication.remember(context,new File(path));
+            values.clear();values.put(MediaStore.MediaColumns.IS_PENDING,0);
+            context.getContentResolver().update(uri,values,null,null);
             published=true;return new Export(uri,fileAccessUri(uri,mediaType),path);
         } finally {
             if(!published) {

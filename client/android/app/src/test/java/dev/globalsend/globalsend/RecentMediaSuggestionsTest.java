@@ -35,13 +35,17 @@ public class RecentMediaSuggestionsTest {
         final java.util.Set<String> trashed=new java.util.HashSet<>();
         java.io.File original;
         final java.util.Map<String,String> paths=new java.util.HashMap<>();
+        final java.util.Map<String,String> owners=new java.util.HashMap<>(),relative=new java.util.HashMap<>();
         boolean extra;
+        int generatedBefore;
+        Runnable afterImages;
         String extraName="new.jpg";
         public boolean onCreate() {return true;}
         public Cursor query(Uri uri,String[] columns,String selection,String[] args,String sort) {
             if(selection==null) {
                 MatrixCursor row=new MatrixCursor(columns);Object[] values=new Object[columns.length];
-                for(int i=0;i<columns.length;i++)values[i]=columns[i].equals(MediaStore.MediaColumns.DATA)?paths.get(uri.getLastPathSegment()):columns[i].equals(MediaStore.MediaColumns._ID)?Long.parseLong(uri.getLastPathSegment()):trashed.contains(uri.getLastPathSegment())?1:0;
+                String id=uri.getLastPathSegment();
+                for(int i=0;i<columns.length;i++)values[i]=columns[i].equals(MediaStore.MediaColumns.DATA)?paths.get(id):columns[i].equals(MediaStore.MediaColumns.OWNER_PACKAGE_NAME)?owners.get(id):columns[i].equals(MediaStore.MediaColumns.RELATIVE_PATH)?relative.get(id):columns[i].equals(MediaStore.MediaColumns._ID)?Long.parseLong(id):trashed.contains(id)?1:0;
                 row.addRow(values);return row;
             }
             assertTrue(selection.contains("date_added>=?"));assertTrue(selection.contains("is_pending=0"));
@@ -49,10 +53,23 @@ public class RecentMediaSuggestionsTest {
             MatrixCursor rows=new MatrixCursor(columns);
             long seconds=System.currentTimeMillis()/1000;
             if(uri.toString().contains("images")) {
-                rows.addRow(new Object[]{101,"camera.jpg",seconds,paths.get("101")});
-                if(extra)rows.addRow(new Object[]{103,extraName,seconds+1,paths.get("103")});
-            } else rows.addRow(new Object[]{102,"camera.mp4",seconds,paths.get("102")});
+                for(int i=0;i<generatedBefore;i++)rows.addRow(values(columns,200+i,"export.jpg",seconds+2));
+                rows.addRow(values(columns,101,"camera.jpg",seconds));
+                if(extra)rows.addRow(values(columns,103,extraName,seconds+1));
+            } else {
+                if(afterImages!=null) {Runnable run=afterImages;afterImages=null;run.run();}
+                rows.addRow(values(columns,102,"camera.mp4",seconds));
+            }
             return rows;
+        }
+        private Object[] values(String[] columns,long id,String name,long seconds) {
+            Object[] values=new Object[columns.length];String key=Long.toString(id);
+            for(int i=0;i<columns.length;i++)values[i]=columns[i].equals(MediaStore.MediaColumns._ID)?id:
+                columns[i].equals(MediaStore.MediaColumns.DISPLAY_NAME)?name:
+                columns[i].equals(MediaStore.MediaColumns.DATE_ADDED)?seconds:
+                columns[i].equals(MediaStore.MediaColumns.DATA)?paths.get(key):
+                columns[i].equals(MediaStore.MediaColumns.OWNER_PACKAGE_NAME)?owners.get(key):relative.get(key);
+            return values;
         }
         public String getType(Uri uri) {return "image/jpeg";}
         @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws java.io.FileNotFoundException {
@@ -70,7 +87,8 @@ public class RecentMediaSuggestionsTest {
         context=RuntimeEnvironment.getApplication();gallery=new Gallery();
         android.content.pm.ProviderInfo info=new android.content.pm.ProviderInfo();info.authority="media";info.exported=true;
         gallery.attachInfo(context,info);
-        gallery.original=new java.io.File(context.getFilesDir(),"gallery-original.jpg");
+        gallery.original=new java.io.File(android.os.Environment.getExternalStorageDirectory(),"Pictures/GlobalSend-test-media/gallery-original.jpg");
+        gallery.original.getParentFile().mkdirs();
         Files.write(gallery.original.toPath(),new byte[]{1,2,3});
         ShadowContentResolver.registerProviderInternal("media",gallery);
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES,Manifest.permission.READ_MEDIA_VIDEO);
@@ -96,11 +114,11 @@ public class RecentMediaSuggestionsTest {
         assertEquals(3,suggested.size());assertEquals("new.jpg",suggested.get(2).name);
     }
     @Test public void receivedMediaIsExcludedByOriginAndSurvivesFeedRestart() throws Exception {
-        java.io.File received=new java.io.File(context.getFilesDir(),"received/camera.jpg");
+        java.io.File received=new java.io.File(android.os.Environment.getExternalStorageDirectory(),"Download/GlobalSend/camera.jpg");
         gallery.paths.put("101",received.getCanonicalPath());
-        gallery.paths.put("102",new java.io.File(context.getFilesDir(),"camera.mp4").getCanonicalPath());
+        gallery.paths.put("102",new java.io.File(android.os.Environment.getExternalStorageDirectory(),"DCIM/camera.mp4").getCanonicalPath());
         // Same basename in another directory is not a received file.
-        gallery.paths.put("103",new java.io.File(context.getFilesDir(),"camera/camera.jpg").getCanonicalPath());
+        gallery.paths.put("103",new java.io.File(android.os.Environment.getExternalStorageDirectory(),"DCIM/camera/camera.jpg").getCanonicalPath());
         ReceivedFilePublication.remember(context,received);
         gallery.extra=true;gallery.extraName="camera.jpg";feed.start();until(() -> batches.get()==1);
         assertEquals(2,suggested.size());
@@ -187,5 +205,56 @@ public class RecentMediaSuggestionsTest {
             "{\"enabled\":true,\"handled\":[\"101\"]}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         feed.refresh();until(() -> current.size()==1);
         assertEquals(List.of(MediaStore.Video.Media.EXTERNAL_CONTENT_URI+"/102"),current);
+    }
+    @Test public void privateExportAndAppOwnedMediaAreNotSuggestionsButAnExternalNamesakeIs() throws Exception {
+        java.io.File cached=new java.io.File(context.getCacheDir(),"dragcache/camera.jpg");
+        cached.getParentFile().mkdirs();Files.write(cached.toPath(),new byte[]{3,2,1});
+        gallery.paths.put("101",cached.getCanonicalPath());
+        gallery.owners.put("102",context.getPackageName()); // DATA can be redacted.
+        gallery.extra=true;gallery.extraName="camera.jpg";
+        gallery.paths.put("103",new java.io.File(android.os.Environment.getExternalStorageDirectory(),"DCIM/camera.jpg").getCanonicalPath());
+        feed.start();until(() -> batches.get()==1);
+        assertEquals(1,suggested.size());assertTrue(suggested.get(0).uri.endsWith("/103"));
+        assertTrue(cached.isFile());
+        feed.stop();context.getSharedPreferences("dock-media-suggestions",0).edit().clear().commit();
+        suggested.clear();feed=create();feed.start();until(() -> batches.get()==2);
+        assertEquals(1,suggested.size());assertTrue(suggested.get(0).uri.endsWith("/103"));
+    }
+    @Test public void oldPublicDragCacheIsExcludedWithoutDataOrOriginJournal() throws Exception {
+        gallery.relative.put("101","Download/GlobalSend/Drag-cache/");
+        gallery.extra=true;gallery.extraName="export.jpg";
+        gallery.relative.put("103","Download/Else/Drag-cache/");
+        feed.start();until(() -> batches.get()==1);
+        assertEquals(2,suggested.size());assertFalse(suggested.stream().anyMatch(m -> m.uri.endsWith("/101")));
+        assertTrue(suggested.stream().anyMatch(m -> m.uri.endsWith("/103")));
+    }
+    @Test public void ownOriginChangesPruneVisibleSuggestionsEvenWithNoRecordedPaths() throws Exception {
+        List<String> current=new ArrayList<>();
+        feed=new RecentMediaSuggestions(context,items -> {for(var item:items)current.add(item.uri);},
+            disabled::incrementAndGet,() -> new ArrayList<>(current),current::removeAll);
+        feed.start();until(() -> current.size()==2);
+        gallery.owners.put("101",context.getPackageName());
+        context.getContentResolver().notifyChange(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,null);
+        until(() -> current.size()==1);
+        assertEquals(List.of(MediaStore.Video.Media.EXTERNAL_CONTENT_URI+"/102"),current);
+        assertTrue(gallery.original.isFile());
+    }
+    @Test public void generatedExportsDoNotConsumeThePageBudgetAndHideRealPhotos() throws Exception {
+        gallery.generatedBefore=40;
+        for(int i=0;i<40;i++)gallery.owners.put(Integer.toString(200+i),context.getPackageName());
+        feed.start();until(() -> batches.get()==1);
+        assertEquals(2,suggested.size());
+        assertTrue(suggested.stream().anyMatch(m -> m.uri.endsWith("/101")));
+        assertTrue(suggested.stream().noneMatch(m -> m.name.equals("export.jpg")));
+    }
+    @Test public void originRecordedDuringAStoreReadCannotLeakIntoThePendingSuggestionBatch() throws Exception {
+        gallery.paths.put("101",new java.io.File(gallery.original.getParentFile(),"../GlobalSend-test-media/"+gallery.original.getName()).getPath());
+        gallery.afterImages=() -> {
+            try {ReceivedFilePublication.remember(context,gallery.original);}
+            catch(java.io.IOException failure){throw new RuntimeException(failure);}
+        };
+        feed.start();until(() -> batches.get()==1);
+        assertEquals(1,suggested.size());assertTrue(suggested.get(0).uri.endsWith("/102"));
+        assertTrue(gallery.original.isFile());
     }
 }

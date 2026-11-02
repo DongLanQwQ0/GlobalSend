@@ -15,6 +15,7 @@ import 'content_drag_surface.dart';
 import 'dock_platform.dart';
 import 'models.dart';
 import 'received_file_access.dart';
+import 'ios_window_header.dart';
 
 Future<void> showTextViewer(
   BuildContext context, {
@@ -210,35 +211,37 @@ class _TextViewerState extends State<_TextViewer> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  Ui.space4,
-                  Ui.space3,
-                  Ui.space2,
-                  Ui.space1,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: Ui.textLg,
-                          height: Ui.leadingTight,
-                          fontWeight: Ui.weightLabel,
+              IosWindowHeader(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    Ui.space4,
+                    Ui.space3,
+                    Ui.space2,
+                    Ui.space1,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: Ui.textLg,
+                            height: Ui.leadingTight,
+                            fontWeight: Ui.weightLabel,
+                          ),
                         ),
                       ),
-                    ),
-                    ContentDragControl(
-                      child: IconButton(
-                        tooltip: '关闭',
-                        onPressed: () => Navigator.pop(context),
-                        icon: const AppIcon(Icons.close, size: 21),
+                      ContentDragControl(
+                        child: IconButton(
+                          tooltip: '关闭',
+                          onPressed: () => Navigator.pop(context),
+                          icon: const AppIcon(Icons.close, size: 21),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               if (widget.notice != null)
