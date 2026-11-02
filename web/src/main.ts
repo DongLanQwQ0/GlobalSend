@@ -92,7 +92,7 @@ class GlobalSend {
   readonly clipboard=new ClipboardSlot(()=>rememberedGet('globalsend:clipboard-slot'),value=>rememberedSet('globalsend:clipboard-slot',value));
   get clipboardSlot(){return this.clipboard.current;}
   private clipboardDrag:{text?:string;file?:File}|null=null;
-  setClipboardReceive(enabled:boolean){this.clipboard.setEnabled(enabled);this.render();if(enabled && this.clipboardSlot?.key && !this.clipboardSlot.file && localStorageSupported())void this.ensureFileStore().then(store=>this.restoreClipboardFile(store));}
+  async setClipboardReceive(enabled:boolean){this.clipboard.setEnabled(enabled);this.render();if(enabled && this.clipboardSlot?.key && !this.clipboardSlot.file && localStorageSupported())await this.restoreClipboardFile(await this.ensureFileStore());}
   private async retireClipboard(value:ClipboardSlotValue|null){
     if(!value?.key || !value.scope || this.clipboard.value?.key===value.key)return;
     this.rtcLocalFiles.delete(value.key);this.retainedSources.delete(value.key);this.previewSources.delete(value.key);

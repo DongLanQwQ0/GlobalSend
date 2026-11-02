@@ -1758,12 +1758,13 @@ test('device diagnostic shows selected source-to-target endpoints and separates 
 test('selected cards keep native HTML drag enabled on Receive, History and Files without changing selection',()=>{
  for(const view of ['receive','sent','library']){
   const {c,document,render,Event}=fixture();c.render=render;c.contentView=view;c.receiveSelecting=view==='receive';c.sentSelecting=view==='sent';c.fileLibrary.editing=view==='library';c.fileLibrary.opened=true;
+  const receivedAt=Date.now(),createdAt=new Date(receivedAt).toISOString();
   const files=[0,1,2].map(index=>new File(['data'],'item-'+index+'.bin'));
   if(view==='library'){
-   c.fileLibrary.entries=files.map((file,index)=>({id:'scope/'+index,key:String(index),scope:'scope',name:file.name,mimeType:file.type,size:file.size,receivedAt:Date.now(),expiresAt:Date.now()+60000}));
+   c.fileLibrary.entries=files.map((file,index)=>({id:'scope/'+index,key:String(index),scope:'scope',name:file.name,mimeType:file.type,size:file.size,receivedAt,expiresAt:receivedAt+60000}));
    files.forEach((file,index)=>c.fileLibrary.files.set('scope/'+index,file));c.fileLibrary.selected=new Set(['scope/0','scope/1']);
   }else{
-   c.transfers=files.map((file,index)=>{const t=transfer('drag-'+index,'received');t.files[0].sha256=String(index).repeat(64);if(view==='sent'){t.sourceDeviceId='receiver';t.targetDeviceId='sender';c.fileSources.set(t.transferId+':'+t.files[0].fileId,file);}else c.rtcLocalFiles.set(t.transferId+':'+t.files[0].fileId,file);return t;});
+   c.transfers=files.map((file,index)=>{const t=transfer('drag-'+index,'received');t.createdAt=createdAt;t.files[0].sha256=String(index).repeat(64);if(view==='sent'){t.sourceDeviceId='receiver';t.targetDeviceId='sender';c.fileSources.set(t.transferId+':'+t.files[0].fileId,file);}else c.rtcLocalFiles.set(t.transferId+':'+t.files[0].fileId,file);return t;});
    const selected=new Set(['file:drag-0:file-drag-0','file:drag-1:file-drag-1']);if(view==='sent')c.sentSelected=selected;else c.selected=selected;
   }
   render();const selector=view==='library'?'[data-library-id="scope/2"]':'[data-drag-file="drag-2:file-drag-2"]',card=document.querySelector(selector)!;assert.equal(card.getAttribute('draggable'),'true');
@@ -1859,4 +1860,14 @@ test('Web slot keeps immutable dragged and staged blobs while retiring only its 
  const exported=c.clipboardSlot.file;c.stageClipboardSlot();assert.equal(await c.picked[0].text(),'pixel body');
  await c.adoptClipboard({id:'next-text',source:'other',at:'2099-01-02',text:'latest'});
  assert.deepEqual(released,['auto:image']);assert.equal(await exported.text(),'pixel body');assert.equal(await c.picked[0].text(),'pixel body');assert.equal(c.clipboardSlot.text,'latest');
+});
+
+
+test('re-enabling clipboard receiving restores an immutable private image without deleting the hidden current slot',async()=>{
+ const {c,context}=fixture(),original=new File(['restored pixels'],'restored.png',{type:'image/png'}),released:string[]=[];
+ context.Worker=function(){};context.navigator.storage={getDirectory:async()=>({})};
+ const store={get:async()=>original,releaseClipboard:async(key:string)=>released.push(key)};c.ensureFileStore=async()=>store;
+ c.clipboard.receive({id:'persisted',source:'sender',at:'2099-01-01',scope:c.dockKey,key:'persisted:image',name:'restored.png',mimeType:'image/png'});
+ await c.setClipboardReceive(false);await c.retireClipboard({...c.clipboard.value});assert.deepEqual(released,[]);
+ await c.setClipboardReceive(true);assert.notEqual(c.clipboardSlot.file,original);assert.equal(await c.clipboardSlot.file.text(),'restored pixels');assert.equal(c.clipboardSlot.key,'persisted:image');
 });
