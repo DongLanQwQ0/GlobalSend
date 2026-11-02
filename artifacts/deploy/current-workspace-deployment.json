@@ -1,14 +1,14 @@
 {
   "state": "deployed",
-  "stamp": "20261102-clipboard112",
-  "sourceCommit": "dd01dc38669065717a3537435ebef5f39d739058",
-  "image": "globalsend:clipboard-reference-1.0.87-20261102",
-  "oldImage": "globalsend:copied-cards-1.0.86-20261102",
+  "stamp": "20261102-restart114",
+  "sourceCommit": "c02248f35beb915ebbf80a1a5791b821691b8dcb",
+  "image": "globalsend:restart-order-1.0.89-20261102",
+  "oldImage": "globalsend:image-policy-1.0.88-20261102",
   "health": "healthy",
-  "release": "/home/ubuntu/GlobalSend/releases/20261102-clipboard112",
-  "previousRelease": "/home/ubuntu/GlobalSend/releases/20261102-copied111",
+  "release": "/home/ubuntu/GlobalSend/releases/20261102-restart114",
+  "previousRelease": "/home/ubuntu/GlobalSend/releases/20261102-image113",
   "composeBase": "/home/ubuntu/GlobalSend/releases/20261029-1620-multi-group",
   "installerUploaded": false,
-  "evidence": "artifacts/tmp/release112/server-deploy.log",
-  "publicWebEvidence": "artifacts/tmp/release112/public-assets.json"
+  "evidence": "artifacts/tmp/release114/server-deploy.log",
+  "publicWebEvidence": "artifacts/tmp/release114/public-assets.json"
 }
