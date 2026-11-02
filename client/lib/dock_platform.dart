@@ -90,8 +90,9 @@ class DockPlatform {
       channel.invokeMethod('notificationPermission');
   static Future<void> importClipboard() =>
       channel.invokeMethod('importClipboard');
-  static Future<void> copyReceivedImage(String path) =>
-      channel.invokeMethod<void>('copyReceivedImage', {'path': path});
+  static Future<bool> copyReceivedImage(String path) async =>
+      await channel.invokeMethod<bool>('copyReceivedImage', {'path': path}) ==
+      true;
   static Future<bool> dragClipboardSuggestion(String revision) async =>
       await channel.invokeMethod<bool>('dragClipboardSuggestion', {
         'revision': revision,

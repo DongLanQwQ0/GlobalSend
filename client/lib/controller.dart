@@ -122,27 +122,27 @@ class SendController extends ChangeNotifier {
   bool get clipboardReceiveEnabled => clipboard.enabled;
   Future<void> setClipboardReceiveEnabled(bool enabled) =>
       clipboard.setEnabled(enabled);
-  Future<void> copyClipboardSlot() async {
+  bool get canCopyClipboardSlot =>
+      clipboardSlot?.kind == 'text' || FileShareBridge.canWriteImageClipboard;
+  Future<bool> copyClipboardSlot() async {
     final item = clipboardSlot;
-    if (item == null) return;
+    if (item == null) return false;
+    if (item.kind != 'text' &&
+        !await FileShareBridge.ensureImageClipboardCapability())
+      return false;
     clipboard.retain(item.localPath);
     try {
-      if (item.kind == 'text')
+      if (item.kind == 'text') {
         await copyDockText(item);
-      else if (Platform.isWindows)
-        await SystemBridge.copyImage(
+        return true;
+      }
+      if (defaultTargetPlatform == TargetPlatform.windows)
+        return await SystemBridge.copyImage(
           item.localPath,
           originDeviceId: item.originDeviceId,
           sourceEventId: item.sourceEventId,
         );
-      else if (Platform.isAndroid)
-        await DockPlatform.channel.invokeMethod<void>('copyReceivedImage', {
-          'path': item.localPath,
-        });
-      else
-        await FileShareBridge.channel.invokeMethod<void>('copyReceivedImage', {
-          'path': item.localPath,
-        });
+      return await FileShareBridge.copyReceivedImage(item.localPath);
     } finally {
       await clipboard.release(item.localPath);
     }
@@ -392,6 +392,7 @@ class SendController extends ChangeNotifier {
        _providedBackgroundReceive = backgroundReceive,
        updates = updates ?? AppUpdates(),
        vault = vault ?? PlatformVault() {
+    FileShareBridge.imageClipboardSupported.addListener(changed);
     this.updates.canInstall = () => updateIdle;
     this.updates.beforeInstall = saveForUpdate;
     this.reachability =
@@ -1616,6 +1617,7 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> init() async {
+    unawaited(FileShareBridge.ensureImageClipboardCapability());
     _bindRemoteReferences();
     _reachabilityStarted = true;
     reachability.start();
@@ -3314,17 +3316,17 @@ class SendController extends ChangeNotifier {
     if (_clipboardRoots.containsKey(identity)) return;
     _clipboardRoots[identity] = item.expiresAtMillis;
     _lastRemoteClipboardAt = item.createdAtMillis;
+    if (!await FileShareBridge.ensureImageClipboardCapability()) return;
     try {
       final bool applied;
-      if (Platform.isWindows) {
+      if (defaultTargetPlatform == TargetPlatform.windows) {
         applied = await SystemBridge.copyImage(
           item.localPath,
           originDeviceId: item.originDeviceId,
           sourceEventId: item.sourceEventId,
         );
       } else {
-        await copyClipboardSlot();
-        applied = true;
+        applied = await copyClipboardSlot();
       }
       if (applied) {
         clipboardStatus = '已同步';
@@ -6869,6 +6871,7 @@ class SendController extends ChangeNotifier {
 
   @override
   void dispose() {
+    FileShareBridge.imageClipboardSupported.removeListener(changed);
     if (Platform.isAndroid &&
         DockPlatform.onPullCopiedFile == pullCopiedFileSelection) {
       DockPlatform.onPullCopiedFile = null;

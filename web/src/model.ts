@@ -48,6 +48,12 @@ export function suggestedDeviceName(browser:{userAgent:string;maxTouchPoints?:nu
   if(/Linux|X11/i.test(ua+' '+platform))return 'Linux 电脑';
   return '浏览器';
 }
+/** Image clipboard writes are intentionally off on Android and iPhone, not iPad. */
+export function imageClipboardSupported(browser:{userAgent:string;maxTouchPoints?:number;platform?:string;userAgentData?:{platform?:string}}):boolean {
+  const ua=browser.userAgent,platform=browser.userAgentData?.platform || browser.platform || '';
+  if(/iPad/i.test(ua) || /Macintosh/i.test(ua) && (browser.maxTouchPoints || 0)>1)return true;
+  return !/Android|iPhone|iPod/i.test(ua+' '+platform);
+}
 export function centerWebSocketUrl(baseUrl:string,ticket:string):string {
   const url=new URL(`${baseUrl}/api/v1/ws`);url.protocol=url.protocol==='https:'?'wss:':'ws:';url.searchParams.set('ticket',ticket);return url.href;
 }

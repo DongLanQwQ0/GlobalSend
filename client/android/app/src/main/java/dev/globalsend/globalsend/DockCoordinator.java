@@ -128,18 +128,9 @@ final class DockCoordinator {
             try {
                 switch (call.method) {
                     case "copyReceivedImage":
-                        String imagePath=call.argument("path");
-                        Uri imageUri=DockShareProvider.registerReadSource(this.context,imagePath);
-                        ClipboardManager manager=this.context.getSystemService(ClipboardManager.class);
-                        NativeFileLease previousImageLease=clipboardImageLease;Uri previousImageUri=clipboardImageUri;
-                        clipboardImageLease=new NativeFileLease(List.of(imagePath));clipboardImageUri=imageUri;
-                        try {manager.setPrimaryClip(ClipData.newUri(this.context.getContentResolver(),"GlobalSend",imageUri));}
-                        catch(RuntimeException denied) {
-                            clipboardImageLease.close();DockShareProvider.release(imageUri);
-                            clipboardImageLease=previousImageLease;clipboardImageUri=previousImageUri;throw denied;
-                        }
-                        if(previousImageLease!=null)previousImageLease.close();if(previousImageUri!=null)DockShareProvider.release(previousImageUri);
-                        result.success(null);break;
+                        // Android image reception stays in the slot; do not overwrite
+                        // the user's system clipboard, including legacy bridge calls.
+                        result.success(false);break;
                     case "startRemoteReferenceDrag":
                         View referenceSource=findFlutterView(host().findViewById(android.R.id.content));
                         if(referenceSource==null || !host().hasWindowFocus())throw new IllegalStateException("请从可见的引用卡片开始拖动");

@@ -1492,6 +1492,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void copy(ReceiveNotifications.Receipt receipt) {
+        if(receipt.text==null)return; // Images remain draggable/openable, not system clipboard content.
         if (!receipt.id.startsWith("shelf:") && !"clipboard-slot".equals(receipt.id)) { actions.copy(receipt.id); return; }
         context.getSystemService(android.content.ClipboardManager.class)
             .setPrimaryClip(android.content.ClipData.newPlainText("GlobalSend", receipt.text));

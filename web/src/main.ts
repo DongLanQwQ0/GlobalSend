@@ -10,7 +10,7 @@ import { centeredDragImage } from './drag_image';
 import { digestFile } from './files';
 import { emptyGroupData, publicSession, validateGroupKey } from './group';
 import { Api, ApiError } from './api';
-import { baseFromLocation, centerWebSocketUrl, suggestedDeviceName, escapeHtml as e, formatBytes, characterCount, mergeEvents, normalizeBaseUrl, safeDownloadUrl, statusLabel, storageKey } from './model';
+import { baseFromLocation, centerWebSocketUrl, suggestedDeviceName, imageClipboardSupported, escapeHtml as e, formatBytes, characterCount, mergeEvents, normalizeBaseUrl, safeDownloadUrl, statusLabel, storageKey } from './model';
 import type { Device, ServerInfo, Session, StoredState, Transfer, TransferFile, WireEvent } from './model';
 import { icon, platformIcon } from './icons';
 import { dockScopeKey, expiryLabel, fileItemKey, localTextDeadline, textItemKey, visibleLocalEvents } from './dock';
@@ -110,13 +110,15 @@ class GlobalSend {
     if(!this.clipboard.receive(value)){await this.retireClipboard(value);return;}
     if(value.key && value.file)this.rtcLocalFiles.set(value.key,value.file);
     if(value.text!==undefined && navigator.clipboard?.writeText)void navigator.clipboard.writeText(value.text).catch(()=>{});
-    else if(value.file && typeof ClipboardItem!=='undefined' && navigator.clipboard?.write && value.file.type.startsWith('image/'))void navigator.clipboard.write([new ClipboardItem({[value.file.type]:value.file})]).catch(()=>{});
+    else if(imageClipboardSupported(navigator) && value.file && typeof ClipboardItem!=='undefined' && navigator.clipboard?.write && value.file.type.startsWith('image/'))void navigator.clipboard.write([new ClipboardItem({[value.file.type]:value.file})]).catch(()=>{});
     this.render();
     await this.retireClipboard(previous);
   }
-  async copyClipboardSlot(){const value=this.clipboardSlot;if(!value)return;try{if(value.text!==undefined)await navigator.clipboard.writeText(value.text);else if(value.file)await navigator.clipboard.write([new ClipboardItem({[value.file.type]:value.file})]);this.toast('已复制');}catch{this.toast('浏览器未允许写入剪贴板，可拖出或加入待发送',true);}}
+  get canCopyClipboardSlot(){return this.clipboardSlot?.text!==undefined || imageClipboardSupported(navigator);}
+  async copyClipboardSlot(){const value=this.clipboardSlot;if(!value || !this.canCopyClipboardSlot)return false;try{if(value.text!==undefined)await navigator.clipboard.writeText(value.text);else if(value.file)await navigator.clipboard.write([new ClipboardItem({[value.file.type]:value.file})]);else return false;this.toast('已复制');return true;}catch{this.toast('浏览器未允许写入剪贴板，可拖出或加入待发送',true);return false;}}
+
   stageClipboardSlot(){const value=this.clipboardSlot;if(value?.text!==undefined)this.stagedTexts.push({id:id(),text:value.text});else if(value?.file)this.addFiles([value.file]);this.render();}
-  clipboardSlotHtml(){const value=this.clipboardSlot;if(!value)return '';return '<article class="copied-file-reference clipboard-slot-card" draggable="true" data-drag-clipboard-slot aria-label="自动剪贴板槽位"><div class="clipboard-slot-preview">'+(value.key?this.previewHtml(value.key,value.name || '',value.mimeType):'<span>'+e((value.text || '').slice(0,180))+'</span>')+'</div><div class="clipboard-slot-actions"><button class="quiet" data-action="stage-clipboard-slot" title="加入待发送" aria-label="加入待发送">'+icon('plus')+'</button><button class="quiet" data-action="copy-clipboard-slot">'+icon('copy')+'复制</button></div><button class="icon-button quiet" data-action="clear-clipboard-slot" aria-label="清除剪贴板槽位">'+icon('close')+'</button></article>';}
+  clipboardSlotHtml(){const value=this.clipboardSlot;if(!value)return '';return '<article class="copied-file-reference clipboard-slot-card" draggable="true" data-drag-clipboard-slot aria-label="自动剪贴板槽位"><div class="clipboard-slot-preview">'+(value.key?this.previewHtml(value.key,value.name || '',value.mimeType):'<span>'+e((value.text || '').slice(0,180))+'</span>')+'</div><div class="clipboard-slot-actions"><button class="quiet" data-action="stage-clipboard-slot" title="加入待发送" aria-label="加入待发送">'+icon('plus')+'</button>'+(this.canCopyClipboardSlot?'<button class="quiet" data-action="copy-clipboard-slot">'+icon('copy')+'复制</button>':'')+'</div><button class="icon-button quiet" data-action="clear-clipboard-slot" aria-label="清除剪贴板槽位">'+icon('close')+'</button></article>';}
 
   rememberReferenceFiles(){
     for(const transfer of [...this.localHistory.scopes.flatMap(scope=>scope.transfers),...this.transfers]){if(!transfer.copiedFile || transfer.targetDeviceId!==this.session?.device.deviceId)continue;

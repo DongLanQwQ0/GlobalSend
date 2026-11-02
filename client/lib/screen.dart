@@ -3807,7 +3807,12 @@ class _SendScreenState extends State<SendScreen>
                     previewOnly: true,
                     onOpen: () =>
                         slot.kind == 'text' ? readText(slot) : openFile(slot),
-                    onCopy: () => perform(c.copyClipboardSlot, done: '已复制'),
+                    onCopy: c.canCopyClipboardSlot
+                        ? () => perform(() async {
+                            if (await c.copyClipboardSlot() && mounted)
+                              notice('已复制');
+                          })
+                        : null,
                     menu: IconButton(
                       tooltip: '加入待发送',
                       icon: const AppIcon(Icons.add, size: 18),

@@ -90,7 +90,10 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
         else { self.dragSources = args }
         self.attachToForegroundScene()
         result(nil)
+      } else if call.method == "imageClipboardSupported" {
+        result(UIDevice.current.userInterfaceIdiom == .pad)
       } else if call.method == "copyReceivedImage" {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { result(false); return }
         let args = call.arguments as? [String: Any] ?? [:]
         let path = args["path"] as? String ?? ""
         self.work.async {
@@ -101,7 +104,7 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
             let type = source.flatMap { CGImageSourceGetType($0) as String? } ?? UTType(filenameExtension: url.pathExtension)?.identifier ?? UTType.image.identifier
             DispatchQueue.main.async {
               UIPasteboard.general.setItems([[type: data]], options: [.localOnly: true])
-              result(nil)
+              result(true)
             }
           } catch { DispatchQueue.main.async { result(FlutterError(code: "CLIPBOARD_IMAGE", message: "无法复制图片", details: nil)) } }
         }

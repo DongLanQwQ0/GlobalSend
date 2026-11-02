@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import 'dock_platform.dart';
@@ -68,8 +69,38 @@ abstract final class FileShareBridge {
   static bool get supported => Platform.isAndroid || Platform.isIOS;
   static Future<void> importClipboard() =>
       channel.invokeMethod('importClipboard');
-  static Future<void> copyReceivedImage(String path) =>
-      channel.invokeMethod<void>('copyReceivedImage', {'path': path});
+  static final imageClipboardSupported = ValueNotifier<bool>(false);
+  static Future<bool>? _imageClipboardCapability;
+  static bool get canWriteImageClipboard =>
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.iOS &&
+          imageClipboardSupported.value;
+  static Future<bool> ensureImageClipboardCapability() {
+    if (defaultTargetPlatform != TargetPlatform.iOS)
+      return Future.value(canWriteImageClipboard);
+    return _imageClipboardCapability ??= refreshImageClipboardCapability();
+  }
+
+  static Future<bool> refreshImageClipboardCapability() {
+    if (defaultTargetPlatform != TargetPlatform.iOS)
+      return Future.value(canWriteImageClipboard);
+    _install();
+    return _imageClipboardCapability = channel
+        .invokeMethod<bool>('imageClipboardSupported')
+        .then((allowed) {
+          imageClipboardSupported.value = allowed == true;
+          return allowed == true;
+        });
+  }
+
+  static Future<bool> copyReceivedImage(String path) async {
+    if (!await ensureImageClipboardCapability()) return false;
+    return await channel.invokeMethod<bool>('copyReceivedImage', {
+          'path': path,
+        }) ==
+        true;
+  }
+
   static final _incoming = StreamController<void>.broadcast();
   static final _dragEvents = StreamController<Map<String, dynamic>>.broadcast();
   static final _clipboardSlotLeases =
@@ -99,6 +130,7 @@ abstract final class FileShareBridge {
   static final windowLayout = ValueNotifier<Map<String, dynamic>>(const {});
   static Future<void> startWindowLayout() async {
     if (!Platform.isIOS) return;
+    await ensureImageClipboardCapability();
     _install();
     final value = await channel.invokeMapMethod<String, dynamic>(
       'windowLayout',

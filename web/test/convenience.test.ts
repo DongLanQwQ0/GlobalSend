@@ -1871,3 +1871,17 @@ test('re-enabling clipboard receiving restores an immutable private image withou
  await c.setClipboardReceive(false);await c.retireClipboard({...c.clipboard.value});assert.deepEqual(released,[]);
  await c.setClipboardReceive(true);assert.notEqual(c.clipboardSlot.file,original);assert.equal(await c.clipboardSlot.file.text(),'restored pixels');assert.equal(c.clipboardSlot.key,'persisted:image');
 });
+
+
+test('Android and iPhone never write image clipboard; iPad and desktop keep it, text and slot drag stay available',async()=>{
+ for(const [userAgent,maxTouchPoints,allowed] of [['Android 15',5,false],['iPhone OS 18',5,false],['iPad OS 18',5,true],['Macintosh',5,true],['Windows',0,true]]){
+  const {c,context,document,render}=fixture();c.render=render;context.navigator.userAgent=userAgent;context.navigator.maxTouchPoints=maxTouchPoints;
+  const writes:string[]=[],toasts:string[]=[];context.ClipboardItem=class {constructor(value:unknown){}};context.navigator.clipboard={write:async()=>writes.push('image'),writeText:async()=>writes.push('text')};c.toast=(value:string)=>toasts.push(value);
+  await c.adoptClipboard({id:'image',source:'PC',at:'2099-01-02',file:new File(['pixels'],'image.png',{type:'image/png'})});
+  assert.equal(c.clipboardSlot.file.name,'image.png');assert.equal(writes.length,allowed?1:0);assert.equal(await c.copyClipboardSlot(),allowed);assert.equal(writes.length,allowed?2:0);
+  assert.equal(!!document.querySelector('[data-action="copy-clipboard-slot"]'),allowed);assert.equal(document.querySelector('[data-drag-clipboard-slot]')?.getAttribute('draggable'),'true');assert.ok(document.querySelector('[data-action="stage-clipboard-slot"]'));
+  await c.adoptClipboard({id:'old-text',source:'PC',at:'2099-01-01',text:'old'});assert.equal(writes.filter(value=>value==='text').length,0);
+  await c.adoptClipboard({id:'new-text',source:'PC',at:'2099-01-03',text:'new'});assert.equal(writes.filter(value=>value==='text').length,1);assert.equal(await c.copyClipboardSlot(),true);assert.equal(writes.filter(value=>value==='text').length,2);
+  if(!allowed)assert.equal(toasts.length,1,'only the successful explicit text copy announces success');
+ }
+});

@@ -19,6 +19,7 @@ import org.robolectric.util.ReflectionHelpers;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34,manifest=Config.NONE)
 public class ClipboardSlotOverlayTest {
+    private BinaryMessenger.BinaryMessageHandler inbound;
     private Activity activity;private DockCoordinator coordinator;private ReceiveOverlay overlay;
     private final java.util.List<Map<?,?>> leases=new java.util.ArrayList<>();
     @Before public void setUp() {
@@ -30,7 +31,7 @@ public class ClipboardSlotOverlayTest {
                 io.flutter.plugin.common.MethodCall call=io.flutter.plugin.common.StandardMethodCodec.INSTANCE.decodeMethodCall(copy);
                 if(call.method.equals("clipboardSlotLease"))leases.add((Map<?,?>)call.arguments);
             }
-            public void setMessageHandler(String name,BinaryMessageHandler handler){}
+            public void setMessageHandler(String name,BinaryMessageHandler handler){inbound=handler;}
         },"slot-test"));
         overlay=new ReceiveOverlay(RuntimeEnvironment.getApplication(),new ReceiveOverlay.Actions(){
             public void open(String id){}public void copy(String id){}
@@ -65,4 +66,22 @@ public class ClipboardSlotOverlayTest {
         assertEquals(2,leases.size());assertEquals(false,leases.get(1).get("active"));
         assertEquals(leases.get(0).get("paths"),leases.get(1).get("paths"));
     }
+    @Test public void legacyImageCopyBridgeReturnsUnsupportedWithoutWritingOrOpeningSource() {
+        android.content.ClipboardManager manager=activity.getSystemService(android.content.ClipboardManager.class);
+        manager.setPrimaryClip(android.content.ClipData.newPlainText("fixture","preserve clipboard"));
+        io.flutter.plugin.common.StandardMethodCodec codec=io.flutter.plugin.common.StandardMethodCodec.INSTANCE;
+        ByteBuffer message=codec.encodeMethodCall(new io.flutter.plugin.common.MethodCall("copyReceivedImage",Map.of("path","/not-a-readable-file.png")));message.flip();
+        final Object[] returned=new Object[1];inbound.onMessage(message,reply->{ByteBuffer copy=reply.duplicate();copy.flip();returned[0]=codec.decodeEnvelope(copy);});
+        assertEquals(false,returned[0]);assertEquals("preserve clipboard",manager.getPrimaryClip().getItemAt(0).getText().toString());assertTrue(leases.isEmpty());
+    }
+    @Test public void imageSlotCopyIsNotAnActionButTextCopyRemainsAvailable() {
+        android.content.ClipboardManager manager=activity.getSystemService(android.content.ClipboardManager.class);
+        manager.setPrimaryClip(android.content.ClipData.newPlainText("fixture","preserve clipboard"));
+        int before=org.robolectric.shadows.ShadowToast.shownToastCount();
+        ReflectionHelpers.callInstanceMethod(overlay,"copy",ReflectionHelpers.ClassParameter.from(ReceiveNotifications.Receipt.class,new ReceiveNotifications.Receipt("clipboard-slot","1","peer",null,"image.png","/image.png",3)));
+        assertEquals("preserve clipboard",manager.getPrimaryClip().getItemAt(0).getText().toString());assertEquals(before,org.robolectric.shadows.ShadowToast.shownToastCount());
+        ReflectionHelpers.callInstanceMethod(overlay,"copy",ReflectionHelpers.ClassParameter.from(ReceiveNotifications.Receipt.class,new ReceiveNotifications.Receipt("clipboard-slot","2","peer","copied text",null,null,0)));
+        assertEquals("copied text",manager.getPrimaryClip().getItemAt(0).getText().toString());
+    }
+
 }
