@@ -42,6 +42,7 @@ import 'local_ip_menu.dart';
 import 'received_order.dart';
 import 'recent_photos.dart';
 import 'clipboard_suggestions.dart';
+import 'clipboard_slot.dart';
 import 'copied_files_view.dart';
 import 'recent_photos_view.dart';
 import 'installed_apps_picker.dart';
@@ -3790,26 +3791,30 @@ class _SendScreenState extends State<SendScreen>
             child: SizedBox(
               width: 124,
               height: 124,
-              child: ContentDragSurface(
-                key: const ValueKey('clipboard-slot'),
+              child: ClipboardSlotLease(
+                slot: c.clipboard,
                 entry: slot,
-                enabled: !working,
-                onExport: (kind) =>
-                    performExport(() => c.dragOut(slot, pointerKind: kind)),
-                child: CompactContentCard(
+                child: ContentDragSurface(
+                  key: const ValueKey('clipboard-slot'),
                   entry: slot,
-                  sender: '剪贴板',
-                  timestamp: '',
-                  previewOnly: true,
-                  onOpen: () =>
-                      slot.kind == 'text' ? readText(slot) : openFile(slot),
-                  onCopy: () => perform(c.copyClipboardSlot, done: '已复制'),
-                  menu: IconButton(
-                    tooltip: '加入待发送',
-                    icon: const AppIcon(Icons.add, size: 18),
-                    onPressed: working
-                        ? null
-                        : () => perform(c.stageClipboardSlot),
+                  enabled: !working,
+                  onExport: (kind) =>
+                      performExport(() => c.dragOut(slot, pointerKind: kind)),
+                  child: CompactContentCard(
+                    entry: slot,
+                    sender: '剪贴板',
+                    timestamp: '',
+                    previewOnly: true,
+                    onOpen: () =>
+                        slot.kind == 'text' ? readText(slot) : openFile(slot),
+                    onCopy: () => perform(c.copyClipboardSlot, done: '已复制'),
+                    menu: IconButton(
+                      tooltip: '加入待发送',
+                      icon: const AppIcon(Icons.add, size: 18),
+                      onPressed: working
+                          ? null
+                          : () => perform(c.stageClipboardSlot),
+                    ),
                   ),
                 ),
               ),

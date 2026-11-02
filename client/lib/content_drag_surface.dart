@@ -66,6 +66,16 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   bool nativePending = false;
   final previewKey = GlobalKey();
 
+  Map<String, int> get previewPalette {
+    final colors = Ui.colors(context);
+    return {
+      'background': colors.surface.toARGB32(),
+      'ink': colors.textPrimary.toARGB32(),
+      'accent': colors.accent.toARGB32(),
+      'line': colors.line.toARGB32(),
+    };
+  }
+
   void retireFlutterDrag(int pointer) {
     if (!mounted || sourcePointer != pointer || !nativePending) return;
     external.value = true;
@@ -161,6 +171,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
         await SystemBridge.withDragPreview(
           card,
           () => widget.onExport(kind),
+          palette: previewPalette,
           // Keep the painted card until Windows actually enters OLE. Queuing
           // an export/reading its pixels does not transfer pointer ownership.
           onStarted: windowsHandoff ? () => retireFlutterDrag(pointer) : null,
@@ -351,12 +362,15 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
     nativePending = true;
     try {
       if (widget.nativeOnly) {
-        final preview = widget.previewFromSource ? await capturePreview() : null;
+        final preview = widget.previewFromSource
+            ? await capturePreview()
+            : null;
         if (!mounted || pointer == null || sourcePointer != pointer) return;
         if (!windowsHandoff) GestureBinding.instance.cancelPointer(pointer);
         await SystemBridge.withDragPreview(
           preview,
           () => widget.onExport(kind),
+          palette: previewPalette,
           onStarted: windowsHandoff ? () => retireFlutterDrag(pointer) : null,
         );
       } else {

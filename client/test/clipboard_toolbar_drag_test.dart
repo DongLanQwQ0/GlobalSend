@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/api.dart';
+import 'package:globalsend/appearance.dart';
 import 'package:globalsend/file_share.dart';
 import 'package:globalsend/main.dart';
 import 'package:globalsend/models.dart';
 import 'package:globalsend/system_bridge.dart';
+import 'package:globalsend/ui_tokens.dart';
 
 import 'native_drag_render_fixture.dart';
 import 'widget_test.dart' show PreviewController;
@@ -58,6 +60,11 @@ void main() {
           )
           ..connected = true
           ..stagedTexts.add('keep draft');
+        const appearance = Appearance(
+          mode: AppearanceMode.dark,
+          accent: AccentColor.purple,
+        );
+        c.appearance.value = appearance;
         await tester.pumpWidget(GlobalSendApp(controller: c));
         await tester.pumpAndSettle();
         final button = find.byKey(const ValueKey('add-clipboard'));
@@ -75,6 +82,13 @@ void main() {
         await pumpNativeDrag(tester);
         expect(c.exports, [kind.name]);
         expect(c.previews.single['dragSessionId'], isA<int>());
+        final colors = UiPalette.from(appearance);
+        expect(c.previews.single['previewPalette'], {
+          'background': colors.surface.toARGB32(),
+          'ink': colors.textPrimary.toARGB32(),
+          'accent': colors.accent.toARGB32(),
+          'line': colors.line.toARGB32(),
+        });
         expect(
           c.previews.single.containsKey('previewRgba'),
           isFalse,
