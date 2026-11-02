@@ -61,9 +61,15 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   bool nativePending = false;
   final previewKey = GlobalKey();
 
+  void retireFlutterDrag(int pointer) {
+    if (!mounted || sourcePointer != pointer || !nativePending) return;
+    external.value = true;
+    GestureBinding.instance.cancelPointer(pointer);
+  }
+
   Future<NativeDragPreview?> capturePreview() async {
-    // Touch hands off on its first movement, while still inside the source.
-    // Its newly mounted avatar needs one paint before we can reuse the pixels.
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    // The newly mounted long-press avatar needs one paint before readback.
     var element = previewKey.currentContext;
     var boundary = element?.findRenderObject();
     if (boundary is! RenderRepaintBoundary || boundary.debugNeedsPaint) {
@@ -74,17 +80,17 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
     }
     if (boundary is! RenderRepaintBoundary ||
         !boundary.attached ||
-        boundary.debugNeedsPaint)
+        boundary.debugNeedsPaint) {
       return null;
+    }
+    if (!mounted || element == null || !element.mounted) return null;
     var opacity = 1.0;
-    element!.visitAncestorElements((element) {
+    element.visitAncestorElements((element) {
       final ancestor = element.widget;
       if (ancestor is Opacity) opacity *= ancestor.opacity;
       return true;
     });
-    final image = await boundary.toImage(
-      pixelRatio: MediaQuery.devicePixelRatioOf(context),
-    );
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
     try {
       final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
       if (bytes == null) return null;
@@ -102,6 +108,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   }
 
   void preparePreview() {
+    if (Platform.isWindows && nativePending) return;
     external.value = false;
     if (Theme.of(context).platform == TargetPlatform.windows) {
       // The avatar is already mounted by Draggable. Capture its first paint,
@@ -130,25 +137,35 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
 
   void promoteNativeDrag() {
     if (nativePending || external.value) return;
+    final pointer = sourcePointer;
+    if (pointer == null) return;
+    final kind = pointerKind;
+    final windowsHandoff =
+        Platform.isWindows &&
+        Theme.of(context).platform == TargetPlatform.windows;
     nativePending = true;
-    // OLE owns the physical pointer from here. Retire only Flutter's pointer
-    // stream so its avatar/recognizer cannot wait forever for an OS-consumed up.
+    // Preparing an export is not pointer ownership. Retire Flutter's stream
+    // only after native acknowledgement, or when this request finishes.
     unawaited(() async {
       try {
         // Refresh the pixels at the handoff: image decoding may have finished
         // after the first drag frame. Keep the avatar mounted until readback.
         final card = Platform.isWindows ? await capturePreview() : null;
-        if (!mounted || sourcePointer == null) return;
-        external.value = true;
-        final pointer = sourcePointer;
-        if (pointer != null) GestureBinding.instance.cancelPointer(pointer);
+        if (!mounted || sourcePointer != pointer) return;
+        if (!windowsHandoff) retireFlutterDrag(pointer);
         await SystemBridge.withDragPreview(
           card,
-          () => widget.onExport(pointerKind),
+          () => widget.onExport(kind),
+          // Keep the painted card until Windows actually enters OLE. Queuing
+          // an export/reading its pixels does not transfer pointer ownership.
+          onStarted: windowsHandoff ? () => retireFlutterDrag(pointer) : null,
         );
       } finally {
+        if (sourcePointer == pointer) {
+          GestureBinding.instance.cancelPointer(pointer);
+          sourcePointer = null;
+        }
         nativePending = false;
-        sourcePointer = null;
         if (mounted) external.value = false;
       }
     }());
@@ -289,7 +306,14 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
       onDragStarted: preparePreview,
       onDragUpdate: update,
       onDragEnd: (_) {
-        if (mounted) external.value = false;
+        // cancelPointer retires the avatar during native handoff. It must not
+        // re-enable Flutter feedback while the same OLE operation is running.
+        if (mounted &&
+            (!Platform.isWindows ||
+                Theme.of(context).platform != TargetPlatform.windows ||
+                !nativePending)) {
+          external.value = false;
+        }
       },
       child: child,
     );
@@ -315,20 +339,32 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
 
   Future<void> nativeExport(String kind) async {
     if (nativePending) return;
+    final pointer = sourcePointer;
+    final windowsHandoff =
+        Platform.isWindows &&
+        Theme.of(context).platform == TargetPlatform.windows;
     nativePending = true;
     try {
       if (widget.nativeOnly) {
         final preview = await capturePreview();
-        if (!mounted || sourcePointer == null) return;
-        GestureBinding.instance.cancelPointer(sourcePointer!);
+        if (!mounted || pointer == null || sourcePointer != pointer) return;
+        if (!windowsHandoff) GestureBinding.instance.cancelPointer(pointer);
         await SystemBridge.withDragPreview(
           preview,
           () => widget.onExport(kind),
+          onStarted: windowsHandoff ? () => retireFlutterDrag(pointer) : null,
         );
       } else {
         await widget.onExport(kind);
       }
     } finally {
+      if (widget.nativeOnly && windowsHandoff) {
+        if (pointer != null && sourcePointer == pointer) {
+          GestureBinding.instance.cancelPointer(pointer);
+          sourcePointer = null;
+        }
+        if (mounted) external.value = false;
+      }
       nativePending = false;
     }
   }

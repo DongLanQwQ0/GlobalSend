@@ -1,10 +1,13 @@
 #include "../runner/touch_drag.h"
+#include "../runner/drag_preview.h"
 #include <winrt/Windows.Foundation.h>
 #include <tpcshrd.h>
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
 #include <utility>
+#include <chrono>
+#include <algorithm>
 
 namespace {
 UINT dispatch_message = 0;
@@ -12,9 +15,13 @@ UINT32 flags = POINTER_FLAG_PRIMARY | POINTER_FLAG_INCONTACT;
 POINTER_INPUT_TYPE pointer_type = PT_TOUCH;
 int forwarded_right = 0, forwarded_context = 0;
 WNDPROC original_view_proc = nullptr;
+bool reenter_on_mouse_down = false;
 LRESULT CALLBACK RecordViewMessage(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   if (message == WM_RBUTTONDOWN || message == WM_RBUTTONUP) ++forwarded_right;
   if (message == WM_CONTEXTMENU) ++forwarded_context;
+  if (message == WM_LBUTTONDOWN && std::exchange(reenter_on_mouse_down, false)) {
+    SendMessageW(window, WM_MOUSEMOVE, MK_LBUTTON, lp);
+  }
   return CallWindowProcW(original_view_proc, window, message, wp, lp);
 }
 BOOL WINAPI ReadPointer(UINT32 id, POINTER_INFO* info) {
@@ -122,7 +129,7 @@ int main() {
     StartGlobalSendDesktopTouchDrag(L"native", {}, owner,
         [&](HBITMAP bitmap, DWORD* effect) -> HRESULT {
           ++runs;
-          assert(bitmap && dispatch_message == WM_POINTERUPDATE);
+          assert(bitmap && dispatch_message == WM_LBUTTONDOWN);
           assert(GlobalSendDesktopTouchDragStatus(FALSE, MK_LBUTTON) == S_OK);
           assert(GlobalSendDesktopTouchDragStatus(TRUE, MK_LBUTTON) == DRAGDROP_S_CANCEL);
           Message(view, WM_POINTERCAPTURECHANGED, MAKEWPARAM(7, 0));
@@ -131,6 +138,9 @@ int main() {
           assert(!GlobalSendDesktopTouchDragCancelled());
           if (scenario == 2) {
             Pointer(view, WM_POINTERUPDATE, 7, POINTER_FLAG_CANCELED | POINTER_FLAG_PRIMARY);
+            assert(!GlobalSendDesktopTouchDragCancelled());
+            assert(GlobalSendDesktopTouchDragStatus(FALSE, MK_LBUTTON) == S_OK);
+            Message(view, WM_CANCELMODE);
             assert(GlobalSendDesktopTouchDragStatus(FALSE, 0) == DRAGDROP_S_CANCEL);
             return DRAGDROP_S_CANCEL;
           }
@@ -157,13 +167,19 @@ int main() {
       Pointer(view, WM_POINTERUPDATE);
     } else if (scenario == 9) {
       Pointer(view, WM_POINTERUPDATE, 7, POINTER_FLAG_CANCELED | POINTER_FLAG_PRIMARY);
-    } else Pointer(view, WM_POINTERUPDATE);
+    } else {
+      Pointer(view, WM_POINTERUPDATE);
+      assert(runs == 0 && !finished); // Promotion is not a delivered mouse DOWN.
+      reenter_on_mouse_down = scenario == 0;
+      Message(view, WM_LBUTTONDOWN, MK_LBUTTON, 0, 0xff515780);
+    }
     Pump(finished);
     available = true;
     assert(runs == (scenario <= 4 ? 1 : 0));
     assert(copied == (scenario == 0 || scenario == 1));
     assert(failure.empty() == (scenario <= 2));
     Pointer(view, WM_POINTERUP, 7, 0);
+    Message(view, WM_LBUTTONUP, 0, 0, 0xff515780);
     std::cout << "native message-context scenario " << scenario << " passed\n";
   }
 
@@ -253,13 +269,98 @@ int main() {
   Pump(prepared);
   assert(!finished && callbacks == 1);
   Pointer(view, WM_POINTERUPDATE);
+  Message(view, WM_LBUTTONDOWN, MK_LBUTTON, 0, 0xff515780);
   assert(finished && callbacks == 1);
+  Message(view, WM_LBUTTONUP, 0, 0, 0xff515780);
   CloseHandle(entered); CloseHandle(release); CloseHandle(worker_left);
+
+  // Conversion can synchronously retire the old pointer route, before its
+  // generated mouse DOWN is dispatched. That is not yet an OLE-owned drag.
+  for (int mode = 0; mode < 5; ++mode) {
+    Pointer(view, WM_POINTERDOWN);
+    prepared = false; finished = false;
+    int runs = 0;
+    SetGlobalSendPointerConversionForTest([&, mode]() -> BOOL {
+      Pointer(view, WM_POINTERUPDATE, 7, POINTER_FLAG_PRIMARY | POINTER_FLAG_CANCELED);
+      Message(view, WM_POINTERCAPTURECHANGED, MAKEWPARAM(7, 0));
+      assert(!GlobalSendDesktopTouchDragCancelled());
+      SetLastError(ERROR_INVALID_PARAMETER);
+      return mode != 3;
+    });
+    StartGlobalSendDesktopTouchDrag(L"retired pointer", {}, owner,
+        [&](HBITMAP bitmap, DWORD* effect) -> HRESULT {
+          ++runs;
+          assert(bitmap && dispatch_message == WM_LBUTTONDOWN);
+          assert(GlobalSendTouchMouseButtonsAvailableForTest(owner, MK_LBUTTON));
+          assert(GlobalSendDesktopTouchDragStatus(FALSE, MK_LBUTTON) == S_OK);
+          Pointer(view, WM_POINTERUPDATE, 7, POINTER_FLAG_CANCELED | POINTER_FLAG_PRIMARY);
+          assert(!GlobalSendDesktopTouchDragCancelled());
+          if (mode == 1) {
+            Message(view, WM_CANCELMODE);
+            assert(GlobalSendDesktopTouchDragStatus(FALSE, MK_LBUTTON) == DRAGDROP_S_CANCEL);
+            return DRAGDROP_S_CANCEL;
+          }
+          *effect = DROPEFFECT_COPY;
+          return DRAGDROP_S_DROP;
+        }, [&](bool copied, const std::string& error) {
+          assert(copied == (mode == 0));
+          if (mode == 3) assert(error.find("Windows error 87") != std::string::npos);
+          finished = true;
+        });
+    Pump(prepared);
+    Pointer(view, WM_POINTERUPDATE);
+    assert(runs == 0);
+    if (mode == 2) Message(view, WM_LBUTTONUP, 0, 0, 0xff515780);
+    else if (mode == 4) Pointer(view, WM_POINTERDOWN, 8);
+    else if (mode != 3) {
+      assert(!finished);
+      Message(view, WM_LBUTTONDOWN, MK_LBUTTON, 0, 0xff515780);
+    }
+    assert(finished && runs == (mode <= 1 ? 1 : 0));
+    Message(view, WM_LBUTTONUP, 0, 0, 0xff515780);
+    Pointer(view, WM_POINTERUP, mode == 4 ? 8 : 7, 0);
+  }
+
+  // The common RGBA path is ready synchronously: no fresh worker/COM setup,
+  // posted WM_APP, or second input after readback preparation. Report cold and
+  // warm DIB+arming costs separately, not a guessed end-to-end touch latency.
+  for (int scale : {1, 2}) {
+    std::vector<uint8_t> rgba(184 * 140 * scale * scale * 4, 190);
+    std::vector<long long> timings;
+    SetGlobalSendPointerConversionForTest([]() -> BOOL { assert(false); return FALSE; });
+    for (int sample = 0; sample < 12; ++sample) {
+      Pointer(view, WM_POINTERDOWN);
+      Message(view, WM_LBUTTONDOWN, MK_LBUTTON, 0, 0xff515780);
+      prepared = false; finished = false;
+      const auto begin = std::chrono::steady_clock::now();
+      HBITMAP bitmap = GlobalSendDragBitmapFromRgba(rgba, 184 * scale, 140 * scale);
+      StartGlobalSendDesktopTouchDrag(L"rgba", {}, owner,
+          [&](HBITMAP image, DWORD* effect) -> HRESULT {
+            assert(image == bitmap && dispatch_message == WM_MOUSEMOVE);
+            *effect = DROPEFFECT_COPY; return DRAGDROP_S_DROP;
+          }, [&](bool copied, const std::string& error) {
+            assert(copied && error.empty()); finished = true;
+          }, {}, bitmap);
+      timings.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - begin).count());
+      assert(prepared && !finished); // No pump, timer or worker reply was needed.
+      Message(view, WM_MOUSEMOVE, MK_LBUTTON, 0, 0xff515780);
+      assert(finished);
+      Message(view, WM_LBUTTONUP, 0, 0, 0xff515780);
+    }
+    const auto cold = timings.front();
+    timings.erase(timings.begin());
+    std::sort(timings.begin(), timings.end());
+    std::cout << "RGBA DIB+arm " << scale << "x: cold " << cold
+        << " us; warm median " << timings[timings.size() / 2]
+        << " us; warm max " << timings.back() << " us\n";
+  }
 
   // A source destroyed inside nested OLE cancels without replying to a dead
   // Flutter engine. Only the fixture's hidden view is affected.
   Pointer(view, WM_POINTERDOWN);
   prepared = false;
+  SetGlobalSendPointerConversionForTest([]() -> BOOL { return TRUE; });
   bool destroyed = false;
   StartGlobalSendDesktopTouchDrag(L"destroy", {}, owner,
       [&](HBITMAP, DWORD*) -> HRESULT {
@@ -270,6 +371,7 @@ int main() {
       }, [](bool, const std::string&) { assert(false); });
   Pump(prepared);
   Pointer(view, WM_POINTERUPDATE);
+  Message(view, WM_LBUTTONDOWN, MK_LBUTTON, 0, 0xff515780);
   assert(destroyed);
   SetGlobalSendTouchPreparedForTest({});
   UnregisterGlobalSendTouchDrag();

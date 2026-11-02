@@ -83,6 +83,9 @@ void main() {
                 onExport: (kind) {
                   exports.add(kind);
                   previews.add(SystemBridge.dragPreviewArguments);
+                  unawaited(
+                    signalNativeDragStarted(SystemBridge.dragPreviewArguments),
+                  );
                   return native.future;
                 },
                 child: const SizedBox(
@@ -154,6 +157,9 @@ void main() {
                 ),
                 onExport: (kind) {
                   exports.add(kind);
+                  unawaited(
+                    signalNativeDragStarted(SystemBridge.dragPreviewArguments),
+                  );
                   return native.future;
                 },
                 child: const SizedBox(

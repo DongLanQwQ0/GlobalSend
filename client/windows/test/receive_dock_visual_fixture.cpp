@@ -32,7 +32,7 @@ int main() {
   dock = std::make_unique<GlobalSendReceiveDock>(Payload(2), [](const M& values) {
       const auto action = values.find(V("action"));
       if (action != values.end() && std::get<std::string>(action->second) == "close") dock->HideAnimated();
-    }, [](const M&, auto completion, HWND) { completion->Success(V(false)); },
+    }, [](const M&, auto completion, HWND, std::function<void()>) { completion->Success(V(false)); },
     [] { std::cout << "PRESENTED\n" << std::flush; TraceMotion(93); },
     [](int64_t) { std::cout << "CLOSED visible=" << IsWindowVisible(dock->GetHandle()) << "\n" << std::flush; PostQuitMessage(0); });
   if (!dock->Open()) return 2;

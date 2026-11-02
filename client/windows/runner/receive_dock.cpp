@@ -173,7 +173,13 @@ bool GlobalSendReceiveDock::OnCreate() {
       auto reply = std::make_unique<GlobalSendDockDragReply>(std::move(result), [handle, instance] {
         PostMessageW(handle, kDragFinished, instance, 0);
       });
-      drag_(*arguments, std::move(reply), handle);
+      const auto session = Number(*arguments, "dragSessionId");
+      drag_(*arguments, std::move(reply), handle, [this, session] {
+        // The dock has its own Flutter messenger. Main-window notifications
+        // cannot retire this isolate's source avatar (session IDs can overlap).
+        if (session && system_channel_) system_channel_->InvokeMethod("outgoingDragStarted",
+            std::make_unique<Value>(Map{{Value("dragSessionId"), Value(session)}}));
+      });
       return;
     }
     if (call.method_name() == "action") {

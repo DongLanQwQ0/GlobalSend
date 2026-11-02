@@ -22,12 +22,15 @@ void StartGlobalSendTouchDrag(std::wstring text, std::vector<std::wstring> paths
     std::function<void(bool, const std::string&)> completed);
 // Desktop production route: prepare off-thread, then enter OLE from a real
 // native input message. Reuse an existing system-promoted mouse stream or
-// promote the held pointer in its dispatch context. Bitmap is borrowed by OLE.
+// promote the held pointer in its dispatch context. OLE starts only after an
+// actual system mouse DOWN/MOVE. ready_preview transfers a ready RGBA bitmap
+// without a worker round-trip; the synchronous OLE callback borrows it.
 void StartGlobalSendDesktopTouchDrag(std::wstring text,
     std::vector<std::wstring> paths, HWND source_owner,
     std::function<HRESULT(HBITMAP, DWORD*)> run_drag,
     std::function<void(bool, const std::string&)> completed,
-    std::function<HBITMAP()> prepare_preview = {});
+    std::function<HBITMAP()> prepare_preview = {},
+    HBITMAP ready_preview = nullptr);
 bool GlobalSendDesktopTouchDragCancelled();
 // Native promotion uses Windows' mouse move/up state. Physical mouse drags
 // are unchanged; no injected mouse packets or low-level hook are used.

@@ -55,7 +55,8 @@ class GlobalSendReceiveDock final : public Win32Window {
   using Map = flutter::EncodableMap;
   using Action = std::function<void(const Map&)>;
   using Drag = std::function<void(const Map&,
-      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>, HWND)>;
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>, HWND,
+      std::function<void()>)>;
   GlobalSendReceiveDock(Map payload, Action action, Drag drag, std::function<void()> shown,
       std::function<void(int64_t)> closed, std::function<void(bool)> interaction = {});
   ~GlobalSendReceiveDock() override;

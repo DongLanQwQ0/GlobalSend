@@ -47,6 +47,7 @@ struct Operation {
   bool starting = false;
   bool desktop = false;
   bool system_promoted = false;
+  bool promoting = false;
   bool prepared = false;
   bool cancelled = false;
   HWND source_owner = nullptr;
@@ -79,8 +80,12 @@ const auto convert_pointer = []() -> PointerConverter {
 #endif
 bool MouseButtonsAvailable(HWND source, DWORD pressed) {
   physical_mouse_buttons &= pressed;
-  const DWORD own_promotion = contact && contact_primary && owner_window == source &&
-      promoted_mouse_owner == source && promoted_contact_sequence == contact_sequence
+  const bool promoted_operation = operation && operation->desktop &&
+      operation->system_promoted && operation->source_owner == source &&
+      promoted_contact_sequence == operation->contact_sequence;
+  const DWORD own_promotion = promoted_mouse_owner == source &&
+      (promoted_operation || (contact && contact_primary && owner_window == source &&
+          promoted_contact_sequence == contact_sequence))
       ? promoted_mouse_buttons : 0;
   return !(pressed & physical_mouse_buttons) && !(pressed & ~own_promotion);
 }
@@ -127,6 +132,11 @@ bool HasNativeMouseContact(const std::shared_ptr<Operation>& state) {
       (promoted_mouse_buttons & MK_LBUTTON);
 }
 
+bool OwnInputWindow(HWND window, HWND source) {
+  const auto found = observed_windows.find(window);
+  return found != observed_windows.end() && found->second.second == source;
+}
+
 void ObserveMouseButton(HWND window, UINT message, WPARAM wparam, ULONG_PTR marker) {
   DWORD bit = 0;
   bool down = false;
@@ -156,7 +166,9 @@ void ObserveMouseButton(HWND window, UINT message, WPARAM wparam, ULONG_PTR mark
   if (down) {
     // Compatibility DOWN may be queued just before the native POINTERDOWN.
     // Only the immediately following contact generation can claim that bit.
-    const auto sequence = contact ? contact_sequence : contact_sequence + 1;
+    const auto sequence = operation && operation->desktop && operation->system_promoted &&
+        operation->source_owner == source ? operation->contact_sequence :
+        contact ? contact_sequence : contact_sequence + 1;
     if (source != promoted_mouse_owner || sequence != promoted_contact_sequence) {
       promoted_mouse_buttons = 0;
       promoted_mouse_owner = source;
@@ -225,7 +237,12 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
       }
       if (operation && operation->desktop &&
           info.pointerId == operation->pointer && contact_sequence == operation->contact_sequence) {
-        if ((info.pointerFlags & POINTER_FLAG_CANCELED) || (!contact && !operation->system_promoted)) CancelDesktop(operation);
+        // Once Windows owns the compatibility mouse stream, the original
+        // pointer route can be retired/cancelled as part of that handoff.
+        // Its replacement mouse UP, OLE Escape/WM_CANCELMODE and destruction
+        // own termination; a cancelled pointer before promotion still cancels.
+        if (!operation->system_promoted &&
+            ((info.pointerFlags & POINTER_FLAG_CANCELED) || !contact)) CancelDesktop(operation);
       }
     }
   } else if (message == WM_POINTERUP &&
@@ -248,19 +265,28 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
   } else if (message == WM_NCDESTROY) {
     const auto found = observed_windows.find(window);
     if (found != observed_windows.end()) DetachGlobalSendTouchDragWindow(found->second.second);
+  } else if (message == WM_CANCELMODE) {
+    CancelDesktop(operation);
+  } else if (message == WM_LBUTTONUP && IsPromotedPointerMouse(extra) &&
+      operation && operation->desktop && !operation->starting &&
+      OwnInputWindow(window, operation->source_owner) &&
+      (operation->system_promoted || (promoted_mouse_owner == operation->source_owner &&
+          promoted_contact_sequence == operation->contact_sequence))) {
+    CancelDesktop(operation);
   }
   const auto state = operation;
-  if (state && state->desktop && state->prepared && !state->starting &&
-      contact == state->pointer && contact_sequence == state->contact_sequence &&
-      owner_window == state->source_owner && contact_primary) {
+  if (state && state->desktop && state->prepared && !state->starting && !state->promoting) {
     const auto found = observed_windows.find(window);
     const bool own_window = found != observed_windows.end() &&
         found->second.second == state->source_owner;
     const bool native_mouse = own_window && IsPromotedPointerMouse(extra) &&
         (message == WM_MOUSEMOVE || message == WM_LBUTTONDOWN) &&
         (wparam & MK_LBUTTON) && HasNativeMouseContact(state);
-    const bool native_pointer = own_window && message == WM_POINTERUPDATE &&
-        GET_POINTERID_WPARAM(wparam) == state->pointer && !HasNativeMouseContact(state);
+    const bool native_pointer = !state->system_promoted && own_window &&
+        contact == state->pointer && contact_sequence == state->contact_sequence &&
+        owner_window == state->source_owner && contact_primary &&
+        message == WM_POINTERUPDATE && GET_POINTERID_WPARAM(wparam) == state->pointer &&
+        !HasNativeMouseContact(state);
     if (native_mouse || native_pointer) {
       // Promote before DefWindowProc can consume this pointer message; then
       // deliver Flutter's last movement before entering the nested OLE loop.
@@ -300,8 +326,9 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state, bool already_prom
   bool copied = false;
   try {
     if (operation != state) { if (preview) DeleteObject(preview); return; }
-    if (contact != state->pointer || contact_sequence != state->contact_sequence ||
-        owner_window != state->source_owner || !contact_primary) {
+    if (!state->system_promoted && (contact != state->pointer ||
+        contact_sequence != state->contact_sequence ||
+        owner_window != state->source_owner || !contact_primary)) {
       if (preview) DeleteObject(preview);
       Complete(state, false, "触点已抬起或取消，请保持长按并拖动");
       return;
@@ -311,7 +338,6 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state, bool already_prom
       Complete(state, false, "其他鼠标操作正在进行，请松开后重试");
       return;
     }
-    state->starting = true;
     if (!already_promoted && !convert_pointer) {
       if (preview) {DeleteObject(preview);preview=nullptr;}
       Complete(state,false,"此Windows版本不支持原生触屏拖出，请使用鼠标拖放");
@@ -323,6 +349,7 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state, bool already_prom
       // and a lost source capture previously turned a legitimate drop into cancel.
       // Conversion can synchronously hand pointer capture over to OLE.
       state->system_promoted = true;
+      state->promoting = true; // Also guards reentrant messages while forwarding.
       SetLastError(ERROR_SUCCESS);
       if (!already_promoted && !convert_pointer()) {
         const DWORD code = GetLastError();
@@ -332,11 +359,27 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state, bool already_prom
         return;
       }
       forward_input();
+      state->promoting = false;
       if (operation != state || state->cancelled) {
         if (preview) DeleteObject(preview);
         Complete(state, false, "");
         return;
       }
+      if (!HasNativeMouseContact(state)) {
+        if (already_promoted) {
+          if (preview) DeleteObject(preview);
+          Complete(state, false, ""); // Released while the last event was forwarded.
+          return;
+        }
+        // API success requests system promotion; it does not mean the queued
+        // WM_LBUTTONDOWN has reached this thread yet. Entering OLE now can see
+        // zero buttons on its first QueryContinueDrag and immediately drop.
+        // Restore the preview and enter on the real signed mouse DOWN/MOVE.
+        const std::lock_guard lock(state->preview_mutex);
+        state->preview = preview;
+        return;
+      }
+      state->starting = true;
       DWORD effect = DROPEFFECT_NONE;
       const HRESULT result = state->run_drag(preview, &effect);
       copied = result == DRAGDROP_S_DROP && effect == DROPEFFECT_COPY && !state->cancelled;
@@ -543,12 +586,15 @@ void StartGlobalSendDesktopTouchDrag(std::wstring text,
     std::vector<std::wstring> paths, HWND source_owner,
     std::function<HRESULT(HBITMAP, DWORD*)> run_drag,
     std::function<void(bool, const std::string&)> completed,
-    std::function<HBITMAP()> prepare_preview) {
-  if (operation) { completed(false, "已有拖拽正在进行"); return; }
+    std::function<HBITMAP()> prepare_preview, HBITMAP ready_preview) {
+  const auto dispose_preview = [&] { if (ready_preview) DeleteObject(ready_preview); };
+  if (operation) { dispose_preview(); completed(false, "已有拖拽正在进行"); return; }
   if (!contact || !contact_primary || owner_window != source_owner) {
+    dispose_preview();
     completed(false, "请长按后保持接触并拖动"); return;
   }
   if (!input_available(source_owner)) {
+    dispose_preview();
     completed(false, "其他鼠标操作正在进行，请松开后重试"); return;
   }
   operation = std::make_shared<Operation>();
@@ -560,6 +606,16 @@ void StartGlobalSendDesktopTouchDrag(std::wstring text,
   operation->prepare_serial = ++desktop_prepare_serial;
   operation->run_drag = std::move(run_drag);
   const auto state = operation;
+  if (ready_preview) {
+    // RGBA readback already happened in Flutter. DIB creation needs neither a
+    // worker apartment nor another posted preparation round-trip.
+    state->preview = ready_preview;
+    state->prepared = true;
+#ifdef GLOBALSEND_TOUCH_DRAG_TESTING
+    if (prepared_for_test) prepared_for_test(0);
+#endif
+    return;
+  }
   try {
     std::thread([state, text = std::move(text), paths = std::move(paths),
         prepare_preview = std::move(prepare_preview)] {

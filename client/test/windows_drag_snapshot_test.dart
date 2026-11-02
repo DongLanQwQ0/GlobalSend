@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -45,10 +46,11 @@ void main() {
         picture.dispose();
       });
       final calls = <Map<dynamic, dynamic>>[];
+      final native = Completer<bool>();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(SystemBridge.channel, (call) async {
             calls.add(call.arguments as Map);
-            return true;
+            return native.future;
           });
       addTearDown(
         () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -83,10 +85,12 @@ void main() {
           ),
         ),
       );
-      await tester.runAsync(() => precacheImage(
-        ResizeImage(FileImage(file), width: 560),
-        tester.element(find.byKey(const ValueKey('image-source'))),
-      ));
+      await tester.runAsync(
+        () => precacheImage(
+          ResizeImage(FileImage(file), width: 560),
+          tester.element(find.byKey(const ValueKey('image-source'))),
+        ),
+      );
       final drag = await tester.startGesture(
         tester.getCenter(find.byKey(const ValueKey('image-source'))),
         kind: PointerDeviceKind.mouse,
@@ -101,8 +105,10 @@ void main() {
       expect(tester.getSize(feedback), const Size(184, 140));
       late List<int> expected;
       await tester.runAsync(() async {
-        final boundary = find.ancestor(of: feedback, matching: find.byType(RepaintBoundary))
-            .evaluate().map((element) => element.renderObject)
+        final boundary = find
+            .ancestor(of: feedback, matching: find.byType(RepaintBoundary))
+            .evaluate()
+            .map((element) => element.renderObject)
             .whereType<RenderRepaintBoundary>()
             .firstWhere((boundary) => boundary.size == const Size(184, 140));
         final image = await boundary.toImage();
@@ -133,7 +139,11 @@ void main() {
       expect(calls.single['previewWidth'], 184);
       expect(calls.single['previewHeight'], 140);
       expect(calls.single['previewRgba'], orderedEquals(expected));
+      await signalNativeDragStarted(Map<String, Object>.from(calls.single));
+      await tester.pump();
       expect(find.byKey(const ValueKey('drag-feedback-rgba')), findsNothing);
+      native.complete(true);
+      await pumpNativeDrag(tester);
       await drag.up();
       await tester.pump();
       expect(tester.takeException(), isNull);

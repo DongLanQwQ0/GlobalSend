@@ -405,7 +405,13 @@ class DragSource final : public IDropSource {
   bool touch_ = false;
 };
 
-void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> result, HWND source_window) {
+void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> result,
+    HWND source_window, std::function<void()> started = {}) {
+  const auto session = Integer(arguments, "dragSessionId");
+  if (!started && session != 0) started = [session] {
+    if (channel) channel->InvokeMethod("outgoingDragStarted",
+        std::make_unique<Value>(Map{{Value("dragSessionId"), Value(session)}}));
+  };
   std::vector<uint8_t> bytes;
   std::vector<std::wstring> export_paths;
   std::wstring export_text;
@@ -436,7 +442,7 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
     export_text = text;
   }
   const auto pointer_kind = String(arguments, "pointerKind");
-  std::function<HBITMAP()> prepare_preview;
+  HBITMAP ready_preview = nullptr;
   const auto rgba = arguments.find(Value("previewRgba"));
   if (rgba != arguments.end()) {
     if (const auto* pixels = std::get_if<std::vector<uint8_t>>(&rgba->second)) {
@@ -446,14 +452,13 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
         if (const auto* value = std::get_if<int32_t>(&entry->second)) return *value;
         return 0;
       };
-      prepare_preview = [pixels = *pixels, width = number("previewWidth"),
-          height = number("previewHeight")] {
-        return GlobalSendDragBitmapFromRgba(pixels, width, height);
-      };
+      ready_preview = GlobalSendDragBitmapFromRgba(*pixels,
+          number("previewWidth"), number("previewHeight"));
     }
   }
   IDataObject* payload = nullptr;
   if (FAILED(CreateGlobalSendDragData(format, bytes, &payload))) {
+    if (ready_preview) DeleteObject(ready_preview);
     result->Error("DRAG_DATA", "Windows could not prepare drag content");
     return;
   }
@@ -469,10 +474,11 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
           [](DragSource* value) { value->Release(); });
     auto completion = std::shared_ptr<flutter::MethodResult<Value>>(std::move(result));
       StartGlobalSendDesktopTouchDrag(std::move(export_text), std::move(export_paths), source_window,
-        [data, source, source_window](HBITMAP bitmap, DWORD* effect) {
+        [data, source, source_window, started](HBITMAP bitmap, DWORD* effect) {
           InitializeGlobalSendDragPreviewFromBitmap(data.get(), source_window, bitmap);
           outgoing_drag = true;
           outgoing_source_window = source_window;
+          if (started) started();
           const auto status = DoDragDrop(data.get(), source.get(), DROPEFFECT_COPY, effect);
           PublishDrag(false);
           outgoing_drag = false;
@@ -487,17 +493,18 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
         else completion->Error("TOUCH_DRAG_FAILED", error);
         update_interaction.ReleasePointers();
         update_interaction.Set(GlobalSendUpdateInteraction::export_operation, false);
-      }, std::move(prepare_preview));
+      }, {}, ready_preview);
     return;
   }
   auto* data = payload; auto* source = new DragSource();
-  HBITMAP bitmap = prepare_preview ? prepare_preview() : GlobalSendContentDragBitmap(export_text, export_paths);
+  HBITMAP bitmap = ready_preview ? ready_preview : GlobalSendContentDragBitmap(export_text, export_paths);
   InitializeGlobalSendDragPreviewFromBitmap(data, source_window, bitmap);
   if (bitmap) DeleteObject(bitmap);
   DWORD effect = DROPEFFECT_NONE;
   update_interaction.Set(GlobalSendUpdateInteraction::export_operation, true);
   outgoing_drag = true;
   outgoing_source_window = source_window;
+  if (started) started();
   HRESULT status = DoDragDrop(data, source, DROPEFFECT_COPY, &effect);
   PublishDrag(false);
   outgoing_drag = false;
@@ -514,8 +521,8 @@ bool PrepareReceiveDock(Map payload) {
     [](const Map& action) {
       if (channel) channel->InvokeMethod("receiveDockAction", std::make_unique<Value>(action));
       if (String(action, "action") == "close") CloseDockLater(Integer(action, "arrivalGeneration"));
-    }, [](const Map& values, auto completion, HWND window) {
-      Drag(values, std::move(completion), window);
+    }, [](const Map& values, auto completion, HWND window, std::function<void()> started) {
+      Drag(values, std::move(completion), window, std::move(started));
     }, [] { CompleteDockReplies(); }, [](int64_t generation) {
       PostMessageW(owner, kDestroyReceiveDock, static_cast<WPARAM>(generation), 0);
     }, [](bool) { UpdateInteractionChanged(); });

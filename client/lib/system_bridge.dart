@@ -16,22 +16,42 @@ class NativeDragPreview {
 class SystemBridge {
   static const channel = MethodChannel('dev.globalsend/system');
   static final _dragPreviewKey = Object();
+  static final _dragSessionKey = Object();
+  static int _nextDragSession = 0;
+  static final _dragStarted = <int, void Function()>{};
 
   /// Keeps existing exporters unchanged while handing their native drag the
   /// exact card painted for this gesture. Concurrent exports have own scopes.
   static Future<T> withDragPreview<T>(
     NativeDragPreview? preview,
-    Future<T> Function() export,
-  ) => runZoned(export, zoneValues: {_dragPreviewKey: preview});
+    Future<T> Function() export, {
+    void Function()? onStarted,
+  }) {
+    final session = onStarted == null ? null : ++_nextDragSession;
+    if (session != null) {
+      _install();
+      _dragStarted[session] = onStarted!;
+    }
+    return runZoned(() async {
+      try {
+        return await export();
+      } finally {
+        if (session != null) _dragStarted.remove(session);
+      }
+    }, zoneValues: {_dragPreviewKey: preview, _dragSessionKey: session});
+  }
+
   static Map<String, Object> get dragPreviewArguments {
     final preview = Zone.current[_dragPreviewKey] as NativeDragPreview?;
-    return preview == null
-        ? const {}
-        : {
-            'previewRgba': preview.rgba,
-            'previewWidth': preview.width,
-            'previewHeight': preview.height,
-          };
+    final session = Zone.current[_dragSessionKey] as int?;
+    return {
+      if (session != null) 'dragSessionId': session,
+      if (preview != null) ...{
+        'previewRgba': preview.rgba,
+        'previewWidth': preview.width,
+        'previewHeight': preview.height,
+      },
+    };
   }
 
   /// Read-only OS interface metadata; no discovery traffic or permission prompt.
@@ -268,6 +288,11 @@ class SystemBridge {
     if (!_installed) {
       _installed = true;
       channel.setMethodCallHandler((call) async {
+        if (call.method == 'outgoingDragStarted') {
+          final session = (call.arguments as Map)['dragSessionId'];
+          _dragStarted.remove(session)?.call();
+          return null;
+        }
         if (call.method == 'prepareUpdateExit') {
           final path = _windowStatePath;
           if (path != null && call.arguments is Map) {

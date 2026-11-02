@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:globalsend/content_drag_surface.dart';
 import 'package:globalsend/models.dart';
 import 'package:globalsend/text_selection_surface.dart';
+import 'package:globalsend/system_bridge.dart';
 
 void main() {
   for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.stylus]) {
@@ -30,7 +31,12 @@ void main() {
                       source: '',
                       text: '整张卡片',
                     ),
-                    onExport: (kind) async => exports.add(kind),
+                    onExport: (kind) async {
+                      exports.add(kind);
+                      await signalNativeDragStarted(
+                        SystemBridge.dragPreviewArguments,
+                      );
+                    },
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onSecondaryTapDown: (details) {

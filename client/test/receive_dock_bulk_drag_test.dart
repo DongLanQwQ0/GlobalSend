@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -23,10 +24,12 @@ void main() {
   final calls = <MethodCall>[];
   final imageKey = GlobalKey();
   late List<String> paths;
+  Completer<bool>? dragReply;
 
   setUp(() async {
     messenger.setMockMethodCallHandler(SystemBridge.channel, (_) async => null);
     calls.clear();
+    dragReply = null;
     await fixtures.create(recursive: true);
     paths = [for (var i = 0; i < 40; i++) '${fixtures.path}/file-$i.bin'];
     await Future.wait(paths.map((path) => File(path).writeAsBytes([1, 2])));
@@ -91,6 +94,10 @@ void main() {
     messenger.setMockMethodCallHandler(ReceiveDockApp.channel, (call) async {
       calls.add(call);
       if (call.method == 'ready') return content(files: files);
+      if (call.method == 'dragOut') {
+        dragReply = Completer<bool>();
+        return dragReply!.future;
+      }
       return null;
     });
     await tester.pumpWidget(
@@ -136,6 +143,23 @@ void main() {
         await pumpNativeDrag(tester);
         // Windows promotes the card bitmap to OLE immediately, not on exit.
         expect(calls.where((call) => call.method == 'dragOut'), hasLength(1));
+        final session = Map<String, Object>.from(
+          calls.singleWhere((call) => call.method == 'dragOut').arguments
+              as Map,
+        );
+        final avatar = find.byKey(
+          const ValueKey('drag-feedback-bulk-file-drag'),
+        );
+        expect(
+          avatar,
+          findsOneWidget,
+          reason: 'dock still owns its avatar while native is queued',
+        );
+        await signalNativeDragStarted(
+          session,
+        ); // Dock's system messenger, not the main engine.
+        await tester.pump();
+        expect(avatar, findsNothing);
         if (kind == PointerDeviceKind.mouse) {
           final updated = content()..['serial'] = 2;
           await messenger.handlePlatformMessage(
@@ -164,6 +188,7 @@ void main() {
           findsNothing,
         );
         await drag.up();
+        dragReply!.complete(true);
         await tester.pumpAndSettle();
         // The new source must not consume the rest of the header's window move.
         final move = await tester.startGesture(
