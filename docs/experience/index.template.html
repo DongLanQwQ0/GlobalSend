@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>GlobalSend · 功能与入口图谱</title>
+  <style>/* ATLAS_CSS */</style>
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <aside class="rail">
+    <a class="brand" href="#top">GlobalSend<span>体验图谱 / 01</span></a>
+    <div class="rail-caption">不是更多入口<br>而是更顺手的位置。</div>
+    <nav aria-label="章节">
+      <a href="#modules"><span>01</span>模块分工</a>
+      <a href="#layout"><span>02</span>入口布局</a>
+      <a href="#catalog"><span>03</span>功能清单</a>
+      <a href="#journeys"><span>04</span>使用路径</a>
+      <a href="#decisions"><span>05</span>编排建议</a>
+      <a href="#acceptance"><span>06</span>待验收项</a>
+    </nav>
+    <div class="rail-bottom"><span class="snapshot-dot"></span>功能基线 1.0.89+114<br><small>2026.11.02 · 评审方案<br>不会修改客户端设置</small></div>
+  </aside>
+  <main id="main">
+    <header id="top" class="hero">
+      <div class="eyebrow">PRODUCT EXPERIENCE / 功能与入口</div>
+      <div class="hero-heading"><h1>把能力放回<br><em>顺手的位置。</em></h1><div class="hero-note"><span>推荐方向</span><p>收发在工作区。<br>自动化跟着设备。<br>整理归入内容。<br>设置保持安静。</p></div></div>
+      <p class="intro">从“我要做什么”出发，重新理解 GlobalSend。这里展示现有能力、平台差异，以及可讨论的入口方案；<strong>布局建议尚未替换运行版本。</strong></p>
+      <div class="platforms" role="tablist" aria-label="选择平台" id="platforms"></div>
+    </header>
+    <section id="modules" class="section">
+      <div class="section-top"><div><span class="section-index">01 / MODULE ROLES</span><h2>三个容器，三种使用场景</h2></div></div>
+      <p class="section-description">共享内容与状态，不复制整套界面。先确定每个模块要帮用户完成什么，再决定按钮放在哪里、占多大空间。</p>
+      <div id="module-list" class="module-list"></div>
+      <div class="module-handoff"><strong>交接原则</strong><p>主界面负责完整处理；Android 暂存坞服务跨应用中转；Windows 接收窗口服务后台到件。自动剪贴板保持静默，组内编辑不当作收件；iOS、iPadOS、Web不照搬Android悬浮窗。</p></div>
+    </section>
+    <section id="layout" class="section">
+      <div class="section-top"><div><span class="section-index">02 / WORKSPACE</span><h2>先看入口，后看选项</h2></div><div class="segmented" aria-label="布局版本"><button data-mode="proposed" aria-pressed="true">建议布局</button><button data-mode="current" aria-pressed="false">当前入口</button></div></div>
+      <div id="platform-intro" class="platform-intro"></div>
+      <div class="workspace-wrap"><div id="workspace"></div><aside class="map-notes" id="map-notes"></aside></div>
+      <div class="layout-caption"><span>交互示意</span>点击布局中的区域，查看功能、现有入口与建议入口。示意设备和文件不是实际数据。</div>
+    </section>
+    <section id="catalog" class="section">
+      <div class="section-top"><div><span class="section-index">03 / CAPABILITIES</span><h2>每个功能，各归其位</h2></div><span class="small-meta" id="catalog-count"></span></div>
+      <div class="catalog-tools"><label class="search"><span data-icon="search"></span><input id="search" type="search" placeholder="搜索功能、入口或操作…" aria-label="搜索功能"><kbd>/</kbd></label><select id="catalog-platform" aria-label="功能清单的平台"></select><label class="availability"><input type="checkbox" id="only-supported">仅看本平台可用</label></div>
+      <div class="group-tabs" id="group-tabs" aria-label="功能分类"></div>
+      <div id="feature-list" class="feature-list"></div>
+      <div class="empty" id="empty" hidden><h3>没有匹配的功能</h3><p>试试“拖放”“同步”或“文件夹”。</p><button id="reset-filter" class="text-button">清除筛选</button></div>
+      <details class="comparison"><summary>并排比较五个平台<span>来源、接收与系统能力分开看</span></summary><div id="comparison"></div></details>
+    </section>
+    <section id="journeys" class="section">
+      <div class="section-top"><div><span class="section-index">04 / HOW TO</span><h2>用一条短路径，完成一件事</h2></div></div>
+      <div class="journey-layout"><div id="journey-tabs" role="tablist" aria-label="使用场景" class="journey-tabs"></div><div id="journey-body" class="journey-body" role="tabpanel"></div></div>
+      <div class="states-strip"><div><span class="state-symbol suggestion-symbol"></span><strong>建议</strong><small>还没有确认</small></div><div><span class="state-symbol reference-symbol"></span><strong>远程引用</strong><small>原件在另一台设备</small></div><div><span class="state-symbol local-symbol"></span><strong>本地副本</strong><small>可直接使用</small></div><div><span class="state-symbol slot-symbol"></span><strong>自动剪贴板槽位</strong><small>只保留最新一份</small></div></div>
+    </section>
+    <section id="decisions" class="section">
+      <div class="section-top"><div><span class="section-index">05 / RECOMMENDATIONS</span><h2>减少寻找，不削减能力</h2></div><span class="small-meta">P0 优先澄清语义 · P1 再整理入口</span></div>
+      <div id="decision-list" class="decision-list"></div>
+      <div class="settings-plan"><div><span class="eyebrow">设置的建议分组</span><h3>日常动作不藏进设置。</h3><p>设备相关开关可以就近配置，但仍操作同一份设置状态。</p></div><ol><li><b>连接与设备</b><span>服务器、分组、设备名、可达性</span></li><li><b>收发与后台</b><span>同步、接收、路径、并发、通知、启动</span></li><li><b>存储</b><span>接收位置、迁移、自动清理</span></li><li><b>外观与帮助</b><span>主题、指南、更新、版本</span></li></ol></div>
+    </section>
+    <section id="acceptance" class="section">
+      <div class="section-top"><div><span class="section-index">06 / BEFORE WE REARRANGE</span><h2>哪些已经有，哪些还要确认</h2></div></div>
+      <p class="section-description">入口重组前先保留这份边界。编译、定向检查、实际系统操作是不同证据；未验收不等于未实现。</p>
+      <div id="pending-list" class="pending-list"></div>
+      <div class="evidence-note"><strong>已确认且不重复测试</strong><p>Android 暂存与接收图片投放微信、文件选择器可见新文件、设备高亮、位置记忆已有用户确认。114已更新 Windows、Android、中心/Web，IPA已构建，签名安装仍由用户完成。</p></div>
+    </section>
+    <footer><a href="#top">GlobalSend · 回到顶部 ↑</a><span>五个平台，一套收发语义。<br>资料基于114快照，不是实时设备检测。</span></footer>
+  </main>
+  <dialog id="feature-dialog" aria-labelledby="detail-title"><div class="dialog-shell"><header><span id="detail-eyebrow"></span><button id="close-detail" class="icon-button" aria-label="关闭详情"></button></header><div id="detail-body"></div></div></dialog>
+  <script>/* ATLAS_ICONS */</script>
+  <script>window.ATLAS_DATA = /* ATLAS_DATA */;</script>
+  <script>/* ATLAS_APP */</script>
+</body>
+</html>

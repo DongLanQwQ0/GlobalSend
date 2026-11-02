@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>GlobalSend · 功能与入口图谱</title>
+  <style>:root{--paper:#f6f5f0;--surface:#fff;--ink:#202c2a;--muted:#697570;--line:#dce0d8;--accent:#23745f;--wash:#edf3ed;--orange:#bf572d;--rail:#1d2c29;--radius:18px;font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--paper);font-synthesis:none;scroll-behavior:smooth;scroll-padding-top:24px}
+*{box-sizing:border-box}
+body{margin:0}
+button,input,select{font:inherit}
+button,a,input,summary{-webkit-tap-highlight-color:transparent}
+button{cursor:pointer}
+button:disabled{cursor:default}
+a{color:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #dc8c57;outline-offset:4px}
+button{color:inherit}
+svg{width:21px;height:21px;vertical-align:middle;flex-shrink:0}
+button svg{pointer-events:none}
+.skip{position:fixed;left:20px;top:-100px;z-index:9;background:#fff;padding:14px}
+.skip:focus{top:10px}
+.rail{position:fixed;inset:0 auto 0 0;width:224px;padding:40px 26px;color:#d4dfd8;background:var(--rail);display:flex;flex-direction:column}
+.brand{text-decoration:none;font-size:23px;font-weight:650;letter-spacing:-.8px}
+.brand span{display:block;margin-top:10px;font-size:11px;font-weight:450;letter-spacing:2px;color:#8da59a}
+.rail-caption{font-size:14px;line-height:1.8;color:#9bafa5;margin:55px 0 28px}
+.rail nav{display:flex;flex-direction:column;gap:6px}
+.rail nav a{display:flex;gap:17px;padding:13px 10px;text-decoration:none;border-radius:8px;font-size:14px;transition:background .18s}
+.rail nav a span{font-size:11px;align-self:center;color:#7e9c8e;font-variant-numeric:tabular-nums}
+.rail nav a:hover,.rail nav a.active{background:#30433c;color:#fff}
+.rail-bottom{margin-top:auto;font-size:12px;line-height:2.1;padding-top:26px}
+.rail-bottom small{color:#8fa69b;font-size:11px}
+.snapshot-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#98b6a5;margin-right:8px}
+main{margin-left:224px;max-width:1536px;padding:58px 52px 0}
+.hero{padding-bottom:10px}
+.eyebrow,.section-index{font-size:10px;letter-spacing:2px;font-weight:650;color:var(--muted)}
+.hero-heading{display:flex;justify-content:space-between;gap:32px;align-items:center;margin:24px 0}
+.hero h1{font-size:clamp(38px,4.5vw,64px);letter-spacing:-2.5px;line-height:1.25;font-weight:650;margin:0}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero-note{border-left:1px solid #bac8be;padding-left:26px;min-width:180px}
+.hero-note>span{font-size:10px;color:var(--orange);font-weight:650;letter-spacing:2px}
+.hero-note p{font-size:14px;line-height:1.85;margin:12px 0 0}
+.intro{max-width:680px;font-size:14px;line-height:1.9;color:var(--muted);margin:24px 0 30px}
+.intro strong{color:var(--ink);font-weight:500}
+.platforms{display:flex;gap:6px;border-bottom:1px solid var(--line);padding:0 0 15px;flex-wrap:wrap}
+.platforms button{display:flex;align-items:center;gap:8px;border:1px solid transparent;border-radius:9px;background:transparent;padding:12px 17px;font-size:13px;transition:background .18s}
+.platforms button[aria-selected=true]{background:var(--ink);color:#fff}
+.platforms button:not([aria-selected=true]):hover{background:#e8ebe4}
+.platforms svg{width:18px;height:18px}
+.section{padding:46px 0;border-bottom:1px solid var(--line);scroll-margin-top:22px}
+.section-top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:22px}
+.section-top h2{font-size:25px;letter-spacing:-.8px;font-weight:650;margin:10px 0 0}
+.segmented{display:flex;padding:4px;background:#e9ece5;border-radius:9px;flex-shrink:0}
+.segmented button{border:0;background:none;padding:9px 14px;border-radius:6px;font-size:12px}
+.segmented button[aria-pressed=true]{background:#fff;box-shadow:0 1px 4px #172f2110}
+.platform-intro{margin-bottom:22px}
+.platform-intro h3{font-size:16px;margin:0 0 6px}
+.platform-intro p{margin:0;color:var(--muted);font-size:13px;line-height:1.8}
+.workspace-wrap{display:grid;grid-template-columns:minmax(0,1fr) 195px;gap:24px;align-items:start}
+#workspace{min-width:0}
+.window{border:1px solid #cbd4c9;border-radius:14px;background:#f9faf6;box-shadow:0 10px 35px #1d332909;overflow:hidden}
+.window-bar{display:flex;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #e2e6dd;align-items:center}
+.window-brand{font-size:12px;font-weight:700}
+.window-title{display:flex;align-items:center;gap:7px}
+.window-title i{width:6px;height:6px;background:#d5ddd2;border-radius:50%}
+.mock-actions{display:flex;gap:4px;align-items:center}
+.mock-actions button,.mock-nav button{border:0;background:none;border-radius:6px;padding:7px;font-size:10px;display:flex;gap:4px;align-items:center;white-space:nowrap}
+.mock-actions svg{width:14px;height:14px}
+.mock-actions button:hover,.mock-nav button:hover{background:#e5ece2}
+.mock-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.08fr);gap:10px;padding:12px}
+.mock-panel{padding:12px;border:1px solid #dce2d8;border-radius:12px;background:#fff;min-width:0}
+.mock-label{display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:600;color:#5c6c62;margin-bottom:10px}
+.mock-label button{border:0;background:none;font-size:10px;padding:0;color:var(--accent)}
+.hotspot{border:1px solid transparent;background:none;width:100%;text-align:left;border-radius:8px;transition:background .15s,border-color .15s;position:relative}
+.hotspot:hover{background:#edf4e9;border-color:#9ab6a5}
+.hotspot:focus-visible{outline-offset:1px}
+.mock-draft{display:flex;gap:7px;padding:0 0 8px;min-height:84px}
+.mini-card{flex:0 0 72px;min-height:72px;border:1px solid #dde4d8;border-radius:9px;background:#f1f5ed;display:flex;flex-direction:column;justify-content:space-between;font-size:9px;padding:9px;overflow:hidden;line-height:1.5}
+.mini-card svg{width:18px;height:18px;color:var(--accent)}
+.mini-card.suggest{border:1px dashed #a4b49e;background:#f8faf5;color:#73806e}
+.mock-split{display:flex;gap:6px;margin:9px 0 12px}
+.mock-split button{font-size:9px;padding:7px 6px;border:1px solid #dce3d7;border-radius:6px;background:#fff;display:flex;gap:3px;align-items:center}
+.mock-split svg{width:12px;height:12px}
+.mock-devices{display:flex;gap:6px;margin:6px 0 14px}
+.mock-device{width:65px;min-height:61px;background:#edf3e8;border:1px solid #d8e2d0;border-radius:9px;font-size:9px;text-align:center;padding:9px 2px}
+.mock-device svg{display:block;margin:0 auto 5px;width:19px;height:19px}
+.mock-shared{min-height:101px;padding:10px;background:#f3f6ef;border:1px solid #dde5d6;color:#82907a;font-size:10px;line-height:1.8}
+.mock-shared strong{display:block;color:#455d49;font-size:10px;font-weight:600;margin-bottom:10px}
+.mock-ref{font-size:9px;display:flex;align-items:center;gap:6px;padding:8px;margin-top:7px;background:#f3f5f0;border:1px solid #e0e4da}
+.mock-ref svg{width:14px;height:14px}
+.mock-nav{display:flex;gap:1px;margin:-12px -12px 10px;padding:3px 4px 0;border-bottom:1px solid #d9e1d2}
+.mock-nav button{flex:1;justify-content:center;border-radius:7px 7px 0 0;padding:10px 5px}
+.mock-nav button:first-child{color:var(--accent);border-bottom:2px solid var(--accent);background:#edf3e8}
+.mock-slot{font-size:9px;border:1px solid #bcd0c2;background:#f2f6ef;padding:8px;display:flex;gap:6px;align-items:center;margin-bottom:9px}
+.mock-slot strong{font-size:9px}
+.mock-slot svg{width:13px;height:13px}
+.mock-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.mock-file{min-height:122px;padding:0;border:1px solid #dee5d8;border-radius:9px;overflow:hidden;background:#f7f8f3}
+.mock-file p{font-size:11px;line-height:1.65;margin:0;padding:11px;min-height:85px}
+.mock-file small{display:block;font-size:8px;padding:7px;background:#edf1e7;color:#7b8874}
+.mock-picture{min-height:85px;background:linear-gradient(145deg,#b4c9a9,#dce6b9 51%,#8caa90 52%,#c5d4aa);display:flex;align-items:center;justify-content:center;color:#f5f8ed}
+.mock-picture svg{width:30px;height:30px;opacity:.9}
+.map-notes{display:flex;flex-direction:column;gap:19px;padding-top:3px}
+.map-note{display:flex;gap:9px}
+.map-note>span{font-size:10px;color:var(--orange);border-top:1px solid var(--orange);width:20px;padding-top:5px;flex-shrink:0}
+.map-note strong{font-size:12px;font-weight:650}
+.map-note p{margin:6px 0 0;font-size:11px;line-height:1.8;color:var(--muted)}
+.layout-caption{font-size:11px;color:var(--muted);line-height:1.8;margin-top:16px}
+.layout-caption>span{color:var(--orange);font-weight:600;margin-right:12px}
+.mobile-workspace{display:grid;grid-template-columns:minmax(0,285px) minmax(130px,1fr);gap:16px;align-items:center;justify-content:center;padding:0 14px}
+.phone{border:1px solid #b7c5b6;border-radius:25px;padding:9px;background:#e5ebe1;max-width:285px;width:100%;justify-self:center;box-shadow:0 12px 30px #253b2210}
+.phone .window{border-radius:17px;box-shadow:none}
+.phone .window-bar{padding:12px 10px}
+.phone .mock-body{display:block;padding:9px}
+.phone .mock-panel{padding:10px}
+.phone .mock-draft{min-height:65px}
+.phone .mini-card{min-height:63px;flex-basis:67px}
+.phone .mock-shared{min-height:84px}
+.phone .mock-nav{margin:0;padding:5px 0 0;border-top:1px solid #e0e6da;border-bottom:0}
+.phone .mock-nav button{border:0;border-radius:7px;background:none;font-size:9px}
+.phone .mock-nav button:first-child{background:#edf3e8}
+.phone .mock-device{min-height:53px}
+.side-scene{min-width:0}
+.side-scene h4{font-size:12px;margin:0 0 10px;font-weight:600}
+.side-scene p{font-size:11px;line-height:1.8;color:var(--muted);margin:10px 0}
+.dock-demo{border-radius:15px;background:#e2e8dcce;border:1px solid #c7d2c2;box-shadow:0 10px 25px #243b2010;padding:10px;position:relative;overflow:hidden}
+.dock-demo>.mock-label{margin-bottom:8px}
+.dock-cards{display:flex;gap:7px}
+.dock-cards .mini-card{flex:1;min-width:0;height:80px;padding:8px}
+.dock-handle{margin:15px 0 0 auto;width:16px;height:68px;border-radius:20px;background:#d8e2d0;display:flex;align-items:center;justify-content:center}
+.dock-handle i{width:3px;height:29px;border-radius:8px;background:#638d70}
+.share-demo{padding:16px;border-radius:14px;background:#fff;border:1px solid #d7e0d0}
+.share-demo .mock-split{flex-wrap:wrap;margin:8px 0}
+.share-demo .mock-split button{font-size:10px;padding:8px}
+.small-meta{font-size:11px;line-height:1.7;color:var(--muted)}
+.catalog-tools{display:flex;gap:20px;align-items:center;margin-bottom:17px}
+.search{display:flex;gap:10px;align-items:center;flex:1;max-width:540px;padding:12px 14px;border:1px solid #cfd8cb;background:#fff;border-radius:10px}
+.search>span{color:#7c8b77}
+.search svg{width:18px;height:18px}
+.search input{border:0;outline:none;width:100%;min-width:0;font-size:13px;background:transparent;color:var(--ink)}
+.search:focus-within{outline:2px solid #85a38e;outline-offset:1px}
+kbd{font-family:inherit;font-size:11px;border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--muted)}
+.availability{display:flex;gap:7px;align-items:center;white-space:nowrap;font-size:11px;color:var(--muted)}
+input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+.group-tabs{display:flex;gap:7px;margin-bottom:19px;flex-wrap:wrap}
+.group-tabs button{border:0;background:transparent;border-radius:7px;padding:8px 12px;font-size:12px;color:var(--muted)}
+.group-tabs button[aria-pressed=true]{background:#e3eadd;color:#31543b;font-weight:600}
+.feature-list{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.feature-card{display:grid;grid-template-columns:31px 1fr 16px;gap:11px;background:var(--surface);padding:19px 18px;border:1px solid #dde3d8;border-radius:12px;width:100%;text-align:left;align-content:start;transition:transform .16s,border-color .16s,box-shadow .16s}
+.feature-card:hover{transform:translateY(-2px);border-color:#a3baa8;box-shadow:0 5px 15px #26382408}
+.feature-card .feature-icon{padding-top:1px;color:var(--accent)}
+.feature-card h3{font-size:14px;font-weight:600;margin:0}
+.feature-card p{font-size:12px;line-height:1.75;color:var(--muted);margin:7px 0 10px}
+.feature-card .arrow-icon{color:#9aa595;font-size:17px}
+.feature-card .badge{display:inline-block;font-size:9px;padding:3px 6px;border-radius:4px;background:#eef3e9;color:#58714b;font-weight:450}
+.feature-card.unavailable{background:#f0f1ec}
+.feature-card.unavailable .feature-icon{color:#8a9484}
+.feature-card.unavailable .badge{background:#e5e8df;color:#717a69}
+.empty{text-align:center;padding:36px;background:#fff;border:1px dashed var(--line);border-radius:12px}
+.empty h3{font-size:16px}
+.empty p{font-size:13px;color:var(--muted)}
+.text-button{border:0;background:none;color:var(--accent);font-size:13px;padding:9px}
+.comparison{margin-top:20px;border-top:1px solid var(--line);padding-top:18px}
+.comparison summary{cursor:pointer;font-size:13px;font-weight:600;padding:7px 0}
+.comparison summary span{margin-left:12px;color:var(--muted);font-size:11px;font-weight:400}
+.table-scroll{overflow:auto;margin-top:17px;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;font-size:11px;width:100%;min-width:660px;text-align:left}
+th,td{padding:13px 12px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.6}
+th{font-weight:600;background:#edf1e7}
+tbody tr:last-child td{border-bottom:0}
+td:first-child{font-weight:600;min-width:115px}
+.journey-layout{display:grid;grid-template-columns:230px 1fr;background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden}
+.journey-tabs{display:flex;flex-direction:column;gap:3px;background:#edf1e7;padding:12px}
+.journey-tabs button{display:flex;align-items:center;gap:12px;text-align:left;background:none;border:0;border-radius:8px;padding:15px 12px;font-size:12px;line-height:1.6}
+.journey-tabs button>span{font-size:10px;color:#809578}
+.journey-tabs button[aria-selected=true]{background:#fff;color:var(--accent);font-weight:600}
+.journey-body{padding:27px 30px;min-height:245px}
+.journey-body h3{font-size:18px;margin:0 0 22px;font-weight:600}
+.journey-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:17px}
+.journey-steps li{display:flex;align-items:flex-start;gap:13px;font-size:12px;line-height:1.8}
+.journey-steps b{font-size:10px;color:var(--accent);width:22px;height:22px;border-radius:50%;background:#eaf1e4;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.related{display:flex;gap:7px;flex-wrap:wrap;margin-top:22px}
+.related button{font-size:10px;padding:7px 9px;border:1px solid #dce3d5;border-radius:6px;background:#fff;color:var(--accent)}
+.states-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-top:20px}
+.states-strip>div{display:grid;grid-template-columns:20px 1fr;gap:4px 8px;align-items:center}
+.states-strip strong{font-size:11px;font-weight:550}
+.states-strip small{font-size:10px;color:var(--muted);grid-column:2}
+.state-symbol{width:17px;height:17px;border-radius:4px;border:1px solid #afc1a8}
+.suggestion-symbol{border-style:dashed;background:#f4f6ef}
+.reference-symbol{background:#eee6dd;border-color:#c3ab92}
+.local-symbol{background:#d8e6d1}
+.slot-symbol{box-shadow:inset 3px 0 #6b9272;background:#eef4e8}
+.decision-list{display:flex;flex-direction:column;gap:0}
+.decision{display:grid;grid-template-columns:40px minmax(180px,.8fr) minmax(0,1.2fr);gap:22px;padding:24px 0;border-top:1px solid var(--line);align-items:start}
+.decision-priority{font-size:10px;font-weight:650;color:var(--orange);border:1px solid #d8c7b7;border-radius:5px;padding:5px 7px;justify-self:start}
+.decision h3{font-size:16px;margin:0 0 10px;line-height:1.5;font-weight:600}
+.decision p{font-size:12px;color:var(--muted);line-height:1.85;margin:0}
+.decision-change{background:#ebefe5;padding:15px 17px;border-radius:9px}
+.decision-change strong{font-size:11px;color:var(--accent);display:block;margin-bottom:5px}
+.decision-change p{color:#425541}
+.decision-change small{font-size:10px;color:#6e7b63;display:block;margin-top:8px;line-height:1.8}
+.settings-plan{display:grid;grid-template-columns:1fr 1.3fr;gap:35px;padding:28px;background:var(--rail);border-radius:15px;color:#dce8db;margin-top:12px}
+.settings-plan .eyebrow{color:#93b09a}
+.settings-plan h3{font-size:20px;line-height:1.5;font-weight:550;margin:13px 0}
+.settings-plan p{font-size:12px;line-height:1.85;color:#9fb6a3}
+.settings-plan ol{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:16px}
+.settings-plan li{display:flex;flex-direction:column;gap:5px;border-left:1px solid #54705a;padding-left:14px}
+.settings-plan b{font-size:12px;font-weight:550}
+.settings-plan li span{font-size:11px;color:#9eb6a2}
+.section-description{font-size:13px;line-height:1.85;max-width:700px;color:var(--muted);margin-top:-4px;margin-bottom:24px}
+.pending-list{border-top:1px solid var(--line)}
+.pending{display:grid;grid-template-columns:100px 1fr;gap:20px;padding:20px 0;border-bottom:1px solid var(--line)}
+.pending>span{color:var(--accent);font-size:11px;font-weight:600;padding-top:3px}
+.pending h3{font-size:13px;font-weight:600;margin:0 0 5px}
+.pending .status{color:var(--orange);font-size:10px}
+.pending p{font-size:12px;color:var(--muted);line-height:1.8;margin:7px 0 0}
+.evidence-note{margin-top:22px;padding:18px 20px;border-radius:10px;background:#eaf0e3}
+.evidence-note strong{font-size:12px;font-weight:600;color:var(--accent)}
+.evidence-note p{font-size:12px;line-height:1.85;margin:8px 0 0;color:#5f7458}
+footer{padding:32px 0 40px;display:flex;justify-content:space-between;gap:20px;font-size:11px;color:var(--muted);line-height:1.8}
+footer a{text-decoration:none;color:var(--ink);font-weight:600}
+dialog{border:1px solid #ccd8c8;border-radius:20px;width:min(650px,calc(100% - 32px));max-height:calc(100dvh - 48px);padding:0;color:var(--ink);background:var(--paper);box-shadow:0 30px 100px #0c1f2130;overscroll-behavior:contain}
+dialog::backdrop{background:#1a2c2a70;backdrop-filter:blur(5px)}
+dialog[open]{animation:modal-in .22s cubic-bezier(.2,.75,.25,1)}
+dialog.closing{animation:modal-out .15s ease-in both}
+dialog[open]::backdrop{animation:backdrop-in .22s ease}
+dialog.closing::backdrop{animation:backdrop-out .15s ease both}
+.dialog-shell{padding:26px 30px 30px}
+.dialog-shell header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
+.dialog-shell header>span{font-size:10px;color:var(--accent);letter-spacing:1px}
+.icon-button{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border:0;background:transparent;border-radius:50%}
+.icon-button:hover{background:#e5eadf}
+.detail-icon{color:var(--accent);margin-bottom:12px}
+.detail-icon svg{width:30px;height:30px}
+.dialog-shell h2{font-size:27px;letter-spacing:-.8px;margin:0}
+.detail-description{font-size:14px;color:var(--muted);line-height:1.9;margin:12px 0 20px}
+.detail-platform{padding:15px 17px;background:#e8efe2;border-radius:10px;margin-bottom:22px}
+.detail-platform strong{font-size:11px;color:var(--accent)}
+.detail-platform p{font-size:12px;line-height:1.85;margin:7px 0 0;color:#52674c}
+.detail-section{margin-top:23px}
+.detail-section h3{font-size:12px;font-weight:650;margin:0 0 9px}
+.detail-section p,.detail-section li{font-size:13px;line-height:1.9;color:#5d6d59}
+.detail-section p{margin:0}
+.detail-section ol{padding-left:20px;margin:0}
+.detail-section li{padding-left:6px;margin-bottom:8px}
+.entry-compare{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}
+.entry-compare>div{border:1px solid var(--line);padding:14px;border-radius:9px}
+.entry-compare>div:last-child{background:#fff;border-color:#b8cdb7}
+.entry-compare h3{font-size:10px;color:var(--muted);margin:0 0 8px}
+.entry-compare>div:last-child h3{color:var(--accent)}
+.entry-compare p{font-size:12px;line-height:1.9;margin:0}
+.sources{display:flex;gap:8px;flex-wrap:wrap}
+.sources a{font-size:10px;color:var(--accent);text-decoration:none;border-bottom:1px solid #b6c8b0;padding-bottom:3px}
+.detail-note{background:#f0e9df;border-radius:9px;padding:13px 16px;color:#816044;font-size:12px;line-height:1.8;margin-top:20px}
+.detail-evidence{font-size:11px;color:var(--muted);line-height:1.8;margin-top:20px}
+.enter{animation:content-in .22s ease-out}
+@keyframes content-in{from{opacity:0;transform:translateY(6px)}
+to{opacity:1;transform:translateY(0)}
+}
+@keyframes modal-in{from{opacity:0;transform:translateY(12px) scale(.98)}
+to{opacity:1;transform:translateY(0) scale(1)}
+}
+@keyframes modal-out{to{opacity:0;transform:translateY(8px) scale(.985)}
+}
+@keyframes backdrop-in{from{opacity:0}
+to{opacity:1}
+}
+@keyframes backdrop-out{to{opacity:0}
+}
+
+@media(min-width:1600px){main{padding-left:70px;padding-right:70px}
+}
+@media(max-width:1180px){.rail{width:195px;padding:34px 20px}
+main{margin-left:195px;padding:40px 30px 0}
+.hero-note{min-width:150px;padding-left:18px}
+.workspace-wrap{grid-template-columns:1fr}
+.map-notes{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;padding-top:0}
+.mobile-workspace{grid-template-columns:minmax(0,260px) minmax(130px,240px);max-width:570px;margin:auto}
+.section-top{gap:13px}
+.section-top h2{font-size:23px}
+.decision{gap:16px;grid-template-columns:36px .9fr 1.1fr}
+.journey-layout{grid-template-columns:200px 1fr}
+.journey-body{padding:24px}
+.states-strip{gap:8px}
+}
+@media(max-width:800px){.rail{position:relative;width:auto;padding:22px 24px;display:block}
+.brand{font-size:20px;display:flex;align-items:center;justify-content:space-between}
+.brand span{margin:0;font-size:10px}
+.rail-caption,.rail-bottom{display:none}
+.rail nav{flex-direction:row;gap:16px;margin-top:19px;overflow:auto;padding-bottom:2px}
+.rail nav a{padding:6px 0;font-size:11px;border-radius:0;white-space:nowrap;gap:6px}
+.rail nav a span{font-size:9px}
+.rail nav a.active,.rail nav a:hover{background:none;color:#fff}
+.rail nav a.active{border-bottom:1px solid #91b49c}
+main{margin:0;padding:35px 24px 0}
+.hero h1{font-size:48px}
+.hero-heading{margin-top:20px}
+.hero-note{min-width:140px}
+.hero-note p{font-size:12px}
+.hero-note>span{font-size:9px}
+.section{padding:35px 0}
+.platforms{gap:3px;flex-wrap:nowrap}
+.platforms button{padding:10px 12px;font-size:11px;gap:6px}
+.platforms svg{width:16px;height:16px}
+.feature-card{padding:16px 14px;grid-template-columns:25px 1fr 12px;gap:8px}
+.feature-card h3{font-size:13px}
+.feature-card p{font-size:11px}
+.journey-layout{grid-template-columns:180px 1fr}
+.states-strip{grid-template-columns:1fr 1fr;gap:20px}
+.settings-plan{padding:23px;gap:22px}
+.decision h3{font-size:14px}
+.small-meta{font-size:10px}
+}
+@media(max-width:540px){main{padding:29px 18px 0}
+.rail{padding:21px 18px}
+.rail nav{gap:17px}
+.rail nav a span{display:none}
+.hero h1{font-size:40px;letter-spacing:-1.7px}
+.hero-note{display:none}
+.intro{font-size:12px;line-height:1.9;margin:18px 0 23px}
+.hero-heading{margin:20px 0}
+.platforms{gap:0;justify-content:space-between;overflow:auto}
+.platforms button{flex:0 0 auto;padding:10px 9px;gap:4px;font-size:10px}
+.platforms svg{width:15px;height:15px}
+.section-top{align-items:flex-start;flex-wrap:wrap;margin-bottom:19px}
+.section-top h2{font-size:21px}
+.section-index,.eyebrow{font-size:9px;letter-spacing:1.5px}
+.segmented button{padding:8px 11px;font-size:10px}
+.platform-intro p{font-size:12px}
+.platform-intro h3{font-size:14px}
+.mock-body{padding:8px;gap:6px}
+.mock-panel{padding:8px}
+.mock-nav{margin:-8px -8px 8px}
+.window-bar{padding:10px}
+.window-brand{font-size:11px}
+.mock-actions button{font-size:8px;padding:5px}
+.mock-actions svg{width:12px;height:12px}
+.mock-split{flex-wrap:wrap;gap:3px}
+.mock-split button{font-size:8px;padding:5px}
+.mini-card{flex-basis:52px;padding:6px;font-size:8px;min-height:63px}
+.mock-device{width:50px;font-size:8px;min-height:52px}
+.mock-grid{gap:5px}
+.mock-file{min-height:104px}
+.mock-file p{font-size:9px;min-height:73px;padding:8px}
+.mock-picture{min-height:73px}
+.mock-file small{font-size:7px;padding:5px}
+.mock-shared{font-size:8px;min-height:86px;padding:8px}
+.mock-shared strong{font-size:9px}
+.mock-label{font-size:9px}
+.mock-label button{font-size:8px}
+.mock-ref{font-size:8px;padding:6px}
+.mock-nav button{font-size:9px}
+.mock-slot{font-size:8px;padding:6px;gap:4px}
+.mock-slot strong{font-size:8px}
+.map-notes{grid-template-columns:1fr;gap:12px}
+.map-note p{margin:3px 0 0}
+.map-note>span{width:20px}
+.map-note strong{font-size:12px}
+.map-note p{font-size:11px}
+.workspace-wrap{gap:17px}
+.mobile-workspace{padding:0;grid-template-columns:minmax(0,1fr) minmax(105px,.65fr);gap:12px}
+.phone{padding:6px;border-radius:23px}
+.phone .mock-body{padding:7px}
+.phone .mock-panel{padding:8px}
+.phone .mock-split button{font-size:8px}
+.phone .window-brand{font-size:10px}
+.phone .window-bar{padding:10px 8px}
+.phone .mock-actions button{padding:4px}
+.phone .mini-card{flex-basis:58px}
+.phone .mock-devices{margin-bottom:10px}
+.phone .mock-device{width:49px}
+.phone .mock-shared{font-size:9px;min-height:72px}
+.side-scene h4{font-size:11px}
+.side-scene p{font-size:10px}
+.dock-demo{padding:7px;border-radius:12px}
+.dock-cards{gap:4px}
+.dock-cards .mini-card{height:64px;font-size:8px;padding:5px}
+.side-scene .mini-card svg{width:15px;height:15px}
+.dock-demo .mock-label{font-size:8px}
+.share-demo{padding:10px}
+.share-demo .mock-split{display:block}
+.share-demo .mock-split button{width:100%;margin:5px 0;font-size:9px}
+.catalog-tools{align-items:stretch;flex-wrap:wrap;gap:12px}
+.search{flex-basis:100%;padding:11px 12px}
+.availability{font-size:11px}
+.group-tabs{gap:4px}
+.group-tabs button{font-size:10px;padding:8px 9px}
+.feature-list{grid-template-columns:1fr}
+.feature-card{padding:17px 15px;grid-template-columns:30px 1fr 16px;gap:10px}
+.feature-card h3{font-size:14px}
+.feature-card p{font-size:12px;margin-bottom:9px}
+.comparison summary span{display:block;margin:8px 0 0 16px;line-height:1.6}
+.journey-layout{display:block}
+.journey-tabs{display:flex;flex-direction:row;gap:4px;overflow:auto;padding:8px}
+.journey-tabs button{min-width:135px;font-size:10px;padding:10px 8px;gap:7px}
+.journey-body{padding:22px 18px;min-height:290px}
+.journey-body h3{font-size:16px;line-height:1.6}
+.journey-steps li{font-size:12px}
+.states-strip{margin-top:23px}
+.decision{grid-template-columns:34px 1fr;gap:12px;padding:21px 0}
+.decision-change{grid-column:2}
+.decision h3{font-size:15px;margin-bottom:8px}
+.settings-plan{grid-template-columns:1fr;gap:15px;padding:23px}
+.settings-plan h3{font-size:20px}
+.settings-plan p{margin-bottom:3px}
+.settings-plan ol{gap:14px}
+.pending{grid-template-columns:1fr;gap:7px}
+.pending>span{font-size:10px}
+.pending h3{font-size:13px}
+.section-description{font-size:12px}
+.dialog-shell{padding:18px 20px 24px}
+.dialog-shell h2{font-size:23px}
+.entry-compare{grid-template-columns:1fr}
+.detail-description{font-size:13px}
+.detail-section p,.detail-section li{font-size:12px}
+footer{align-items:flex-start;font-size:10px}
+footer span{max-width:155px}
+dialog{max-height:calc(100dvh - 28px)}
+}
+@media(prefers-reduced-motion:reduce){:root{scroll-behavior:auto}
+*,*::before,*::after{animation:none!important;transition:none!important}
+}
+
+
+.window-bar{flex-wrap:wrap}
+html:has(dialog[open]){overflow:hidden}
+.module-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
+.module-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 20px;min-width:0}
+.module-heading{display:flex;align-items:center;gap:10px;color:var(--accent);margin-bottom:18px}
+.module-heading small{font-size:9px;letter-spacing:1.3px;color:var(--muted)}
+.module-card h3{font-size:14px;font-weight:600;margin:0 0 8px;line-height:1.5}
+.module-purpose{font-size:22px;letter-spacing:-.6px;font-weight:600;margin:0 0 14px}
+.module-scene{font-size:12px;line-height:1.85;color:var(--muted);min-height:65px;margin:0 0 16px}
+.module-primary{padding:13px 12px;border-radius:8px;background:#eef2e8;display:flex;flex-direction:column;gap:7px}
+.module-primary span{font-size:9px;color:var(--muted)}
+.module-primary strong{font-size:11px;color:var(--accent);font-weight:600;line-height:1.6}
+.module-card ul{padding-left:15px;margin:17px 0;color:#576a52;min-height:115px}
+.module-card li{font-size:11px;line-height:1.85;padding-left:2px;margin:5px 0}
+.module-card details{border-top:1px solid var(--line);padding-top:12px;font-size:11px}
+.module-card summary{cursor:pointer;color:var(--accent);line-height:1.8}
+.module-card dl{margin:16px 0 0}
+.module-card dt{font-size:10px;font-weight:600;margin:13px 0 5px}
+.module-card dd{font-size:11px;color:var(--muted);line-height:1.9;margin:0}
+.module-rule{font-size:11px;color:#455e3f;line-height:1.8;margin:15px 0 0}
+.module-card .related{gap:5px;margin-top:15px}
+.module-card .related button{font-size:9px;padding:6px 7px}
+.module-handoff{margin-top:18px;border-left:2px solid var(--orange);padding:2px 0 2px 16px}
+.module-handoff strong{font-size:11px;color:var(--orange)}
+.module-handoff p{font-size:12px;color:var(--muted);line-height:1.9;margin:7px 0 0}
+.dock-demo{display:flex;align-items:stretch;gap:5px}
+.dock-demo .dock-cards{flex:1;min-width:0}
+.dock-controls{display:flex;flex-direction:column;justify-content:space-between;gap:3px}
+.dock-controls button{border:0;background:none;display:flex;align-items:center;justify-content:center;gap:3px;font-size:8px;padding:3px;color:var(--accent)}
+.dock-controls svg{width:12px;height:12px}
+.phone .mock-split{flex-wrap:nowrap}
+.phone .mock-split button{flex:1;justify-content:center;padding:6px 3px;font-size:8px;gap:2px}
+.phone .mock-split svg{width:10px;height:10px}
+.phone .mock-nav button{min-width:0;gap:2px;padding:9px 3px;font-size:8px}
+.phone .mock-nav svg{width:12px;height:12px}
+@media(max-width:1180px){.module-list{grid-template-columns:1fr}.module-card{display:grid;grid-template-columns:minmax(150px,.8fr) minmax(0,1.2fr);column-gap:25px;padding:22px 24px}.module-heading,.module-card h3,.module-purpose,.module-scene{grid-column:1}.module-primary{grid-column:2;grid-row:1/3;align-self:start}.module-card ul{grid-column:2;grid-row:3/6;min-height:0;margin:8px 0}.module-card details,.module-rule,.module-card .related{grid-column:1/-1}.module-scene{min-height:0;margin-bottom:15px}.module-card details{margin-top:6px}}
+@media(max-width:540px){.module-card{display:block;padding:22px}.module-heading{margin-bottom:14px}.module-purpose{font-size:24px}.module-scene{min-height:0;font-size:12px}.module-card ul{margin:17px 0}.module-card li,.module-card dd{font-size:12px}.module-primary strong{font-size:12px}.module-rule{font-size:12px}.module-card summary{font-size:12px}.module-card .related button{font-size:10px}.dock-demo .dock-cards .mini-card{height:78px;font-size:7px;padding:5px;flex-basis:0}.dock-demo .dock-cards .mini-card:nth-child(2){display:none}}
+:root{scrollbar-gutter:stable}
+#catalog-platform{padding:11px 10px;border:1px solid #cfd8cb;border-radius:8px;background:#fff;color:var(--ink);font-size:12px;max-width:125px}
+@media(max-width:540px){#catalog-platform{font-size:11px;padding:8px 10px}}
+.phone .mock-split button{white-space:nowrap}
+</style>
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <aside class="rail">
+    <a class="brand" href="#top">GlobalSend<span>体验图谱 / 01</span></a>
+    <div class="rail-caption">不是更多入口<br>而是更顺手的位置。</div>
+    <nav aria-label="章节">
+      <a href="#modules"><span>01</span>模块分工</a>
+      <a href="#layout"><span>02</span>入口布局</a>
+      <a href="#catalog"><span>03</span>功能清单</a>
+      <a href="#journeys"><span>04</span>使用路径</a>
+      <a href="#decisions"><span>05</span>编排建议</a>
+      <a href="#acceptance"><span>06</span>待验收项</a>
+    </nav>
+    <div class="rail-bottom"><span class="snapshot-dot"></span>功能基线 1.0.89+114<br><small>2026.11.02 · 评审方案<br>不会修改客户端设置</small></div>
+  </aside>
+  <main id="main">
+    <header id="top" class="hero">
+      <div class="eyebrow">PRODUCT EXPERIENCE / 功能与入口</div>
+      <div class="hero-heading"><h1>把能力放回<br><em>顺手的位置。</em></h1><div class="hero-note"><span>推荐方向</span><p>收发在工作区。<br>自动化跟着设备。<br>整理归入内容。<br>设置保持安静。</p></div></div>
+      <p class="intro">从“我要做什么”出发，重新理解 GlobalSend。这里展示现有能力、平台差异，以及可讨论的入口方案；<strong>布局建议尚未替换运行版本。</strong></p>
+      <div class="platforms" role="tablist" aria-label="选择平台" id="platforms"></div>
+    </header>
+    <section id="modules" class="section">
+      <div class="section-top"><div><span class="section-index">01 / MODULE ROLES</span><h2>三个容器，三种使用场景</h2></div></div>
+      <p class="section-description">共享内容与状态，不复制整套界面。先确定每个模块要帮用户完成什么，再决定按钮放在哪里、占多大空间。</p>
+      <div id="module-list" class="module-list"></div>
+      <div class="module-handoff"><strong>交接原则</strong><p>主界面负责完整处理；Android 暂存坞服务跨应用中转；Windows 接收窗口服务后台到件。自动剪贴板保持静默，组内编辑不当作收件；iOS、iPadOS、Web不照搬Android悬浮窗。</p></div>
+    </section>
+    <section id="layout" class="section">
+      <div class="section-top"><div><span class="section-index">02 / WORKSPACE</span><h2>先看入口，后看选项</h2></div><div class="segmented" aria-label="布局版本"><button data-mode="proposed" aria-pressed="true">建议布局</button><button data-mode="current" aria-pressed="false">当前入口</button></div></div>
+      <div id="platform-intro" class="platform-intro"></div>
+      <div class="workspace-wrap"><div id="workspace"></div><aside class="map-notes" id="map-notes"></aside></div>
+      <div class="layout-caption"><span>交互示意</span>点击布局中的区域，查看功能、现有入口与建议入口。示意设备和文件不是实际数据。</div>
+    </section>
+    <section id="catalog" class="section">
+      <div class="section-top"><div><span class="section-index">03 / CAPABILITIES</span><h2>每个功能，各归其位</h2></div><span class="small-meta" id="catalog-count"></span></div>
+      <div class="catalog-tools"><label class="search"><span data-icon="search"></span><input id="search" type="search" placeholder="搜索功能、入口或操作…" aria-label="搜索功能"><kbd>/</kbd></label><select id="catalog-platform" aria-label="功能清单的平台"></select><label class="availability"><input type="checkbox" id="only-supported">仅看本平台可用</label></div>
+      <div class="group-tabs" id="group-tabs" aria-label="功能分类"></div>
+      <div id="feature-list" class="feature-list"></div>
+      <div class="empty" id="empty" hidden><h3>没有匹配的功能</h3><p>试试“拖放”“同步”或“文件夹”。</p><button id="reset-filter" class="text-button">清除筛选</button></div>
+      <details class="comparison"><summary>并排比较五个平台<span>来源、接收与系统能力分开看</span></summary><div id="comparison"></div></details>
+    </section>
+    <section id="journeys" class="section">
+      <div class="section-top"><div><span class="section-index">04 / HOW TO</span><h2>用一条短路径，完成一件事</h2></div></div>
+      <div class="journey-layout"><div id="journey-tabs" role="tablist" aria-label="使用场景" class="journey-tabs"></div><div id="journey-body" class="journey-body" role="tabpanel"></div></div>
+      <div class="states-strip"><div><span class="state-symbol suggestion-symbol"></span><strong>建议</strong><small>还没有确认</small></div><div><span class="state-symbol reference-symbol"></span><strong>远程引用</strong><small>原件在另一台设备</small></div><div><span class="state-symbol local-symbol"></span><strong>本地副本</strong><small>可直接使用</small></div><div><span class="state-symbol slot-symbol"></span><strong>自动剪贴板槽位</strong><small>只保留最新一份</small></div></div>
+    </section>
+    <section id="decisions" class="section">
+      <div class="section-top"><div><span class="section-index">05 / RECOMMENDATIONS</span><h2>减少寻找，不削减能力</h2></div><span class="small-meta">P0 优先澄清语义 · P1 再整理入口</span></div>
+      <div id="decision-list" class="decision-list"></div>
+      <div class="settings-plan"><div><span class="eyebrow">设置的建议分组</span><h3>日常动作不藏进设置。</h3><p>设备相关开关可以就近配置，但仍操作同一份设置状态。</p></div><ol><li><b>连接与设备</b><span>服务器、分组、设备名、可达性</span></li><li><b>收发与后台</b><span>同步、接收、路径、并发、通知、启动</span></li><li><b>存储</b><span>接收位置、迁移、自动清理</span></li><li><b>外观与帮助</b><span>主题、指南、更新、版本</span></li></ol></div>
+    </section>
+    <section id="acceptance" class="section">
+      <div class="section-top"><div><span class="section-index">06 / BEFORE WE REARRANGE</span><h2>哪些已经有，哪些还要确认</h2></div></div>
+      <p class="section-description">入口重组前先保留这份边界。编译、定向检查、实际系统操作是不同证据；未验收不等于未实现。</p>
+      <div id="pending-list" class="pending-list"></div>
+      <div class="evidence-note"><strong>已确认且不重复测试</strong><p>Android 暂存与接收图片投放微信、文件选择器可见新文件、设备高亮、位置记忆已有用户确认。114已更新 Windows、Android、中心/Web，IPA已构建，签名安装仍由用户完成。</p></div>
+    </section>
+    <footer><a href="#top">GlobalSend · 回到顶部 ↑</a><span>五个平台，一套收发语义。<br>资料基于114快照，不是实时设备检测。</span></footer>
+  </main>
+  <dialog id="feature-dialog" aria-labelledby="detail-title"><div class="dialog-shell"><header><span id="detail-eyebrow"></span><button id="close-detail" class="icon-button" aria-label="关闭详情"></button></header><div id="detail-body"></div></div></dialog>
+  <script>"use strict";var GlobalSendIcons=(()=>{var e=Object.defineProperty;var q=Object.getOwnPropertyDescriptor;var o=Object.getOwnPropertyNames;var p=Object.prototype.hasOwnProperty;var M=(t,h)=>{for(var l in h)e(t,l,{get:h[l],enumerable:!0})},n=(t,h,l,c)=>{if(h&&typeof h=="object"||typeof h=="function")for(let r of o(h))!p.call(t,r)&&r!==l&&e(t,r,{get:()=>h[r],enumerable:!(c=q(h,r))||c.enumerable});return t};var s=t=>n(e({},"__esModule",{value:!0}),t);var x={};M(x,{icon:()=>i,platformIcon:()=>v});var d={link:"M280-280q-83 0-141.5-58.5T80-480q0-83 58.5-141.5T280-680h120q17 0 28.5 11.5T440-640q0 17-11.5 28.5T400-600H280q-50 0-85 35t-35 85q0 50 35 85t85 35h120q17 0 28.5 11.5T440-320q0 17-11.5 28.5T400-280H280Zm80-160q-17 0-28.5-11.5T320-480q0-17 11.5-28.5T360-520h240q17 0 28.5 11.5T640-480q0 17-11.5 28.5T600-440H360Zm200 160q-17 0-28.5-11.5T520-320q0-17 11.5-28.5T560-360h120q50 0 85-35t35-85q0-50-35-85t-85-35H560q-17 0-28.5-11.5T520-640q0-17 11.5-28.5T560-680h120q83 0 141.5 58.5T880-480q0 83-58.5 141.5T680-280H560Z",settings:"M433-80q-27 0-46.5-18T363-142l-9-66q-13-5-24.5-12T307-235l-62 26q-25 11-50 2t-39-32l-47-82q-14-23-8-49t27-43l53-40q-1-7-1-13.5v-27q0-6.5 1-13.5l-53-40q-21-17-27-43t8-49l47-82q14-23 39-32t50 2l62 26q11-8 23-15t24-12l9-66q4-26 23.5-44t46.5-18h94q27 0 46.5 18t23.5 44l9 66q13 5 24.5 12t22.5 15l62-26q25-11 50-2t39 32l47 82q14 23 8 49t-27 43l-53 40q1 7 1 13.5v27q0 6.5-2 13.5l53 40q21 17 27 43t-8 49l-48 82q-14 23-39 32t-50-2l-60-26q-11 8-23 15t-24 12l-9 66q-4 26-23.5 44T527-80h-94Zm7-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"},a={drag:'<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',undo:'<path d="M8 5 3 10l5 5M3 10h10a7 7 0 0 1 7 7v3"/>',redo:'<path d="m16 5 5 5-5 5m5-5H11a7 7 0 0 0-7 7v3"/>',trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',logo:'<path d="m4 13 8-8 8 8M12 5v14M5 19h14"/>',send:'<path d="m22 2-7 20-4-9L2 9 22 2ZM22 2 11 13"/>',inbox:'<path d="M4 4h16l2 12v4H2v-4L4 4Z"/><path d="M2 14h6l2 3h4l2-3h6M12 3v7m-3-3 3 3 3-3"/>',text:'<path d="M4 5h16M12 5v15M8 20h8"/>',clipboard:'<rect x="5" y="4" width="14" height="18" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/>',eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',"eye-off":'<path d="m3 3 18 18M9.5 5.3A11 11 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-3.1 4.1M6.1 6.1A18 18 0 0 0 2 12s3.5 7 10 7a11 11 0 0 0 5.9-1.9M10 10a3 3 0 0 0 4 4"/>',history:'<path d="M3 10a9 9 0 1 1 2 8M3 4v6h6M12 7v6l4 2"/>',image:'<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 4 4 3-3 5 5"/>',file:'<path d="M14 2H5v20h14V7l-5-5Z"/><path d="M14 2v6h6M8 12h8M8 16h6"/>',folder:'<path d="M3 5h6l2 3h10v12H3V5Z"/>',laptop:'<rect x="4" y="3" width="16" height="13" rx="2"/><path d="M1 20h22M8 16v4m8-4v4"/>',phone:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/>',tablet:'<rect x="4" y="2" width="16" height="20" rx="3"/><path d="M11 18h2"/>',plus:'<path d="M12 5v14M5 12h14"/>',settings:'<path d="m9 3 1-1h4l1 3 3 1 3 1-1 4 1 3-3 2-2 3h-4l-2-2-4-1-1-4 1-3 1-3 2-3Z"/><circle cx="12" cy="12" r="3"/>',copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',down:'<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>',arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',close:'<path d="m6 6 12 12M6 18 18 6"/>',check:'<path d="m5 12 4 4L19 6"/>',shield:'<path d="m12 2 8 4v6c0 5-8 10-8 10S4 17 4 12V6l8-4Z"/><path d="m8 11 3 3 5-5"/>',globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/>',link:'<path d="m10 13 4-4m-7 7-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m6 0 2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(2 0)"/>',retry:'<path d="M3 11a9 9 0 1 1 2 7M3 4v7h7"/>',alert:'<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v1"/>',logout:'<path d="M9 4H3v16h6m5-13 5 5-5 5m-7-5h12"/>'};function i(t){return d[t]?`<svg viewBox="0 -960 960 960" fill="currentColor" stroke="none" aria-hidden="true"><path d="${d[t]}"/></svg>`:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a[t]||a.file}</svg>`}function v(t){return i(t==="windows"?"laptop":t==="android"?"phone":t==="web"?"globe":"tablet")}return s(x);})();
+</script>
+  <script>window.ATLAS_DATA = {"baseline":{"version":"1.0.89+114","date":"2026-11-02","source":"c02248f35beb915ebbf80a1a5791b821691b8dcb","title":"GlobalSend 功能与入口图谱"},"platforms":[{"id":"windows","name":"Windows","icon":"laptop","context":"桌面工作区","summary":"把发送和整理放在同一屏；接收坞只处理中途到来的内容。","constraint":"鼠标与触屏使用原生拖放；本轮未操作真实 Windows 界面。"},{"id":"android","name":"Android","icon":"phone","context":"手机与悬浮暂存坞","summary":"应用内完成收发，应用外用暂存坞中转；不要为每次操作来回切应用。","constraint":"悬浮坞需系统授权；后台能力受系统调度影响。图片可拖放，不写系统剪贴板。"},{"id":"ios","name":"iOS","icon":"phone","context":"iPhone","summary":"以系统分享、前台收发为主，不照搬 Android 的悬浮窗。","constraint":"没有 Android 式悬浮坞；系统图片写入关闭。iPhone 尚无独立实机验收。"},{"id":"ipados","name":"iPadOS","icon":"tablet","context":"iPad 多任务","summary":"内容与设备同时可见，让分屏中的拖放成为最短发送路径。","constraint":"共用通用 IPA，但单独验收；目标应用能否接收由实际目标决定。"},{"id":"web","name":"Web","icon":"globe","context":"浏览器","summary":"打开本站就连接本站；保留一致的收发语义，明确浏览器文件的归属。","constraint":"页面关闭不保证收件；无法枚举完整网卡。原生远端引用可按需拖放，Web 需先拉取。"}],"groups":[{"id":"send","name":"发送与设备","icon":"arrow","question":"把内容送过去"},{"id":"shared","name":"共享与自动化","icon":"copy","question":"让内容随手可用"},{"id":"organize","name":"接收与整理","icon":"folder","question":"找到、使用和清理"},{"id":"system","name":"连接与系统","icon":"settings","question":"配置后安静运行"}],"modules":[{"id":"home","name":"主界面","english":"WORKBENCH","icon":"laptop","purpose":"完整工作台","scene":"主动使用GlobalSend，准备一批内容、查找文件或调整配置。","primary":"准备内容 → 选设备 → 发送","owns":["待发送区与设备区","组内共享编辑、文件复制引用","接收 / 已发送 / 文件库的完整管理","连接、存储、系统行为与帮助设置"],"lifecycle":"草稿、本地文件和历史按各自规则保存；切页、切组或收起窗口，不改变内容身份。","handoff":"Windows主窗有焦点时在主窗内接收；没有焦点时交给独立接收窗口。Android应用外操作交给悬浮暂存坞。","geometry":"占用可用工作空间。桌面左右两窗格；手机四项底部导航；iPad按实际窗口宽度适配。","rule":"完整管理与低频设置只在这里做。","ids":["compose","device","shared-text","library"]},{"id":"android-dock","name":"Android 悬浮暂存坞","english":"CROSS-APP SHELF","icon":"phone","purpose":"跨应用中转站","scene":"正在其它应用中，临时放下一份内容、取走收件，或把它发给另一台设备。","primary":"接住 → 暂存 → 拖出或投给设备","owns":["分开的接收 / 暂存视图","最新自动剪贴板槽位、文件复制引用与建议","单项 / 全部拖放、设备投递与边缘滚动","贴边收起、展开、移动和缩放"],"lifecycle":"暂存是本机引用；成功投放后3秒移出，点按或再次拖动可取消。未确认建议独立计时，不混入全部拖动。","handoff":"双击内容末尾预留空白格打开主界面。历史检索、完整文件管理、网络诊断和设置交回主界面。","geometry":"小、薄、半透明，贴物理屏幕边缘；卡片是视觉主体，接收 / 暂存 / 拖动控件靠展开侧竖排。","rule":"优先让出背景操作空间，不复制一套主应用。","ids":["dock","suggestions","clipboard","references"]},{"id":"windows-receiver","name":"Windows 接收窗口","english":"INCOMING TRAY","icon":"down","purpose":"后台到件入口","scene":"主窗口未聚焦时，另一台设备送来内容；快速取用，不打断当前桌面工作。","primary":"看见到件 → 预览或拖出","owns":["普通收件到达时立即显示进度","图片 / 文本直接预览，内容最新在前","原生拖出、链接打开和快捷内容操作","外部内容悬停2秒后转设备投递"],"lifecycle":"这里只展示已有收件与传输状态，不另存一套历史。关闭窗口不删除正式收件，不中断接收。自动槽位更新不新弹窗口。","handoff":"单击空白处打开主窗口；拖空白是移动，必须区分。批量整理、编辑和配置回主界面处理。","geometry":"紧凑无标题横向窗格、半透明背景与控件；卡片横滚，不因为多文件扩成整页，不移动主窗冒充。","rule":"只处理眼前这一批，完整整理留给主界面。","ids":["receive","preview","drop","clipboard"]}],"features":[{"id":"compose","name":"添加内容","icon":"plus","group":"send","description":"文字、文件、文件夹和媒体进入同一个待发送区。","current":"桌面顶栏“文本 / 剪贴板”；待发送区的添加文件、文件夹；手机四个添加按钮。","proposed":"发送区顶部放一组水平动作：文本、剪贴板、文件、媒体。文件夹及发送 App 放在“文件”的次级菜单。","steps":["点击待发送空白处输入文字，或使用对应的添加动作。","查看本批待发送卡片；建议必须先确认，不计入本批。","点设备发送，或把内容直接拖到设备。"],"support":["windows","android","ios","ipados","web"],"priority":"P1","sources":["UI_DESIGN.md","guides/windows.md"],"differences":{"android":"“媒体”使用系统图片/视频 picker；发送 App 仅 Android 提供。","web":"剪贴板读取、目录选择遵循浏览器能力和授权。"}},{"id":"device","name":"点设备即发送","icon":"laptop","group":"send","description":"目标设备是发送入口，不再增加一个常驻发送按钮。","current":"待发送下方的设备卡片；多选入口位于设备区。","proposed":"设备卡保持紧凑、整卡可点。将多选与刷新放在设备区标题右侧，不与内容列表多选混在一起。","steps":["先添加本批内容。","点一台设备：立即发送，本批清空。","需要多台时先进入设备多选，再确认；本次结束退出多选。"],"support":["windows","android","ios","ipados","web"],"priority":"保留","sources":["UI_DESIGN.md","COMPONENTS.md"]},{"id":"drop","name":"直接拖到设备","icon":"drag","group":"send","description":"不经过待发送中转，只发送手里这一批。","current":"设备卡片已经是专属投放目标。","proposed":"拖动时只强调命中的设备。其余待发送区域用于添加；建议卡片不是投放区。","steps":["抓起本地内容、已接收卡片或建议。","移到目标设备卡片上，确认只有该设备高亮。","松手发送这批内容，不清空原有的其它草稿。"],"support":["windows","android","ios","ipados","web"],"priority":"保留","sources":["UI_DESIGN.md","guides/ipad.md"],"evidence":"Android设备高亮已由用户确认；iPad基本投递亦有用户实测。新系统行为仍按平台验收。"},{"id":"suggestions","name":"建议卡片","icon":"image","group":"send","description":"提供候选，不擅自变成待发送内容。","current":"发送区内的剪贴板/媒体建议；Android 暂存坞中也有建议。","proposed":"沿用统一方形卡片，以虚线和“点按添加”区分建议；不抢第一个正式内容的位置。","steps":["点击建议，正式加入待发送或暂存。","也可长按直接拖给设备或其它应用。","未确认的建议不参加普通发送和全部拖动。"],"support":["windows","android","ios","ipados","web"],"priority":"P0","sources":["COMPONENTS.md","guides/android.md"],"differences":{"windows":"顶部剪贴板、建议卡片均可拖。媒体建议受该平台发现能力影响。","android":"媒体建议累计30秒真实可见闲置时间；收起、尚未滑到或操作中不计时。自有收件和拖放缓存不重复建议。","ios":"剪贴板读取遵循系统粘贴授权；媒体建议与拖影仍需iPhone独立实机确认。","ipados":"剪贴板建议已接入UIKit提供方；新版拖影与媒体建议仍需签名后的实机确认。","web":"有剪贴板建议；不把网页说成具备Android后台相册发现能力。"}},{"id":"folder","name":"文件夹传输","icon":"folder","group":"send","description":"一张文件夹卡，传输后仍是原来的目录树。","current":"文件夹选择入口、拖入文件夹、文件复制引用。","proposed":"文件选择旁保留文件夹入口；列表只展示根文件夹，成员和数量放详情。","steps":["选择或拖入一个文件夹。","把根卡片发给设备；不压缩成ZIP。","在接收目录查看原目录树，包含空目录。"],"support":["windows","android","ios","ipados","web"],"priority":"保留","sources":["FILE_REUSE.md","RECEIVE_STORAGE_LAYOUT.md"],"differences":{"web":"目录导入、导出方式取决于浏览器API；不承诺所有浏览器都可直接选择本地目录。"}},{"id":"progress","name":"传输任务与恢复","icon":"retry","group":"send","description":"看得到速度，也能暂停、取消和重试。","current":"待发送卡片进度、详情与失败操作。","proposed":"正在传输的卡片保留速度/进度与暂停；失败时才出现单项重试及批量重试/清除。","steps":["发送后在任务卡片查看进度和速度。","没有响应时暂停或取消，不必等所有连接超时。","失败后重试；可恢复的数据沿用断点。"],"support":["windows","android","ios","ipados","web"],"priority":"P1","sources":["REQUIREMENTS_STATUS.md"],"note":"默认文件并发为4。选路的短探测预算不应成为已测通路径的完整传输握手上限。"},{"id":"shared-text","name":"组内共享文本","icon":"text","group":"shared","description":"共同编辑，不等同于发一条消息。","current":"发送区域下方的共享文本框；撤销、重做在框的工具栏。","proposed":"保留大面积可编辑区；只在未同步或冲突时提示，正常时不显示“已同步”。文件引用另成一行，不塞进正文。","steps":["选定要编辑的分组。","直接编辑，同组设备同步看到修改。","用撤销/重做调整；共享更新不唤起应用、不弹收件页。"],"support":["windows","android","ios","ipados","web"],"priority":"P0","sources":["COMPONENTS.md","UI_DESIGN.md"]},{"id":"clipboard","name":"自动剪贴板槽位","icon":"copy","group":"shared","description":"只保留最新的一份，不积累成聊天记录。","current":"Windows 设置中“同步剪贴板”及目标；接收同步开关；工作区和接收坞的独立槽位。","proposed":"Windows设备卡的更多菜单放“自动同步到此设备”；接收侧用固定的最新槽位。全局设置仍保留总开关。","steps":["在Windows开启同步，并指定一个目标设备。","复制文字或截图，接收端静默更新唯一槽位。","支持的系统写入剪贴板；也可拖放槽位，显式加入待发送后才成为普通内容。"],"support":["windows","android","ios","ipados","web"],"priority":"P0","sources":["CLIPBOARD_SYNC.md","COMPONENTS.md"],"sourceOnly":["windows"],"evidence":"自动送图已有用户确认；114偏好恢复已通过生产控制器和组件检查，实际Windows重开仍待用户确认。","differences":{"windows":"自动监听来源目前仅Windows。开关和目标持久保存；图片可写入系统剪贴板，另一台Windows的实际粘贴仍待验收。","android":"可接收最新槽位；文字可复制，图片不写系统剪贴板。","ios":"可接收；只写文字，不写图片。不能宣传后台持续监听本机剪贴板。","ipados":"可接收，保留系统图片写入；后台受iPadOS调度。","web":"接收槽位；图片写入按宿主和授权区分，Android/iPhone浏览器禁用图片写入。"},"note":"当前文本同步会跳过空文本、超过8192个UTF-8字节及匹配敏感词的文本；至少350ms合并并有1秒发送间隔。入口应给出可发现的原因，不能暗示任意复制都无条件送达。"},{"id":"references","name":"文件复制引用卡","icon":"file","group":"shared","description":"先看到文件，真正需要时再拉取。","current":"Windows 设置的“文件复制推送”；接收方组内共享区与悬浮坞的引用卡。","proposed":"将定向配置移到设备操作旁，文件引用单独放在共享文本框下方的横向卡片带。未拉取与本地可用的状态明确不同。","steps":["在Windows启用文件复制推送，明确选择目标。","Ctrl+C复制文件/文件夹；只有指定目标看到引用。","目标点击拉取；已有本地副本直接打开/拖放。完成后按完成时间进入暂存前列。"],"support":["windows","android","ios","ipados","web"],"priority":"P0","sources":["COPIED_FILES.md","COMPONENTS.md"],"sourceOnly":["windows"],"evidence":"用户已确认引用出现并拉取成功；114排序与本地目录提供方有定向检查。","note":"关闭或来源最后连接断开会撤回引用。删除本机引用不是删除来源原件。"},{"id":"on-demand","name":"按需拖放","icon":"drag","group":"shared","description":"可以先拖到目标，再按目标的数据请求下载。","current":"原生未拉取的文件复制引用卡。","proposed":"沿用引用卡，不再造“远程文件”独立页面；卡片显示来源，拉取中展示真实进度。","steps":["长按或拖起未下载引用。","投到需要真实文件数据的目标应用。","系统提供方按需拉取并交付；已有本地文件直接复用。"],"support":["windows","android","ios","ipados"],"priority":"P1","sources":["COPIED_FILES.md"],"differences":{"windows":"使用原生提供方；实际第三方目标分别验收。","android":"使用系统URI/目录提供方；已有本地目录读取原树，不复制或ZIP。","ios":"代码与提供方检查已接入，iPhone独立实机待验收。","ipados":"需手动签名安装IPA后检查真实目标；QQ成功不代表微信成功。","web":"未接入延迟文件提供方：先拉取，再拖出真实文件。"},"evidence":"原生提供方检查通过；不能把提供方读取成功当作微信插入成功。"},{"id":"dock","name":"接收坞与暂存坞","icon":"down","group":"shared","description":"接收是别人送来的，暂存是自己放进去的。","current":"Windows右下角独立接收坞；Android可贴边悬浮暂存坞。","proposed":"坞只负责临时中转，接收与暂存独立；不要复制一整套应用导航。控件靠展开侧边排列。","steps":["新普通收件进入接收视图；自动剪贴板更新保持静默。","把内容拖入暂存，长按卡片或全部拖动图标再拖出。","外部内容悬停2秒切为设备目标，松到设备即发送。"],"support":["windows","android"],"priority":"P0","sources":["UI_DESIGN.md","guides/android.md","guides/windows.md"],"differences":{"windows":"独立接收窗口，不移动主窗冒充；单击空白打开主窗，拖空白移动。","android":"接收/暂存分开，双击末尾空白格打开应用；暂存成功投放3秒后移出，可点按或再次拖动取消。","ios":"无Android式系统悬浮坞，使用系统分享和前台收发。","ipados":"无应用自绘悬浮坞；利用分屏/台前调度。","web":"无跨应用悬浮窗，使用页面内提示及可用通知。"}},{"id":"receive","name":"接收区","icon":"down","group":"organize","description":"正式收件留在这里，最新的排前面。","current":"桌面右侧“接收”；移动端底部“接收”。","proposed":"作为内容导航首项。保留两列预览；数量固定左侧，分类、排序、多选紧邻，不另占高工具行。","steps":["点卡片看预览，文本可直接复制。","拖回待发送或直接拖给设备，进入下一轮发送。","用多选、全选和删除整理；返回先退出多选。"],"support":["windows","android","ios","ipados","web"],"priority":"保留","sources":["UI_DESIGN.md","COMPONENTS.md"]},{"id":"history","name":"已发送 / 历史","icon":"history","group":"organize","description":"发送记录与文件本体分开处理。","current":"桌面“已发送”，移动端“历史”。","proposed":"保持与接收/文件库同一导航和工具栏；统一向用户解释“历史就是已发送”，不再新增独立发送档案入口。","steps":["打开已发送记录，查看去向与内容。","已发送文本可编辑，保存后返回，不再次弹旧收件。","批量删除记录不删除外部发送原件。"],"support":["windows","android","ios","ipados","web"],"priority":"P1","sources":["UI_DESIGN.md","REQUIREMENTS_STATUS.md"]},{"id":"library","name":"文件库","icon":"folder","group":"organize","description":"本机已保存文件，而不是另一份收件历史。","current":"桌面右侧“文件库”；移动端底部“文件”；部分存储设置也从文件库进入。","proposed":"作为统一内容导航第三项。分类与排序复用接收/历史的同一行；存储设置只留一个清晰入口。","steps":["按图片、视频、音频、文本、文件夹等类型筛选。","预览、打开、转发或多选管理。","外部文件移除后刷新引用，不制造失效卡片。"],"support":["windows","android","ios","ipados","web"],"priority":"P1","sources":["REQUIREMENTS_STATUS.md","RECEIVE_STORAGE_LAYOUT.md"],"differences":{"web":"浏览器文件库属于当前站点与配置；清站点数据会删除其中内容，不等于电脑Download目录。"}},{"id":"preview","name":"预览与内容操作","icon":"image","group":"organize","description":"看内容、拖内容，操作集中在卡片和预览页。","current":"点卡片预览；右键/更多菜单；预览中的复制和外部打开。","proposed":"不另放重复“查看”。预览保留一个复制；菜单顺序为打开、定位文件、加入待发送、其它操作、删除、详情。","steps":["图片缩放跟随手势中心；文本/常见文本文件直接读。","Windows图片/文件预览双击外部打开，Esc逐层返回。","查看态整元素可拖；主动编辑态保留输入法和文本编辑。"],"support":["windows","android","ios","ipados","web"],"priority":"保留","sources":["UI_DESIGN.md","REQUIREMENTS_STATUS.md"],"evidence":"图片缩放有组件/像素检查；真实双指及系统合成器仍需对应平台结果。"},{"id":"storage","name":"接收位置与清理","icon":"trash","group":"organize","description":"文件直接保存到接收位置，清理规则只碰已管理收件。","current":"设置中的接收目录与清理；Web也从文件库进入。","proposed":"统一收进“设置 → 存储”，文件库只提供同一页的快捷入口，不出现两套清理配置。","steps":["选择平台可用的接收位置；更改时迁移已管理的原件和引用。","普通收件平铺，同名加(n)；真实文件夹仍保留目录树。","默认清理两天前且严格小于200 KB的图片；其它类别不默认勾选。"],"support":["windows","android","ios","ipados","web"],"priority":"P0","sources":["RECEIVE_STORAGE_LAYOUT.md","REQUIREMENTS_STATUS.md"],"differences":{"ios":"系统沙盒与可用目录授权限制位置选择；不可选择时仍平铺保存，不能承诺任意外部目录。","ipados":"Files可见性和系统目录授权与Windows不同；保留平铺文件名。","web":"可选目录取决于浏览器API；否则使用浏览器文件库再导出。"}},{"id":"discovery","name":"分组与设备发现","icon":"link","group":"system","description":"按唯一ID识别设备，不按名字或相同IP猜身份。","current":"连接弹层、设置中的分组、设备区刷新；点击GlobalSend可查看本机地址。","proposed":"顶栏连接入口统一处理服务器、分组和设备名；刷新留在设备旁。本机地址和网络诊断移到连接详情。","steps":["使用同一中心和至少10位相同组密码加入组。","可同时加入多个组，设备按唯一ID去重。","刷新重新上报本机地址并让组员更新；离线设备保留30秒可尝试发送。"],"support":["windows","android","ios","ipados","web"],"priority":"P1","sources":["MULTI_GROUP.md","PLATFORMS.md","REQUIREMENTS_STATUS.md"],"differences":{"web":"默认使用提供网页的中心，无需手填；浏览器不保证显示真实网卡IP。"}},{"id":"routing","name":"选路与可达性","icon":"globe","group":"system","description":"内网优先，公网其次，中继最后。","current":"长按/右键设备看路径；设置中的传输方式、并发与中继阈值。","proposed":"设备详情解释源→目标和实测路径；默认工作区不堆IP。仅需要时展开手动方式，正在传输时显示当前路径。","steps":["刷新时并行探测候选源网卡与目标地址对。","发送复用已测通路径，依次回落内网、公网、中继。","网络变化重新连接；手动方式仍可选。中继超过32 MiB确认。"],"support":["windows","android","ios","ipados","web"],"priority":"P1","sources":["REQUIREMENTS_STATUS.md"],"differences":{"android":"蜂窝文件传输默认开启且不限大小；是否可达以实际网络测试为准。","web":"通过可用WebRTC候选尝试直连，不等同于枚举全部网卡或蜂窝；关页不保证连接。"},"note":"目标是尽量一秒完成选择，不是保证所有网络一秒握手。中心可达也不等于目标设备能接收。"},{"id":"share","name":"系统分享与媒体","icon":"file","group":"system","description":"从当前应用直接交给GlobalSend。","current":"系统分享面板、应用内文件/媒体picker；Android发送App。","proposed":"系统级入口由系统面板承担，应用内不再放“系统分享设置”二级页；文件和媒体动作保持可见。","steps":["从系统分享面板选择GlobalSend，导入待发送。","Apple分享尝试尽早唤起；无法唤起时打开应用继续已有批次。","指定设备的系统建议若出现，携唯一ID定向投递。"],"support":["android","ios","ipados"],"priority":"P1","sources":["PLATFORMS.md","guides/ipad.md"],"differences":{"android":"系统接收分享、图片/视频picker、发送已安装App的APK。","ios":"分享扩展与主App需同一App Group签名授权；系统决定快捷建议是否出现。","ipados":"同一IPA分享扩展；设备建议的位置和排序不可由应用强制。","web":"网页不等于原生系统分享扩展；使用浏览器可用的文件与粘贴入口。"}},{"id":"background","name":"后台接收与启动","icon":"laptop","group":"system","description":"尽量不断开，但不虚构系统做不到的后台能力。","current":"Windows托盘/开机启动；Android后台与悬浮窗；Web通知。","proposed":"设置分为“后台与通知”，只显示本平台能用的选项。权限失败时在同一处解释和修复。","steps":["Windows关闭主窗后保留托盘接收；可设置开机和仅后台启动。","Android按需授予悬浮窗/通知/后台运行；无法弹出才通知。","Apple与Web需保持前台或可用多任务接收，不承诺退出后持续接收。"],"support":["windows","android","ios","ipados","web"],"priority":"P1","sources":["WINDOWS_STARTUP.md","PLATFORMS.md","guides/web.md"],"differences":{"web":"目前只有活动页面通知，没有浏览器退出后的服务端Web Push。","ios":"无APNs后台传输保证，不承诺远程唤醒到前台。","ipados":"分屏或台前调度可保持可见；被系统挂起不保证接收。"}},{"id":"appearance","name":"外观与使用指南","icon":"settings","group":"system","description":"主题一致，指南按平台讲重点。","current":"设置中的外观、主题色和使用指南。","proposed":"外观与帮助放设置，不占收发主区域；图标遵循主题，只有异常才常驻说明。","steps":["选择跟随系统、亮色、暗色或中性主题。","选择强调色；所有内容卡和拖影应响应同一主题。","使用指南按平台介绍核心路径，Android重点介绍悬浮坞。"],"support":["windows","android","ios","ipados","web"],"priority":"保留","sources":["UI_DESIGN.md","PLATFORMS.md"]},{"id":"updates","name":"检查与安装更新","icon":"retry","group":"system","description":"只提示当前平台确有新包的更新。","current":"设置中的更新、自动检查、自动下载并更新。","proposed":"统一“设置 → 更新”，下载/安装进度在这一处；不用收件弹层承载更新通知。","steps":["自动或手动检查GitHub对应平台包。","Windows空闲后台替换完整包；Android调起系统安装确认。","iPhone/iPad只检查通知，IPA由用户手动签名安装。"],"support":["windows","android","ios","ipados","web"],"priority":"保留","sources":["UPDATES.md"],"differences":{"web":"刷新网页使用服务器已部署资源，不下载原生包。","windows":"真实应用自更新交接仍待用户验收，不能拿本地脚本覆盖当作自动更新通过。","android":"系统确认仍需用户；ADB覆盖不代表应用内安装流程已验收。"}},{"id":"integrations","name":"外部调用与链接投递","icon":"link","group":"system","description":"让其它应用把内容交给GlobalSend，而不是再造收发流程。","current":"Windows命令行传入文件；Android本机集成接口；接收卡片中的链接。","proposed":"Windows使用系统“发送到”或文件参数；外部应用用稳定设备ID投递。接口说明归入帮助，不挤进日常工作区。","steps":["Windows运行GlobalSend.exe并传入文件/文件夹，会唤起已有实例并加入待发送；不会擅自发送。","Android外部调用方通过既有本机桥查询设备，再按唯一ID定向投递链接。","能自动打开的目标走打开意图；iPad等目标接收普通链接，由用户点击打开。"],"support":["windows","android","ios","ipados","web"],"priority":"保留","sources":["WINDOWS_STARTUP.md","INTEGRATION_ABI_V1.md"],"differences":{"windows":"--background仅启动托盘/接收核心；传入文件仍保留原打开并加入待发送语义。","android":"本机Messenger ABI已有实现；首次关联、能力与目标ID来自真实接口，不按设备名称猜测。","ios":"可接收普通链接；不声明iPhone远程自动唤起浏览器。","ipados":"Chrona可发送普通链接；不能自动唤醒浏览器不等于不能送达链接。","web":"可接收与点击普通链接；不是Android本机绑定服务。"}}],"journeys":[{"id":"quick","name":"立即发一份内容","ids":["compose","device","drop"],"goal":"选内容 → 找设备 → 发出去","steps":["窗口内粘贴、添加，或从别的应用抓起内容。","普通发送点设备；手里已经拖着内容就直接投到设备。","只在实际传输或失败时显示进度、暂停和重试。"]},{"id":"copy","name":"让复制的内容跟着走","ids":["suggestions","clipboard","references"],"goal":"先区分你想“自动送达”还是“需要再取”","steps":["偶尔发一次：点剪贴板建议确认，或直接拖动。","文字/截图持续同步：Windows指定设备，自动覆盖接收槽位。","复制大文件/文件夹：Windows发引用，目标需要时才拉取。"]},{"id":"relay","name":"在应用之间中转","ids":["dock","on-demand","share"],"goal":"先暂存，再交给另一个应用或设备","steps":["Android在应用外把内容放进暂存坞；iPad用多任务拖放。","直接拖出，或悬停坞2秒进入设备模式。","未下载引用用原生按需提供；Web先拉取再拖。"]},{"id":"find","name":"找回与整理内容","ids":["receive","history","library","storage"],"goal":"先判断你找的是“事件”还是“文件”","steps":["找别人刚发的：接收；找自己发过的：历史。","找本机保存文件：文件库，按类型或排序筛选。","预览、转发、多选整理；长期规则统一到存储设置。"]}],"decisions":[{"priority":"P0","title":"三种“剪贴板”必须分开","reason":"候选、最新同步、本地/远程文件不应长得像同一种已接收卡片。","change":"建议用虚线；自动槽位固定一份；文件引用标明来源和拉取状态。","keep":"不改变指定目标、静默槽位、不写历史的已确认语义。","ids":["suggestions","clipboard","references"]},{"priority":"P0","title":"定向自动化靠近目标设备","reason":"用户先想到“发给谁”，不是先想到去设置找监听开关。","change":"设备更多菜单提供同步/文件复制配置，指向同一份设置，不创建第二套状态。","keep":"不自动选择第一台设备；开关关闭时保留目标并禁用下拉。","ids":["device","clipboard","references"]},{"priority":"P0","title":"共享编辑与文件引用拆层","reason":"共同编辑是持续工作区，引用是可取用资源；混在正文里难以辨认。","change":"保留高的共享编辑框，引用放其下独立横向卡片带。","keep":"编辑静默、撤销连续；手动拉取不弹收件强调页。","ids":["shared-text","references"]},{"priority":"P1","title":"整理导航与工具栏只用一套","reason":"接收、已发送、文件库是同一工作区的三种视角，不是三套页面体系。","change":"标签与内容相连，固定数量在左；统一筛选、排序、多选及批量动作。","keep":"移动端发送/接收/历史/文件四项导航；桌面仍保留左右两窗格。","ids":["receive","history","library"]},{"priority":"P1","title":"系统差异只在相关位置解释","reason":"将浏览器限制塞满默认页面，会让所有用户读到与自己无关的信息。","change":"按平台呈现可用入口，在授权失败、路径不可用或操作失败时说明原因。","keep":"iOS/iPadOS独立说明；不假造悬浮窗、后台唤起或Web延迟文件能力。","ids":["share","background","on-demand"]}],"pending":[{"platform":"Windows","item":"114重启后同步开关与目标恢复","state":"定向检查通过 · 实际重开待确认","next":"首次升级设置一次后，关闭并重开验证；遵循不自动操作Windows的约定。"},{"platform":"Windows","item":"触屏、虚拟桌面拖影与接收坞合成","state":"原生实现/构建已有 · 系统交互待验收","next":"用户实际触屏跨应用投放；不以鼠标或组件结果替代。"},{"platform":"Windows","item":"另一台Windows的图片Ctrl+V、真实自动更新","state":"缺少对应真实操作结果","next":"具备第二台设备时确认粘贴；自动更新需真实空闲替换场景。"},{"platform":"Android","item":"114完成拉取排序与目录拖出","state":"模型/组件/提供方检查通过 · 实机新行为待确认","next":"拉取一份引用，确认前移且可拖；不重复已验收的微信路径。"},{"platform":"Android","item":"应用内下载并安装更新","state":"安装器检查已有 · 系统确认流程待验收","next":"通过应用内更新入口安装，不能以ADB成功替代。"},{"platform":"iOS / iPadOS","item":"114剪贴板建议、拖影、微信与按需拖放","state":"IPA编译/提供方通过 · 分平台实机待验收","next":"用户手动签名安装；分别记录目标应用结果，iPhone仍缺实机。"},{"platform":"Web","item":"页面关闭后的服务端推送","state":"未实现 · 不算现有能力","next":"当前指南只说明活动页面通知；是否新增Web Push需另行决定。"}]};</script>
+  <script>(() => {
+  'use strict';
+  const { platforms, groups, modules, features, journeys, decisions, pending } = window.ATLAS_DATA;
+  const state = { platform: 'windows', mode: 'proposed', group: 'all', query: '', onlySupported: false, journey: 'quick' };
+  const $ = selector => document.querySelector(selector);
+  const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const icon = name => name === 'search'
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="7"/><path d="m16 16 5 5"/></svg>'
+    : GlobalSendIcons.icon(name);
+  const byId = id => features.find(feature => feature.id === id);
+  const platform = () => platforms.find(item => item.id === state.platform);
+  const related = ids => `<div class="related">${ids.map(id => `<button data-feature="${id}">${escape(byId(id).name)} ↗</button>`).join('')}</div>`;
+  const hotspot = (id, body, className = '') => `<button class="hotspot ${className}" data-feature="${id}" aria-label="查看${escape(byId(id).name)}">${body}</button>`;
+  const mockButton = (id, label, name) => `<button data-feature="${id}">${icon(name)}${label}</button>`;
+  const draft = () => `<div class="mock-label"><span>待发送 · 1</span><button data-feature="compose">＋ 文件</button></div><div class="mock-draft">${hotspot('compose', `${icon('file')}<span>讨论稿.md</span>`, 'mini-card')}${hotspot('suggestions', `${icon('copy')}<span>剪贴板<br>点按添加</span>`, 'mini-card suggest')}</div>`;
+  const deviceArea = () => `<div class="mock-label"><span>设备 · 2</span><button data-feature="discovery">刷新　多选</button></div><div class="mock-devices">${hotspot('device',`${icon('phone')}<span>手机</span>`,'mock-device')}${hotspot('drop',`${icon('tablet')}<span>iPad</span>`,'mock-device')}</div>${state.mode === 'proposed' ? hotspot('clipboard',state.platform === 'windows' ? '设备自动化　同步 / 文件引用　→' : '设备共享　最新同步 / 文件引用　→','mock-ref') : ''}`;
+  const sharedArea = () => `${hotspot('shared-text','<strong>组内共享　↶　↷</strong>在这里共同编辑…','mock-shared')}${hotspot('references',`${icon('folder')}<span>项目资料　·　${state.mode === 'proposed' ? '远程引用，点击拉取' : '来自电脑'}</span>`,'mock-ref')}`;
+  function contentPanel() {
+    return `<section class="mock-panel"><div class="mock-nav">${mockButton('receive','接收','down')}${mockButton('history','已发送','history')}${mockButton('library','文件库','folder')}</div>${hotspot('clipboard',`${icon('copy')}<strong>最新同步</strong>　这一份保持最新`,'mock-slot')}<div class="mock-label"><span>2 项</span><button data-feature="library">筛选　多选</button></div><div class="mock-grid">${hotspot('preview','<p>把手里的内容，<br>直接交给设备。</p><small>手机 · 14:30</small>','mock-file')}${hotspot('receive',`<div class="mock-picture">${icon('image')}</div><small>iPad · 14:28</small>`,'mock-file')}</div></section>`;
+  }
+  function desktopMap() {
+    const web = state.platform === 'web';
+    const actions = state.mode === 'proposed'
+      ? `${mockButton('compose','文本','text')}${mockButton('suggestions','剪贴板','copy')}${mockButton('compose','文件','file')}`
+      : `${mockButton('compose','文本','text')}${mockButton('suggestions','剪贴板','copy')}`;
+    return `<div class="window"><div class="window-bar"><div class="window-title"><i></i><span class="window-brand">GlobalSend${web ? ' / Web' : ''}</span></div><div class="mock-actions">${actions}${mockButton('discovery','','link')}${mockButton('appearance','','settings')}</div></div><div class="mock-body"><section class="mock-panel">${draft()}${deviceArea()}${sharedArea()}</section>${contentPanel()}</div></div>`;
+  }
+  function phoneMap() {
+    const android = state.platform === 'android';
+    return `<div class="mobile-workspace"><div class="phone"><div class="window"><div class="window-bar"><span class="window-brand">GlobalSend</span><div class="mock-actions">${mockButton('discovery','','link')}${mockButton('appearance','','settings')}</div></div><div class="mock-body"><div class="mock-split">${mockButton('compose','文本','text')}${mockButton('suggestions','剪贴板','copy')}${mockButton('folder','文件','file')}${mockButton('share','媒体','image')}</div><section class="mock-panel">${draft()}</section><div style="margin-top:12px">${deviceArea()}</div>${sharedArea()}</div><div class="mock-nav">${mockButton('device','发送','arrow')}${mockButton('receive','接收','down')}${mockButton('history','历史','history')}${mockButton('library','文件','folder')}</div></div></div><div class="side-scene"><h4>${android ? '应用外：悬浮暂存坞' : '应用外：系统分享'}</h4>${android ? `<div class="dock-demo"><div class="dock-cards">${hotspot('dock',`${icon('image')}<span>本地图片</span>`,'mini-card')}${hotspot('references',`${icon('folder')}<span>远程引用</span>`,'mini-card')}</div><div class="dock-controls">${mockButton('dock','1','down')}${mockButton('dock','1','folder')}${mockButton('drop','','drag')}</div></div><div class="dock-handle"><i></i></div>` : `<div class="share-demo">${icon('file')}<div class="mock-split">${mockButton('share','GlobalSend','arrow')}${mockButton('device','指定设备','phone')}</div></div>`}<p>${android ? '接收与暂存分开。<br>双击空白回应用；<br>悬停2秒转设备投递。' : '系统分享导入待发送。<br>系统决定设备建议，<br>不模拟Android悬浮窗。'}</p>${hotspot(android ? 'dock' : 'share', '查看操作说明 ↗', 'text-button')}</div></div>`;
+  }
+  function renderLayout() {
+    const p = platform();
+    $('#platform-intro').innerHTML = `<h3>${escape(p.name)} · ${escape(p.context)}</h3><p>${escape(p.summary)}</p>`;
+    $('#workspace').innerHTML = ['android','ios'].includes(p.id) ? phoneMap() : desktopMap();
+    const notes = state.mode === 'current'
+      ? [['分散的配置','同步和文件复制推送从设置进入，目标选择远离设备卡。'],['混合的状态','共享文本、文件引用、建议和自动槽位需要被分别理解。'],['不同的系统边界',p.constraint]]
+      : [['高频动作不躲藏','内容 → 设备。拖着内容时，设备卡就是发送入口。'],['配置跟着目标走','设备相关自动化提供就近入口，仍保存到同一份设置。'],['状态各有位置',p.constraint]];
+    $('#map-notes').innerHTML = notes.map(([title,text],i) => `<div class="map-note"><span>0${i+1}</span><div><strong>${escape(title)}</strong><p>${escape(text)}</p></div></div>`).join('');
+    document.querySelector('.layout-caption').innerHTML = `<span>${state.mode === 'current' ? '当前入口示意' : '建议布局 · 尚未实施'}</span>点击区域查看功能。${p.id === 'ipados' ? '此为宽屏示意；窄窗口仍按实际空间适配。' : ''}示意设备和文件不是实际数据。`;
+    $('#workspace').classList.remove('enter');
+    requestAnimationFrame(() => $('#workspace').classList.add('enter'));
+  }
+  function supportLabel(feature) {
+    if (!feature.support.includes(state.platform)) return '本平台无此原生能力';
+    if (feature.sourceOnly) return feature.sourceOnly.includes(state.platform) ? '可作为来源与接收端' : '可接收 · 来源为 Windows';
+    return state.platform === 'web' && feature.id === 'suggestions' ? '剪贴板建议可用' : '本平台已实现';
+  }
+  function renderCatalog() {
+    const q = state.query.trim().toLowerCase();
+    const list = features.filter(feature =>
+      (state.group === 'all' || feature.group === state.group) &&
+      (!state.onlySupported || feature.support.includes(state.platform)) &&
+      (!q || [feature.name, feature.description, feature.current, feature.proposed, ...feature.steps, ...Object.values(feature.differences || {})].join(' ').toLowerCase().includes(q))
+    );
+    $('#catalog-count').textContent = `${platform().name} · ${list.length} / ${features.length} 项`;
+    $('#feature-list').innerHTML = list.map(feature => `<button class="feature-card ${feature.support.includes(state.platform) ? '' : 'unavailable'}" data-feature="${feature.id}"><span class="feature-icon">${icon(feature.icon)}</span><div><h3>${escape(feature.name)}</h3><p>${escape(feature.description)}</p><span class="badge">${supportLabel(feature)}</span></div><span class="arrow-icon">↗</span></button>`).join('');
+    $('#empty').hidden = list.length > 0;
+    document.querySelectorAll('[data-group]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.group === state.group)));
+  }
+  function renderJourney() {
+    const journey = journeys.find(item => item.id === state.journey);
+    $('#journey-tabs').innerHTML = journeys.map((item,i) => `<button role="tab" id="journey-${item.id}" aria-controls="journey-body" aria-selected="${item.id === state.journey}" tabindex="${item.id === state.journey ? 0 : -1}" data-journey="${item.id}"><span>0${i+1}</span>${escape(item.name)}</button>`).join('');
+    $('#journey-body').setAttribute('aria-labelledby', `journey-${journey.id}`);
+    $('#journey-body').innerHTML = `<h3>${escape(journey.goal)}</h3><ol class="journey-steps">${journey.steps.map((step,i) => `<li><b>${i+1}</b><span>${escape(step)}</span></li>`).join('')}</ol>${related(journey.ids)}<p class="small-meta">${escape(platform().name)}：${escape(platform().constraint)}</p>`;
+  }
+  function renderComparison() {
+    const rows = [
+      ['自动监听本机复制','文字 / 截图','无持续监听来源','无持续监听来源','无持续监听来源','无持续监听来源'],
+      ['接收自动同步槽位','支持','支持','支持','支持','支持'],
+      ['系统图片写入','保留','关闭','关闭','保留','按宿主与授权'],
+      ['文件复制推送来源','支持','仅接收引用','仅接收引用','仅接收引用','仅接收引用'],
+      ['未下载引用拖放','原生提供方','原生提供方','原生提供方¹','原生提供方¹','先拉取再拖'],
+      ['应用外中转','独立接收坞','悬浮暂存坞','系统分享 / 前台','系统分享 / 多任务','保持网页打开'],
+      ['后台持续接收','托盘核心','服务 / 系统调度','不保证','前台 / 多任务','不保证关页接收'],
+      ['更新安装','完整包自动替换¹','系统确认¹','手动签名IPA','手动签名IPA','刷新已部署网页'],
+    ];
+    $('#comparison').innerHTML = `<div class="table-scroll"><table><caption class="small-meta" style="text-align:left;padding:12px">实现能力对照，不等同于所有第三方应用已验收</caption><thead><tr><th scope="col">能力</th>${platforms.map(p=>`<th scope="col">${p.name}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map((cell,i)=>i===0?`<th scope="row">${cell}</th>`:`<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="small-meta">¹ 提供方或流程已有实现/检查，真实系统场景仍见“待验收项”。iOS与iPadOS共用IPA，但不能共用一份实机结论。</p>`;
+  }
+  function renderDecisions() {
+    $('#decision-list').innerHTML = decisions.map(item=>`<article class="decision"><span class="decision-priority">${item.priority}</span><div><h3>${escape(item.title)}</h3><p>${escape(item.reason)}</p></div><div class="decision-change"><strong>建议这样调整</strong><p>${escape(item.change)}</p><small>保留：${escape(item.keep)}</small>${related(item.ids)}</div></article>`).join('');
+    $('#pending-list').innerHTML = pending.map(item=>`<article class="pending"><span>${escape(item.platform)}</span><div><h3>${escape(item.item)}</h3><span class="status">${escape(item.state)}</span><p>${escape(item.next)}</p></div></article>`).join('');
+  }
+  function renderModules() {
+    $('#module-list').innerHTML = modules.map(item=>`<article class="module-card" data-module="${item.id}"><div class="module-heading"><span>${icon(item.icon)}</span><small>${escape(item.english)}</small></div><h3>${escape(item.name)}</h3><p class="module-purpose">${escape(item.purpose)}</p><p class="module-scene">${escape(item.scene)}</p><div class="module-primary"><span>主任务</span><strong>${escape(item.primary)}</strong></div><ul>${item.owns.map(text=>`<li>${escape(text)}</li>`).join('')}</ul><details><summary>生命周期与交接</summary><dl><dt>内容如何保留</dt><dd>${escape(item.lifecycle)}</dd><dt>何时回主界面</dt><dd>${escape(item.handoff)}</dd><dt>空间与形态</dt><dd>${escape(item.geometry)}</dd></dl></details><p class="module-rule">${escape(item.rule)}</p>${related(item.ids)}</article>`).join('');
+  }
+  let closing = false;
+  function openDetail(id) {
+    const feature = byId(id);
+    if (!feature) return;
+    const p = platform(), supported = feature.support.includes(p.id);
+    $('#detail-eyebrow').textContent = `${p.name} / ${groups.find(group => group.id === feature.group).name}`;
+    const difference = feature.differences?.[p.id] || (supported ? '保持统一的内容与状态语义；具体系统操作按当前平台能力执行。' : '此平台没有对应原生能力。请使用本平台已有的收发、系统分享或前台页面。');
+    $('#detail-body').innerHTML = `<div class="detail-icon">${icon(feature.icon)}</div><h2 id="detail-title">${escape(feature.name)}</h2><p class="detail-description">${escape(feature.description)}</p><div class="detail-platform"><strong>${escape(p.name)} · ${supportLabel(feature)}</strong><p>${escape(difference)}</p></div><div class="entry-compare"><div><h3>现有入口</h3><p>${escape(feature.current)}</p></div><div><h3>建议入口 · 待讨论</h3><p>${escape(feature.proposed)}</p></div></div><section class="detail-section"><h3>怎么用</h3><ol>${feature.steps.map(step=>`<li>${escape(step)}</li>`).join('')}</ol></section>${feature.note ? `<div class="detail-note">${escape(feature.note)}</div>` : ''}${feature.evidence ? `<p class="detail-evidence">验收依据：${escape(feature.evidence)}</p>` : '<p class="detail-evidence">实现与检查依据见下方文档；本页不新增实机验收结论。</p>'}<section class="detail-section"><h3>依据与进一步说明</h3><div class="sources">${feature.sources.map(source=>`<a href="https://github.com/DongLanQwQ0/GlobalSend/blob/ca6012f/docs/${encodeURI(source)}" target="_blank" rel="noopener">${escape(source)} ↗</a>`).join('')}</div></section>`;
+    const dialog = $('#feature-dialog');
+    closing = false; dialog.classList.remove('closing');
+    if (!dialog.open) dialog.showModal();
+    dialog.scrollTop = 0;
+    $('#close-detail').focus({preventScroll:true});
+  }
+  function closeDetail() {
+    const dialog = $('#feature-dialog');
+    if (!dialog.open || closing) return;
+    closing = true;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { dialog.close(); closing = false; return; }
+    dialog.classList.add('closing');
+    dialog.addEventListener('animationend', () => { dialog.close(); dialog.classList.remove('closing'); closing = false; }, {once:true});
+  }
+  function selectPlatform(id, focus = false) {
+    state.platform = id;
+    $('#catalog-platform').value = id;
+    document.querySelectorAll('[data-platform]').forEach(button=>{
+      button.setAttribute('aria-selected', String(button.dataset.platform === id));
+      button.tabIndex = button.dataset.platform === id ? 0 : -1;
+    });
+    if (focus) $(`[data-platform="${id}"]`).focus();
+    renderLayout(); renderCatalog(); renderJourney();
+  }
+  $('#platforms').innerHTML = platforms.map(p=>`<button role="tab" data-platform="${p.id}" aria-selected="${state.platform === p.id}" aria-controls="layout" tabindex="${state.platform === p.id ? 0 : -1}">${icon(p.icon)}${p.name}</button>`).join('');
+  $('#catalog-platform').innerHTML = platforms.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  $('#catalog-platform').addEventListener('change', event=>selectPlatform(event.target.value));
+  $('#group-tabs').innerHTML = [{id:'all',name:'全部'},...groups].map(group=>`<button data-group="${group.id}" aria-pressed="${group.id === state.group}">${group.name}</button>`).join('');
+  document.querySelectorAll('[data-icon]').forEach(node=>{ node.innerHTML = icon(node.dataset.icon); });
+  $('#close-detail').innerHTML = icon('close');
+  document.addEventListener('click', event => {
+    const target = event.target.closest('button');
+    if (!target) return;
+    if (target.dataset.platform) selectPlatform(target.dataset.platform);
+    if (target.dataset.mode) {
+      state.mode = target.dataset.mode;
+      document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===state.mode)));
+      renderLayout();
+    }
+    if (target.dataset.feature) openDetail(target.dataset.feature);
+    if (target.dataset.group) { state.group=target.dataset.group; renderCatalog(); }
+    if (target.dataset.journey) { state.journey=target.dataset.journey; renderJourney(); $(`[data-journey="${state.journey}"]`).focus({preventScroll:true}); }
+  });
+  $('#search').addEventListener('input', event => { state.query = event.target.value; renderCatalog(); });
+  $('#only-supported').addEventListener('change', event => { state.onlySupported = event.target.checked; renderCatalog(); });
+  $('#reset-filter').addEventListener('click', () => { state.query=''; state.group='all'; $('#search').value=''; renderCatalog(); $('#search').focus(); });
+  $('#close-detail').addEventListener('click', closeDetail);
+  $('#feature-dialog').addEventListener('cancel', event => { event.preventDefault(); closeDetail(); });
+  let backdropStart = false;
+  $('#feature-dialog').addEventListener('pointerdown', event=>{
+    const rect=event.currentTarget.getBoundingClientRect();
+    backdropStart = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+  });
+  $('#feature-dialog').addEventListener('click', event=>{
+    const rect=event.currentTarget.getBoundingClientRect();
+    if (backdropStart && (event.clientX<rect.left || event.clientX>rect.right || event.clientY<rect.top || event.clientY>rect.bottom)) closeDetail();
+    backdropStart=false;
+  });
+  document.addEventListener('keydown',event=>{
+    if (event.key==='/' && !$('#feature-dialog').open && !['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) { event.preventDefault(); $('#search').focus(); }
+    const tab=event.target.closest('[role="tab"]');
+    if (!tab || !['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+    const parent=tab.closest('[role="tablist"]'), tabs=[...parent.querySelectorAll('[role="tab"]')];
+    let index=tabs.indexOf(tab);
+    index=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+    event.preventDefault();
+    if (tabs[index].dataset.platform) selectPlatform(tabs[index].dataset.platform,true);
+    else { state.journey=tabs[index].dataset.journey; renderJourney(); $(`[data-journey="${state.journey}"]`).focus(); }
+  });
+  const observer=new IntersectionObserver(entries=>{
+    const active=entries.filter(entry=>entry.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top)[0];
+    if (!active) return;
+    document.querySelectorAll('.rail nav a').forEach(link=>link.classList.toggle('active',link.hash===`#${active.target.id}`));
+  },{rootMargin:'-5% 0px -65% 0px'});
+  document.querySelectorAll('main>.section').forEach(section=>observer.observe(section));
+  renderModules(); renderLayout(); renderCatalog(); renderJourney(); renderComparison(); renderDecisions();
+})();
+</script>
+<template id="material-symbols-license">Google Material Symbols Rounded: link / settings (24px, FILL 0, wght 400).
+https://github.com/google/material-design-icons/tree/master/symbols/web
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/link/materialsymbolsrounded/link_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/settings/materialsymbolsrounded/settings_24px.svg
+
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.</template>
+</body>
+</html>
