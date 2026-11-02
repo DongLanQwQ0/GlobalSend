@@ -22,6 +22,11 @@ void main() {
   testWidgets(
     'waiting native helper disables install and keeps cancel in the same action row',
     (tester) async {
+      tester.view.physicalSize = const Size(950, 650);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final capture = GlobalKey();
       late AppUpdates updates;
       await tester.runAsync(() async {
         updates = AppUpdates(
@@ -39,11 +44,26 @@ void main() {
       expect(updates.installing, isFalse);
       expect(updates.installPending, isTrue);
       await tester.pumpWidget(
-        AppUpdatesScope(
-          updates: updates,
-          child: MaterialApp(
-            theme: Ui.theme(),
-            home: const Scaffold(body: UpdateCheckControl()),
+        RepaintBoundary(
+          key: capture,
+          child: AppUpdatesScope(
+            updates: updates,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: Ui.theme(),
+              home: Scaffold(
+                appBar: AppBar(title: const Text('更新')),
+                body: const Center(
+                  child: SizedBox(
+                    width: 600,
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: UpdateCheckControl(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       );
@@ -53,6 +73,17 @@ void main() {
       expect(tester.widget<TextButton>(install).onPressed, isNull);
       expect(find.text('更新中…'), findsOneWidget);
       expect(tester.getCenter(install).dy, tester.getCenter(cancel).dy);
+      await tester.runAsync(() async {
+        final picture =
+            await (capture.currentContext!.findRenderObject()
+                    as RenderRepaintBoundary)
+                .toImage();
+        final bytes = await picture.toByteData(format: ui.ImageByteFormat.png);
+        picture.dispose();
+        final file = File('../artifacts/tmp/completion105/update-waiting.png');
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(bytes!.buffer.asUint8List());
+      });
       await tester.runAsync(updates.cancelUpdate);
       await tester.pumpAndSettle();
       expect(tester.widget<TextButton>(install).onPressed, isNotNull);
