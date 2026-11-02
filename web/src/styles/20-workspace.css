@@ -303,10 +303,10 @@
 
 /* One shared clipboard slot uses the same square content surface as references. */
 .clipboard-slot-card{background:var(--field)}
-.clipboard-slot-preview{height:100%;overflow:hidden;border-radius:inherit}
-.clipboard-slot-preview>span:not(.content-preview){display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden;padding:var(--space-2);padding-right:28px;font-size:var(--text-sm);line-height:var(--leading-normal);overflow-wrap:anywhere}
+.clipboard-slot-preview{height:calc(100% - 32px);overflow:hidden;border-radius:inherit}
+.clipboard-slot-preview>span:not(.content-preview){display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;margin:var(--space-2) 28px 0 var(--space-2);font-size:var(--text-sm);line-height:var(--leading-normal);overflow-wrap:anywhere}
 .clipboard-slot-preview .content-preview{height:100%;min-height:0;border-radius:inherit}
 .clipboard-slot-preview img{width:100%;height:100%;object-fit:cover}
 .clipboard-slot-actions{position:absolute;inset:auto 0 0;display:flex;align-items:center;justify-content:space-between;background:color-mix(in srgb,var(--surface) 88%,transparent);padding:var(--space-0)}
-.clipboard-slot-actions button{display:inline-flex;align-items:center;gap:var(--space-0);padding:var(--space-0);min-height:28px;font-size:var(--text-xs)}
+.clipboard-slot-actions button{display:inline-flex;align-items:center;gap:var(--space-0);padding:var(--space-0);min-height:28px;font-size:var(--text-xs);color:var(--green)}
 .clipboard-slot-actions svg{width:14px;height:14px}
