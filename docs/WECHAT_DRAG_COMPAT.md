@@ -1,5 +1,13 @@
 # Android 文件拖入微信的路径兼容
 
+## 113修复暂存副本并隐藏相册缓存
+
+112再次失败的真实日志显示：暂存图片进入兼容副本分支，查询`IS_PENDING=1`时的`_data`得到`.pending-…png`，发布后系统已改名，却仍把旧路径交给微信。此前成功走的是已有原件复用，不能覆盖这个分支。
+
+113在清除pending后重新读取最终路径与媒体分类，只在自有`Drag-cache`目录创建`.nomedia`，让兼容副本成为Files中的`MEDIA_TYPE_NONE`，并授权实际Files URI。旧副本按既有journal中的精确URI重扫，不扫描或隐藏正常接收根，不删除原件。
+
+用户已确认暂存、接收两处图片均能投放微信。三条实机兼容副本均为最终非pending路径、分类0、pending0；按确切ID查询Images均无结果，普通接收图片1000062619仍在Images，接收根无`.nomedia`。证据：`artifacts/tmp/release113/phone-drag113.jsonl`、`gallery-index.txt`、`gallery-images-final.txt`；36项框架检查见`artifacts/tmp/wechat-gallery113/jvm-final.log`。手机临时诊断已清理，生产缓存保留原有10分钟精确生命周期。
+
 ## 当前112实机结果
 
 2026-11-02，手机覆盖安装1.0.87+112后，用户确认悬浮坞图片拖入已打开的微信聊天成功。本次独立文件诊断记录了`image/png`原生拖放、微信默认元数据查询、现有MediaStore文件/图片URI授权、返回`Download/GlobalSend`中的原路径以及`accepted=true`，没有新建兼容副本。`returned=false`表示没有回投暂存坞，不是失败。
