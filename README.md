@@ -1,6 +1,6 @@
 # GlobalSend
 
-自托管的跨设备文本与文件接收坞。Windows / Android / iPad 原生客户端使用 Flutter，另提供网页版；中心通过 Docker 部署。Web 自动连接本站，原生客户端可自定义中心。
+自托管的跨设备文本与文件接收坞，正式支持 **Windows、Android、iOS、iPadOS、Web**。原生客户端使用 Flutter；iOS 与 iPadOS 共用 IPA，分别适配交互。中心通过 Docker 部署，Web 自动连接本站，原生客户端可自定义中心。详见[平台范围](docs/PLATFORMS.md)。
 
 ## 开始使用
 

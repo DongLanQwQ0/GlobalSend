@@ -1,6 +1,7 @@
 # GlobalSend local releases
 
 - The public project/product name is exactly `GlobalSend`, with this capitalization.
+- Officially supported client platforms are Windows, Android, iOS, iPadOS and Web. iOS and iPadOS share the universal IPA and existing `ios` update lane, but their layouts, system integration and acceptance stay platform-specific. Do not silently omit a supported platform or add macOS/Linux to the official list. See `docs/PLATFORMS.md`.
 - Native release workflow: `npm run release:local`. After each successful native build, update the complete Windows bundle in `E:\Programs\GlobalSend` and restart GlobalSend; push the APK to the connected physical Android phone, install with `adb install -r`, and launch it. Preserve application data. Do not host installers on the server.
 - When Android builds or updates are explicitly on hold, use `npm run release:local -- -WindowsOnly` for Windows. It builds/replaces/restarts the complete Windows bundle without building an APK, accessing ADB or changing the phone; keep its last confirmed version in the release record.
 - Stabilize and accept Windows and Android first; build the IPA last. The iPad workflow is manual-only (`workflow_dispatch`), not triggered by source pushes. Do not start an IPA build during ongoing Windows/Android fixes.
