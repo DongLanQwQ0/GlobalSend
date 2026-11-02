@@ -2820,85 +2820,105 @@ class _SendScreenState extends State<SendScreen>
     final title = isText
         ? value.replaceAll('\n', ' ')
         : c.stagedFileNames[path] ?? safeName(path!);
-    return Material(
-      color: Ui.colors(context).surface,
-      borderRadius: Ui.cardRadius,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: isText
-            ? () => composeText(index: textIndex)
-            : () => openStagedFile(path!),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (!isText && c.stagedDirectoryNames.containsKey(path))
-                    Center(
-                      child: AppIcon(
-                        Icons.folder_outlined,
-                        size: 36,
-                        color: Ui.colors(context).accent,
-                      ),
-                    )
-                  else
-                    ContentPreview(
-                      location: path ?? '',
-                      name: isText ? '文本' : title,
-                      text: isText ? value : null,
-                      compact: true,
-                      maxTextLines: isText ? 4 : 2,
-                      topInset: isText ? 24 : 0,
-                    ),
-                  Positioned(
-                    top: 2,
-                    right: 2,
-                    child: SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: IconButton(
-                        tooltip: '移除',
-                        padding: EdgeInsets.zero,
-                        style: IconButton.styleFrom(
-                          backgroundColor: Ui.colors(context).surface
-                              .withValues(alpha: .9),
-                          minimumSize: const Size(28, 28),
+    final entry = DockEntry(
+      id: isText ? 'staged-text-$textIndex' : 'staged-file-$path',
+      kind: isText ? 'text' : 'file',
+      title: isText ? '文本' : title,
+      source: c.profile?.deviceId ?? '',
+      text: value,
+      localPath: path ?? '',
+      entryKind: c.stagedDirectoryNames.containsKey(path)
+          ? 'directory'
+          : 'file',
+      outgoing: true,
+      status: 'staged',
+    );
+    return ContentDragSurface(
+      key: ValueKey(entry.id),
+      entry: entry,
+      enabled: !working,
+      onExport: (kind) =>
+          performExport(() => c.dragOut(entry, pointerKind: kind)),
+      child: Material(
+        color: Ui.colors(context).surface,
+        borderRadius: Ui.cardRadius,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: isText
+              ? () => composeText(index: textIndex)
+              : () => openStagedFile(path!),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (!isText && c.stagedDirectoryNames.containsKey(path))
+                      Center(
+                        child: AppIcon(
+                          Icons.folder_outlined,
+                          size: 36,
+                          color: Ui.colors(context).accent,
                         ),
-                        onPressed: working
-                            ? null
-                            : () {
-                                if (isText) {
-                                  c.stagedTexts.removeAt(textIndex);
-                                  c.changed();
-                                } else
-                                  perform(() => c.removeStagedFile(path!));
-                              },
-                        icon: const AppIcon(Icons.close, size: 16),
+                      )
+                    else
+                      ContentPreview(
+                        location: path ?? '',
+                        name: isText ? '文本' : title,
+                        text: isText ? value : null,
+                        compact: true,
+                        maxTextLines: isText ? 4 : 2,
+                        topInset: isText ? 24 : 0,
+                      ),
+                    Positioned(
+                      top: 2,
+                      right: 2,
+                      child: SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: IconButton(
+                          tooltip: '移除',
+                          padding: EdgeInsets.zero,
+                          style: IconButton.styleFrom(
+                            backgroundColor: Ui.colors(context).surface
+                                .withValues(alpha: .9),
+                            minimumSize: const Size(28, 28),
+                          ),
+                          onPressed: working
+                              ? null
+                              : () {
+                                  if (isText) {
+                                    c.stagedTexts.removeAt(textIndex);
+                                    c.changed();
+                                  } else
+                                    perform(() => c.removeStagedFile(path!));
+                                },
+                          icon: const AppIcon(Icons.close, size: 16),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            if (!isText)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: Ui.space1,
-                  vertical: Ui.space0,
-                ),
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: Ui.text2xs,
-                    height: Ui.leadingCompact,
-                  ),
+                  ],
                 ),
               ),
-          ],
+              if (!isText)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Ui.space1,
+                    vertical: Ui.space0,
+                  ),
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: Ui.text2xs,
+                      height: Ui.leadingCompact,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -59,7 +59,8 @@ class CopiedFileReferenceCard extends StatelessWidget {
       ),
     );
     return Material(
-      color: surfaceColor ?? palette.surfaceMuted,
+      color: surfaceColor ?? palette.surface,
+      elevation: surfaceColor == null ? Ui.elevationRaised : Ui.elevationFlat,
       shape: RoundedRectangleBorder(
         borderRadius: Ui.cardRadius,
         side: BorderSide(color: palette.line, width: Ui.stroke),

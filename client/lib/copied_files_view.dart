@@ -20,7 +20,7 @@ class CopiedFileOffers extends StatelessWidget {
     if (entries.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       key: const ValueKey('copied-file-offers'),
-      height: 80,
+      height: 140,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(
           horizontal: Ui.space2,
@@ -32,13 +32,12 @@ class CopiedFileOffers extends StatelessWidget {
         itemBuilder: (context, index) {
           final offer = entries[index];
           return SizedBox(
-            width: 202,
+            width: 124,
             child: CopiedFileReferenceCard(
               key: ValueKey(
                 'copied-file-${offer['offerId']}-${offer['itemId']}',
               ),
               reference: offer,
-              compact: true,
               onPull: () => onPull(offer, offer['itemId']!),
               onDismiss: () => client.dismiss(offer['id']!),
             ),

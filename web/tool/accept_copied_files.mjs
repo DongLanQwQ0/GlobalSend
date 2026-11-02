@@ -40,6 +40,10 @@ try{
   await until(()=>evaluate('window.__client.connected'),Boolean);
   const receiver=await evaluate('window.__client.session');
   await evaluate("(()=>{const c=window.__client;c.stagedTexts=[{id:'draft',text:'Keep my draft'}];c.appearance.set({mode:'dark'});c.render();})()");
+  // Exercise the actual sending-page DOM handlers with native browser File/DataTransfer objects.
+  const stagedDrag=await evaluate(`(()=>{const c=window.__client;c.addFiles([new File(['staged bytes'],'staged-note.txt',{type:'text/plain'})]);c.render();const result=[];for(const kind of ['text','file']){const node=document.querySelector('[data-drag-staged="'+kind+'"]'),start=kind==='text'?node.querySelector('[data-edit-staged]'):node,transfer=new DataTransfer();const event=new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:transfer});start.dispatchEvent(event);result.push({kind,allowed:!event.defaultPrevented,text:transfer.getData('text/plain'),files:[...transfer.files].map(file=>file.name),payload:kind==='text'?c.internalPayload?.text:c.internalPayload?.file?.name});node.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:transfer}));}c.picked=[];c.render();return result;})()`);
+  assert.deepEqual(stagedDrag,[{kind:'text',allowed:true,text:'Keep my draft',files:[],payload:'Keep my draft'},{kind:'file',allowed:true,text:'',files:['staged-note.txt'],payload:'staged-note.txt'}]);
+  await writeFile(join(run,'staged-drag.json'),JSON.stringify(stagedDrag,null,2));
   const bytes=Buffer.from('A copied file pulled through the ordinary transfer pipeline.','utf8');
   let pulls=0;
   sourceSocket.on('message',raw=>{
@@ -62,6 +66,7 @@ try{
   for(const width of [950,390]){
     await page('Emulation.setDeviceMetricsOverride',{width,height:width===950?650:844,deviceScaleFactor:1,mobile:width<500});await delay(150);
     assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+    const card=await evaluate("(()=>{const r=document.querySelector('[data-copied-reference]').getBoundingClientRect();return {width:r.width,height:r.height};})()");assert.equal(card.width,card.height,'references use square content cards');
     const capture=await page('Page.captureScreenshot',{format:'jpeg',quality:84});await writeFile(join(run,`references-${width}.jpg`),Buffer.from(capture.data,'base64'));
   }
   const selector='[data-action="pull-copied-file"]';

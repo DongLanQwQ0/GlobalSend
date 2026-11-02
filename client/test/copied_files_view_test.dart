@@ -192,7 +192,8 @@ void main() {
       await tester.pump();
       expect(find.text('正在准备'), findsOneWidget);
       final folder = find.byKey(const ValueKey('copied-file-batch-folder'));
-      expect(tester.widget<CopiedFileReferenceCard>(folder).compact, isTrue);
+      expect(tester.widget<CopiedFileReferenceCard>(folder).compact, isFalse);
+      expect(tester.getSize(folder), const Size(124, 124));
       final button = tester.widget<InkWell>(
         find.descendant(of: folder, matching: find.byType(InkWell)).first,
       );

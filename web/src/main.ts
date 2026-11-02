@@ -821,9 +821,11 @@ class GlobalSend {
     if(this.beginSelectedDrag(event,node))return;
     // A native drag of selected glyphs keeps the browser's selected substring.
     if(this.dragOriginOnText || isTextSelectionPoint(drag))return;
-    if((drag.target as Element).closest('button,input,select') && !node.hasAttribute('data-drag-library')){drag.preventDefault();return;}
+    if((drag.target as Element).closest('button,input,select') && !node.hasAttribute('data-drag-library') && !(node.dataset.dragStaged && (drag.target as Element).closest('[data-edit-staged]'))){drag.preventDefault();return;}
     let text:string|undefined,file:File|undefined;
-    if(node.dataset.dragShared)text=this.shared.draft;
+    if(node.dataset.dragStaged==='text')text=this.stagedTexts.find(item=>item.id===node.dataset.stagedId)?.text;
+    else if(node.dataset.dragStaged==='file')file=this.picked.find(item=>this.pickedKey(item)===node.dataset.stagedId);
+    else if(node.dataset.dragShared)text=this.shared.draft;
     else if(node.dataset.dragText)text=this.viewedText()?.event.eventId===node.dataset.dragText?this.viewedText()!.draft:this.localEvent(node.dataset.dragText)?.payload.text || '';
     else if(node.dataset.dragReceipt)text=(this.receiptBatch.get(node.dataset.dragReceipt) || this.receipt)?.text || '';
     else if(node.dataset.dragLibrary)file=this.fileLibrary.fileForDrag(node.dataset.dragLibrary);
@@ -2630,8 +2632,8 @@ class GlobalSend {
     on('[data-view-receipt]','click',(event,node)=>{if((event.target as Element).closest('button,a') || window.getSelection?.()?.isCollapsed===false)return;this.receiptFocusId=node.dataset.viewReceipt!;this.render();});
     on('[data-receipt-menu]','click',(event,node)=>{event.stopPropagation();const rect=node.getBoundingClientRect();this.openCardMenu('receipt',node.dataset.receiptMenu!,rect.right-180,rect.bottom+4);});
     on('[data-drag-all]','dragstart',(event,node)=>this.beginBulkDrag(event,node));
-    on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragstart',(event,node)=>this.beginContentDrag(event,node));
-    on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library]','dragend',()=>{this.endContentDrag();this.render();});
+    on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library],[data-drag-staged]','dragstart',(event,node)=>this.beginContentDrag(event,node));
+    on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library],[data-drag-staged]','dragend',()=>{this.endContentDrag();this.render();});
     on('.content-card[data-drag-text],.content-card[data-drag-file]','contextmenu',(event,node)=>{if(isTextSelectionTarget(event.target))return;event.preventDefault();if(this.heldCardKey===(node.dataset.receiveKey || node.dataset.sentKey) || node.hasAttribute('data-receive-key') && this.receiveSelecting || node.hasAttribute('data-sent-key') && this.sentSelecting)return;const mouse=event as MouseEvent;this.openCardMenu(node.dataset.receiptId?'receipt':node.dataset.dragText?'text':'file',node.dataset.receiptId || node.dataset.dragText || node.dataset.dragFile!,mouse.clientX,mouse.clientY);});
     on('[data-card-menu]','click',(event,node)=>{event.stopPropagation();const card=node.closest<HTMLElement>('[data-drag-text],[data-drag-file]');if(!card)return;const rect=node.getBoundingClientRect();this.openCardMenu(card.dataset.dragText?'text':'file',card.dataset.dragText || card.dataset.dragFile!,rect.right-180,rect.bottom+4);});
     on('[data-card-command]','click',(_event,node)=>{void this.run(()=>this.cardCommand(node.dataset.cardCommand!));});
