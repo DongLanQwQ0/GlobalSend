@@ -122,6 +122,7 @@ class CopiedFilesClient {
     String path, {
     required String transferId,
     required String fileId,
+    int? completedAtMillis,
   }) async {
     final id = referenceId(
       reference['sourceDeviceId'],
@@ -130,14 +131,28 @@ class CopiedFilesClient {
     );
     if (_received[id]?['localPath'] == path &&
         _received[id]?['transferId'] == transferId &&
-        _received[id]?['fileId'] == fileId) {
+        _received[id]?['fileId'] == fileId &&
+        _received[id]?['completedAtMillis'] != null) {
       _waiting.remove(id)?.complete([path]);
+      return;
+    }
+    final previous = _received[id];
+    final sameReceipt =
+        previous?['transferId'] == transferId && previous?['fileId'] == fileId;
+    if (!sameReceipt &&
+        completedAtMillis != null &&
+        completedAtMillis > 0 &&
+        (int.tryParse(previous?['completedAtMillis'] ?? '') ?? 0) >
+            completedAtMillis) {
       return;
     }
     _received[id] = {
       'localPath': path,
       'transferId': transferId,
       'fileId': fileId,
+      'completedAtMillis': sameReceipt && previous?['completedAtMillis'] != null
+          ? previous!['completedAtMillis']!
+          : '${completedAtMillis != null && completedAtMillis > 0 ? completedAtMillis : DateTime.now().millisecondsSinceEpoch}',
     };
     await _persist();
     _waiting.remove(id)?.complete([path]);
@@ -213,34 +228,50 @@ class CopiedFilesClient {
   bool _refreshAgain = false;
   bool get connected => _api != null;
 
-  List<Map<String, String>> get references => [
-    for (final offer in offers)
-      for (final value in offer['items'] as List)
-        if (!_dismissed.contains(
-          'copied:${offer['sourceDeviceId']}:${offer['offerId']}:${value['id']}',
-        ))
-          {
-            'id':
-                'copied:${offer['sourceDeviceId']}:${offer['offerId']}:${value['id']}',
-            'sourceDeviceId': offer['sourceDeviceId'] as String,
-            'sourceName': offer['sourceName'] as String,
-            'offerId': offer['offerId'] as String,
-            'itemId': value['id'] as String,
-            'name': value['name'] as String,
-            'kind': value['kind'] as String,
-            'size': '${value['size'] ?? 0}',
-            ...?_received[referenceId(
-              offer['sourceDeviceId'],
-              offer['offerId'],
-              value['id'],
-            )],
-            'state': _referenceState(
-              offer['sourceDeviceId'],
-              offer['offerId'],
-              value['id'],
-            ),
-          },
-  ];
+  List<Map<String, String>> get references {
+    final values = <Map<String, String>>[
+      for (final offer in offers)
+        for (final value in offer['items'] as List)
+          if (!_dismissed.contains(
+            'copied:${offer['sourceDeviceId']}:${offer['offerId']}:${value['id']}',
+          ))
+            {
+              'id':
+                  'copied:${offer['sourceDeviceId']}:${offer['offerId']}:${value['id']}',
+              'sourceDeviceId': offer['sourceDeviceId'] as String,
+              'sourceName': offer['sourceName'] as String,
+              'offerId': offer['offerId'] as String,
+              'itemId': value['id'] as String,
+              'name': value['name'] as String,
+              'kind': value['kind'] as String,
+              'size': '${value['size'] ?? 0}',
+              ...?_received[referenceId(
+                offer['sourceDeviceId'],
+                offer['offerId'],
+                value['id'],
+              )],
+              'state': _referenceState(
+                offer['sourceDeviceId'],
+                offer['offerId'],
+                value['id'],
+              ),
+            },
+    ];
+    // Arrival order remains stable until bytes are really available. Progress,
+    // polling and reuse of an already completed receipt cannot promote a card.
+    final positions = {
+      for (var i = 0; i < values.length; i++) values[i]['id']: i,
+    };
+    values.sort((a, b) {
+      final completed = (int.tryParse(b['completedAtMillis'] ?? '') ?? 0)
+          .compareTo(int.tryParse(a['completedAtMillis'] ?? '') ?? 0);
+      return completed != 0
+          ? completed
+          : positions[a['id']]!.compareTo(positions[b['id']]!);
+    });
+    return values;
+  }
+
   String _referenceState(String source, String offer, String item) {
     if (_received.containsKey(referenceId(source, offer, item)))
       return 'received';

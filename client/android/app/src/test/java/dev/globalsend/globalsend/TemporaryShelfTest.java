@@ -19,6 +19,20 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34, manifest=Config.NONE)
 public class TemporaryShelfTest {
+    @Test public void stagedTimeSurvivesRestartAndRepeatedAddDoesNotPromote() throws Exception {
+        Context context=RuntimeEnvironment.getApplication();
+        TemporaryShelf shelf=new TemporaryShelf(context,() -> {});
+        java.util.concurrent.ExecutorService io=org.robolectric.util.ReflectionHelpers.getField(shelf,"io");
+        io.submit(() -> {}).get(5,java.util.concurrent.TimeUnit.SECONDS);advance(1);
+        shelf.add(List.of("content://fixture/ordered"),List.of(),Map.of());
+        String id=shelf.items.keySet().iterator().next();long first=shelf.addedAt(id);assertTrue(first>0);
+        advance(10);shelf.add(List.of("content://fixture/ordered"),List.of(),Map.of());assertEquals(first,shelf.addedAt(id));
+        io.submit(() -> {}).get(5,java.util.concurrent.TimeUnit.SECONDS);
+        TemporaryShelf restored=new TemporaryShelf(context,() -> {});
+        java.util.concurrent.ExecutorService restoredIo=org.robolectric.util.ReflectionHelpers.getField(restored,"io");
+        restoredIo.submit(() -> {}).get(5,java.util.concurrent.TimeUnit.SECONDS);advance(1);
+        assertEquals(first,restored.addedAt(id));assertEquals(1,restored.items.size());
+    }
     @Test public void mainPageAndOverlayShareOneVisibleTimeBudget() {
         TemporaryShelf shelf=new TemporaryShelf(RuntimeEnvironment.getApplication(),() -> {});
         shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/shared","shared.jpg",1)));

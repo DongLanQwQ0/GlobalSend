@@ -64,3 +64,29 @@ test('only completed exact references become local draggable content and deletio
  const {document}=parseHTML('<body>'+copiedFilesHtml(client)+'</body>');assert.equal(document.querySelector('[data-drag-file]')?.getAttribute('data-drag-file'),'transfer:root');
  client.reconcile(()=>false);assert.equal(client.references[0].localKey,undefined);await client.pull(ref.id);assert.equal(calls,2);
 });
+
+test('completed copies promote by receipt time, never progress or rediscovery, in the actual card list',async()=>{
+ const multi={...offer,items:[{id:'a',name:'old.pdf',kind:'file' as const},{id:'b',name:'recent folder',kind:'directory' as const},{id:'c',name:'pending.pdf',kind:'file' as const}]};
+ const client=new CopiedFilesReceiver(async<T>()=>({offers:[multi]}) as T,()=>{});
+ await client.refresh();
+ const names=()=>{const {document}=parseHTML('<body>'+copiedFilesHtml(client)+'</body>');return [...document.querySelectorAll('strong')].map(node=>node.textContent);};
+ assert.deepEqual(names(),['old.pdf','recent folder','pending.pdf']);
+ client.receive({...response('sending'),itemIds:['c']});
+ assert.deepEqual(names(),['old.pdf','recent folder','pending.pdf']);
+ client.remember('source',{offerId:'batch',itemId:'b'},'transfer:b',200);
+ client.remember('source',{offerId:'batch',itemId:'a'},'transfer:a',100);
+ assert.deepEqual(names(),['recent folder','old.pdf','pending.pdf']);
+ client.remember('source',{offerId:'batch',itemId:'a'},'transfer:a',900);
+ await client.pull('copied:source:batch:a');await client.refresh();
+ assert.deepEqual(names(),['recent folder','old.pdf','pending.pdf']);
+ assert.equal(client.references.find(ref=>ref.item.id==='a')?.completedAtMillis,100);
+ const restored=new CopiedFilesReceiver(async<T>()=>({offers:[multi]}) as T,()=>{});
+ // Restoring local inventory in reverse discovery order keeps the receipt order.
+ restored.remember('source',{offerId:'batch',itemId:'b'},'transfer:b',200);
+ restored.remember('source',{offerId:'batch',itemId:'a'},'transfer:a',100);
+ await restored.refresh();assert.deepEqual(restored.references.map(ref=>ref.item.id),['b','a','c']);
+ client.reconcile(key=>key!=='transfer:a');
+ client.remember('source',{offerId:'batch',itemId:'a'},'new-transfer:a',300);
+ assert.deepEqual(names(),['old.pdf','recent folder','pending.pdf']);
+ assert.equal(client.references.length,3);
+});

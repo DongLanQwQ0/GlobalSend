@@ -124,7 +124,7 @@ class GlobalSend {
     for(const transfer of [...this.localHistory.scopes.flatMap(scope=>scope.transfers),...this.transfers]){if(!transfer.copiedFile || transfer.targetDeviceId!==this.session?.device.deviceId)continue;
       const root=transfer.files.find(file=>!file.relativePath || isFolderRoot(file));if(!root)continue;
       const members=root.relativePath?folderMembers(root,transfer.files):[root];if(!members.every(file=>file.status==='received' && !!this.localFile(fileKey(transfer.transferId,file.fileId))))continue;
-      this.copiedFiles.remember(transfer.sourceDeviceId,transfer.copiedFile,fileKey(transfer.transferId,root.fileId));
+      this.copiedFiles.remember(transfer.sourceDeviceId,transfer.copiedFile,fileKey(transfer.transferId,root.fileId),Math.max(...members.map(file=>Date.parse(this.receiptTime(fileKey(transfer.transferId,file.fileId),file.receivedAt || transfer.createdAt)) || 0)));
     }
   }
   clipboardSuggestion: ClipboardSuggestionKind | null = null;

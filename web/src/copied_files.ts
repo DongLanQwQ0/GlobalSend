@@ -3,16 +3,16 @@ import type { CopiedFileOffer, CopiedFilePull } from '../../packages/protocol/sr
 type Request = <T>(path:string, body?:unknown, method?:string)=>Promise<T>;
 export interface CopiedReference {
   id:string; offer:CopiedFileOffer; item:CopiedFileOffer['items'][number];
-  state:CopiedFilePull['state']|'received'|''; error:string; localKey?:string;
+  state:CopiedFilePull['state']|'received'|''; error:string; localKey?:string; completedAtMillis:number;
 }
 
 /** Receiver-only references. Bytes and receipts stay in the existing transfer pipeline. */
 export class CopiedFilesReceiver {
   offers:CopiedFileOffer[]=[];
   error='';
-  private received=new Map<string,string>();
-  remember(source:string,context:{offerId:string;itemId:string},key:string){const id=`copied:${source}:${context.offerId}:${context.itemId}`;if(this.received.get(id)===key)return;this.received.set(id,key);this.changed();}
-  reconcile(local:(key:string)=>boolean){for(const [id,key] of this.received)if(!local(key)){this.received.delete(id);for(const [request,pull] of this.pulls)if(id===`copied:${pull.sourceDeviceId}:${pull.offerId}:${pull.itemIds[0]}`)this.pulls.delete(request);}}
+  private received=new Map<string,{key:string;completedAtMillis:number}>();
+  remember(source:string,context:{offerId:string;itemId:string},key:string,completedAtMillis=Date.now()){const id=`copied:${source}:${context.offerId}:${context.itemId}`,previous=this.received.get(id);if(previous?.key===key || previous && previous.completedAtMillis>completedAtMillis)return;this.received.set(id,{key,completedAtMillis});this.changed();}
+  reconcile(local:(key:string)=>boolean){for(const [id,{key}] of this.received)if(!local(key)){this.received.delete(id);for(const [request,pull] of this.pulls)if(id===`copied:${pull.sourceDeviceId}:${pull.offerId}:${pull.itemIds[0]}`)this.pulls.delete(request);}}
   private pulls=new Map<string,CopiedFilePull>();
   private dismissed=new Set<string>();
   private epoch=0;
@@ -26,8 +26,9 @@ export class CopiedFilesReceiver {
   get references():CopiedReference[]{return this.offers.flatMap(offer=>offer.items.map((item):CopiedReference=>{
     const id=`copied:${offer.sourceDeviceId}:${offer.offerId}:${item.id}`;
     const pull=[...this.pulls.values()].filter(value=>value.sourceDeviceId===offer.sourceDeviceId && value.offerId===offer.offerId && value.itemIds.includes(item.id)).at(-1);
-    return {id,offer,item,localKey:this.received.get(id),state:this.received.has(id)?'received':pull?.state==='sent'?'sending':pull?.state || '',error:pull?.error || ''};
-  })).filter(value=>!this.dismissed.has(value.id));}
+    const local=this.received.get(id);
+    return {id,offer,item,localKey:local?.key,completedAtMillis:local?.completedAtMillis || 0,state:local?'received':pull?.state==='sent'?'sending':pull?.state || '',error:pull?.error || ''};
+  })).filter(value=>!this.dismissed.has(value.id)).sort((a,b)=>b.completedAtMillis-a.completedAtMillis);}
   dismiss(id:string){this.dismissed.add(id);this.changed();}
   async refresh():Promise<void>{
     if(this.refreshWork){this.refreshAgain=true;return this.refreshWork;}

@@ -827,17 +827,28 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             row.addView(empty, new LinearLayout.LayoutParams(expandedWidth - dp(43), side));
         }
         List<ReceiveNotifications.Receipt> ordered=new ArrayList<>(),suggested=new ArrayList<>();
+        List<Map<String,String>> completed=new ArrayList<>(),remote=new ArrayList<>();
+        if(shelfVisible)for(Map<String,String> reference:DockCoordinator.copiedFiles()) {
+            if(!reference.getOrDefault("localPath","").isEmpty())completed.add(reference);
+            else remote.add(reference);
+        }
+        completed.sort(java.util.Comparator.comparingLong(ReceiveOverlay::copiedCompletedAt).reversed());
         for(ReceiveNotifications.Receipt receipt:displayed().values()) {
+            // The local copy is still the same reference card, not another shelf
+            // card for the exact same path. Names never establish identity.
+            if(shelfVisible && !receipt.localPath.isEmpty() && completed.stream().anyMatch(reference -> receipt.localPath.equals(reference.get("localPath"))))continue;
             if(shelfVisible && shelf.isSuggested(receipt.id))suggested.add(receipt);
             else ordered.add(receipt);
         }
         suggested.sort(java.util.Comparator.comparingLong((ReceiveNotifications.Receipt item) -> shelf.suggestedAt(item.id)).reversed());
+        if(shelfVisible)ordered.sort(java.util.Comparator.comparingLong((ReceiveNotifications.Receipt item) -> shelf.addedAt(item.id)).reversed());
         Map<String,Object> clipboard=shelfVisible?DockCoordinator.clipboardSuggestion():java.util.Collections.emptyMap();
         long clipboardAt=((Number)clipboard.getOrDefault("suggestedAt",0L)).longValue();
         boolean clipboardPending=!"empty".equals(clipboard.getOrDefault("kind","empty"));
         boolean hasContent=!ordered.isEmpty(),tailAdded=false,clipboardAdded=false;
         ordered.addAll(suggested);
         for (ReceiveNotifications.Receipt receipt : ordered) {
+            if(shelfVisible)appendCompletedCopies(side,completed,shelf.isSuggested(receipt.id)?Long.MIN_VALUE:shelf.addedAt(receipt.id));
             if(shelfVisible && !tailAdded && shelf.isSuggested(receipt.id)) {
                 appendListTail(side,hasContent);tailAdded=true;
             }
@@ -938,9 +949,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             row.addView(card, size);
             cards.add(card);
         }
+        if(shelfVisible)appendCompletedCopies(side,completed,Long.MIN_VALUE);
         if(!tailAdded)appendListTail(side,hasContent);
         if(shelfVisible && !clipboardAdded)appendClipboardSuggestion(side,clipboard);
-        if(shelfVisible)for(Map<String,String> reference:DockCoordinator.copiedFiles())appendCopiedFile(side,reference);
+        for(Map<String,String> reference:remote)appendCopiedFile(side,reference);
         scroll.scrollTo(0, 0);
         if(animateCards) {
             LinearLayout owner=row;
@@ -961,6 +973,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         }
     }
 
+    private static long copiedCompletedAt(Map<String,String> reference) {
+        try {return Long.parseLong(reference.getOrDefault("completedAtMillis","0"));}
+        catch(NumberFormatException legacy){return 0;}
+    }
+    private void appendCompletedCopies(int side,List<Map<String,String>> remaining,long before) {
+        while(!remaining.isEmpty() && copiedCompletedAt(remaining.get(0))>=before)appendCopiedFile(side,remaining.remove(0));
+    }
     static void copiedFilesChanged() {
         ReceiveOverlay overlay=current.get();
         if(overlay==null || overlay.root==null || !overlay.shelfVisible)return;

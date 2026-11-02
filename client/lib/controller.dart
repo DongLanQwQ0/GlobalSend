@@ -340,6 +340,11 @@ class SendController extends ChangeNotifier {
         displayed.localPath,
         transferId: displayed.transferId,
         fileId: displayed.fileId,
+        completedAtMillis: [
+          displayed.receivedAtMillis,
+          if (displayed is FolderCardEntry)
+            ...displayed.members.map((entry) => entry.receivedAtMillis),
+        ].reduce(max),
       );
     }
   }

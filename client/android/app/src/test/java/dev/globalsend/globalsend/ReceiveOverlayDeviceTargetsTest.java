@@ -139,6 +139,58 @@ public class ReceiveOverlayDeviceTargetsTest {
         for(int i=0;i<8;i++)devices.add(Map.of("deviceId","id-"+i,"name",i<2?"同名设备":"设备 "+i,"platform",i%2==0?"windows":"android"));
         devices.add(devices.get(0));coordinator.updateSendTargets("center",devices);
     }
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    @Config(shadows={AndroidDragTest.NativeDragView.class,AndroidDragTest.NativeDragGroup.class})
+    public void completedCopiedFileMovesAheadOfStagedContentOnlyAtItsReceiptTime() throws Exception {
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        shelf.add(List.of(),List.of("regular"),Map.of());
+        ReceiveNotifications.Receipt regular=shelf.items.values().stream().filter(item -> "regular".equals(item.text)).findFirst().get();
+        Map<String,Long> addedAt=(Map<String,Long>)field(shelf,"addedAt");addedAt.put(regular.id,200L);
+        shelf.suggest(List.of(new RecentMediaSuggestions.Media("content://fixture/suggested","suggested.jpg",1)));
+        ReflectionHelpers.setField(overlay,"shelfVisible",true);
+        Map<String,String> original=Map.of("id","copied:device:batch:folder","sourceDeviceId","device","sourceName","DongLan",
+            "offerId","batch","itemId","folder","name","Course files","kind","directory","state","");
+        coordinator.updateCopiedFiles(List.of(original));draw();
+        LinearLayout row=(LinearLayout)field(overlay,"row");
+        assertEquals(regular,row.getChildAt(0).getTag());
+        Map<String,String> ready=new java.util.HashMap<>(original);
+        java.io.File localRoot=new java.io.File(activity.getFilesDir(),"order114-root");
+        new java.io.File(localRoot,"empty").mkdirs();
+        java.nio.file.Files.write(new java.io.File(localRoot,"child.txt").toPath(),"local folder bytes".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        ready.put("state","received");ready.put("localPath",localRoot.getPath());ready.put("completedAtMillis","300");
+        coordinator.updateCopiedFiles(List.of(ready));draw();
+        assertEquals("copied-file-reference",row.getChildAt(0).getTag());
+        assertEquals(regular,row.getChildAt(1).getTag());
+        int blank=-1,suggestion=-1,copies=0;
+        for(int i=0;i<row.getChildCount();i++) {
+            Object tag=row.getChildAt(i).getTag();
+            if("open-app-space".equals(tag))blank=i;
+            if(tag instanceof ReceiveNotifications.Receipt && shelf.isSuggested(((ReceiveNotifications.Receipt)tag).id))suggestion=i;
+            if("copied-file-reference".equals(tag))copies++;
+        }
+        assertEquals(1,copies);assertTrue(blank>1);assertEquals(blank+1,suggestion);
+        capture("copied-completed-order114");
+        // A newer deliberate shelf operation can now precede that finished copy.
+        addedAt.put(regular.id,400L);
+        coordinator.updateCopiedFiles(List.of(new java.util.HashMap<>(ready)));ReflectionHelpers.callInstanceMethod(overlay,"render");draw();
+        assertEquals(regular,row.getChildAt(0).getTag());
+        assertEquals("copied-file-reference",row.getChildAt(1).getTag());
+        ready.put("sourceName","reconnected");coordinator.updateCopiedFiles(List.of(ready));draw();
+        assertEquals(regular,row.getChildAt(0).getTag());
+        // If that exact local file was also staged, do not show a duplicate card.
+        shelf.add(List.of(ready.get("localPath")),List.of(),Map.of());draw();
+        copies=0;for(int i=0;i<row.getChildCount();i++)if("copied-file-reference".equals(row.getChildAt(i).getTag()))copies++;
+        assertEquals(1,copies);
+        assertFalse(java.util.stream.IntStream.range(0,row.getChildCount()).mapToObj(row::getChildAt).anyMatch(view -> view.getTag() instanceof ReceiveNotifications.Receipt && ready.get("localPath").equals(((ReceiveNotifications.Receipt)view.getTag()).localPath)));
+        // The actual file branch must retain the ready-copy native drag path.
+        ready.put("kind","file");ready.put("name","child.txt");ready.put("localPath",new java.io.File(localRoot,"child.txt").getPath());
+        coordinator.updateCopiedFiles(List.of(ready));draw();
+        assertTrue(row.findViewWithTag("copied-file-reference").performLongClick());
+        DockCoordinator.LocalDrag local=(DockCoordinator.LocalDrag)AndroidDragTest.NativeDragView.states.get(0);
+        assertEquals(List.of(ready.get("localPath")),local.paths);assertNull(local.remoteReference);assertNull(copiedRequest);
+        assertTrue(new java.io.File(localRoot,"empty").isDirectory());
+        drag(DragEvent.ACTION_DRAG_ENDED,0,0,false);
+    }
     private boolean incoming(int action,ClipData clip,float x,float y) {
         DragEvent event=ReflectionHelpers.callConstructor(DragEvent.class);
         ReflectionHelpers.setField(event,"mAction",action);

@@ -22,6 +22,7 @@ final class TemporaryShelf {
     private final Context context;
     private static final long SUGGESTION_DURATION_MS=30_000;
     final LinkedHashMap<String, ReceiveNotifications.Receipt> items = new LinkedHashMap<>();
+    private final Map<String,Long> addedAt = new LinkedHashMap<>();
     private final Map<String,Long> suggested = new LinkedHashMap<>();
     private final Map<String,Long> suggestionRemaining = new LinkedHashMap<>();
     private final java.util.Set<String> visibleSuggestions = new java.util.HashSet<>();
@@ -44,6 +45,7 @@ final class TemporaryShelf {
         io.execute(() -> {
             List<ReceiveNotifications.Receipt> restored = new ArrayList<>();
             Map<String,Long> restoredSuggested=new LinkedHashMap<>();
+            Map<String,Long> restoredAddedAt=new LinkedHashMap<>();
             Map<String,Long> restoredRemaining=new LinkedHashMap<>();
             try {
                 if (file.isFile()) {
@@ -61,6 +63,7 @@ final class TemporaryShelf {
                         if(record.optBoolean("suggested") && remaining<=0)continue;
                         restored.add(new ReceiveNotifications.Receipt(record.getString("id"), "1", "暂存",
                             record.has("text") ? record.getString("text") : null, record.optString("name"), path, 0));
+                        restoredAddedAt.put(record.getString("id"),record.optLong("addedAt",0));
                         if(record.optBoolean("suggested")) {
                             restoredSuggested.put(record.getString("id"),offeredAt);
                             restoredRemaining.put(record.getString("id"),remaining);
@@ -78,6 +81,7 @@ final class TemporaryShelf {
                     if (!receipt.localPath.isEmpty() && !receipt.localPath.startsWith("content://") && !new File(receipt.localPath).exists())continue;
                     if (!contains(receipt.localPath, receipt.text)) {
                         items.put(receipt.id, receipt);
+                        addedAt.put(receipt.id,restoredAddedAt.getOrDefault(receipt.id,0L));
                         if(restoredSuggested.containsKey(receipt.id)) {
                             long offeredAt=restoredSuggested.get(receipt.id);
                             suggested.put(receipt.id,offeredAt);
@@ -121,7 +125,10 @@ final class TemporaryShelf {
     void add(List<String> paths, List<String> texts, Map<String, String> names) {
         cancelRemoval();
         for(ReceiveNotifications.Receipt item:items.values())
-            if(paths.contains(item.localPath))forgetSuggestion(item.id);
+            if(paths.contains(item.localPath)) {
+                if(isSuggested(item.id))addedAt.put(item.id,System.currentTimeMillis());
+                forgetSuggestion(item.id);
+            }
         List<ReceiveNotifications.Receipt> added = new ArrayList<>();
         java.util.Set<String> batchPaths = new java.util.HashSet<>(), batchTexts = new java.util.HashSet<>();
         for (String path : paths) if (batchPaths.add(path) && !contains(path, null)) {
@@ -131,12 +138,14 @@ final class TemporaryShelf {
         for (String text : texts) if (batchTexts.add(text) && !contains("", text))
             added.add(new ReceiveNotifications.Receipt("shelf:" + UUID.randomUUID(), "1", "暂存", text, "", "", 0));
         LinkedHashMap<String, ReceiveNotifications.Receipt> next = new LinkedHashMap<>();
-        for (ReceiveNotifications.Receipt item : added) next.put(item.id, item);
+        long now=System.currentTimeMillis();
+        for (ReceiveNotifications.Receipt item : added) {next.put(item.id, item);addedAt.put(item.id,now);}
         next.putAll(items); items.clear(); items.putAll(next);
         save(); changed.run();
     }
 
     boolean isSuggested(String id) {return suggested.containsKey(id);}
+    long addedAt(String id) {return addedAt.getOrDefault(id,0L);}
     long suggestedAt(String id) {return suggested.getOrDefault(id,0L);}
     List<String> suggestedPaths() {
         List<String> paths=new ArrayList<>();
@@ -273,6 +282,7 @@ final class TemporaryShelf {
             JSONObject record = new JSONObject();
             try {
                 record.put("id", item.id); record.put("path", item.localPath); record.put("name", item.fileName);
+                record.put("addedAt",addedAt(item.id));
                 if(suggested.containsKey(item.id)) {
                     record.put("suggested",true);record.put("suggestedAt",suggested.get(item.id));
                     record.put("suggestionRemainingMs",suggestionRemaining.get(item.id));
