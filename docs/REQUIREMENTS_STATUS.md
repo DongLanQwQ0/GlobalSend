@@ -2,7 +2,7 @@
 
 本表按用户最终要求合并，替代早期规划中已撤回的交互。源码已实现、自动检查通过、系统真机已验收是不同状态；具体安装及部署版本分别以 `artifacts/releases/latest-local.json` 和 `artifacts/deploy/current-workspace-deployment.json` 为准。
 
-当前 Windows 为 1.0.83+108，已覆盖更新并启动，修正真实触控消息中的原生拖放接管，见 [Windows触屏拖放](WINDOWS_TOUCH_DRAG.md)。Android仍为已安装的1.0.82+106；网页版106与IPA107继续有效，未因仅Windows代码变化重建其它平台。IPA由用户手动签名安装。交付与证据见 `artifacts/reports/completion106.json` 和 `artifacts/reports/completion108.json`，不能将组件检查当成Windows实体触屏验收。
+当前 Windows 为 1.0.84+109，已覆盖更新并启动，继续修正等待、出现即消失及拖影闪动；只有匹配的原生开始通知才退休窗内拖影，系统真实按下事件交付后才进入拖放，见 [Windows触屏拖放](WINDOWS_TOUCH_DRAG.md)。Android仍为已安装的1.0.82+106；网页版106与IPA107继续有效，未因仅Windows代码变化重建其它平台。IPA由用户手动签名安装。交付与证据见 `artifacts/reports/completion106.json` 和 `artifacts/reports/completion108.json`，不能将组件检查当成Windows实体触屏验收。
 
 Android两项专项已在真实V2527A上通过：悬浮坞合成链接点开Edge；实际由GlobalSend导出的Drag-cache媒体行不进入发送页或坞建议，非本应用图片仍会建议，删除原图后建议自动消失。本次测试分组、收件、草稿、暂存及媒体文件均已清理，应用拖放缓存也已按10分钟生命周期移除，见 `artifacts/reports/android106-dock-physical-20261102.md`。没有更改网络、重启或覆盖Chrona。
 
