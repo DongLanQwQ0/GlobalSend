@@ -20,10 +20,10 @@ export function validateCleanup(value:CleanupPreferences):CleanupPreferences {
   if(!['any','greater','smaller','atMost'].includes(value.sizeRule) || !value.categories.every(category=>FILE_CATEGORIES.includes(category)))throw new Error('清理规则无效');
   return {retentionHours:value.retentionHours,categories:[...new Set(value.categories)],sizeRule:value.sizeRule,sizeMiB:value.sizeMiB};
 }
-export function cleanupMatches(file:{name:string;size:number},rules:CleanupPreferences) {
-  return rules.categories.includes(fileCategory(file.name)) && (rules.sizeRule==='any' || (rules.sizeRule==='greater'?file.size>rules.sizeMiB*1048576:rules.sizeRule==='atMost'?file.size<=rules.sizeMiB*1048576:file.size<rules.sizeMiB*1048576));
+export function cleanupMatches(file:{name:string;size:number;entryKind?:'file'|'directory'},rules:CleanupPreferences) {
+  return file.entryKind!=='directory' && rules.categories.includes(fileCategory(file.name)) && (rules.sizeRule==='any' || (rules.sizeRule==='greater'?file.size>rules.sizeMiB*1048576:rules.sizeRule==='atMost'?file.size<=rules.sizeMiB*1048576:file.size<rules.sizeMiB*1048576));
 }
-export function cleanupDue(file:{name:string;size:number;receivedAt:number},rules:CleanupPreferences,now=Date.now()) {
+export function cleanupDue(file:{name:string;size:number;receivedAt:number;entryKind?:'file'|'directory'},rules:CleanupPreferences,now=Date.now()) {
   return file.receivedAt+rules.retentionHours*3600000<=now && cleanupMatches(file,rules);
 }
 

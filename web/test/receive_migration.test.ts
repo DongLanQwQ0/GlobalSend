@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 import {DiskDirectory,diskWorkerFactory,indexedDBFixture} from './helpers/disk_opfs.ts';
 import {defaultCleanup,cleanupMatches} from '../src/cleanup.ts';
+import {folderLibraryEntries} from '../src/library.ts';
 
 const require=createRequire(import.meta.url),{build}=require('esbuild');
 const code=(await build({entryPoints:[fileURLToPath(new URL('../src/rtc_storage.worker.ts',import.meta.url))],bundle:true,format:'iife',write:false,platform:'browser',logLevel:'silent'})).outputFiles[0].text;
@@ -169,4 +170,34 @@ test('reuse never trusts a name, stale digest, deleted source, uncommitted prefi
   assert.equal((await worker.call('reuse',data)).file,undefined,'do not discard folder layout by reusing unrelated paths');
   await worker.call('open',{...data,key:'partial'});await worker.call('write',{key:'partial',offset:0,bytes:new TextEncoder().encode('good').buffer});await worker.call('finish',{key:'partial'});
   assert.equal((await worker.call('reuse',data)).file,undefined,'unconfirmed full-length prefixes are not saved files');
+});
+
+
+test('real worker cleans image members without treating suffix-named directories as files',async()=>{
+  const f=await fixture(),receiver=f.worker('directory-boundary');await receiver.ready;
+  const root={key:'tree:root',name:'album.png',relativePath:'album.png',entryKind:'directory',transferId:'tree',size:0};
+  await receiver.call('directory',root);
+  await receiver.call('directory',{...root,key:'tree:sub',name:'notes.txt',relativePath:'album.png/notes.txt'});
+  await save(receiver,'tree:image','photo.png','image',{transferId:'tree',relativePath:'album.png/notes.txt/photo.png'});
+  await save(receiver,'tree:text','keep.txt','keep',{transferId:'tree',relativePath:'album.png/notes.txt/keep.txt'});
+  const scope=join(f.root.path,'globalsend-received-v1','directory-boundary');
+  for(const key of ['tree:root','tree:sub','tree:image','tree:text']){
+    const path=join(scope,encodeURIComponent(key)+'.json'),meta=JSON.parse(await readFile(path,'utf8'));
+    meta.receivedAt=Date.now()-50*3600000;await writeFile(path,JSON.stringify(meta));
+  }
+  assert.equal(cleanupMatches({...root},defaultCleanup()),false);
+  assert.equal(cleanupMatches({...root,name:'notes.txt'},{...defaultCleanup(),categories:['text'],sizeRule:'any'}),false);
+  await receiver.call('cleanup');
+  const library=f.worker();await library.ready;
+  const entries=(await library.call('library-list')).entries;
+  assert.deepEqual(Array.from(entries,(entry:any)=>entry.name).sort(),['album.png','keep.txt','notes.txt']);
+  assert.deepEqual(Array.from(folderLibraryEntries(entries),(entry:any)=>entry.name),['album.png']);
+  const keptRoot=entries.find((entry:any)=>entry.name==='album.png');
+  assert.equal((await library.call('library-get',{id:keptRoot.id})).entry.entryKind,'directory');
+  assert.ok(existsSync(join(scope,encodeURIComponent('tree:root')+'.json')));
+  const received=join(f.root.path,'globalsend-received-v1','received','album.png','notes.txt');
+  assert.equal(existsSync(join(received,'photo.png')),false);
+  assert.equal(await readFile(join(received,'keep.txt'),'utf8'),'keep');
+  await receiver.call('shutdown');await library.call('shutdown');
+  const {rm}=await import('node:fs/promises');await rm(f.path,{recursive:true});
 });

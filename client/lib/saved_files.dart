@@ -133,7 +133,8 @@ class SavedFileCleanupFilter {
   final SavedFileSizeRule sizeRule;
   final double sizeMiB;
   bool matches(SavedFile file) {
-    if (!categories.contains(savedFileCategory(file.name))) return false;
+    if (file.directory || !categories.contains(savedFileCategory(file.name)))
+      return false;
     final bytes = sizeMiB * 1024 * 1024;
     return switch (sizeRule) {
       SavedFileSizeRule.any => true,
@@ -1215,7 +1216,7 @@ class SavedFilesStore {
             continue;
           }
           // Cleanup filters apply to each file, not to an enclosing directory.
-          // Empty directories are removed only after eligible children expire.
+          // Folder roots keep their metadata so surviving children stay grouped.
           if (owned && !await _delete(item, recursive: false)) continue;
           _items.remove(item.id);
           removed.add(item);

@@ -145,4 +145,73 @@ void main() {
       isTrue,
     );
   });
+  test('store cleanup removes expired image members but keeps suffix-named folder roots and their contents', () async {
+    final parent = await Directory('../artifacts/tmp/cleanup-directory112')
+        .create(recursive: true);
+    final work = await parent.createTemp('store-');
+    addTearDown(() => work.delete(recursive: true));
+    final root = await Directory(
+      '${work.path}/GlobalSend/profile/device/root/album.png',
+    ).create(recursive: true);
+    final sub = await Directory('${root.path}/notes.txt').create();
+    final photo = await File('${sub.path}/photo.png').writeAsString('image');
+    final keep = await File('${sub.path}/keep.txt').writeAsString('keep');
+    final stamp = DateTime.now()
+        .subtract(const Duration(hours: 50))
+        .millisecondsSinceEpoch;
+    SavedFile entry(
+      String id,
+      String path,
+      String name, {
+      bool directory = false,
+      int size = 0,
+    }) => SavedFile(
+      id: id,
+      profileKey: 'profile',
+      deviceId: 'device',
+      groupId: 'g',
+      transferId: 'tree',
+      fileId: 'root',
+      path: path,
+      name: name,
+      size: size,
+      receivedAtMillis: stamp,
+      directory: directory,
+      relativePath: path
+          .substring(root.parent.path.length + 1)
+          .replaceAll('\\', '/'),
+    );
+    final records = [
+      entry('root', root.path, 'album.png', directory: true),
+      entry('sub', sub.path, 'notes.txt', directory: true),
+      entry('image', photo.path, 'photo.png', size: 5),
+      entry('text', keep.path, 'keep.txt', size: 4),
+    ];
+    final index = File('${work.path}/index.json');
+    await index.writeAsString(
+      jsonEncode({'files': records.map((file) => file.toJson()).toList()}),
+    );
+    final store = SavedFilesStore(indexFile: index, documentsDirectory: work);
+    await store.load();
+    expect(store.cleanupFilter.matches(records.first), isFalse);
+    expect(
+      SavedFileCleanupFilter(
+        categories: {SavedFileCategory.text},
+        sizeRule: SavedFileSizeRule.any,
+      ).matches(records[1]),
+      isFalse,
+    );
+    expect(await store.ownsExisting(records.first), isTrue);
+    expect((await store.prune(DateTime.now())).map((file) => file.id), [
+      'image',
+    ]);
+    expect(await photo.exists(), isFalse);
+    expect(await keep.readAsString(), 'keep');
+    expect(await root.exists(), isTrue);
+    expect(await sub.exists(), isTrue);
+    final fresh = SavedFilesStore(indexFile: index, documentsDirectory: work);
+    await fresh.load();
+    expect(fresh.items.map((file) => file.id).toSet(), {'root', 'sub', 'text'});
+    expect(folderLibraryCards(fresh.items).map((file) => file.id), ['root']);
+  });
 }
