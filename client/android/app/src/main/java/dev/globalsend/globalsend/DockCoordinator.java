@@ -116,6 +116,7 @@ final class DockCoordinator {
         this.context = context.getApplicationContext(); current = new WeakReference<>(this);
         if (context instanceof Activity) attach((Activity) context);
         this.channel = channel;
+        DragDiagnostics.initialize(this.context);
         clipboardLeaseListener=this::releaseReplacedClipboard;
         this.context.getSystemService(ClipboardManager.class).addPrimaryClipChangedListener(clipboardLeaseListener);
         RemoteReferenceFiles.listen(request -> main.post(() -> {
@@ -888,6 +889,7 @@ final class DockCoordinator {
         for(String text:texts){if(text==null||text.length()>100000)throw new IllegalArgumentException("Invalid drag text");items.add(new ClipData.Item(text));types.add("text/plain");}
         if(items.isEmpty())throw new IllegalArgumentException("没有可拖动的内容");
         ClipData clip=new ClipData(label,types.toArray(new String[0]),items.get(0));for(int i=1;i<items.size();i++)clip.addItem(items.get(i));
+        traceDrag("clip prepared items="+items.size()+" mime="+types+" flags="+flags+" session="+session.id);
         PersistableBundle metadata = new PersistableBundle();
         metadata.putString(LOCAL_DRAG_SESSION, session.id);
         clip.getDescription().setExtras(metadata);
@@ -921,6 +923,7 @@ final class DockCoordinator {
     }
 
     static void traceDrag(String event) {
+        DragDiagnostics.record(event);
         if(android.util.Log.isLoggable("GlobalSendDrag",android.util.Log.DEBUG))android.util.Log.d("GlobalSendDrag",event);
     }
 

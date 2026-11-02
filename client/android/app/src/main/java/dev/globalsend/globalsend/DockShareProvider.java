@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class DockShareProvider extends ContentProvider {
     private int previewUid=-1;
     private static void trace(String event) {
+        DragDiagnostics.record("provider "+event);
         if(android.util.Log.isLoggable("GlobalSendDrag",android.util.Log.DEBUG))
             android.util.Log.d("GlobalSendDrag",event+" caller="+android.os.Binder.getCallingUid());
     }
@@ -102,6 +103,7 @@ public final class DockShareProvider extends ContentProvider {
         return entry;
     }
     @Override public boolean onCreate() {
+        DragDiagnostics.initialize(getContext());
         LegacyDragFiles.restore(getContext());
         try {previewUid=getContext().getPackageManager().getApplicationInfo("com.vivo.globaldragdrop",0).uid;}
         catch(android.content.pm.PackageManager.NameNotFoundException absent) { }
@@ -113,10 +115,11 @@ public final class DockShareProvider extends ContentProvider {
         return type == null ? "application/octet-stream" : type;
     }
     @Override public String getType(Uri uri) {
-        try { String type=lookup(uri).mimeType;trace("type="+type);return type; }
-        catch (FileNotFoundException error) { return null; }
+        try { String type=lookup(uri).mimeType;trace("type="+type+" uri="+uri);return type; }
+        catch (FileNotFoundException error) {trace("type-unavailable uri="+uri+" cause="+error.getMessage());return null;}
     }
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
+        trace("open-request uri="+uri+" mode="+mode);
         if (!mode.equals("r")) throw new FileNotFoundException("Read-only drag capability");
         Entry entry=lookup(uri);int caller=android.os.Binder.getCallingUid();
         ParcelFileDescriptor descriptor;
@@ -139,7 +142,7 @@ public final class DockShareProvider extends ContentProvider {
             if(descriptor==null)throw new FileNotFoundException("无法读取共享文件");
         }
         markAccess(entry,caller);
-        trace("open-readable");return descriptor;
+        trace("open-readable uri="+uri);return descriptor;
     }
     private void markAccess(Entry entry,int caller) {
         // Vivo opens the item while drawing its drag preview, before a drop.
@@ -148,6 +151,7 @@ public final class DockShareProvider extends ContentProvider {
             entry.externalAccess=android.os.SystemClock.uptimeMillis();
     }
     @Override public android.content.res.AssetFileDescriptor openAssetFile(Uri uri,String mode) throws FileNotFoundException {
+        trace("open-asset-request uri="+uri+" mode="+mode);
         if(!"r".equals(mode))throw new FileNotFoundException("Read-only drag capability");
         Entry entry=lookup(uri);if(entry.source==null)return super.openAssetFile(uri,mode);
         int caller=android.os.Binder.getCallingUid();long identity=android.os.Binder.clearCallingIdentity();
@@ -155,16 +159,17 @@ public final class DockShareProvider extends ContentProvider {
         try {result=getContext().getContentResolver().openAssetFileDescriptor(entry.source,mode);}
         finally {android.os.Binder.restoreCallingIdentity(identity);}
         if(result==null)throw new FileNotFoundException("无法读取共享文件");
-        markAccess(entry,caller);trace("open-asset-readable");return result;
+        markAccess(entry,caller);trace("open-asset-readable uri="+uri);return result;
     }
     @Override public android.content.res.AssetFileDescriptor openTypedAssetFile(Uri uri,String type,android.os.Bundle options) throws FileNotFoundException {
+        trace("open-typed-request uri="+uri+" type="+type);
         Entry entry=lookup(uri);if(entry.source==null)return super.openTypedAssetFile(uri,type,options);
         int caller=android.os.Binder.getCallingUid();long identity=android.os.Binder.clearCallingIdentity();
         android.content.res.AssetFileDescriptor result;
         try {result=getContext().getContentResolver().openTypedAssetFileDescriptor(entry.source,type,options);}
         finally {android.os.Binder.restoreCallingIdentity(identity);}
         if(result==null)throw new FileNotFoundException("无法读取共享文件");
-        markAccess(entry,caller);trace("open-typed-readable");return result;
+        markAccess(entry,caller);trace("open-typed-readable uri="+uri);return result;
     }
     @Override public String[] getStreamTypes(Uri uri,String filter) {
         try {
@@ -176,7 +181,7 @@ public final class DockShareProvider extends ContentProvider {
         } catch(FileNotFoundException missing){return null;}
     }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] arguments, String order) {
-        trace("query columns="+(projection==null?"default":java.util.Arrays.toString(projection)));
+        trace("query columns="+(projection==null?"default":java.util.Arrays.toString(projection))+" uri="+uri);
         try {
             Entry e = lookup(uri);int caller=android.os.Binder.getCallingUid();
             String[] columns = projection == null ? new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE,"_data"} : projection;
@@ -198,13 +203,13 @@ public final class DockShareProvider extends ContentProvider {
                     } finally {android.os.Binder.restoreCallingIdentity(identity);}
                     // A legacy reader consumes a path, not our descriptor.
                     // Together with native drop acceptance this is its receipt.
-                    markAccess(e,caller);trace("legacy-path-supplied");
+                    markAccess(e,caller);trace("legacy-path-supplied packages="+java.util.Arrays.toString(packages)+" path="+path);
                 }
             }
             MatrixCursor cursor = new MatrixCursor(columns); Object[] values = new Object[columns.length];
             for (int i = 0; i < columns.length; i++) values[i] = columns[i].equals(OpenableColumns.DISPLAY_NAME) ? e.name : columns[i].equals(OpenableColumns.SIZE) ? (e.file!=null?Long.valueOf(e.file.length()):e.size) : columns[i].equals("_data")?path:null;
             cursor.addRow(values); return cursor;
-        } catch (java.io.IOException | RuntimeException e) {trace("legacy-path-unavailable="+e.getClass().getSimpleName());return null;}
+        } catch (java.io.IOException | RuntimeException e) {trace("legacy-path-unavailable="+e.getClass().getSimpleName()+": "+e.getMessage());return null;}
     }
     @Override public Uri insert(Uri uri, ContentValues values) { throw new UnsupportedOperationException(); }
     @Override public int update(Uri uri, ContentValues values, String selection, String[] arguments) { throw new UnsupportedOperationException(); }

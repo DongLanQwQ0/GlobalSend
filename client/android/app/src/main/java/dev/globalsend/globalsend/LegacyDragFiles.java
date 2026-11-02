@@ -32,6 +32,7 @@ final class LegacyDragFiles {
         Export(Uri uri,Uri readUri,String path){this(uri,readUri,path,true);}
         Export(Uri uri,Uri readUri,String path,boolean owned){this.uri=uri;this.readUri=readUri;this.path=path;this.owned=owned;}
         void grant(Context context,String[] packages) {
+            DragDiagnostics.record("legacy grant uri="+uri+" readUri="+readUri+" packages="+java.util.Arrays.toString(packages));
             if(packages!=null)for(String name:packages) {
                 context.grantUriPermission(name,uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 // FUSE checks the typed media/file URI, not the Downloads URI
@@ -63,6 +64,7 @@ final class LegacyDragFiles {
         values.put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS+"/GlobalSend/Drag-cache");
         values.put(MediaStore.MediaColumns.IS_PENDING,1);
         Uri uri=context.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);
+        DragDiagnostics.record("legacy publish inserted="+uri+" mime="+type);
         if(uri==null)throw new IOException("Cannot allocate drag export");
         long expires=System.currentTimeMillis()+LIFETIME_MS;
         boolean published=false;
@@ -79,6 +81,7 @@ final class LegacyDragFiles {
             }
             String path;int mediaType;
             try(Cursor cursor=context.getContentResolver().query(fileAccessUri(uri,0),new String[]{MediaStore.MediaColumns.DATA,MediaStore.Files.FileColumns.MEDIA_TYPE},null,null,null)) {
+                DragDiagnostics.record("legacy pending row query rows="+(cursor==null?-1:cursor.getCount()));
                 if(cursor==null || !cursor.moveToFirst() || cursor.isNull(0))throw new IOException("No exported file path");
                 path=cursor.getString(0);mediaType=cursor.getInt(1);
             }

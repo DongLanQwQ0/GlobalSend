@@ -539,6 +539,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     backgroundMove=sizingEdges==0 && !collapsed && geometry==null && !hitsInteraction(surface,event);
                     backgroundMoved=false;
                     if(backgroundMove || sizingEdges!=0) {downX=event.getRawX();downY=event.getRawY();startX=layout.x;startY=layout.y;startWidth=layout.width;startHeight=layout.height;}
+                    DragDiagnostics.record("overlay touch down x="+event.getX()+" y="+event.getY()+" resize="+sizingEdges+" move="+backgroundMove);
                 }
                 if(contentGestures!=null) {
                     if(isContentArea(event))contentGestures.onTouchEvent(event);
@@ -1094,12 +1095,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if(shelfVisible || hasContent) {
             View openSpace=new View(context);openSpace.setTag("open-app-space");
             openSpace.setContentDescription("双击打开 GlobalSend");
-            // With no staged content the initial viewport stays completely blank;
-            // suggestions are reached by swiping, never replacing the app-opening area.
-            // Include the viewport's scrollable padding: clipToPadding=false
-            // must not expose a 4dp slice of the next suggested card.
-            int width=shelfVisible && !hasContent?Math.max(side,expandedWidth-dp(39)):side;
-            row.addView(openSpace,new LinearLayout.LayoutParams(width,side));
+            // One square follows staged content/clear, immediately followed by
+            // suggestions. It never expands to push suggestions offscreen.
+            row.addView(openSpace,new LinearLayout.LayoutParams(side,side));
         }
     }
 
@@ -1235,6 +1233,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private boolean export(View source, List<ReceiveNotifications.Receipt> selection) {
+        DragDiagnostics.record("overlay export selected="+selection.size()+" shelf="+shelfVisible);
         List<String> paths = new ArrayList<>(), texts = new ArrayList<>();
         List<ReceiveNotifications.Receipt> staged = new ArrayList<>();
         for (ReceiveNotifications.Receipt item : selection) {
@@ -1610,13 +1609,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         expanded.setLayoutParams(new FrameLayout.LayoutParams(expandedWidth,expandedHeight,
             Gravity.TOP | (edgeRight?Gravity.LEFT:Gravity.RIGHT)));
         int side=Math.max(1,expandedHeight-dp(8));
-        boolean hasContent=displayed().values().stream().anyMatch(item -> !shelfVisible || !shelf.isSuggested(item.id));
         for(int i=0;i<row.getChildCount();i++) {
             View child=row.getChildAt(i);
             LinearLayout.LayoutParams size=(LinearLayout.LayoutParams)child.getLayoutParams();
-            int width="empty-receive".equals(child.getTag())?expandedWidth-dp(43):
-                "open-app-space".equals(child.getTag()) && shelfVisible && !hasContent?
-                    Math.max(side,expandedWidth-dp(39)):side;
+            int width="empty-receive".equals(child.getTag())?expandedWidth-dp(43):side;
             if(size.width!=width || size.height!=side) {
                 size.width=width;size.height=side;child.setLayoutParams(size);
             }

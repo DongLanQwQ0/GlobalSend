@@ -429,6 +429,7 @@ public class ReceiveOverlayDeviceTargetsTest {
         assertEquals("清空当前列表",row.getChildAt(1).getContentDescription());
         View blank=row.getChildAt(2);assertEquals("open-app-space",blank.getTag());
         assertNull(blank.getBackground());assertEquals(blank.getHeight(),blank.getWidth());
+        assertEquals("suggestions immediately follow the single blank square",blank.getRight(),row.getChildAt(3).getLeft());
         for(int i=3;i<5;i++)assertTrue(shelf.isSuggested(((ReceiveNotifications.Receipt)row.getChildAt(i).getTag()).id));
         waitForImage(row.getChildAt(3));
         ((HorizontalScrollView)field(overlay,"scroll")).scrollTo(row.getWidth(),0);
@@ -438,15 +439,16 @@ public class ReceiveOverlayDeviceTargetsTest {
         assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
     }
     @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
-    public void emptyShelfKeepsInitialViewportBlankAndCanSwipeToMedia() throws Exception {
+    public void emptyShelfKeepsOneBlankSquareAndSuggestionsAreImmediatelyVisible() throws Exception {
         TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");shelf.clear();
         shelf.suggest(List.of(new RecentMediaSuggestions.Media(syntheticPicture(),"new.jpg",1)));
         ((View)field(overlay,"shelfTab")).performClick();draw();
         LinearLayout row=(LinearLayout)field(overlay,"row");assertEquals(2,row.getChildCount());
         HorizontalScrollView viewport=(HorizontalScrollView)field(overlay,"scroll");
         View blank=row.getChildAt(0),media=row.getChildAt(1);
-        assertEquals("open-app-space",blank.getTag());assertTrue(blank.getWidth()>=viewport.getWidth()-viewport.getPaddingLeft()-viewport.getPaddingRight());
-        assertTrue("suggestion starts outside initial viewport",media.getLeft()>=viewport.getWidth()-viewport.getPaddingLeft());
+        assertEquals("open-app-space",blank.getTag());assertEquals(blank.getHeight(),blank.getWidth());
+        assertEquals(blank.getRight(),media.getLeft());
+        assertTrue("available space shows suggestions on initial expansion",bounds(media).left<bounds(viewport).right);
         capture("media-empty-initial");
         android.content.pm.ResolveInfo launcher=new android.content.pm.ResolveInfo();launcher.activityInfo=new android.content.pm.ActivityInfo();
         launcher.activityInfo.packageName=activity.getPackageName();launcher.activityInfo.name="test.GlobalSendActivity";
