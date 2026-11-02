@@ -110,4 +110,4 @@
 4. 平台专有入口只出现在相关场景，正常状态安静，异常或需要决定时再解释。
 5. 核对 [待验收项](REQUIREMENTS_STATUS.md)，不能把评审示意图当作真实系统交互已通过。
 
-可点击的入口示意、23组功能说明和五平台对照见 [功能图谱](../web/public/experience/index.html)。页面构建方式见 [图谱维护说明](EXPERIENCE_ATLAS.md)。
+可点击的入口示意、24组功能说明和五平台对照见 [功能图谱](../web/public/experience/index.html)。页面构建方式见 [图谱维护说明](EXPERIENCE_ATLAS.md)。

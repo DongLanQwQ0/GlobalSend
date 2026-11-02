@@ -27,7 +27,7 @@
   }
   function phoneMap() {
     const android = state.platform === 'android';
-    return `<div class="mobile-workspace"><div class="phone"><div class="window"><div class="window-bar"><span class="window-brand">GlobalSend</span><div class="mock-actions">${mockButton('discovery','','link')}${mockButton('appearance','','settings')}</div></div><div class="mock-body"><div class="mock-split">${mockButton('compose','文本','text')}${mockButton('suggestions','剪贴板','copy')}${mockButton('folder','文件','file')}${mockButton('share','媒体','image')}</div><section class="mock-panel">${draft()}</section><div style="margin-top:12px">${deviceArea()}</div>${sharedArea()}</div><div class="mock-nav">${mockButton('device','发送','arrow')}${mockButton('receive','接收','down')}${mockButton('history','历史','history')}${mockButton('library','文件','folder')}</div></div></div><div class="side-scene"><h4>${android ? '应用外：悬浮暂存坞' : '应用外：系统分享'}</h4>${android ? `<div class="dock-demo"><div class="dock-cards">${hotspot('dock',`${icon('image')}<span>本地图片</span>`,'mini-card')}${hotspot('references',`${icon('folder')}<span>远程引用</span>`,'mini-card')}</div><div class="dock-controls">${mockButton('dock','1','down')}${mockButton('dock','1','folder')}${mockButton('drop','','drag')}</div></div><div class="dock-handle"><i></i></div>` : `<div class="share-demo">${icon('file')}<div class="mock-split">${mockButton('share','GlobalSend','arrow')}${mockButton('device','指定设备','phone')}</div></div>`}<p>${android ? '接收与暂存分开。<br>双击空白回应用；<br>悬停2秒转设备投递。' : '系统分享导入待发送。<br>系统决定设备建议，<br>不模拟Android悬浮窗。'}</p>${hotspot(android ? 'dock' : 'share', '查看操作说明 ↗', 'text-button')}</div></div>`;
+    return `<div class="mobile-workspace"><div class="phone"><div class="window"><div class="window-bar"><span class="window-brand">GlobalSend</span><div class="mock-actions">${mockButton('discovery','','link')}${mockButton('appearance','','settings')}</div></div><div class="mock-body"><div class="mock-split">${mockButton('compose','文本','text')}${mockButton('suggestions','剪贴板','copy')}${mockButton('folder','文件','file')}${mockButton('share','媒体','image')}</div><section class="mock-panel">${draft()}</section><div style="margin-top:12px">${deviceArea()}</div>${sharedArea()}</div><div class="mock-nav">${mockButton('device','发送','arrow')}${mockButton('receive','接收','down')}${mockButton('history','历史','history')}${mockButton('library','文件','folder')}</div></div></div><div class="side-scene"><h4>${android ? '应用外：悬浮暂存坞' : '应用外：系统分享'}</h4>${android ? `<div class="dock-demo"><div class="dock-cards">${hotspot('android-shelf',`${icon('image')}<span>本地图片</span>`,'mini-card')}${hotspot('references',`${icon('folder')}<span>远程引用</span>`,'mini-card')}</div><div class="dock-controls">${mockButton('android-shelf','1','down')}${mockButton('android-shelf','1','folder')}${mockButton('drop','','drag')}</div></div><div class="dock-handle"><i></i></div>` : `<div class="share-demo">${icon('file')}<div class="mock-split">${mockButton('share','GlobalSend','arrow')}${mockButton('device','指定设备','phone')}</div></div>`}<p>${android ? '接收与暂存分开。<br>双击空白回应用；<br>悬停2秒转设备投递。' : '系统分享导入待发送。<br>系统决定设备建议，<br>不模拟Android悬浮窗。'}</p>${hotspot(android ? 'android-shelf' : 'share', '查看操作说明 ↗', 'text-button')}</div></div>`;
   }
   function renderLayout() {
     const p = platform();
@@ -60,9 +60,10 @@
   }
   function renderJourney() {
     const journey = journeys.find(item => item.id === state.journey);
+    const steps = journey.platformSteps?.[state.platform] || journey.steps;
     $('#journey-tabs').innerHTML = journeys.map((item,i) => `<button role="tab" id="journey-${item.id}" aria-controls="journey-body" aria-selected="${item.id === state.journey}" tabindex="${item.id === state.journey ? 0 : -1}" data-journey="${item.id}"><span>0${i+1}</span>${escape(item.name)}</button>`).join('');
     $('#journey-body').setAttribute('aria-labelledby', `journey-${journey.id}`);
-    $('#journey-body').innerHTML = `<h3>${escape(journey.goal)}</h3><ol class="journey-steps">${journey.steps.map((step,i) => `<li><b>${i+1}</b><span>${escape(step)}</span></li>`).join('')}</ol>${related(journey.ids)}<p class="small-meta">${escape(platform().name)}：${escape(platform().constraint)}</p>`;
+    $('#journey-body').innerHTML = `<h3>${escape(journey.goal)}</h3><ol class="journey-steps">${steps.map((step,i) => `<li><b>${i+1}</b><span>${escape(step)}</span></li>`).join('')}</ol>${related(journey.ids)}<p class="small-meta">${escape(platform().name)}：${escape(platform().constraint)}</p>`;
   }
   function renderComparison() {
     const rows = [
@@ -85,13 +86,14 @@
     $('#module-list').innerHTML = modules.map(item=>`<article class="module-card" data-module="${item.id}"><div class="module-heading"><span>${icon(item.icon)}</span><small>${escape(item.english)}</small></div><h3>${escape(item.name)}</h3><p class="module-purpose">${escape(item.purpose)}</p><p class="module-scene">${escape(item.scene)}</p><div class="module-primary"><span>主任务</span><strong>${escape(item.primary)}</strong></div><ul>${item.owns.map(text=>`<li>${escape(text)}</li>`).join('')}</ul><details><summary>生命周期与交接</summary><dl><dt>内容如何保留</dt><dd>${escape(item.lifecycle)}</dd><dt>何时回主界面</dt><dd>${escape(item.handoff)}</dd><dt>空间与形态</dt><dd>${escape(item.geometry)}</dd></dl></details><p class="module-rule">${escape(item.rule)}</p>${related(item.ids)}</article>`).join('');
   }
   let closing = false;
+  let closeAnimationHandler;
   function openDetail(id) {
     const feature = byId(id);
     if (!feature) return;
     const p = platform(), supported = feature.support.includes(p.id);
     $('#detail-eyebrow').textContent = `${p.name} / ${groups.find(group => group.id === feature.group).name}`;
     const difference = feature.differences?.[p.id] || (supported ? '保持统一的内容与状态语义；具体系统操作按当前平台能力执行。' : '此平台没有对应原生能力。请使用本平台已有的收发、系统分享或前台页面。');
-    $('#detail-body').innerHTML = `<div class="detail-icon">${icon(feature.icon)}</div><h2 id="detail-title">${escape(feature.name)}</h2><p class="detail-description">${escape(feature.description)}</p><div class="detail-platform"><strong>${escape(p.name)} · ${supportLabel(feature)}</strong><p>${escape(difference)}</p></div><div class="entry-compare"><div><h3>现有入口</h3><p>${escape(feature.current)}</p></div><div><h3>建议入口 · 待讨论</h3><p>${escape(feature.proposed)}</p></div></div><section class="detail-section"><h3>怎么用</h3><ol>${feature.steps.map(step=>`<li>${escape(step)}</li>`).join('')}</ol></section>${feature.note ? `<div class="detail-note">${escape(feature.note)}</div>` : ''}${feature.evidence ? `<p class="detail-evidence">验收依据：${escape(feature.evidence)}</p>` : '<p class="detail-evidence">实现与检查依据见下方文档；本页不新增实机验收结论。</p>'}<section class="detail-section"><h3>依据与进一步说明</h3><div class="sources">${feature.sources.map(source=>`<a href="https://github.com/DongLanQwQ0/GlobalSend/blob/ca6012f/docs/${encodeURI(source)}" target="_blank" rel="noopener">${escape(source)} ↗</a>`).join('')}</div></section>`;
+    $('#detail-body').innerHTML = `<div class="detail-icon">${icon(feature.icon)}</div><h2 id="detail-title">${escape(feature.name)}</h2><p class="detail-description">${escape(feature.description)}</p><div class="detail-platform"><strong>${escape(p.name)} · ${supportLabel(feature)}</strong><p>${escape(difference)}</p></div><div class="entry-compare"><div><h3>现有入口</h3><p>${escape(feature.current)}</p></div><div><h3>建议入口 · 待讨论</h3><p>${escape(feature.proposed)}</p></div></div><section class="detail-section"><h3>怎么用</h3><ol>${feature.steps.map(step=>`<li>${escape(step)}</li>`).join('')}</ol></section>${feature.note ? `<div class="detail-note">${escape(feature.note)}</div>` : ''}${feature.evidence ? `<p class="detail-evidence">验收依据：${escape(feature.evidence)}</p>` : '<p class="detail-evidence">实现与检查依据见下方文档；本页不新增实机验收结论。</p>'}<section class="detail-section"><h3>依据与进一步说明</h3><div class="sources">${feature.sources.map(source=>`<a href="https://github.com/DongLanQwQ0/GlobalSend/blob/490c5a3/docs/${encodeURI(source)}" target="_blank" rel="noopener">${escape(source)} ↗</a>`).join('')}</div></section>`;
     const dialog = $('#feature-dialog');
     closing = false; dialog.classList.remove('closing');
     if (!dialog.open) dialog.showModal();
@@ -104,7 +106,13 @@
     closing = true;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) { dialog.close(); closing = false; return; }
     dialog.classList.add('closing');
-    dialog.addEventListener('animationend', () => { dialog.close(); dialog.classList.remove('closing'); closing = false; }, {once:true});
+    closeAnimationHandler = event => {
+      if (event.target !== dialog || event.animationName !== 'modal-out' || event.pseudoElement) return;
+      dialog.removeEventListener('animationend',closeAnimationHandler);
+      closeAnimationHandler = undefined;
+      dialog.close();
+    };
+    dialog.addEventListener('animationend',closeAnimationHandler);
   }
   function selectPlatform(id, focus = false) {
     state.platform = id;
@@ -139,6 +147,16 @@
   $('#only-supported').addEventListener('change', event => { state.onlySupported = event.target.checked; renderCatalog(); });
   $('#reset-filter').addEventListener('click', () => { state.query=''; state.group='all'; $('#search').value=''; renderCatalog(); $('#search').focus(); });
   $('#close-detail').addEventListener('click', closeDetail);
+  $('#feature-dialog').addEventListener('close', () => {
+    if (closeAnimationHandler) $('#feature-dialog').removeEventListener('animationend',closeAnimationHandler);
+    closeAnimationHandler=undefined;
+    $('#feature-dialog').classList.remove('closing');
+    closing=false;
+  });
+  $('#feature-dialog').addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault(); event.stopPropagation(); closeDetail();
+  });
   $('#feature-dialog').addEventListener('cancel', event => { event.preventDefault(); closeDetail(); });
   let backdropStart = false;
   $('#feature-dialog').addEventListener('pointerdown', event=>{

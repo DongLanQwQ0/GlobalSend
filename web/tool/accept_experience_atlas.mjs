@@ -71,6 +71,7 @@ try {
   await page('Emulation.setDeviceMetricsOverride',{width:1440,height:1050,deviceScaleFactor:1,mobile:false});
   await page('Page.navigate',{url:base+'/experience/'});
   await until(()=>evaluate('document.querySelectorAll(".feature-card").length'),value=>value===features.length);
+  await evaluate('window.__modalEvents=[];for(const type of ["close","cancel","toggle","beforetoggle","animationstart","animationend"]){document.querySelector("dialog").addEventListener(type,event=>window.__modalEvents.push({type:event.type,animation:event.animationName,pseudo:event.pseudoElement,open:event.currentTarget.open,classes:event.currentTarget.className,time:performance.now()}))}');
   if (visualOnly) {
     for (const [selector,name] of [['#modules','module-roles-desktop.jpg'],['#layout','desktop-layout.jpg'],['#catalog','desktop-catalog.jpg'],['#decisions','desktop-recommendations.jpg']]) {
       await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({behavior:'instant'})`);
@@ -103,7 +104,12 @@ try {
   await capture('clipboard-detail.jpg');
   await key('Escape');await until(()=>evaluate('document.querySelector("dialog").open'),value=>!value);
   check('Esc closes modal',true);
-  await click('.feature-card[data-feature=dock]');await delay(240);
+  check('Esc finishes its own exit animation',await evaluate('window.__modalEvents.some(event=>event.type==="animationend" && event.animation==="modal-out" && !event.pseudo)'));
+  await click('.feature-card[data-feature=windows-receiver]');
+  await until(()=>evaluate('document.querySelector("dialog").open && document.getAnimations().every(animation=>animation.playState!=="running")'),Boolean);
+  report.modalEvents=await evaluate('window.__modalEvents');
+  check('Windows receiving window stays open and does not inherit shelf expiry',await evaluate('document.querySelector("dialog").open && document.querySelector("#detail-title").textContent==="Windows 接收窗口" && !document.querySelector("#detail-body").textContent.includes("3秒")'));
+  await capture('windows-receiver-detail.jpg');
   await page('Input.dispatchMouseEvent',{type:'mousePressed',x:5,y:5,button:'left',clickCount:1});
   await page('Input.dispatchMouseEvent',{type:'mouseReleased',x:5,y:5,button:'left',clickCount:1});
   await until(()=>evaluate('document.querySelector("dialog").open'),value=>!value);
@@ -117,9 +123,9 @@ try {
     await click('#close-detail');await until(()=>evaluate('document.querySelector("dialog").open'),value=>!value);
   }
   await click('[data-platform=web]');await click('#only-supported');
-  check('Web capability filter excludes native dock and on-demand',await evaluate('!document.querySelector(".feature-card[data-feature=dock]") && !document.querySelector(".feature-card[data-feature=on-demand]")'));
+  check('Web capability filter excludes both native modules and on-demand',await evaluate('!document.querySelector(".feature-card[data-feature=android-shelf]") && !document.querySelector(".feature-card[data-feature=windows-receiver]") && !document.querySelector(".feature-card[data-feature=on-demand]")'));
   await click('#only-supported');await click('[data-group=shared]');
-  check('shared group contains only shared features',await evaluate('[...document.querySelectorAll(".feature-card")].map(n=>n.dataset.feature)'),['shared-text','clipboard','references','on-demand','dock']);
+  check('shared group contains only shared features',await evaluate('[...document.querySelectorAll(".feature-card")].map(n=>n.dataset.feature)'),['shared-text','clipboard','references','on-demand','android-shelf']);
   await evaluate('document.querySelector("#search").value="没有这个功能xyz";document.querySelector("#search").dispatchEvent(new Event("input",{bubbles:true}))');
   check('empty result state',await evaluate('!document.querySelector("#empty").hidden && document.querySelectorAll(".feature-card").length===0'));
   await click('#reset-filter');check('clear filter restores full list',await evaluate('document.querySelectorAll(".feature-card").length'),features.length);
@@ -127,6 +133,11 @@ try {
   check('nearby platform filter reuses global selection',await evaluate('document.querySelector("[data-platform=ipados]").getAttribute("aria-selected")==="true" && document.querySelector("#platform-intro").textContent.includes("iPadOS")'));
   await click('[data-journey=copy]');
   check('copy scenario distinguishes three mechanisms',await evaluate('document.querySelector("#journey-body").textContent.includes("持续同步") && document.querySelector("#journey-body").textContent.includes("需要时才拉取")'));
+  await click('[data-journey=relay]');
+  for (const [id,phrase] of [['windows','单击空白回到主界面'],['android','暂存投放成功3秒后移出'],['ios','系统分享面板'],['ipados','台前调度'],['web','远程引用先拉取']]) {
+    await click(`[data-platform=${id}]`);
+    check(`${id}: platform-specific cross-app journey`,await evaluate(`document.querySelector("#journey-body").textContent.includes(${JSON.stringify(phrase)})`));
+  }
   await click('details.comparison>summary');check('comparison opens',await evaluate('document.querySelector("details.comparison").open'));
   for(const [width,height] of [[950,650],[768,1024],[390,844],[320,740]]) {
     await page('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<600});
@@ -136,7 +147,8 @@ try {
     }
     if(width===390){
       await click('[data-platform=android]');await evaluate('document.querySelector("#layout").scrollIntoView()');await delay(250);await capture('android-layout-390.jpg');
-      await click('.feature-card[data-feature=dock]');await delay(250);
+      await click('.feature-card[data-feature=android-shelf]');await delay(250);
+      check('Android shelf retains staging expiry and double-click semantics',await evaluate('document.querySelector("#detail-title").textContent==="Android 悬浮暂存坞" && document.querySelector("#detail-body").textContent.includes("3秒") && document.querySelector("#detail-body").textContent.includes("双击")'));
       check('mobile dialog stays inside viewport',await evaluate('(()=>{let r=document.querySelector("dialog").getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})()'));
       await capture('mobile-detail-390.jpg');await key('Escape');await until(()=>evaluate('document.querySelector("dialog").open'),value=>!value);
     }
@@ -149,7 +161,7 @@ try {
   check('slash focuses search',await evaluate('document.activeElement.id'), 'search');
   await evaluate('document.activeElement.blur()');
   await page('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
-  await click('.feature-card[data-feature=dock]');
+  await click('.feature-card[data-feature=android-shelf]');
   check('reduced motion honors preference',await evaluate('getComputedStyle(document.querySelector("dialog")).animationName'), 'none');
   await click('#close-detail');check('reduced motion closes without animation timer',await evaluate('!document.querySelector("dialog").open'));
   await page('Page.navigate',{url:new URL('../../web/public/experience/index.html',import.meta.url).href});
