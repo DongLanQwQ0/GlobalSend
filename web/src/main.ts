@@ -92,9 +92,9 @@ class GlobalSend {
   readonly clipboard=new ClipboardSlot(()=>rememberedGet('globalsend:clipboard-slot'),value=>rememberedSet('globalsend:clipboard-slot',value));
   get clipboardSlot(){return this.clipboard.current;}
   private clipboardDrag:{text?:string;file?:File}|null=null;
-  setClipboardReceive(enabled:boolean){this.clipboard.setEnabled(enabled);this.render();}
+  setClipboardReceive(enabled:boolean){this.clipboard.setEnabled(enabled);this.render();if(enabled && this.clipboardSlot?.key && !this.clipboardSlot.file && localStorageSupported())void this.ensureFileStore().then(store=>this.restoreClipboardFile(store));}
   private async retireClipboard(value:ClipboardSlotValue|null){
-    if(!value?.key || !value.scope || this.clipboardSlot?.key===value.key)return;
+    if(!value?.key || !value.scope || this.clipboard.value?.key===value.key)return;
     this.rtcLocalFiles.delete(value.key);this.retainedSources.delete(value.key);this.previewSources.delete(value.key);
     const preview=this.previews.get(value.key);if(preview?.url)URL.revokeObjectURL(preview.url);this.previews.delete(value.key);
     let store:RtcFileStore|undefined;const own=value.scope===this.dockKey;
@@ -1991,6 +1991,12 @@ class GlobalSend {
     }finally{if(generation===this.generation){this.accepting.delete(transferId);this.render();}}
   }
   get rtcEnabled() {return !this.rtcUnavailable && !!(this.info?.features as {rtcDataChannels?:boolean}|undefined)?.rtcDataChannels && rtcStorageSupported();}
+  private async restoreClipboardFile(store:RtcFileStore){
+    const slot=this.clipboardSlot;if(!slot?.key || slot.file || slot.scope!==this.dockKey)return;
+    const file=await store.get(slot.key);if(this.clipboardSlot!==slot)return;
+    if(file)slot.file=new File([await file.arrayBuffer()],file.name,{type:file.type,lastModified:file.lastModified});else this.clipboard.clear();
+    this.render();
+  }
   async ensureFileStore():Promise<RtcFileStore>{
     if(this.rtcStore){await this.rtcStore.ready;return this.rtcStore;}
     if(this.storeStarting)return this.storeStarting;
@@ -1998,7 +2004,7 @@ class GlobalSend {
     const starting=(async()=>{
       await this.rtcClosing;
       const store=new RtcFileStore(scope);
-      try{await store.ready;if(generation!==this.generation)throw new DOMException('会话已切换','AbortError');this.rtcStore=store;this.receiveDestination=(await store.destination()).name;const slot=this.clipboardSlot;if(slot?.key && !slot.file && slot.scope===scope){const file=await store.get(slot.key);if(file)slot.file=new File([await file.arrayBuffer()],file.name,{type:file.type,lastModified:file.lastModified});else this.clipboard.clear();}return store;}
+      try{await store.ready;if(generation!==this.generation)throw new DOMException('会话已切换','AbortError');this.rtcStore=store;this.receiveDestination=(await store.destination()).name;await this.restoreClipboardFile(store);return store;}
       catch(error){await store.dispose().catch(()=>{});throw error;}
     })();
     this.storeStarting=starting;try{return await starting;}finally{if(this.storeStarting===starting)this.storeStarting=null;}
