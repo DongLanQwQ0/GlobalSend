@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <oleidl.h>
+#include <set>
 
 // Native touch export completes asynchronously. Hold the source window until
 // the platform reply really completes, not merely until the start function returns.
@@ -84,6 +85,10 @@ class GlobalSendReceiveDock final : public Win32Window {
   std::string DropDeviceAt(POINTL point) const;
   void SetDropRegions(const Map& regions);
   void NotifyInteraction();
+  void RetainClipboardSlot();
+  void ReleaseClipboardSlotsExcept(const std::string& path);
+  std::string ClipboardSlotPath() const;
+  std::set<std::string> clipboard_slot_paths_;
   static LRESULT CALLBACK InteractionObserver(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
   Map payload_;
   Action action_;

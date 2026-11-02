@@ -26,22 +26,39 @@ public final class DockShareProvider extends ContentProvider {
         final long expires = System.currentTimeMillis() + 600000;
         volatile long externalAccess=-1;
         LegacyDragFiles.Export legacyExport;
+        NativeFileLease sourceLease;
+        ParcelFileDescriptor retainedDescriptor;
         Entry(File file,Uri source,String original,String name,String type,Long size) {
             this.file=file;this.source=source;this.original=original;this.name=name;this.mimeType=type;this.size=size;
         }
     }
     private static final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
+    private static void expireEntries() {
+        for(java.util.Map.Entry<String,Entry> row:entries.entrySet())if(row.getValue().expires<System.currentTimeMillis() && entries.remove(row.getKey(),row.getValue()))closeEntry(row.getValue());
+    }
+    private static void closeEntry(Entry entry) {
+        synchronized(entry) {
+            if(entry.sourceLease!=null)entry.sourceLease.close();entry.sourceLease=null;
+            if(entry.retainedDescriptor!=null)try{entry.retainedDescriptor.close();}catch(java.io.IOException ignored){}
+            entry.retainedDescriptor=null;
+        }
+    }
+    static void release(Uri uri) {
+        if(uri==null || uri.getPathSegments().size()<2)return;
+        Entry entry=entries.remove(uri.getPathSegments().get(1));if(entry!=null)closeEntry(entry);
+    }
     static Uri register(android.content.Context context, File file, String label) throws Exception {
         File canonical = file.getCanonicalFile();
         // Explicit drag/share exports require read access, not cleanup ownership.
         // A user-selected Download/GlobalSend file is not app-private, but is a
         // valid original for this same read-only URI capability.
         if (!canonical.isFile() || !canonical.canRead()) throw new SecurityException("文件不存在或无法读取");
-        entries.entrySet().removeIf(e -> e.getValue().expires < System.currentTimeMillis());
+        expireEntries();
         return register(context,new Entry(canonical,null,file.getPath(),label,mimeType(file.getName()),canonical.length()));
     }
     private static Uri register(android.content.Context context,Entry entry) {
-        entries.entrySet().removeIf(e -> e.getValue().expires < System.currentTimeMillis());
+        expireEntries();
+        entry.sourceLease=new NativeFileLease(java.util.List.of(entry.original));
         String id=UUID.randomUUID().toString();entries.put(id,entry);
         // A real display-name segment also supports targets that classify a
         // shared item by its URI extension rather than querying OpenableColumns.
@@ -103,7 +120,16 @@ public final class DockShareProvider extends ContentProvider {
         if (!mode.equals("r")) throw new FileNotFoundException("Read-only drag capability");
         Entry entry=lookup(uri);int caller=android.os.Binder.getCallingUid();
         ParcelFileDescriptor descriptor;
-        if(entry.file!=null)descriptor=ParcelFileDescriptor.open(entry.file,ParcelFileDescriptor.MODE_READ_ONLY);
+        if(entry.file!=null && entry.original.replace('\\','/').contains("/clipboard-slot-cache/")) {
+            synchronized(entry) {
+                if(entry.retainedDescriptor==null)entry.retainedDescriptor=ParcelFileDescriptor.open(entry.file,ParcelFileDescriptor.MODE_READ_ONLY);
+                // A retained inode, not a copied placeholder. New opens have
+                // independent seek positions, even after the cache name retires.
+                File readable=entry.file.isFile()?entry.file:new File("/proc/self/fd/"+entry.retainedDescriptor.getFd());
+                descriptor=ParcelFileDescriptor.open(readable,ParcelFileDescriptor.MODE_READ_ONLY);
+                if(entry.sourceLease!=null)entry.sourceLease.close();entry.sourceLease=null;
+            }
+        } else if(entry.file!=null)descriptor=ParcelFileDescriptor.open(entry.file,ParcelFileDescriptor.MODE_READ_ONLY);
         else {
             // Forward the app's already-authorized document as a descriptor;
             // no byte copy and no requirement for the target to understand SAF.

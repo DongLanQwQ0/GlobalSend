@@ -1,6 +1,7 @@
 #include "receive_dock.h"
 #include "touch_drag.h"
 #include "drop_target.h"
+#include "remote_reference_codec.h"
 #include "shell_file.h"
 #include "utils.h"
 #include <flutter/standard_method_codec.h>
@@ -52,7 +53,28 @@ GlobalSendReceiveDock::GlobalSendReceiveDock(Map payload, Action action,
     : payload_(std::move(payload)), action_(std::move(action)), drag_(std::move(drag)),
       first_frame_(std::move(shown)), closed_(std::move(closed)),
       interaction_changed_(std::move(interaction)), interaction_([this] { NotifyInteraction(); }),
-      frame_token_(++next_frame_token), instance_token_(frame_token_) {}
+      frame_token_(++next_frame_token), instance_token_(frame_token_) { RetainClipboardSlot(); }
+
+std::string GlobalSendReceiveDock::ClipboardSlotPath() const {
+  const auto found = payload_.find(Value("clipboardSlot"));
+  const auto* slot = found == payload_.end() ? nullptr : std::get_if<Map>(&found->second);
+  if (!slot) return {};
+  const auto entry = slot->find(Value("localPath"));
+  const auto* path = entry == slot->end() ? nullptr : std::get_if<std::string>(&entry->second);
+  return path ? *path : std::string();
+}
+void GlobalSendReceiveDock::RetainClipboardSlot() {
+  const auto path = ClipboardSlotPath();
+  if (!path.empty() && clipboard_slot_paths_.insert(path).second && action_)
+    action_(Map{{Value("action"),Value("clipboardSlotLease")},{Value("paths"),Value(flutter::EncodableList{Value(path)})},{Value("active"),Value(true)}});
+}
+void GlobalSendReceiveDock::ReleaseClipboardSlotsExcept(const std::string& path) {
+  for (auto it = clipboard_slot_paths_.begin(); it != clipboard_slot_paths_.end();) {
+    if (*it == path) { ++it; continue; }
+    if (action_) action_(Map{{Value("action"),Value("clipboardSlotLease")},{Value("paths"),Value(flutter::EncodableList{Value(*it)})},{Value("active"),Value(false)}});
+    it = clipboard_slot_paths_.erase(it);
+  }
+}
 
 void GlobalSendReceiveDock::NotifyInteraction() {
   const bool active = Interacting();
@@ -67,7 +89,7 @@ LRESULT CALLBACK GlobalSendReceiveDock::InteractionObserver(HWND window, UINT me
   return DefSubclassProc(window, message, wp, lp);
 }
 
-GlobalSendReceiveDock::~GlobalSendReceiveDock() { Destroy(); }
+GlobalSendReceiveDock::~GlobalSendReceiveDock() { Destroy(); ReleaseClipboardSlotsExcept({}); }
 
 int64_t GlobalSendReceiveDock::Generation() const { return Number(payload_, "arrivalGeneration"); }
 
@@ -131,6 +153,13 @@ bool GlobalSendReceiveDock::OnCreate() {
       controller_->engine()->messenger(), "dev.globalsend/receive-dock",
       &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    if (call.method_name() == "clipboardSlotRendered") {
+      const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+      std::string path;
+      if (args) { const auto found = args->find(Value("path")); if (found != args->end()) if (const auto* value = std::get_if<std::string>(&found->second)) path = *value; }
+      if (path == ClipboardSlotPath()) ReleaseClipboardSlotsExcept(path);
+      result->Success(); return;
+    }
     if (call.method_name() == "ready") { ready_ = true; result->Success(Value(payload_)); return; }
     if (call.method_name() == "hitRegions") {
       // One translucent pane includes the gaps between cards. Leave its native
@@ -163,7 +192,7 @@ bool GlobalSendReceiveDock::OnCreate() {
       interaction_.Set(GlobalSendUpdateInteraction::flutter_operation, busy);
       result->Success(); return;
     }
-    if (call.method_name() == "dragOut") {
+    if (call.method_name() == "dragOut" || call.method_name() == "startRemoteReferenceDrag") {
       const auto* arguments = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
       if (!arguments || !drag_) { result->Error("BAD_ARGUMENT", "Expected drag data"); return; }
       dragging_ = true;
@@ -206,6 +235,8 @@ bool GlobalSendReceiveDock::OnCreate() {
         {Value("serverKey"),Value(drop_server_key_)}, {Value("paths"),Value(paths)}, {Value("texts"),Value(texts)},
         {Value("dropId"),Value("receiver-"+std::to_string(GetTickCount64()))}};
       if (!content.error.empty()) action[Value("error")] = Value(content.error);
+      if (const auto reference = DecodeGlobalSendRemoteReference(content.remote_reference))
+        action[Value("remoteReference")] = Value(*reference);
       if (action_) action_(action);
     }, [] { return true; }, [this](POINTL point) { return !DropDeviceAt(point).empty(); }, {}, {},
     [this](bool active, POINTL point) { TrackDrop(active, point); }}, window);
@@ -234,6 +265,7 @@ void GlobalSendReceiveDock::Update(Map payload) {
     }
   }
   payload_ = std::move(payload);
+  RetainClipboardSlot();
   if (channel_) channel_->InvokeMethod("content", std::make_unique<Value>(payload_));
 }
 

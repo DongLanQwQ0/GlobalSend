@@ -21,6 +21,7 @@ add_executable(${BINARY_NAME} WIN32
   "touch_drag.cpp"
   "drop_target.cpp"
   "drag_preview.cpp"
+  "remote_drag_data.cpp"
   "receive_dock.cpp"
   "main.cpp"
   "utils.cpp"

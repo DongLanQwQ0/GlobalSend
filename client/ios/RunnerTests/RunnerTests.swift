@@ -8,6 +8,29 @@ class RunnerTests: XCTestCase {
 
   private let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNUCOhhYGBgYgADAAuOAQCntjSiAAAAAElFTkSuQmCC")!
 
+  func testImageDragOffersOriginalFileAndUIKitObjectWithoutReplacingFileRoute() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("GlobalSend/provider-tests/" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appendingPathComponent("source.png")
+    try png.write(to: file)
+    let provider = try XCTUnwrap(NativeDragProviders.file(file))
+    XCTAssertEqual(provider.suggestedName, "source.png")
+    XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.png.identifier))
+    XCTAssertTrue(provider.canLoadObject(ofClass: UIImage.self))
+    let bytes = expectation(description: "original file representation")
+    provider.loadFileRepresentation(forTypeIdentifier: UTType.png.identifier) { url, error in
+      XCTAssertNil(error)
+      XCTAssertEqual(url.flatMap { try? Data(contentsOf: $0) }, self.png)
+      bytes.fulfill()
+    }
+    let object = expectation(description: "UIKit image representation")
+    provider.loadObject(ofClass: UIImage.self) { value, error in
+      XCTAssertNil(error); XCTAssertNotNil(value as? UIImage); object.fulfill()
+    }
+    wait(for: [bytes, object], timeout: 5)
+  }
+
   func testSafariImageWinsOverPageURLAndKeepsExactPNGBytes() throws {
     let store = try SharedInboxStore(root: FileManager.default.temporaryDirectory.appendingPathComponent("GlobalSend/provider-tests/" + UUID().uuidString))
     defer { try? FileManager.default.removeItem(at: store.root) }

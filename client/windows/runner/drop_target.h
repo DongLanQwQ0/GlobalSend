@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <oleidl.h>
 #include <functional>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@ struct GlobalSendDroppedContent {
   std::string error;
   POINTL screen_point{};
   bool has_screen_point = false;
+  std::vector<uint8_t> remote_reference;
 };
 
 struct GlobalSendDropCallbacks {

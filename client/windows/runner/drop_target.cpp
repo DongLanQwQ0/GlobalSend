@@ -48,7 +48,8 @@ class DropTarget final : public IDropTarget {
   }
   HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data, DWORD, POINTL point, DWORD* effect) override {
     if (!effect) return E_POINTER;
-    supported_ = Supports(data, CF_HDROP) || Supports(data, CF_UNICODETEXT);
+    supported_ = Supports(data, CF_HDROP) || Supports(data, CF_UNICODETEXT) ||
+        Supports(data, static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"GlobalSend.RemoteReference.v1")));
     SetEffect(point, effect);
     POINT screen{point.x, point.y};
     if (image_) image_->DragEnter(window_, data, &screen, *effect);
@@ -125,6 +126,16 @@ class DropTarget final : public IDropTarget {
 bool ReadGlobalSendDrop(IDataObject* data, GlobalSendDroppedContent* content) {
   if (!data || !content) return false;
   *content = {};
+  const auto remote = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"GlobalSend.RemoteReference.v1"));
+  if (Supports(data, remote)) {
+    auto type = Format(remote); OwnedMedium medium;
+    if (FAILED(data->GetData(&type, &medium.value)) || medium.value.tymed != TYMED_HGLOBAL) return false;
+    const auto length = GlobalSize(medium.value.hGlobal);
+    const auto* source = static_cast<const uint8_t*>(GlobalLock(medium.value.hGlobal));
+    if (!source) return false;
+    content->remote_reference.assign(source, source + length);
+    GlobalUnlock(medium.value.hGlobal); return true;
+  }
   const bool files = Supports(data, CF_HDROP);
   auto format = Format(files ? CF_HDROP : CF_UNICODETEXT);
   if (!files && !Supports(data, CF_UNICODETEXT)) return false;

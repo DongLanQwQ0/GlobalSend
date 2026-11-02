@@ -123,6 +123,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private LinearLayout countGroup, shelfGroup;
     private ImageView countIcon, shelfIcon;
     private android.view.GestureDetector contentGestures;
+    private long scrollRevision;
     private Runnable pendingOpen;
     private boolean doubleTapGesture;
     private boolean collapsed, shelfVisible, edgeRight = true;
@@ -236,7 +237,27 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     @Override public void background() {appForeground=false;mediaSuggestions.refresh();}
 
-    private Map<String, ReceiveNotifications.Receipt> displayed() { return shelfVisible ? shelf.items : items; }
+    private Map<String, ReceiveNotifications.Receipt> displayed() {
+        if(shelfVisible)return shelf.items;
+        Map<String,ReceiveNotifications.Receipt> result=new LinkedHashMap<>();
+        Map<String,Object> slot=DockCoordinator.clipboardSlot();
+        if(slot!=null) {
+            String kind=String.valueOf(slot.getOrDefault("kind","text"));
+            String text="text".equals(kind)?String.valueOf(slot.getOrDefault("text","")):null;
+            Object bytes=slot.get("size");long size=bytes instanceof Number?((Number)bytes).longValue():0;
+            ReceiveNotifications.Receipt receipt=new ReceiveNotifications.Receipt("clipboard-slot","slot",
+                String.valueOf(slot.getOrDefault("sourceLabel","")),text,String.valueOf(slot.getOrDefault("title","剪贴板")),
+                String.valueOf(slot.getOrDefault("localPath","")),size);
+            result.put(receipt.id,receipt);
+        }
+        result.putAll(items);return result;
+    }
+    static void clipboardSlotChanged() {
+        ReceiveOverlay overlay=current.get();
+        if(overlay==null || overlay.root==null || overlay.shelfVisible || overlay.collapsed)return;
+        if(DockCoordinator.afterExportFrom(overlay.root,ReceiveOverlay::clipboardSlotChanged))return;
+        overlay.renderKeepingScroll();
+    }
 
     private void suggestMedia(List<RecentMediaSuggestions.Media> media) {
         if(root!=null && DockCoordinator.afterExportFrom(root,() -> suggestMedia(media)))return;
@@ -244,7 +265,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         shelf.suggest(media);
         if(scroll!=null) {
             HorizontalScrollView owner=scroll;
-            owner.post(() -> {if(scroll==owner)owner.scrollTo(offset,0);});
+            restoreScroll(owner,offset);
         }
     }
 
@@ -265,7 +286,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         overlay.render();
         if(overlay.scroll!=null) {
             HorizontalScrollView owner=overlay.scroll;
-            owner.post(() -> {if(overlay.scroll==owner)owner.scrollTo(offset,0);});
+            overlay.restoreScroll(owner,offset);
         }
     }
 
@@ -417,7 +438,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             render();
             if (!newItem) {
                 final HorizontalScrollView updated = scroll;
-                updated.post(() -> { if (scroll == updated) updated.scrollTo(previousScroll, 0); });
+                restoreScroll(updated,previousScroll);
             }
             final View presented = root;
             final boolean[] replied = {false};
@@ -620,7 +641,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         scroll.setHorizontalScrollBarEnabled(false);
         scroll.setPadding(dp(4),0,0,0);
         scroll.setClipToPadding(false);
-        scroll.setOnScrollChangeListener((view,x,y,oldX,oldY) -> waitForSuggestionScroll());
+        scroll.setOnScrollChangeListener((view,x,y,oldX,oldY) -> {scrollRevision++;waitForSuggestionScroll();});
         row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         scroll.addView(row, new HorizontalScrollView.LayoutParams(-2, -1));
@@ -962,6 +983,10 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         remove.setTextSize(20);
         FrameLayout.LayoutParams corner=new FrameLayout.LayoutParams(dp(36),dp(36),Gravity.TOP|Gravity.RIGHT);card.addView(remove,corner);
         card.setOnClickListener(view -> {if(!busy){feedback(HapticFeedbackConstants.VIRTUAL_KEY);DockCoordinator.pullCopiedFile(reference.get("id"),false);}});
+        card.setOnLongClickListener(view -> {
+            try{return DockCoordinator.startRemoteReferenceDrag(view,reference,true);}
+            catch(Exception error){feedbackResult(false);android.widget.Toast.makeText(context,error.getMessage(),android.widget.Toast.LENGTH_SHORT).show();return false;}
+        });
         LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(side,side);size.rightMargin=dp(3);row.addView(card,size);
     }
     private void showClipboardShelf() {
@@ -1071,7 +1096,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             openSpace.setContentDescription("双击打开 GlobalSend");
             // With no staged content the initial viewport stays completely blank;
             // suggestions are reached by swiping, never replacing the app-opening area.
-            int width=shelfVisible && !hasContent?Math.max(side,expandedWidth-dp(43)):side;
+            // Include the viewport's scrollable padding: clipToPadding=false
+            // must not expose a 4dp slice of the next suggested card.
+            int width=shelfVisible && !hasContent?Math.max(side,expandedWidth-dp(39)):side;
             row.addView(openSpace,new LinearLayout.LayoutParams(width,side));
         }
     }
@@ -1152,9 +1179,18 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void renderKeepingScroll() {
         int offset=scroll.getScrollX(); render();
         HorizontalScrollView owner=scroll;
-        owner.post(() -> { if(scroll==owner)owner.scrollTo(offset,0); });
+        restoreScroll(owner,offset);
+    }
+    private void restoreScroll(HorizontalScrollView owner,int offset) {
+        final long revision=scrollRevision;
+        owner.post(() -> {
+            // A refresh may restore the viewport after layout, but must never
+            // overwrite a scroll the user made after this restoration queued.
+            if(scroll==owner && scrollRevision==revision)owner.scrollTo(offset,0);
+        });
     }
     private void remove(ReceiveNotifications.Receipt receipt) {
+        if("clipboard-slot".equals(receipt.id)){DockCoordinator.clearClipboardSlot();renderKeepingScroll();return;}
         if (shelfVisible) shelf.remove(receipt.id);
         else {
             items.remove(receipt.id); renderKeepingScroll();
@@ -1164,6 +1200,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void clearDisplayed() {
         if (shelfVisible) shelf.clear();
         else {
+            DockCoordinator.clearClipboardSlot();
             Map<String,String> versions=new LinkedHashMap<>();
             for(ReceiveNotifications.Receipt receipt:items.values())versions.put(receipt.id,receipt.version);
             items.clear(); render(); actions.dismiss(versions,generation);
@@ -1173,8 +1210,9 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private void updateLabels() {
         if (root == null) return;
         int remaining = shelf.removalSeconds();
-        count.setText(String.valueOf(items.size())); shelfTab.setText(String.valueOf(shelf.items.size()));
-        count.setContentDescription("接收 " + items.size() + " 项");
+        int receivedCount=items.size()+(DockCoordinator.clipboardSlot()==null?0:1);
+        count.setText(String.valueOf(receivedCount)); shelfTab.setText(String.valueOf(shelf.items.size()));
+        count.setContentDescription("接收 " + receivedCount + " 项");
         shelfTab.setContentDescription("暂存 " + shelf.items.size() + " 项");
         countGroup.setContentDescription(count.getContentDescription());
         shelfGroup.setContentDescription(shelfTab.getContentDescription());
@@ -1455,13 +1493,13 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
 
     private void copy(ReceiveNotifications.Receipt receipt) {
-        if (!receipt.id.startsWith("shelf:")) { actions.copy(receipt.id); return; }
+        if (!receipt.id.startsWith("shelf:") && !"clipboard-slot".equals(receipt.id)) { actions.copy(receipt.id); return; }
         context.getSystemService(android.content.ClipboardManager.class)
             .setPrimaryClip(android.content.ClipData.newPlainText("GlobalSend", receipt.text));
         android.widget.Toast.makeText(context,"已复制",android.widget.Toast.LENGTH_SHORT).show();
     }
     private void open(ReceiveNotifications.Receipt receipt) {
-        if (!receipt.id.startsWith("shelf:")) { actions.open(receipt.id); return; }
+        if (!receipt.id.startsWith("shelf:") && !"clipboard-slot".equals(receipt.id)) { actions.open(receipt.id); return; }
         if (receipt.text != null) { copy(receipt); return; }
         try {
             android.net.Uri uri = receipt.localPath.startsWith("content://") ? android.net.Uri.parse(receipt.localPath) :
@@ -1578,7 +1616,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             LinearLayout.LayoutParams size=(LinearLayout.LayoutParams)child.getLayoutParams();
             int width="empty-receive".equals(child.getTag())?expandedWidth-dp(43):
                 "open-app-space".equals(child.getTag()) && shelfVisible && !hasContent?
-                    Math.max(side,expandedWidth-dp(43)):side;
+                    Math.max(side,expandedWidth-dp(39)):side;
             if(size.width!=width || size.height!=side) {
                 size.width=width;size.height=side;child.setLayoutParams(size);
             }

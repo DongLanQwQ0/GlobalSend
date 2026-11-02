@@ -68,8 +68,33 @@ abstract final class FileShareBridge {
   static bool get supported => Platform.isAndroid || Platform.isIOS;
   static Future<void> importClipboard() =>
       channel.invokeMethod('importClipboard');
+  static Future<void> copyReceivedImage(String path) =>
+      channel.invokeMethod<void>('copyReceivedImage', {'path': path});
   static final _incoming = StreamController<void>.broadcast();
   static final _dragEvents = StreamController<Map<String, dynamic>>.broadcast();
+  static final _clipboardSlotLeases =
+      StreamController<Map<String, dynamic>>.broadcast();
+  static Stream<Map<String, dynamic>> get clipboardSlotLeases {
+    _install();
+    return _clipboardSlotLeases.stream;
+  }
+
+  static final _remoteReferences =
+      StreamController<Map<String, dynamic>>.broadcast();
+  static Stream<Map<String, dynamic>> get remoteReferenceRequests {
+    _install();
+    return _remoteReferences.stream;
+  }
+
+  static Future<void> completeRemoteReference(
+    String token, {
+    List<String> paths = const [],
+    String error = '',
+  }) => channel.invokeMethod<void>('completeRemoteReference', {
+    'token': token,
+    'paths': paths,
+    'error': error,
+  });
   static bool _installed = false;
   static final windowLayout = ValueNotifier<Map<String, dynamic>>(const {});
   static Future<void> startWindowLayout() async {
@@ -85,6 +110,15 @@ abstract final class FileShareBridge {
     if (_installed) return;
     _installed = true;
     channel.setMethodCallHandler((call) async {
+      if (call.method == 'clipboardSlotLease') {
+        _clipboardSlotLeases.add(
+          Map<String, dynamic>.from(call.arguments as Map),
+        );
+        return null;
+      }
+      if (call.method == 'resolveRemoteReference') {
+        _remoteReferences.add(Map<String, dynamic>.from(call.arguments as Map));
+      }
       if (call.method == 'pendingChanged') _incoming.add(null);
       if (call.method == 'windowLayoutChanged') {
         windowLayout.value = Map<String, dynamic>.from(call.arguments as Map);

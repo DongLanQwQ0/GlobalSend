@@ -20,6 +20,7 @@ class IOSDragSource extends StatefulWidget {
     required this.enabled,
     required this.child,
   }) : clipboardRevision = null,
+       remoteReference = null,
        mediaAssetId = null,
        onDragAccepted = null;
   const IOSDragSource.clipboard({
@@ -29,6 +30,7 @@ class IOSDragSource extends StatefulWidget {
     required this.child,
     this.onDragAccepted,
   }) : entry = null,
+       remoteReference = null,
        mediaAssetId = null,
        clipboardRevision = revision;
   const IOSDragSource.media({
@@ -38,11 +40,22 @@ class IOSDragSource extends StatefulWidget {
     required this.child,
     this.onDragAccepted,
   }) : entry = null,
+       remoteReference = null,
        clipboardRevision = null,
        mediaAssetId = assetId;
+  const IOSDragSource.remote({
+    super.key,
+    required this.remoteReference,
+    required this.enabled,
+    required this.child,
+  }) : entry = null,
+       clipboardRevision = null,
+       mediaAssetId = null,
+       onDragAccepted = null;
   final DockEntry? entry;
   final String? clipboardRevision;
   final String? mediaAssetId;
+  final Map<String, dynamic>? remoteReference;
   final VoidCallback? onDragAccepted;
   final bool enabled;
   final Widget child;
@@ -111,9 +124,11 @@ class _IOSDragSourceState extends State<IOSDragSource> {
           'texts': entry?.kind == 'text' ? [entry!.text] : <String>[],
           'label':
               entry?.title ??
+              source.widget.remoteReference?['name'] as String? ??
               (source.widget.mediaAssetId == null ? '剪贴板' : '媒体'),
           'clipboardRevision': ?source.widget.clipboardRevision,
           'mediaAssetId': ?source.widget.mediaAssetId,
+          'remoteReference': ?source.widget.remoteReference,
         });
       }
       final signature = '$surface:$values';

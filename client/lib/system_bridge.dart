@@ -17,6 +17,7 @@ class SystemBridge {
   static const channel = MethodChannel('dev.globalsend/system');
   static final _dragPreviewKey = Object();
   static final _dragSessionKey = Object();
+  static final _dragPaletteKey = Object();
   static int _nextDragSession = 0;
   static final _dragStarted = <int, void Function()>{};
 
@@ -26,25 +27,35 @@ class SystemBridge {
     NativeDragPreview? preview,
     Future<T> Function() export, {
     void Function()? onStarted,
+    Map<String, int>? palette,
   }) {
     final session = onStarted == null ? null : ++_nextDragSession;
     if (session != null) {
       _install();
       _dragStarted[session] = onStarted!;
     }
-    return runZoned(() async {
-      try {
-        return await export();
-      } finally {
-        if (session != null) _dragStarted.remove(session);
-      }
-    }, zoneValues: {_dragPreviewKey: preview, _dragSessionKey: session});
+    return runZoned(
+      () async {
+        try {
+          return await export();
+        } finally {
+          if (session != null) _dragStarted.remove(session);
+        }
+      },
+      zoneValues: {
+        _dragPreviewKey: preview,
+        _dragSessionKey: session,
+        _dragPaletteKey: palette,
+      },
+    );
   }
 
   static Map<String, Object> get dragPreviewArguments {
     final preview = Zone.current[_dragPreviewKey] as NativeDragPreview?;
     final session = Zone.current[_dragSessionKey] as int?;
+    final palette = Zone.current[_dragPaletteKey] as Map<String, int>?;
     return {
+      if (palette != null) 'previewPalette': palette,
       if (session != null) 'dragSessionId': session,
       if (preview != null) ...{
         'previewRgba': preview.rgba,
@@ -107,6 +118,8 @@ class SystemBridge {
     String serverKey = '',
     List<Map<String, String>> copiedFiles = const [],
     int referenceRevision = 0,
+    Map<String, dynamic>? clipboardSlot,
+    bool quiet = false,
   }) async {
     if (!Platform.isWindows) {
       return const {'presentation': 'main', 'shown': true};
@@ -118,6 +131,8 @@ class SystemBridge {
             'serverKey': serverKey,
             'items': items,
             'serial': serial,
+            'clipboardSlot': clipboardSlot,
+            'quiet': quiet,
             if (copiedFiles.isNotEmpty) 'copiedFiles': copiedFiles,
             if (referenceRevision != 0) 'referenceRevision': referenceRevision,
             if (appearance != null) 'appearance': appearance,
@@ -206,6 +221,42 @@ class SystemBridge {
 
   static final StreamController<Map<String, dynamic>> _clipboard =
       StreamController.broadcast();
+  static final _clipboardSlotLeases =
+      StreamController<Map<String, dynamic>>.broadcast();
+  static Stream<Map<String, dynamic>> get clipboardSlotLeases {
+    _install();
+    return _clipboardSlotLeases.stream;
+  }
+
+  static final StreamController<Map<String, dynamic>> _remoteReferences =
+      StreamController.broadcast();
+  static Stream<Map<String, dynamic>> get remoteReferenceRequests {
+    _install();
+    return _remoteReferences.stream;
+  }
+
+  static Future<bool> startRemoteReferenceDrag(
+    Map<String, dynamic> reference, {
+    String pointerKind = 'auto',
+  }) async {
+    _install();
+    return await channel.invokeMethod<bool>('startRemoteReferenceDrag', {
+          'remoteReference': reference,
+          'pointerKind': pointerKind,
+          ...dragPreviewArguments,
+        }) ??
+        false;
+  }
+
+  static Future<void> completeRemoteReference(
+    String token, {
+    List<String> paths = const [],
+    String error = '',
+  }) => channel.invokeMethod<void>('completeRemoteReference', {
+    'token': token,
+    'paths': paths,
+    'error': error,
+  });
   static final StreamController<Map<String, dynamic>> _drops =
       StreamController.broadcast();
   static final StreamController<Map<String, dynamic>> _windows =
@@ -288,6 +339,18 @@ class SystemBridge {
     if (!_installed) {
       _installed = true;
       channel.setMethodCallHandler((call) async {
+        if (call.method == 'clipboardSlotLease') {
+          _clipboardSlotLeases.add(
+            Map<String, dynamic>.from(call.arguments as Map),
+          );
+          return null;
+        }
+        if (call.method == 'resolveRemoteReference') {
+          _remoteReferences.add(
+            Map<String, dynamic>.from(call.arguments as Map),
+          );
+          return null;
+        }
         if (call.method == 'outgoingDragStarted') {
           final session = (call.arguments as Map)['dragSessionId'];
           _dragStarted.remove(session)?.call();
@@ -419,10 +482,7 @@ class SystemBridge {
       false;
 
   static Future<void> cancelClipboardImage() =>
-      channel.invokeMethod<void>(
-        'cancelClipboardImage',
-        <String, dynamic>{},
-      );
+      channel.invokeMethod<void>('cancelClipboardImage', <String, dynamic>{});
 
   /// Determine how an explicit Ctrl+V should be routed, without reading text
   /// or creating an image source until the user actually imports it.

@@ -326,18 +326,33 @@ public class ReceiveOverlayDeviceTargetsTest {
         launcher.activityInfo.packageName=context.getPackageName();launcher.activityInfo.name="test.GlobalSendActivity";
         launcher.activityInfo.applicationInfo=new android.content.pm.ApplicationInfo();launcher.activityInfo.applicationInfo.packageName=context.getPackageName();
         Shadows.shadowOf(context.getPackageManager()).addResolveInfoForIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(context.getPackageName()),launcher);
-        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");shelf.add(List.of(),List.of("暂存"),Map.of());
+        TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
+        // Await real restore IO and deliver its posted UI merge before the
+        // gesture, instead of racing startup's stale scroll restoration.
+        ((java.util.concurrent.ExecutorService)field(shelf,"io")).submit(() -> {}).get();idle(1);
+        shelf.add(List.of(),List.of("暂存"),Map.of());
         for(boolean staged:new boolean[]{false,true}) {
-            ((View)field(overlay,staged?"shelfTab":"count")).performClick();draw();
+            ((View)field(overlay,staged?"shelfTab":"count")).performClick();
+            // Drain the renderKeepingScroll post queued by shelf.add before a
+            // user can scroll; dispatching synthetic taps in the same stack
+            // otherwise races that still-pending restoration to scrollX=0.
+            idle(1);draw();
             LinearLayout row=(LinearLayout)field(overlay,"row");View blank=row.getChildAt(row.getChildCount()-1);
             assertEquals("open-app-space",blank.getTag());assertNull(blank.getBackground());
             assertEquals(row.getChildAt(0).getWidth(),blank.getWidth());assertEquals(blank.getWidth(),blank.getHeight());
             assertEquals("清空当前列表",row.getChildAt(row.getChildCount()-2).getContentDescription());
             ((HorizontalScrollView)field(overlay,"scroll")).scrollTo(row.getWidth(),0);
             Rect area=bounds(blank);assertTrue(area.centerX()<((View)field(overlay,"scroll")).getRight());
+            MotionEvent probe=MotionEvent.obtain(0,0,MotionEvent.ACTION_DOWN,area.centerX(),area.centerY(),0);
+            assertTrue("blank content hit after scrolling staged="+staged+" area="+area+" scroll="+bounds((View)field(overlay,"scroll")),
+                ReflectionHelpers.<Boolean>callInstanceMethod(overlay,"isContentArea",ReflectionHelpers.ClassParameter.from(MotionEvent.class,probe)));
+            probe.recycle();
             if(staged)capture("tail-blank");
+            assertNotNull(context.getPackageManager().getLaunchIntentForPackage(context.getPackageName()));
             tap(area);idle(50);tap(area);idle(400);
-            assertEquals("test.GlobalSendActivity",Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity().getComponent().getClassName());
+            Intent opened=Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity();
+            assertNotNull("Double tap opens application staged="+staged,opened);
+            assertEquals("test.GlobalSendActivity",opened.getComponent().getClassName());
             assertEquals(1,shelf.items.size());assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
         }
     }

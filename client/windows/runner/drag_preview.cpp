@@ -16,7 +16,8 @@ namespace {
 // OLE uses the standard IDataObject proxy; no raw COM pointer crosses threads.
 class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapability {
  public:
-  explicit AsyncShellData(IDataObject* shell) : shell_(shell) {}
+  explicit AsyncShellData(IDataObject* shell, std::function<void(bool)> lease)
+      : shell_(shell), lease_(std::move(lease)) { if (lease_) lease_(true); }
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** output) override {
     if (!output) return E_POINTER;
     *output = nullptr;
@@ -54,10 +55,11 @@ class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapabili
     return S_OK;
   }
  private:
-  ~AsyncShellData() { shell_->Release(); }
+  ~AsyncShellData() { shell_->Release(); if (lease_) lease_(false); }
   std::atomic<ULONG> references_{1};
   std::atomic<bool> enabled_{true}, running_{false};
   IDataObject* shell_;
+  std::function<void(bool)> lease_;
 };
 
 std::unique_ptr<Gdiplus::GraphicsPath> Rounded(float x, float y, float width, float height, float radius) {
@@ -73,7 +75,7 @@ std::unique_ptr<Gdiplus::GraphicsPath> Rounded(float x, float y, float width, fl
 }
 
 HRESULT CreateGlobalSendDragData(CLIPFORMAT format,
-    const std::vector<uint8_t>& bytes, IDataObject** output) {
+    const std::vector<uint8_t>& bytes, IDataObject** output, std::function<void(bool)> lease) {
   if (!output) return E_POINTER;
   *output = nullptr;
   IDataObject* data = nullptr;
@@ -98,11 +100,11 @@ HRESULT CreateGlobalSendDragData(CLIPFORMAT format,
     data->Release();
     return result;
   }
-  *output = new AsyncShellData(data);
+  *output = new AsyncShellData(data, std::move(lease));
   return S_OK;
 }
 
-HBITMAP GlobalSendTextDragBitmap(const std::wstring& text) {
+HBITMAP GlobalSendTextDragBitmap(const std::wstring& text, GlobalSendDragPalette palette) {
   constexpr int width = 216;
   const bool short_text = text.size() <= 24 && text.find_first_of(L"\r\n") == std::wstring::npos;
   const int height = short_text ? 88 : 132;
@@ -139,27 +141,27 @@ HBITMAP GlobalSendTextDragBitmap(const std::wstring& text) {
       graphics.FillPath(&shade, shadow.get());
     }
     auto paper = Rounded(6, 4, 204, static_cast<float>(height - 12), 14);
-    Gdiplus::SolidBrush white(Gdiplus::Color(248, 250, 253, 250));
+    Gdiplus::SolidBrush white(Gdiplus::Color(palette.background));
     graphics.FillPath(&white, paper.get());
-    Gdiplus::Pen border(Gdiplus::Color(150, 219, 229, 220), 1);
+    Gdiplus::Pen border(Gdiplus::Color(palette.line), 1);
     graphics.DrawPath(&border, paper.get());
     auto preview = text.substr(0, 160);
     if (text.size() > preview.size()) preview += L"…";
     Gdiplus::FontFamily family(L"Microsoft YaHei UI");
     Gdiplus::Font body(&family, 14, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    Gdiplus::SolidBrush ink(Gdiplus::Color(255, 32, 41, 35));
+    Gdiplus::SolidBrush ink(Gdiplus::Color(palette.ink));
     Gdiplus::StringFormat format;
     format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
     Gdiplus::RectF bounds(18, 15, 180, static_cast<float>(height - 53));
     graphics.DrawString(preview.c_str(), static_cast<int>(preview.size()), &body, bounds, &format, &ink);
     const float footer = static_cast<float>(height - 31);
-    Gdiplus::Pen green(Gdiplus::Color(255, 23, 107, 80), 1.4f);
+    Gdiplus::Pen green(Gdiplus::Color(palette.accent), 1.4f);
     auto copy_back = Rounded(18, footer, 9, 11, 1.5f);
     auto copy_front = Rounded(21, footer + 3, 9, 11, 1.5f);
     graphics.DrawPath(&green, copy_back.get());
     graphics.DrawPath(&green, copy_front.get());
     Gdiplus::Font label(&family, 12, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    Gdiplus::SolidBrush accent(Gdiplus::Color(255, 23, 107, 80));
+    Gdiplus::SolidBrush accent(Gdiplus::Color(palette.accent));
     graphics.DrawString(L"复制", 2, &label, Gdiplus::PointF(37, footer - 1), &accent);
   }
   Gdiplus::GdiplusShutdown(token);
@@ -189,15 +191,15 @@ HBITMAP GlobalSendDragBitmapFromRgba(const std::vector<uint8_t>& rgba,
 }
 
 HBITMAP GlobalSendContentDragBitmap(const std::wstring& text,
-    const std::vector<std::wstring>& paths) {
-  if (paths.empty()) return GlobalSendTextDragBitmap(text);
+    const std::vector<std::wstring>& paths, GlobalSendDragPalette palette) {
+  if (paths.empty()) return GlobalSendTextDragBitmap(text, palette);
   // A drag started before the first Flutter paint still gets a small card.
   // Asking a shell thumbnail provider here could synchronously load a huge
   // image or hydrate a remote file on the platform thread.
   const auto separator = paths.front().find_last_of(L"\\/");
   auto label = paths.front().substr(separator == std::wstring::npos ? 0 : separator + 1);
   if (paths.size() > 1) label += L"  +" + std::to_wstring(paths.size() - 1);
-  return GlobalSendTextDragBitmap(label);
+  return GlobalSendTextDragBitmap(label, palette);
 }
 
 bool InitializeGlobalSendDragPreview(IDataObject* data, HWND source,

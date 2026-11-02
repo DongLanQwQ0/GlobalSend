@@ -64,6 +64,10 @@ final class DockCoordinator {
         final String id = UUID.randomUUID().toString();
         final String path, text;
         final List<String> paths,texts;
+        Map<String,?> remoteReference;
+        RemoteReferenceFiles.Entry remoteEntry;
+        NativeFileLease fileLease;
+        final List<Uri> exportedUris=new ArrayList<>();
         final WeakReference<View> source;
         boolean dropped;
         boolean accepted;
@@ -79,6 +83,11 @@ final class DockCoordinator {
     private String sendServerKey = "";
     private final List<Map<String, String>> sendTargets = new ArrayList<>();
     private final List<Map<String, String>> copiedFiles = new ArrayList<>();
+    private Map<String,Object> clipboardSlot;
+    private NativeFileLease slotDisplayLease;
+    private NativeFileLease clipboardImageLease;
+    private Uri clipboardImageUri;
+    private ClipboardManager.OnPrimaryClipChangedListener clipboardLeaseListener;
     private static final String LOCAL_DRAG_SESSION = "dev.globalsend.localDrag";
     private RectF queueDropBounds;
     private final Map<String, RectF> deviceDropBounds = new java.util.LinkedHashMap<>();
@@ -107,10 +116,35 @@ final class DockCoordinator {
         this.context = context.getApplicationContext(); current = new WeakReference<>(this);
         if (context instanceof Activity) attach((Activity) context);
         this.channel = channel;
+        clipboardLeaseListener=this::releaseReplacedClipboard;
+        this.context.getSystemService(ClipboardManager.class).addPrimaryClipChangedListener(clipboardLeaseListener);
+        RemoteReferenceFiles.listen(request -> main.post(() -> {
+            if(disposed){RemoteReferenceFiles.complete((String)request.get("token"),List.of(),"接收服务已关闭");return;}
+            this.channel.invokeMethod("resolveRemoteReference",request);
+        }));
         clipboardSuggestions=new ClipboardSuggestions(this.context,ReceiveOverlay::clipboardChanged);
         channel.setMethodCallHandler((call, result) -> {
             try {
                 switch (call.method) {
+                    case "copyReceivedImage":
+                        String imagePath=call.argument("path");
+                        Uri imageUri=DockShareProvider.registerReadSource(this.context,imagePath);
+                        ClipboardManager manager=this.context.getSystemService(ClipboardManager.class);
+                        NativeFileLease previousImageLease=clipboardImageLease;Uri previousImageUri=clipboardImageUri;
+                        clipboardImageLease=new NativeFileLease(List.of(imagePath));clipboardImageUri=imageUri;
+                        try {manager.setPrimaryClip(ClipData.newUri(this.context.getContentResolver(),"GlobalSend",imageUri));}
+                        catch(RuntimeException denied) {
+                            clipboardImageLease.close();DockShareProvider.release(imageUri);
+                            clipboardImageLease=previousImageLease;clipboardImageUri=previousImageUri;throw denied;
+                        }
+                        if(previousImageLease!=null)previousImageLease.close();if(previousImageUri!=null)DockShareProvider.release(previousImageUri);
+                        result.success(null);break;
+                    case "startRemoteReferenceDrag":
+                        View referenceSource=findFlutterView(host().findViewById(android.R.id.content));
+                        if(referenceSource==null || !host().hasWindowFocus())throw new IllegalStateException("请从可见的引用卡片开始拖动");
+                        result.success(startRemoteReferenceDrag(referenceSource,call.argument("remoteReference"),false));break;
+                    case "completeRemoteReference":
+                        RemoteReferenceFiles.complete(call.argument("token"),call.argument("paths"),call.argument("error"));result.success(null);break;
                     case "clipboardSuggestion":
                         result.success(clipboardSuggestions.refresh(attached.get()!=null && attached.get().hasWindowFocus()));break;
                     case "dismissClipboardSuggestion":
@@ -156,6 +190,12 @@ final class DockCoordinator {
                     case "sendTargets":
                         updateSendTargets(call.argument("serverKey"), call.argument("devices"));
                         updateCopiedFiles(call.argument("copiedFiles"));
+                        NativeFileLease previousDisplayLease=slotDisplayLease;
+                        clipboardSlot=call.argument("clipboardSlot");
+                        String slotPath=clipboardSlot==null?"":String.valueOf(clipboardSlot.getOrDefault("localPath",""));
+                        slotDisplayLease=slotPath.isEmpty()?null:new NativeFileLease(List.of(slotPath));
+                        ReceiveOverlay.clipboardSlotChanged();
+                        if(previousDisplayLease!=null)previousDisplayLease.close();
                         result.success(null); break;
                     case "queueDropBounds":
                         updateQueueDropBounds(Boolean.TRUE.equals(call.argument("enabled")) ? call.arguments() : null);
@@ -221,6 +261,36 @@ final class DockCoordinator {
     static List<Map<String,String>> copiedFiles() {
         DockCoordinator coordinator=current.get();
         return coordinator==null?List.of():new ArrayList<>(coordinator.copiedFiles);
+    }
+    static Map<String,Object> clipboardSlot() {
+        DockCoordinator coordinator=current.get();return coordinator==null?null:coordinator.clipboardSlot;
+    }
+    static java.util.function.Consumer<Boolean> fileLeasePublisher(List<String> paths) {
+        DockCoordinator coordinator=current.get();List<String> retained=new ArrayList<>(paths);
+        return active -> {if(coordinator!=null && !retained.isEmpty())coordinator.main.post(() -> {
+            if(!coordinator.disposed)coordinator.channel.invokeMethod("clipboardSlotLease",Map.of("paths",retained,"active",active));
+        });};
+    }
+    private void releaseReplacedClipboard() {
+        if(clipboardImageUri==null)return;
+        try {
+            ClipData clip=context.getSystemService(ClipboardManager.class).getPrimaryClip();
+            if(clip!=null && clip.getItemCount()>0 && clipboardImageUri.equals(clip.getItemAt(0).getUri()))return;
+            DockShareProvider.release(clipboardImageUri);clipboardImageUri=null;
+            if(clipboardImageLease!=null)clipboardImageLease.close();clipboardImageLease=null;
+        }catch(SecurityException background){/* Recheck when this app next reads the clipboard. */}
+    }
+    static void clearClipboardSlot() {
+        DockCoordinator coordinator=current.get();if(coordinator==null)return;
+        coordinator.clipboardSlot=null;
+        if(coordinator.slotDisplayLease!=null)coordinator.slotDisplayLease.close();coordinator.slotDisplayLease=null;
+        coordinator.channel.invokeMethod("clipboardSlotDismissed",java.util.Collections.emptyMap());
+    }
+    static boolean startRemoteReferenceDrag(View source,Map<String,?> reference,boolean rootHandlesDrag) throws Exception {
+        String local=reference.get("localPath")==null?"":reference.get("localPath").toString();
+        if(!local.isEmpty())return startDrag(source,List.of(local),List.of(),String.valueOf(reference.get("name")),null,rootHandlesDrag);
+        LocalDrag session=new LocalDrag(source,List.of(),List.of());session.remoteReference=reference;
+        return startDrag(source,session,String.valueOf(reference.get("name")),rootHandlesDrag);
     }
     static void pullCopiedFile(String id,boolean dismiss) {
         DockCoordinator coordinator=current.get();
@@ -526,6 +596,7 @@ final class DockCoordinator {
                 drop.put("dropId", UUID.randomUUID().toString()); drop.put("local", true);
                 drop.put("paths", new ArrayList<>(local.paths));
                 drop.put("texts", new ArrayList<>(local.texts));
+                if(local.remoteReference!=null)drop.put("remoteReference",new HashMap<>(local.remoteReference));
                 drop.put("temporaryPaths", new ArrayList<>());
                 if(!target.isEmpty()){drop.put("targetDeviceId",target);drop.put("serverKey",dropServerKey);}
                 synchronized (pending) { pending.add(drop); }
@@ -603,7 +674,7 @@ final class DockCoordinator {
     }
     static void refreshClipboardSuggestion() {
         DockCoordinator coordinator=current.get();
-        if(coordinator!=null)coordinator.clipboardSuggestions.refresh(true);
+        if(coordinator!=null){coordinator.releaseReplacedClipboard();coordinator.clipboardSuggestions.refresh(true);}
     }
     static boolean importClipboardToShelf(java.util.function.Consumer<Map<String,Object>> completed) {
         DockCoordinator coordinator=current.get();
@@ -648,8 +719,16 @@ final class DockCoordinator {
             local.dropped = true; local.accepted = true;
             local.returnedToShelf = true;
             Map<String, Object> content = new HashMap<>();
+            if(local.remoteEntry!=null) {
+                local.remoteEntry.resolve().whenComplete((path,error)->coordinator.main.post(()->{
+                    if(error!=null){android.widget.Toast.makeText(coordinator.context,"拉取失败，请重试",android.widget.Toast.LENGTH_SHORT).show();return;}
+                    completed.accept(Map.of("paths",List.of(path),"texts",List.of()));
+                }));
+                return true;
+            }
             content.put("paths", new ArrayList<>(local.paths));
             content.put("texts", new ArrayList<>(local.texts));
+            if(local.remoteReference!=null)content.put("remoteReference",new HashMap<>(local.remoteReference));
             completed.accept(content);
             return true;
         }
@@ -735,6 +814,8 @@ final class DockCoordinator {
         if (activeExport != session) return;
         traceDrag("finish export accepted="+session.accepted+" returned="+session.returnedToShelf);
         activeExport = null;
+        if(session.fileLease!=null){session.fileLease.close();session.fileLease=null;}
+        if(!session.accepted)for(Uri uri:session.exportedUris)DockShareProvider.release(uri);
         View source = session.source.get();
         if (source != null) {
             if (!(source instanceof FlutterView)) source.setOnDragListener(null);
@@ -791,8 +872,17 @@ final class DockCoordinator {
         List<String> paths=session.paths,texts=session.texts;
         List<ClipData.Item> items=new ArrayList<>();java.util.LinkedHashSet<String> types=new java.util.LinkedHashSet<>();
         int flags = View.DRAG_FLAG_GLOBAL;
+        if(session.remoteReference!=null) {
+            RemoteReferenceFiles.Entry remote=RemoteReferenceFiles.register(session.remoteReference);
+            session.remoteEntry=remote;
+            Uri uri=RemoteReferenceFiles.uri(view.getContext(),remote);
+            items.add(new ClipData.Item(uri));
+            types.add(remote.parts.get(0).directory?DocumentsContract.Document.MIME_TYPE_DIR:DockShareProvider.mimeType(remote.parts.get(0).name));
+            flags |= View.DRAG_FLAG_GLOBAL_URI_READ | View.DRAG_FLAG_GLOBAL_PREFIX_URI_PERMISSION;
+        }
         for(String path:paths) {
             Uri uri=DockShareProvider.registerReadSource(view.getContext(),path);
+            session.exportedUris.add(uri);
             items.add(new ClipData.Item(uri));String type=view.getContext().getContentResolver().getType(uri);types.add(type==null?"application/octet-stream":type);flags |= View.DRAG_FLAG_GLOBAL_URI_READ;
         }
         for(String text:texts){if(text==null||text.length()>100000)throw new IllegalArgumentException("Invalid drag text");items.add(new ClipData.Item(text));types.add("text/plain");}
@@ -817,6 +907,7 @@ final class DockCoordinator {
             return event.getAction() == DragEvent.ACTION_DRAG_STARTED || event.getAction() == DragEvent.ACTION_DRAG_ENDED;
         });
         activeExport = session;
+        session.fileLease=new NativeFileLease(session.paths);
         try {
             if (!view.startDragAndDrop(clip, new View.DragShadowBuilder(shadow), session, flags)) {
                 finishExport(session);
@@ -882,6 +973,11 @@ final class DockCoordinator {
     }
     void resumed() { attachDragReceiver(); channel.invokeMethod("dockState", status()); }
     void dispose() {
+        context.getSystemService(ClipboardManager.class).removePrimaryClipChangedListener(clipboardLeaseListener);
+        if(slotDisplayLease!=null)slotDisplayLease.close();
+        if(clipboardImageLease!=null)clipboardImageLease.close();
+        if(clipboardImageUri!=null)DockShareProvider.release(clipboardImageUri);
+        RemoteReferenceFiles.stop();
         disposed = true;
         clipboardSuggestions.dispose();
         synchronized (folderReadGrants) {

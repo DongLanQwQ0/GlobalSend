@@ -5,6 +5,52 @@ import UniformTypeIdentifiers
 import ImageIO
 import Photos
 import Darwin
+import ObjectiveC
+
+private final class NativeDragFileLease: NSObject {
+  private let path: String
+  private let publish: (([String], Bool) -> Void)?
+  init(_ path: String, publish: (([String], Bool) -> Void)?) {
+    self.path = path; self.publish = publish
+    super.init(); publish?([path], true)
+  }
+  deinit {
+    let path = path, publish = publish
+    DispatchQueue.main.async { publish?([path], false) }
+  }
+}
+
+/// Preserve the file provider used by Files/QQ, while also offering UIKit's
+/// image object representation to targets that don't import file-only images.
+enum NativeDragProviders {
+  static var leaseChanged: (([String], Bool) -> Void)?
+  private static var leaseKey: UInt8 = 0
+  static func file(_ url: URL) -> NSItemProvider? {
+    guard let provider = NSItemProvider(contentsOf: url) else { return nil }
+    objc_setAssociatedObject(provider, &leaseKey,
+      NativeDragFileLease(url.path, publish: leaseChanged), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    provider.suggestedName = url.lastPathComponent
+    guard let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image) else { return provider }
+    provider.registerFileRepresentation(forTypeIdentifier: type.identifier, fileOptions: [], visibility: .all) { completion in
+      completion(url, false, nil)
+      return nil
+    }
+    provider.registerObject(ofClass: UIImage.self, visibility: .all) { completion in
+      let progress = Progress(totalUnitCount: 1)
+      DispatchQueue.global(qos: .userInitiated).async {
+        if progress.isCancelled { completion(nil, CocoaError(.userCancelled)); return }
+        if let image = UIImage(contentsOfFile: url.path) {
+          progress.completedUnitCount = 1
+          completion(image, nil)
+        } else {
+          completion(nil, CocoaError(.fileReadCorruptFile))
+        }
+      }
+      return progress
+    }
+    return provider
+  }
+}
 
 final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionDelegate {
   static let shared = FileSharing()
@@ -24,6 +70,7 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   private var dragVisuals: [ObjectIdentifier: NativeDragVisual] = [:]
   private var dragClipboardRevision: String?
   private var dragMediaAssetId: String?
+  private var remoteRequests: [String: (URL?, Error?) -> Void] = [:]
   private lazy var dropInteraction = UIDropInteraction(delegate: self)
   private lazy var dragInteraction: UIDragInteraction = {
     let value = UIDragInteraction(delegate: self); value.isEnabled = true; return value
@@ -31,6 +78,9 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
   func install(_ messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {
     let bridge = FlutterMethodChannel(name: "dev.globalsend/share", binaryMessenger: messenger)
     channel = bridge
+    NativeDragProviders.leaseChanged = { [weak bridge] paths, active in
+      bridge?.invokeMethod("clipboardSlotLease", arguments: ["paths": paths, "active": active])
+    }
     observeInbox()
     bridge.setMethodCallHandler { [weak self] call, result in
       guard let self = self else { return }
@@ -40,8 +90,37 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
         else { self.dragSources = args }
         self.attachToForegroundScene()
         result(nil)
+      } else if call.method == "copyReceivedImage" {
+        let args = call.arguments as? [String: Any] ?? [:]
+        let path = args["path"] as? String ?? ""
+        self.work.async {
+          do {
+            let url = URL(fileURLWithPath: path)
+            let data = try Data(contentsOf: url)
+            let source = CGImageSourceCreateWithData(data as CFData, nil)
+            let type = source.flatMap { CGImageSourceGetType($0) as String? } ?? UTType(filenameExtension: url.pathExtension)?.identifier ?? UTType.image.identifier
+            DispatchQueue.main.async {
+              UIPasteboard.general.setItems([[type: data]], options: [.localOnly: true])
+              result(nil)
+            }
+          } catch { DispatchQueue.main.async { result(FlutterError(code: "CLIPBOARD_IMAGE", message: "无法复制图片", details: nil)) } }
+        }
       } else if call.method == "windowLayout" {
         result(self.windowLayout)
+      } else if call.method == "completeRemoteReference" {
+        let args = call.arguments as? [String: Any] ?? [:]
+        let token = args["token"] as? String ?? ""
+        if let complete = self.remoteRequests.removeValue(forKey: token) {
+          let paths = args["paths"] as? [String] ?? []
+          let message = args["error"] as? String ?? ""
+          if message.isEmpty, paths.count == 1 {
+            complete(URL(fileURLWithPath: paths[0]), nil)
+          } else {
+            complete(nil, NSError(domain: "GlobalSend.RemoteReference", code: 1,
+              userInfo: [NSLocalizedDescriptionKey: message.isEmpty ? "未取得完整文件或目录" : message]))
+          }
+        }
+        result(nil)
       } else if call.method == "prepareDragSource" {
         let args = call.arguments as? [String: Any] ?? [:]
         self.pressedSource = args["sourceId"] as? String ?? ""
@@ -242,7 +321,9 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
     var items: [UIDragItem]
     dragClipboardRevision = source["clipboardRevision"] as? String
     dragMediaAssetId = source["mediaAssetId"] as? String
-    if dragClipboardRevision != nil {
+    if let reference = source["remoteReference"] as? [String: Any] {
+      items = [UIDragItem(itemProvider: remoteProvider(reference))]
+    } else if dragClipboardRevision != nil {
       // Resolve the real providers at the native gesture, not a suggestion's
       // placeholder label, and leave the unconfirmed sending queue untouched.
       items = UIPasteboard.general.itemProviders.map { UIDragItem(itemProvider: $0) }
@@ -252,7 +333,7 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
       items = mediaProvider(assetId).map { [UIDragItem(itemProvider: $0)] } ?? []
     } else {
       items = (source["paths"] as? [String] ?? []).compactMap { path -> UIDragItem? in
-        guard let provider = NSItemProvider(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        guard let provider = NativeDragProviders.file(URL(fileURLWithPath: path)) else { return nil }
         provider.suggestedName = URL(fileURLWithPath: path).lastPathComponent
         let item = UIDragItem(itemProvider: provider)
         item.localObject = ["path": path]
@@ -346,6 +427,38 @@ final class FileSharing: NSObject, UIDropInteractionDelegate, UIDragInteractionD
           completion(error == nil ? export.file : nil, false, error)
         }
       } catch { completion(nil, false, error) }
+      return progress
+    }
+    return provider
+  }
+  private func remoteProvider(_ reference: [String: Any]) -> NSItemProvider {
+    let name = reference["name"] as? String ?? "shared-file"
+    let type = reference["kind"] as? String == "directory" ? UTType.folder :
+      (UTType(filenameExtension: (name as NSString).pathExtension) ?? .data)
+    let provider = NSItemProvider()
+    provider.suggestedName = name
+    provider.registerFileRepresentation(forTypeIdentifier: type.identifier, fileOptions: [], visibility: .all) { [weak self] completion in
+      let progress = Progress(totalUnitCount: 1)
+      let token = UUID().uuidString
+      DispatchQueue.main.async {
+        guard let self = self, let channel = self.channel else {
+          completion(nil, false, NSError(domain: "GlobalSend.RemoteReference", code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "接收服务已关闭"]))
+          return
+        }
+        self.remoteRequests[token] = { url, error in
+          progress.completedUnitCount = 1
+          completion(url, false, error)
+        }
+        if progress.isCancelled {
+          self.remoteRequests.removeValue(forKey: token)?(nil, CocoaError(.userCancelled))
+          return
+        }
+        channel.invokeMethod("resolveRemoteReference", arguments: ["token": token, "reference": reference])
+      }
+      progress.cancellationHandler = { [weak self] in
+        DispatchQueue.main.async { self?.remoteRequests.removeValue(forKey: token)?(nil, CocoaError(.userCancelled)) }
+      }
       return progress
     }
     return provider
@@ -574,7 +687,7 @@ final class BulkDragView: NSObject, FlutterPlatformView, UIDragInteractionDelega
   func view() -> UIView { button }
   func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
     var items = paths.compactMap { path -> UIDragItem? in
-      guard let provider = NSItemProvider(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+      guard let provider = NativeDragProviders.file(URL(fileURLWithPath: path)) else { return nil }
       provider.suggestedName = URL(fileURLWithPath: path).lastPathComponent
       let item = UIDragItem(itemProvider: provider)
       item.localObject = ["path": path]

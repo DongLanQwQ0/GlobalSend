@@ -156,6 +156,17 @@ int main() {
   assert(finished && ticks >= 4);
   target_copy.join();
   DestroyWindow(window);
+  // A path's lease belongs to the complete async data object, not just the
+  // mouse gesture or the source's initial IDataObject reference.
+  std::atomic<int> leases{0}; IDataObject* leased = nullptr;
+  assert(SUCCEEDED(CreateGlobalSendDragData(CF_UNICODETEXT, bytes, &leased,
+      [&](bool active) { leases += active ? 1 : -1; })));
+  IDataObjectAsyncCapability* operation = nullptr;
+  assert(SUCCEEDED(leased->QueryInterface(IID_PPV_ARGS(&operation))));
+  assert(SUCCEEDED(operation->StartOperation(nullptr))); leased->Release();
+  assert(leases == 1);
+  assert(SUCCEEDED(operation->EndOperation(S_OK, nullptr, DROPEFFECT_COPY)));
+  operation->Release(); assert(leases == 0);
   OleUninitialize();
   std::cout << "PASS real Shell IDataObject: Unicode, private image/stream, out/in, original file/folder references, async-copy mode and target lifetime\n";
 }

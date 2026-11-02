@@ -8,13 +8,55 @@ class DockPlatform {
   static final StreamController<Map<String, dynamic>> _events =
       StreamController.broadcast();
   static bool _installed = false;
+  static final _clipboardSlotLeases =
+      StreamController<Map<String, dynamic>>.broadcast();
+  static Stream<Map<String, dynamic>> get clipboardSlotLeases {
+    events;
+    return _clipboardSlotLeases.stream;
+  }
+
+  static final _remoteReferences =
+      StreamController<Map<String, dynamic>>.broadcast();
+  static Stream<Map<String, dynamic>> get remoteReferenceRequests {
+    events;
+    return _remoteReferences.stream;
+  }
+
+  static Future<bool> startRemoteReferenceDrag(
+    Map<String, dynamic> reference, {
+    String pointerKind = 'auto',
+  }) async =>
+      await channel.invokeMethod<bool>('startRemoteReferenceDrag', {
+        'remoteReference': reference,
+        'pointerKind': pointerKind,
+      }) ??
+      false;
+  static Future<void> completeRemoteReference(
+    String token, {
+    List<String> paths = const [],
+    String error = '',
+  }) => channel.invokeMethod<void>('completeRemoteReference', {
+    'token': token,
+    'paths': paths,
+    'error': error,
+  });
   static Future<void> Function(Map<String, dynamic>)? onSendToDevice;
   static Future<void> Function(Map<String, dynamic>)? onPullCopiedFile;
   static Stream<Map<String, dynamic>> get events {
     if (!_installed) {
       _installed = true;
       channel.setMethodCallHandler((call) async {
-        if (call.method == 'pullCopiedFile') {
+        if (call.method == 'clipboardSlotLease') {
+          _clipboardSlotLeases.add(
+            Map<String, dynamic>.from(call.arguments as Map),
+          );
+          return null;
+        }
+        if (call.method == 'resolveRemoteReference') {
+          _remoteReferences.add(
+            Map<String, dynamic>.from(call.arguments as Map),
+          );
+        } else if (call.method == 'pullCopiedFile') {
           final pull = onPullCopiedFile;
           if (pull == null) throw StateError('接收服务尚未就绪');
           await pull(Map<String, dynamic>.from(call.arguments as Map));
@@ -25,6 +67,7 @@ class DockPlatform {
         } else if (call.method == 'nativeDrop' ||
             call.method == 'nativeDrag' ||
             call.method == 'dockState' ||
+            call.method == 'clipboardSlotDismissed' ||
             call.method == 'mediaSuggestionsChanged') {
           _events.add({
             'type': call.method,
@@ -47,6 +90,8 @@ class DockPlatform {
       channel.invokeMethod('notificationPermission');
   static Future<void> importClipboard() =>
       channel.invokeMethod('importClipboard');
+  static Future<void> copyReceivedImage(String path) =>
+      channel.invokeMethod<void>('copyReceivedImage', {'path': path});
   static Future<bool> dragClipboardSuggestion(String revision) async =>
       await channel.invokeMethod<bool>('dragClipboardSuggestion', {
         'revision': revision,
@@ -91,10 +136,12 @@ class DockPlatform {
     String serverKey,
     List<Map<String, dynamic>> devices, {
     List<Map<String, String>> copiedFiles = const [],
+    Map<String, dynamic>? clipboardSlot,
   }) => channel.invokeMethod('sendTargets', {
     'serverKey': serverKey,
     'devices': devices,
     'copiedFiles': copiedFiles,
+    'clipboardSlot': clipboardSlot,
   });
 
   static Future<void> setQueueDropBounds(

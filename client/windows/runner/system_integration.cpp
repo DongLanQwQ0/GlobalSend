@@ -10,8 +10,11 @@
 #include "auto_update.h"
 #include "update_interaction.h"
 #include <system_error>
+#include <charconv>
 #include "single_instance.h"
 #include "drag_preview.h"
+#include "remote_drag_data.h"
+#include "remote_reference_codec.h"
 #include "receive_dock.h"
 #include "queue_drop_region.h"
 #include "local_ip_interfaces.h"
@@ -19,6 +22,7 @@
 #include <flutter/method_channel.h>
 #include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
+#include <flutter/standard_message_codec.h>
 #include <roapi.h>
 #include <ole2.h>
 #include <shellapi.h>
@@ -93,9 +97,24 @@ uint64_t update_request = 0;
 constexpr UINT kDestroyReceiveDock = WM_APP + 119;
 constexpr UINT kCompleteUpdateExit = WM_APP + 120;
 constexpr UINT kResumeUpdateExit = WM_APP + 121;
+constexpr UINT kResolveRemoteReference = WM_APP + 122;
+constexpr UINT kRemoteDragActivityChanged = WM_APP + 123;
+constexpr UINT kClipboardSlotLease = WM_APP + 124;
+struct ClipboardSlotLease { std::vector<std::wstring> paths; bool active; };
+void PublishSlotLease(const std::vector<std::wstring>& paths, bool active, HWND window) {
+  if (paths.empty()) return;
+  auto lease = std::make_unique<ClipboardSlotLease>(ClipboardSlotLease{paths, active});
+  if (window && PostMessageW(window, kClipboardSlotLease, 0, reinterpret_cast<LPARAM>(lease.get()))) lease.release();
+}
+struct RemoteReferenceRequest {
+  Map reference;
+  GlobalSendRemoteResolved complete;
+};
+uint64_t remote_reference_sequence = 0;
+std::map<std::string, GlobalSendRemoteResolved> remote_reference_requests;
 std::unique_ptr<GlobalSendReceiveDock> receive_dock;
 bool UpdateInteracting() {
-  return update_interaction.Busy() || outgoing_drag || (receive_dock && receive_dock->Interacting());
+  return update_interaction.Busy() || outgoing_drag || GlobalSendRemoteDragBusy() || (receive_dock && receive_dock->Interacting());
 }
 void UpdateInteractionChanged() {
   const bool busy = UpdateInteracting();
@@ -128,6 +147,11 @@ int64_t Integer(const Map& map, const char* key) {
   if (found == map.end()) return 0;
   if (const auto* value = std::get_if<int64_t>(&found->second)) return *value;
   if (const auto* value = std::get_if<int>(&found->second)) return *value;
+  if (const auto* value = std::get_if<std::string>(&found->second)) {
+    int64_t parsed = 0;
+    const auto result = std::from_chars(value->data(), value->data() + value->size(), parsed);
+    if (result.ec == std::errc() && result.ptr == value->data() + value->size()) return parsed;
+  }
   return 0;
 }
 Map DockState(const char* presentation, int64_t generation, bool shown) {
@@ -172,6 +196,8 @@ void PublishDrop(GlobalSendDroppedContent content) {
   const std::string id = "windows-" + std::to_string(GetCurrentProcessId()) + "-" +
       std::to_string(GetTickCount64()) + "-" + std::to_string(++drop_sequence);
   Map event{{Value("dropId"), Value(id)}, {Value("paths"), Value(paths)}, {Value("texts"), Value(texts)}};
+  if (const auto reference = DecodeGlobalSendRemoteReference(content.remote_reference))
+    event.emplace(Value("remoteReference"), Value(*reference));
   const auto target = content.has_screen_point ? DeviceDropAt(content.screen_point) : std::string();
   if (!target.empty()) {
     event.emplace(Value("targetDeviceId"), Value(target));
@@ -416,8 +442,47 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
   std::vector<std::wstring> export_paths;
   std::wstring export_text;
   CLIPFORMAT format = CF_UNICODETEXT;
+  const auto remote = arguments.find(Value("remoteReference"));
+  const auto* reference = remote == arguments.end() ? nullptr : std::get_if<Map>(&remote->second);
+  IDataObject* remote_payload = nullptr;
+  if (reference) {
+    std::vector<GlobalSendRemoteFile> entries;
+    const auto found = reference->find(Value("entries"));
+    const auto* manifest = found == reference->end() ? nullptr : std::get_if<flutter::EncodableList>(&found->second);
+    if (manifest) {
+      for (const auto& value : *manifest) if (const auto* entry = std::get_if<Map>(&value))
+        entries.push_back({Wide(String(*entry, "relativePath")), static_cast<uint64_t>(Integer(*entry, "size")), String(*entry, "kind") == "directory"});
+    } else if (String(*reference, "kind") != "directory") {
+      entries.push_back({Wide(String(*reference, "name")), static_cast<uint64_t>(Integer(*reference, "size")), false});
+    } else {
+      result->Error("REMOTE_MANIFEST", "目录需先取得完整目录清单，不能作为空目录拖出"); return;
+    }
+    const HWND request_window = owner;
+    const auto metadata = *reference;
+    const auto status = CreateGlobalSendRemoteDragData(entries,
+      [request_window, metadata](GlobalSendRemoteResolved complete) {
+        auto request = std::make_unique<RemoteReferenceRequest>(RemoteReferenceRequest{metadata, std::move(complete)});
+        if (request_window && PostMessageW(request_window, kResolveRemoteReference, 0, reinterpret_cast<LPARAM>(request.get()))) request.release();
+        else request->complete({}, "接收服务已关闭");
+      }, &remote_payload);
+    if (FAILED(status)) { result->Error("REMOTE_DRAG", "远程文件描述无效"); return; }
+    export_text = Wide(String(*reference, "name"));
+    const auto encoded = flutter::StandardMessageCodec::GetInstance().EncodeMessage(Value(*reference));
+    if (encoded) {
+      STGMEDIUM medium{}; medium.tymed = TYMED_HGLOBAL;
+      medium.hGlobal = GlobalAlloc(GMEM_MOVEABLE, sizeof(uint32_t) + encoded->size());
+      auto* target = medium.hGlobal ? static_cast<uint8_t*>(GlobalLock(medium.hGlobal)) : nullptr;
+      if (!target) { if (medium.hGlobal) GlobalFree(medium.hGlobal); remote_payload->Release(); result->Error("REMOTE_DRAG", "无法准备引用"); return; }
+      const auto length = static_cast<uint32_t>(encoded->size()); memcpy(target, &length, sizeof(length)); memcpy(target + sizeof(length), encoded->data(), length); GlobalUnlock(medium.hGlobal);
+      FORMATETC metadata_format{static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"GlobalSend.RemoteReference.v1")), nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+      if (FAILED(remote_payload->SetData(&metadata_format, &medium, TRUE))) ReleaseStgMedium(&medium);
+    }
+  }
   auto paths = arguments.find(Value("paths"));
-  if (paths != arguments.end() && std::get_if<flutter::EncodableList>(&paths->second)) {
+  if (reference) {
+    // The virtual object's stream resolves on demand, never by fabricating a
+    // local path or pre-downloading in the gesture's platform-thread call.
+  } else if (paths != arguments.end() && std::get_if<flutter::EncodableList>(&paths->second)) {
     std::wstring names;
     const auto& files = std::get<flutter::EncodableList>(paths->second);
     if (files.empty()) { result->Success(Value(false)); return; }
@@ -457,13 +522,25 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
     }
   }
   IDataObject* payload = nullptr;
-  if (FAILED(CreateGlobalSendDragData(format, bytes, &payload))) {
+  payload = remote_payload;
+  const auto leased_paths = export_paths;
+  const auto lease_window = owner;
+  if (!payload && FAILED(CreateGlobalSendDragData(format, bytes, &payload,
+      [leased_paths, lease_window](bool active) { PublishSlotLease(leased_paths, active, lease_window); }))) {
     if (ready_preview) DeleteObject(ready_preview);
     result->Error("DRAG_DATA", "Windows could not prepare drag content");
     return;
   }
   const bool pointer_export = pointer_kind == "touch" || pointer_kind == "stylus" ||
       pointer_kind == "invertedStylus";
+  GlobalSendDragPalette palette;
+  const auto palette_value = arguments.find(Value("previewPalette"));
+  if (palette_value != arguments.end()) if (const auto* colors = std::get_if<Map>(&palette_value->second)) {
+    if (colors->count(Value("background"))) palette.background = static_cast<uint32_t>(Integer(*colors, "background"));
+    if (colors->count(Value("ink"))) palette.ink = static_cast<uint32_t>(Integer(*colors, "ink"));
+    if (colors->count(Value("accent"))) palette.accent = static_cast<uint32_t>(Integer(*colors, "accent"));
+    if (colors->count(Value("line"))) palette.line = static_cast<uint32_t>(Integer(*colors, "line"));
+  }
   if (pointer_export || (pointer_kind != "mouse" && HasGlobalSendTouchContact())) {
     update_interaction.Set(GlobalSendUpdateInteraction::export_operation, true);
       // A held native primary contact drives this explicit desktop adapter.
@@ -473,6 +550,9 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
       auto source = std::shared_ptr<DragSource>(new DragSource(true),
           [](DragSource* value) { value->Release(); });
     auto completion = std::shared_ptr<flutter::MethodResult<Value>>(std::move(result));
+    auto prepare_preview = [text = export_text, paths = export_paths, palette] {
+      return GlobalSendContentDragBitmap(text, paths, palette);
+    };
       StartGlobalSendDesktopTouchDrag(std::move(export_text), std::move(export_paths), source_window,
         [data, source, source_window, started](HBITMAP bitmap, DWORD* effect) {
           InitializeGlobalSendDragPreviewFromBitmap(data.get(), source_window, bitmap);
@@ -493,11 +573,11 @@ void Drag(const Map& arguments, std::unique_ptr<flutter::MethodResult<Value>> re
         else completion->Error("TOUCH_DRAG_FAILED", error);
         update_interaction.ReleasePointers();
         update_interaction.Set(GlobalSendUpdateInteraction::export_operation, false);
-      }, {}, ready_preview);
+      }, std::move(prepare_preview), ready_preview);
     return;
   }
   auto* data = payload; auto* source = new DragSource();
-  HBITMAP bitmap = ready_preview ? ready_preview : GlobalSendContentDragBitmap(export_text, export_paths);
+  HBITMAP bitmap = ready_preview ? ready_preview : GlobalSendContentDragBitmap(export_text, export_paths, palette);
   InitializeGlobalSendDragPreviewFromBitmap(data, source_window, bitmap);
   if (bitmap) DeleteObject(bitmap);
   DWORD effect = DROPEFFECT_NONE;
@@ -519,7 +599,7 @@ bool PrepareReceiveDock(Map payload) {
   if (receive_dock) return true;
   receive_dock = std::make_unique<GlobalSendReceiveDock>(std::move(payload),
     [](const Map& action) {
-      if (channel) channel->InvokeMethod("receiveDockAction", std::make_unique<Value>(action));
+      if (channel) channel->InvokeMethod(String(action, "action") == "clipboardSlotLease" ? "clipboardSlotLease" : "receiveDockAction", std::make_unique<Value>(action));
       if (String(action, "action") == "close") CloseDockLater(Integer(action, "arrivalGeneration"));
     }, [](const Map& values, auto completion, HWND window, std::function<void()> started) {
       Drag(values, std::move(completion), window, std::move(started));
@@ -535,6 +615,7 @@ bool PrepareReceiveDock(Map payload) {
 void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, HWND flutter_view, bool initially_visible) {
   ++system_generation;
   owner = window; ole_initialized = SUCCEEDED(OleInitialize(nullptr));
+  SetGlobalSendRemoteDragActivityChanged([window] { PostMessageW(window, kRemoteDragActivityChanged, 0, 0); });
   import_view = flutter_view;
   queue_drop = {};
   RegisterGlobalSendTouchDrag(flutter_view, window);
@@ -612,6 +693,17 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
     }
     const auto* arguments = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
     if (!arguments) { result->Error("BAD_ARGUMENT", "Expected operation map"); return; }
+    if (call.method_name() == "completeRemoteReference") {
+      const auto token = String(*arguments, "token");
+      auto found = remote_reference_requests.find(token);
+      if (found == remote_reference_requests.end()) { result->Success(); return; }
+      auto complete = std::move(found->second); remote_reference_requests.erase(found);
+      std::vector<std::wstring> paths;
+      const auto values = arguments->find(Value("paths"));
+      if (values != arguments->end()) if (const auto* list = std::get_if<flutter::EncodableList>(&values->second))
+        for (const auto& value : *list) if (const auto* path = std::get_if<std::string>(&value)) paths.push_back(Wide(*path));
+      complete(std::move(paths), String(*arguments, "error")); result->Success(); return;
+    }
     if (call.method_name() == "mainUpdateInteraction") {
       update_interaction.Set(GlobalSendUpdateInteraction::flutter_operation, Bool(*arguments, "active"));
       result->Success(); return;
@@ -645,6 +737,14 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
           std::shared_ptr<flutter::MethodResult<Value>>(std::move(result)));
     } else if (call.method_name() == "presentReceiveDock") {
       auto payload = *arguments;
+      if (Bool(payload, "quiet")) {
+        const bool visible = receive_dock && receive_dock->Shown();
+        const auto generation = visible ? receive_dock->Generation() : static_cast<int64_t>(window_lifecycle ? window_lifecycle->ReceiptArrivalGeneration() : 0);
+        payload[Value("arrivalGeneration")] = Value(generation);
+        if (visible) receive_dock->Update(std::move(payload));
+        result->Success(Value(DockState(visible ? "dock" : "main", generation, visible)));
+        return;
+      }
       const auto serial = Integer(payload, "serial");
       const auto reference_revision = Integer(payload, "referenceRevision");
       if (serial != receive_serial || reference_revision != copied_reference_revision) {
@@ -797,7 +897,7 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
       if (!ok) EmptyClipboard();
       CloseClipboard();
       if (ok) result->Success(); else result->Error("CLIPBOARD_WRITE", "Clipboard copy was not completed");
-    } else if (call.method_name() == "dragOut") {
+    } else if (call.method_name() == "dragOut" || call.method_name() == "startRemoteReferenceDrag") {
       if (!ole_initialized) { result->Error("OLE_UNAVAILABLE", "Windows drag is unavailable"); return; }
       Drag(*arguments, std::move(result), owner);
     } else if (call.method_name() == "openWebUrl") {
@@ -827,6 +927,25 @@ void RegisterGlobalSendSystem(flutter::BinaryMessenger* messenger, HWND window, 
 
 bool HandleGlobalSendWindowMessage(UINT message, WPARAM wparam, LPARAM lparam,
                                   LRESULT* result) {
+  if (message == kRemoteDragActivityChanged) { UpdateInteractionChanged(); *result = 0; return true; }
+  if (message == kClipboardSlotLease) {
+    auto lease = std::unique_ptr<ClipboardSlotLease>(reinterpret_cast<ClipboardSlotLease*>(lparam));
+    if (channel && lease) {
+      flutter::EncodableList paths;
+      for (const auto& path : lease->paths) paths.emplace_back(Utf8FromUtf16(path.c_str()));
+      channel->InvokeMethod("clipboardSlotLease", std::make_unique<Value>(Map{{Value("paths"), Value(paths)}, {Value("active"), Value(lease->active)}}));
+    }
+    *result = 0; return true;
+  }
+  if (message == kResolveRemoteReference) {
+    auto request = std::unique_ptr<RemoteReferenceRequest>(reinterpret_cast<RemoteReferenceRequest*>(lparam));
+    if (!channel || !request) { if (request) request->complete({}, "接收服务已关闭"); *result = 0; return true; }
+    const auto token = "remote-" + std::to_string(++remote_reference_sequence);
+    auto reference = std::move(request->reference);
+    remote_reference_requests[token] = std::move(request->complete);
+    channel->InvokeMethod("resolveRemoteReference", std::make_unique<Value>(Map{{Value("token"), Value(token)}, {Value("reference"), Value(reference)}}));
+    *result = 0; return true;
+  }
   update_interaction.Observe(owner, message, wparam);
   if (message == kCompleteUpdateExit && update_launch && owner) {
     if (update_exit.Complete(UpdateInteracting())) DestroyWindow(owner);
@@ -912,6 +1031,16 @@ bool HandleGlobalSendMessage(UINT message) {
 }
 
 void UnregisterGlobalSendSystem() {
+  SetGlobalSendRemoteDragActivityChanged({});
+  for (auto& request : remote_reference_requests) request.second({}, "接收服务已关闭");
+  remote_reference_requests.clear();
+  MSG queued{};
+  while (owner && PeekMessageW(&queued, owner, kResolveRemoteReference, kResolveRemoteReference, PM_REMOVE)) {
+    auto request = std::unique_ptr<RemoteReferenceRequest>(reinterpret_cast<RemoteReferenceRequest*>(queued.lParam));
+    if (request) request->complete({}, "接收服务已关闭");
+  }
+  while (owner && PeekMessageW(&queued, owner, kClipboardSlotLease, kClipboardSlotLease, PM_REMOVE))
+    delete reinterpret_cast<ClipboardSlotLease*>(queued.lParam);
   update_exit.Cancel();
   ++update_request;
   if (import_view) RemoveWindowSubclass(import_view, PasteSubclass, kPasteSubclass);
