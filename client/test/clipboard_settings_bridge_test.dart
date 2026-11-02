@@ -48,7 +48,9 @@ void main() {
       await controller.setClipboardSync(false, '');
       await Future<void>.delayed(Duration.zero);
       expect(controller.clipboardEnabled, isFalse);
-      expect(controller.clipboardTarget, isEmpty);
+      expect(controller.clipboardTarget, 'tablet');
+      expect(controller.profile!.clipboardSyncEnabled, isFalse);
+      expect(controller.profile!.clipboardSyncTarget, 'tablet');
       expect(
         calls
             .where((call) => call.method == 'cancelClipboardImage')

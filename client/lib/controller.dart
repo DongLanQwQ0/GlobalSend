@@ -172,9 +172,7 @@ class SendController extends ChangeNotifier {
     if (!Platform.isWindows) throw UnsupportedError('文件复制推送目前由 Windows 提供');
     if (enabled && !copiedFilesSupported) throw StateError('请先升级中心以使用文件复制推送');
     await copiedFiles.configure(enabled, targets);
-    await SystemBridge.watchClipboard(
-      clipboardEnabled || copiedFiles.sourceReady,
-    );
+    await _syncClipboardWatch();
     if (copiedFiles.sourceReady)
       await copiedFiles.copiedPaths(await SystemBridge.clipboardFilePaths());
     changed();
@@ -523,6 +521,7 @@ class SendController extends ChangeNotifier {
   int _clipboardSequence = -1, _lastClipboardSend = 0;
   int _lastRemoteClipboardAt = 0;
   StreamSubscription<Map<String, dynamic>>? _clipboardSubscription;
+  Future<void> _clipboardWatchTail = Future<void>.value();
   Timer? _clipboardDebounce, _ephemeralCleanup;
   int _nextSavedFilesCleanup = 0;
   bool _cleaningSavedFiles = false;
@@ -1648,7 +1647,7 @@ class SendController extends ChangeNotifier {
       await copiedFiles.load(File('${root!.path}/copied-files.json'));
       if (Platform.isWindows) {
         if (copiedFiles.sourceReady) {
-          await SystemBridge.watchClipboard(true);
+          await _syncClipboardWatch();
           await copiedFiles.copiedPaths(
             await SystemBridge.clipboardFilePaths(),
           );
@@ -1683,6 +1682,7 @@ class SendController extends ChangeNotifier {
         // Local library access does not need a network session. Credentials
         // remain unused until connect verifies the center's instance ID.
         profile = recent;
+        await _restoreClipboardPreference();
         final state = File('${root!.path}/${recent.storageKey}.json');
         if (await state.exists()) {
           final values = jsonDecode(await state.readAsString());
@@ -1856,6 +1856,8 @@ class SendController extends ChangeNotifier {
         ServerProfile(baseUrl: base, instanceId: data['instanceId']);
     if (!profiles.contains(p)) profiles.add(p);
     profile = p;
+    await _restoreClipboardPreference();
+    if (disposed || request != _connectRequest) return;
     allowLegacyPeerIdentity = p.deviceId.isNotEmpty && p.legacyPeerIdentity;
     cellularUploads = p.cellularAllowed;
     _gate.limit = p.transferConcurrency;
@@ -2458,6 +2460,8 @@ class SendController extends ChangeNotifier {
       await hello.future.timeout(const Duration(seconds: 15));
       if (epoch != generation || disposed || attempt != _socketAttempt) return;
       connected = true;
+      await _resumeClipboardWatch();
+      if (epoch != generation || disposed || attempt != _socketAttempt) return;
       unawaited(urlIntents.synchronize());
       unawaited(
         copiedFiles
@@ -3155,32 +3159,88 @@ class SendController extends ChangeNotifier {
     if (!Platform.isWindows) {
       throw UnsupportedError('自动剪贴板仅用于 Windows；移动端不后台读剪贴板');
     }
-    if (!enabled) {
-      await SystemBridge.cancelClipboardImage();
-      _stopClipboard();
-      changed();
-      return;
-    }
-    if (api?.token.isNotEmpty != true ||
+    final p = profile;
+    final rememberedTarget =
+        targetDeviceId.isNotEmpty &&
+        targetDeviceId == p?.clipboardSyncTarget &&
+        p?.deviceId.isNotEmpty == true &&
+        targetDeviceId != p?.deviceId &&
         !devices.any(
-          (d) =>
-              d['deviceId'] == targetDeviceId &&
-              d['revoked'] != true &&
-              d['deviceId'] != profile?.deviceId,
-        )) {
+          (d) => d['deviceId'] == targetDeviceId && d['revoked'] == true,
+        );
+    if (enabled &&
+        !rememberedTarget &&
+        (api?.token.isNotEmpty != true ||
+            !devices.any(
+              (d) =>
+                  d['deviceId'] == targetDeviceId &&
+                  d['revoked'] != true &&
+                  d['deviceId'] != profile?.deviceId,
+            ))) {
       throw const FormatException('请先选择同组目标设备');
     }
-    _clipboardSubscription ??= SystemBridge.clipboardEvents.listen(
-      _onClipboard,
-    );
+    final epoch = generation, selected = profile;
     await SystemBridge.cancelClipboardImage();
-    await SystemBridge.watchClipboard(true);
-    clipboardEnabled = true;
-    clipboardTarget = targetDeviceId;
+    if (disposed || epoch != generation || selected != profile) {
+      throw StateError('连接已改变，请重新设置剪贴板同步');
+    }
+    _resetClipboardActivity();
+    clipboardEnabled = enabled;
+    if (enabled) clipboardTarget = targetDeviceId;
+    if (p != null) {
+      p.clipboardSyncEnabled = enabled;
+      p.clipboardSyncTarget = clipboardTarget;
+    }
     _lastRemoteClipboardAt = 0;
-    clipboardStatus = '已开启';
+    clipboardStatus = enabled ? '已开启' : '已关闭';
     clipboardError = '';
     changed();
+    // The completed toggle includes its durable preference, not just a native
+    // listener. A connection shutdown must never rewrite this user choice.
+    await save();
+    await _syncClipboardWatch();
+  }
+
+  Future<void> _syncClipboardWatch() {
+    if (!Platform.isWindows) return Future<void>.value();
+    _clipboardWatchTail = _clipboardWatchTail.catchError((Object _) {}).then((
+      _,
+    ) async {
+      final enabled =
+          !disposed && (clipboardEnabled || copiedFiles.sourceReady);
+      if (enabled) {
+        _clipboardSubscription ??= SystemBridge.clipboardEvents.listen(
+          _onClipboard,
+        );
+      }
+      await SystemBridge.watchClipboard(enabled);
+    });
+    return _clipboardWatchTail;
+  }
+
+  Future<void> _restoreClipboardPreference() async {
+    _resetClipboardActivity();
+    final p = profile;
+    clipboardTarget = Platform.isWindows ? p?.clipboardSyncTarget ?? '' : '';
+    clipboardEnabled =
+        Platform.isWindows &&
+        p?.clipboardSyncEnabled == true &&
+        clipboardTarget.isNotEmpty;
+    clipboardStatus = clipboardEnabled ? '等待连接' : '已关闭';
+    await _resumeClipboardWatch();
+  }
+
+  Future<void> _resumeClipboardWatch() async {
+    try {
+      await _syncClipboardWatch();
+      if (clipboardEnabled) {
+        clipboardStatus = connected ? '已开启' : '等待连接';
+        clipboardError = '';
+      }
+    } catch (error) {
+      clipboardStatus = '剪贴板监听失败';
+      clipboardError = '$error';
+    }
   }
 
   bool _sensitiveClipboard(String text) => RegExp(
@@ -3408,20 +3468,14 @@ class SendController extends ChangeNotifier {
     if (dock.length != before) changed();
   }
 
-  void _stopClipboard() {
-    clipboardEnabled = false;
+  void _resetClipboardActivity() {
     clipboardError = '';
-    clipboardTarget = '';
     _clipboardDebounce?.cancel();
+    _clipboardDebounce = null;
+    _clipboardSequence = -1;
+    _lastRemoteClipboardAt = 0;
     _clipboardRoots.clear();
     dock.removeWhere((d) => d.autoClipboard && d.outgoing);
-    clipboardStatus = '已关闭';
-    if (Platform.isWindows) {
-      unawaited(
-        SystemBridge.watchClipboard(!disposed && copiedFiles.sourceReady)
-            .catchError((Object _) {}),
-      );
-    }
   }
 
   Future<void> signOutLocal() async {
@@ -6834,7 +6888,9 @@ class SendController extends ChangeNotifier {
         unawaited(_releaseTemporarySource(path));
       }
     }
-    _stopClipboard();
+    _resetClipboardActivity();
+    clipboardStatus = clipboardEnabled ? '等待连接' : '已关闭';
+    unawaited(_syncClipboardWatch().catchError((Object _) {}));
     busyFiles.clear();
     for (final operation in nativeOperations.values) {
       unawaited(NetworkBridge.cancel(operation));

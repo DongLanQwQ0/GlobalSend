@@ -44,6 +44,8 @@ class ServerProfile {
     this.groupId = '',
     List<Map<String, dynamic>>? groups,
     this.autoReceive = true,
+    this.clipboardSyncEnabled = false,
+    this.clipboardSyncTarget = '',
     this.sendRoutePreference = 'auto',
     this.receiveRoutePreference = 'auto',
     this.cellularAllowed = true,
@@ -59,6 +61,8 @@ class ServerProfile {
   List<Map<String, dynamic>> groups;
   int cursor;
   bool autoReceive;
+  bool clipboardSyncEnabled;
+  String clipboardSyncTarget;
   bool cellularAllowed;
   int relayConfirmMiB;
   int transferConcurrency;
@@ -81,6 +85,8 @@ class ServerProfile {
     'groupId': groupId,
     'groups': groups,
     'autoReceive': autoReceive,
+    'clipboardSyncEnabled': clipboardSyncEnabled,
+    'clipboardSyncTarget': clipboardSyncTarget,
     'sendRoutePreference': sendRoutePreference,
     'receiveRoutePreference': receiveRoutePreference,
     'cellularAllowed': cellularAllowed,
@@ -100,6 +106,8 @@ class ServerProfile {
         .map((e) => Map<String, dynamic>.from(e))
         .toList(),
     autoReceive: j['autoReceive'] ?? true,
+    clipboardSyncEnabled: j['clipboardSyncEnabled'] == true,
+    clipboardSyncTarget: j['clipboardSyncTarget'] as String? ?? '',
     sendRoutePreference: j['sendRoutePreference'] ?? 'auto',
     receiveRoutePreference: j['receiveRoutePreference'] ?? 'auto',
     cellularAllowed: j['cellularAllowed'] ?? true,

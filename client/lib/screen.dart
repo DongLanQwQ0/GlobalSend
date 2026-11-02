@@ -996,7 +996,7 @@ class _SendScreenState extends State<SendScreen>
     relayLimit.text = '${c.profile?.relayConfirmMiB ?? 32}';
     name.text = c.profile?.name ?? name.text;
     _nameEdited = false;
-    clipboardChoice = c.clipboardEnabled
+    clipboardChoice = c.clipboardTarget.isNotEmpty
         ? c.clipboardTarget
         : peers.any((peer) => peer['deviceId'] == clipboardChoice)
         ? clipboardChoice
@@ -4881,8 +4881,8 @@ class _SendScreenState extends State<SendScreen>
   );
 
   Widget clipboardSettings() {
-    final active = c.clipboardEnabled ? c.clipboardTarget : null;
-    if (!c.clipboardEnabled &&
+    final active = c.clipboardTarget.isNotEmpty ? c.clipboardTarget : null;
+    if (active == null &&
         !peers.any((peer) => peer['deviceId'] == clipboardChoice)) {
       clipboardChoice = peers.firstOrNull?['deviceId'];
     }
@@ -4898,7 +4898,7 @@ class _SendScreenState extends State<SendScreen>
           tileColor: Colors.transparent,
           title: const Text('同步剪贴板'),
           value: c.clipboardEnabled,
-          onChanged: working || !c.clipboardEnabled && !online
+          onChanged: working || !c.clipboardEnabled && choice == null
               ? null
               : (value) => perform(
                   () => c.setClipboardSync(value, value ? choice! : ''),
