@@ -1,0 +1,20 @@
+{
+  "lastConfirmedPhoneBuildNumber": 103,
+  "phonePending": true,
+  "publishedAt": "2026-11-02T09:16:30.9730643+08:00",
+  "serial": "",
+  "lastConfirmedPhoneVersion": "1.0.79",
+  "windows": "E:\\Programs\\GlobalSend",
+  "apk": "F:\\Codes\\Java\\GlobalSend\\artifacts\\releases\\GlobalSend-1.0.81-android-arm64-v8a.apk",
+  "apkBytes": 16431707,
+  "windowsPid": 39240,
+  "phoneDeferReason": "Chrona reported the physical phone disconnected; waiting for a fresh authorized connection",
+  "phoneDeferred": true,
+  "androidInstalled": false,
+  "windowsVersion": "1.0.81",
+  "version": "1.0.81",
+  "apkBuilt": true,
+  "buildNumber": 105,
+  "stateBackup": "F:\\Codes\\Java\\GlobalSend\\backups\\native-state\\20261102-091630-pre-1.0.81",
+  "sourceCommit": "60f3875299a6c692f5ca056665d943fa496cd6d8"
+}

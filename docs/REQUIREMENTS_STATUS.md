@@ -2,7 +2,7 @@
 
 本表按用户最终要求合并，替代早期规划中已撤回的交互。源码已实现、自动检查通过、系统真机已验收是不同状态；具体安装及部署版本分别以 `artifacts/releases/latest-local.json` 和 `artifacts/deploy/current-workspace-deployment.json` 为准。
 
-104 指本次修复批次；构建与发布未完成前，下述 104 项是源码候选，不代表设备已更新。
+104 为需求审计修复批次，105 继续修复真实公网更新入口。Windows 已安装105，Android105与IPA105已发布，手机仍最后确认103、待恢复连接后覆盖安装；不能将下文的源码实现当成所有平台均已实机验收。最终交付见 `artifacts/reports/completion105.json`。
 
 ## 连接、选路和传输
 

@@ -1,0 +1,14 @@
+{
+  "state": "deployed",
+  "stamp": "20261102-completion104",
+  "sourceCommit": "92c15c655ac8702d00f4b4afecb8d3d9b8afcf6e",
+  "image": "globalsend:completion-1.0.80-20261102",
+  "oldImage": "globalsend:auto-update-1.0.79-20261101",
+  "health": "healthy",
+  "release": "/home/ubuntu/GlobalSend/releases/20261102-completion104",
+  "previousRelease": "/home/ubuntu/GlobalSend/releases/20261101-auto-update103",
+  "composeBase": "/home/ubuntu/GlobalSend/releases/20261029-1620-multi-group",
+  "installerUploaded": false,
+  "evidence": "artifacts/tmp/completion104-deploy/server-deploy.log",
+  "publicWebEvidence": "artifacts/tmp/completion104-deploy/public.json"
+}

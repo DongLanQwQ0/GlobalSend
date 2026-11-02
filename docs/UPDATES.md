@@ -41,11 +41,15 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-Windows与Android均已覆盖更新并启动 **1.0.79+103**，Web及中心已同步。APK 16,423,483字节，Windows完整ZIP 22,516,452字节，包内无字体；手机实际读回103版，保留数据。三个平台的实际包与独立清单已在[GitHub 103版](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.79-build103)发布，不使用中心分发。最后构建的IPA为14,893,687字节，主应用与扩展均为103/arm64，交用户手动签名安装。
+最新发布为 **1.0.81+105**：Windows完整客户端已更新并启动；APK为16,431,707字节，Windows ZIP为22,530,094字节，均无打包字体。手机由其它任务使用后断开，尚未覆盖105，最后实际读回仍为1.0.79+103；新包保留在本地与[GitHub 105版](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.81-build105)，不以包生成代替手机安装。Web分区拖放反馈已在中心上线，105没有新的Web/中心产品改动，不重复部署相同代码。
 
-自动更新引擎、真实HTTP续传、草稿恢复、Windows隐藏辅助程序替换与回滚、平台筛选和UI检查通过。Android安装器与权限检查通过；实际FileProvider文件读取检查因Windows主机路径差异跳过，仍需在Android真正自动安装时确认。没有操作真实Windows界面或执行真实Windows自更新测试；其实际覆盖由用户后续验收。证据见 `artifacts/reports/automatic-updates103.json`、[Windows更新机制](WINDOWS_SELF_UPDATE.md)和[本机发布记录](../artifacts/releases/latest-local.json)。
+105真实匿名检查21条Release，Windows/Android各读取1份清单，约5.2秒选出各自105包。生产下载器已完整下载22,527,511字节的104版Windows ZIP，实际版本及ZIP内容核对通过；105实际包由发布脚本另行读回版本。此前github.com下载入口在当前网络失败，改用同一GitHub公开资源API后通过，未改变代理设置。证据：`artifacts/tmp/completion104/public-feed-before.json`、`public-download.json`，以及`artifacts/tmp/completion105/public-feed.json`。
 
-101版截图自动发送、98版文件引用拉取及iPad基本跨应用拖放已由用户确认。Windows接收截图后实际Ctrl+V仍因无第二台Windows而未验；103的iPad卡片拖影与剪贴板建议拖动需用户安装后确认，见[iPad说明](IPAD.md)。
+最后构建的105 IPA为14,913,965字节，主应用与扩展均为真机arm64/105，App Group配置一致，无打包字体；实际包和iOS独立清单已发布，交用户手动签名安装。核对记录：`artifacts/tmp/completion105/ios-verified.json`。
+
+自动更新引擎、真实HTTP续传、草稿恢复、Windows隐藏辅助程序替换与回滚、平台筛选和操作门禁检查通过。新增22项公网更新合同检查、15项交互/取消回归及单helper等待31秒后取消均通过。Android安装器与权限检查通过；实际FileProvider读取仍需在Android应用内安装时确认。按用户要求未操作真实Windows界面，真实自更新与实体触屏由用户验收。见 `artifacts/reports/completion105.json`、[Windows更新机制](WINDOWS_SELF_UPDATE.md)和[本机发布记录](../artifacts/releases/latest-local.json)。
+
+101版截图自动发送、98版文件引用拉取及iPad基本跨应用拖放已由用户确认。Windows接收截图后实际Ctrl+V仍因无第二台Windows而未验；105的iPad卡片拖影、剪贴板及媒体建议拖动需用户安装后确认，见[iPad说明](IPAD.md)。
 
 ### 历史交付：1.0.57+68
 
