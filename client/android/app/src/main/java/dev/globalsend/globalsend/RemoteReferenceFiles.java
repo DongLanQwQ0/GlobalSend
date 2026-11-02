@@ -36,6 +36,10 @@ final class RemoteReferenceFiles {
         final CompletableFuture<String> local=new CompletableFuture<>();
         final long created=System.currentTimeMillis();
         boolean requested;
+        final java.util.Set<String> grantedPackages=ConcurrentHashMap.newKeySet();
+        android.content.Context grantContext;
+        Uri grantedTree;
+        boolean revoked;
         Entry(Map<String,Object> reference,List<Part> parts){this.reference=reference;this.parts=parts;}
         synchronized CompletableFuture<String> resolve() {
             if(!requested){requested=true;Consumer<Map<String,Object>> listener=resolver;
@@ -46,6 +50,11 @@ final class RemoteReferenceFiles {
             return local;
         }
         Part part(String path) throws FileNotFoundException {return parts.stream().filter(value->value.path.equals(path)).findFirst().orElseThrow(()->new FileNotFoundException("远程目录项不存在"));}
+        synchronized void revokeTreeGrant() {
+            revoked=true;
+            if(grantContext!=null && grantedTree!=null)grantContext.revokeUriPermission(grantedTree,android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            grantedPackages.clear();grantContext=null;grantedTree=null;
+        }
     }
     private static final ConcurrentHashMap<String,Entry> entries=new ConcurrentHashMap<>();
     private static volatile Consumer<Map<String,Object>> resolver;
@@ -53,10 +62,10 @@ final class RemoteReferenceFiles {
     static {ioThread.start();}
     private static final Handler io=new Handler(ioThread.getLooper());
     static void listen(Consumer<Map<String,Object>> listener){resolver=listener;}
-    static void stop(){resolver=null;for(Entry entry:entries.values())entry.local.completeExceptionally(new FileNotFoundException("接收服务已关闭"));entries.clear();}
+    static void stop(){resolver=null;for(Entry entry:entries.values()){entry.local.completeExceptionally(new FileNotFoundException("接收服务已关闭"));entry.revokeTreeGrant();}entries.clear();}
     @SuppressWarnings("unchecked")
     static Entry register(Map<String,?> value) throws Exception {
-        entries.entrySet().removeIf(row->System.currentTimeMillis()-row.getValue().created>600000 && (!row.getValue().requested || row.getValue().local.isDone()));
+        entries.entrySet().removeIf(row->{Entry entry=row.getValue();boolean expired=System.currentTimeMillis()-entry.created>600000 && (!entry.requested || entry.local.isDone());if(expired)entry.revokeTreeGrant();return expired;});
         Map<String,Object> reference=new HashMap<>();reference.putAll(value);
         String name=String.valueOf(value.get("name"));boolean directory="directory".equals(value.get("kind"));
         Object manifest=value.get("entries");

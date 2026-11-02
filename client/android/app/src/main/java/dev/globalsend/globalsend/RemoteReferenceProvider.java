@@ -14,13 +14,35 @@ public final class RemoteReferenceProvider extends DocumentsProvider {
     public boolean onCreate(){return true;}
     public Cursor queryRoots(String[] projection){return new MatrixCursor(projection==null?new String[]{"root_id"}:projection);}
     public Cursor queryDocument(String id,String[] projection) throws FileNotFoundException {
-        RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.entry(id);MatrixCursor result=new MatrixCursor(projection==null?COLUMNS:projection);add(result,id,entry.part(RemoteReferenceFiles.relative(id)));return result;
+        RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.entry(id);grantTreeAccess(entry);MatrixCursor result=new MatrixCursor(projection==null?COLUMNS:projection);add(result,id,entry.part(RemoteReferenceFiles.relative(id)));return result;
     }
     public Cursor queryChildDocuments(String id,String[] projection,String sortOrder) throws FileNotFoundException {
-        RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.entry(id);String parent=RemoteReferenceFiles.relative(id)+"/";MatrixCursor result=new MatrixCursor(projection==null?COLUMNS:projection);
+        RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.entry(id);grantTreeAccess(entry);String parent=RemoteReferenceFiles.relative(id)+"/";MatrixCursor result=new MatrixCursor(projection==null?COLUMNS:projection);
         for(RemoteReferenceFiles.Part part:entry.parts)if(part.path.startsWith(parent) && part.path.indexOf('/',parent.length())<0)add(result,entry.token+":"+part.path,part);return result;
     }
     public boolean isChildDocument(String parentId,String childId){try{return RemoteReferenceFiles.entry(parentId)==RemoteReferenceFiles.entry(childId) && RemoteReferenceFiles.relative(childId).startsWith(RemoteReferenceFiles.relative(parentId)+"/");}catch(FileNotFoundException missing){return false;}}
+    private void grantTreeAccess(RemoteReferenceFiles.Entry entry) {
+        if(getContext()==null || !entry.parts.get(0).directory)return;
+        String caller=getCallingPackage();
+        if(caller==null || caller.equals(getContext().getPackageName()))return;
+        grantTreeAccess(getContext(),entry,caller);
+    }
+    static void grantTreeAccess(android.content.Context context,RemoteReferenceFiles.Entry entry,String caller) {
+        synchronized(entry) {
+        if(entry.revoked || !entry.parts.get(0).directory || entry.grantedPackages.contains(caller))return;
+        // The framework already checked this caller's drag grant for the root
+        // document. Child IDs are distinct URI path segments, so extend that
+        // same explicit folder drop to its registered tree, not another root.
+        android.net.Uri tree=android.provider.DocumentsContract.buildTreeDocumentUri(
+            context.getPackageName()+".remote-files",entry.token+":"+entry.parts.get(0).path);
+        long identity=android.os.Binder.clearCallingIdentity();
+        try {
+            context.grantUriPermission(caller,tree,android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION|android.content.Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+            entry.grantContext=context.getApplicationContext();entry.grantedTree=tree;entry.grantedPackages.add(caller);
+        }
+        finally {android.os.Binder.restoreCallingIdentity(identity);}
+        }
+    }
     public ParcelFileDescriptor openDocument(String id,String mode,CancellationSignal cancellation) throws FileNotFoundException {
         if(!"r".equals(mode))throw new FileNotFoundException("只读文件");if(cancellation!=null)cancellation.throwIfCanceled();
         RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.entry(id);return RemoteReferenceFiles.open(getContext(),entry,entry.part(RemoteReferenceFiles.relative(id)));

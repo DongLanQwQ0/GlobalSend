@@ -95,4 +95,24 @@ public class RemoteReferenceProviderTest {
             assertEquals("contents",reading.get(2,java.util.concurrent.TimeUnit.SECONDS));
         } finally {reader.onRelease();executor.shutdownNow();file.delete();}
     }
+    @Test public void directoryRootExtendsOnlyItsOwnTreeAndRevokesOnEnd() throws Exception {
+        android.content.Context app=org.robolectric.RuntimeEnvironment.getApplication();
+        java.util.List<android.net.Uri> grants=new java.util.ArrayList<>(),revokes=new java.util.ArrayList<>();
+        android.content.Context capture=new android.content.ContextWrapper(app) {
+            public android.content.Context getApplicationContext(){return this;}
+            public void grantUriPermission(String target,android.net.Uri uri,int flags){
+                assertEquals("com.target.files",target);
+                assertEquals(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION|android.content.Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,flags);
+                grants.add(uri);
+            }
+            public void revokeUriPermission(android.net.Uri uri,int flags){revokes.add(uri);}
+        };
+        RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.register(Map.of("name","Folder","kind","directory","entries",List.of(Map.of("relativePath","Folder","kind","directory"))));
+        RemoteReferenceProvider.grantTreeAccess(capture,entry,"com.target.files");
+        RemoteReferenceProvider.grantTreeAccess(capture,entry,"com.target.files");
+        assertEquals(1,grants.size());assertEquals(entry.token+":Folder",android.provider.DocumentsContract.getTreeDocumentId(grants.get(0)));
+        RemoteReferenceProvider.grantTreeAccess(capture,RemoteReferenceFiles.register(file()),"com.target.files");
+        assertEquals(1,grants.size());assertFalse(entry.requested);
+        RemoteReferenceFiles.stop();assertEquals(grants,revokes);
+    }
 }
