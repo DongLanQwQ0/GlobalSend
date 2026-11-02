@@ -12,13 +12,13 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows 最新版为 **1.0.85+110**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`；Android维持已实测的 **1.0.82+106**。110修复切换剪贴板同步时的原生参数错误，保留109触屏交接修复，不重建未改动的平台。自动更新、Android系统安装确认见[更新说明](docs/UPDATES.md)；开机自启动与后台参数见[启动说明](docs/WINDOWS_STARTUP.md)。
+Windows 和 Android 当前为 **1.0.87+112**；Windows 完整目录已更新并重启于 `E:\Programs\GlobalSend`，Android 已覆盖安装并保留数据。Web 与中心同步上线。自动剪贴板改为静默单槽，不进入普通收件或历史；文件复制引用拉取后复用本地副本，手动拉取不弹收件强调页。默认只清理两天前、小于200 KB的图片文件；文件库支持分类筛选。自动更新见[更新说明](docs/UPDATES.md)，开机自启动与后台参数见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.85+110 完整 ZIP](artifacts/releases/GlobalSend-1.0.85-windows-x64.zip)。不要单独复制 EXE。[触屏修复](docs/WINDOWS_TOUCH_DRAG.md)通过原生组件与编译检查，实际触屏跨应用投放仍由用户验收；系统发送到、整卡拖放与指定设备[剪贴板同步](docs/CLIPBOARD_SYNC.md)保留。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.87+112 完整 ZIP](artifacts/releases/GlobalSend-1.0.87-windows-x64.zip)。不要单独复制 EXE。顶部“剪贴板”与正式内容卡均支持原生拖放；[触屏交接](docs/WINDOWS_TOUCH_DRAG.md)已通过原生组件与编译检查，实际跨应用操作由用户验收。指定设备[剪贴板同步](docs/CLIPBOARD_SYNC.md)与[文件复制推送](docs/COPIED_FILES.md)为独立设置。
 
-Android [1.0.82+106 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.82-android-arm64-v8a.apk)已在手机运行，无打包字体。悬浮坞链接实际点开Edge通过；真实Drag-cache图片未重复进入发送页或坞建议，外部图片正对照及删除后建议移除均通过。本次测试分组和文件已清理，未清除用户数据；实际状态见[本机发布记录](artifacts/releases/latest-local.json)。
+Android [1.0.87+112 arm64 APK，约16.5 MB](artifacts/releases/GlobalSend-1.0.87-android-arm64-v8a.apk)已在手机运行，无打包字体。用户已确认本版悬浮坞图片投放微信成功。暂存坞在普通内容和清空卡之后只留一格空白，再紧接建议，不用整屏空位把建议推远。临时拖放诊断已关闭并从手机清理；实际版本见[本机发布记录](artifacts/releases/latest-local.json)。
 
-iPad / iPhone 的[**1.0.82 (107) 未签名 IPA，约15.0 MB**](artifacts/releases/ios-1.0.82-build107/GlobalSend-iPad-unsigned.ipa)已最后构建，真实 NSItemProvider 检查及完整 iOS 编译通过，无打包字体。网页图片优先读取实际图像数据；分享先请求打开宿主，再继续导入；顶栏随真实窗口控制区域避让。由用户用 iloader 手动签名安装并复验，见[iPad输入与窗口说明](docs/IOS_NATIVE_INPUT_AND_WINDOW_LAYOUT.md)。[Windows/Android106](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.82-build106)与[iOS107](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.82-build107)分平台发布；107仅修正测试，产品代码相同。**中心不托管安装包。**
+iPad / iPhone 的[**1.0.87 (112) 未签名 IPA**](artifacts/releases/ios-1.0.87-build112/GlobalSend-iPad-unsigned.ipa)已按约定最后构建。[Mac 工作流](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41441349826)已完成真实提供方检查、iOS主应用与分享扩展编译及打包。本版增加远端引用的按需文件提供方，并保留图片对象与原文件两种拖放表示；iPad微信及跨应用按需拖放仍由用户手动签名安装后验收，不把QQ或Android结果替代为iPad/iPhone结果。说明见[iPad输入与窗口说明](docs/IOS_NATIVE_INPUT_AND_WINDOW_LAYOUT.md)，下载见[分平台发布](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.87-build112)。**中心不托管安装包。**
 
 网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
 
