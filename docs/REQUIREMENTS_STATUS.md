@@ -2,7 +2,9 @@
 
 本表按用户最终要求合并，替代早期规划中已撤回的交互。源码已实现、自动检查通过、系统真机已验收是不同状态；具体安装及部署版本分别以 `artifacts/releases/latest-local.json` 和 `artifacts/deploy/current-workspace-deployment.json` 为准。
 
-本轮版本为 1.0.82：Windows106已覆盖更新并启动，Android106已构建验签，网页版106已上线；IPA107已最后构建并发布。107仅修正真实 provider 测试的注册选择前提，产品代码与106一致。手机已通过当前实机连接确认安装运行106；发送/接收页切换正常，未重复安装或清除数据，新悬浮坞链接与媒体来源过滤仍待专项实测；IPA由用户手动签名安装。交付与证据见 `artifacts/reports/completion106.json`，不能将自动检查当成全部实机验收。
+当前 Windows 为 1.0.83+108，已覆盖更新并启动，修正真实触控消息中的原生拖放接管，见 [Windows触屏拖放](WINDOWS_TOUCH_DRAG.md)。Android仍为已安装的1.0.82+106；网页版106与IPA107继续有效，未因仅Windows代码变化重建其它平台。IPA由用户手动签名安装。交付与证据见 `artifacts/reports/completion106.json` 和 `artifacts/reports/completion108.json`，不能将组件检查当成Windows实体触屏验收。
+
+Android两项专项已在真实V2527A上通过：悬浮坞合成链接点开Edge；实际由GlobalSend导出的Drag-cache媒体行不进入发送页或坞建议，非本应用图片仍会建议，删除原图后建议自动消失。本次测试分组、收件、草稿、暂存及媒体文件均已清理，应用拖放缓存也已按10分钟生命周期移除，见 `artifacts/reports/android106-dock-physical-20261102.md`。没有更改网络、重启或覆盖Chrona。
 
 本轮已实现：悬浮坞链接直接打开；排除本应用生成/拖放缓存的媒体建议；iPad 网页图片优先导入真实数据、分享先请求唤起后继续导入；顶栏避让系统窗口控制；各平台普通收件平铺接收目录，同名加 `(n)`。真实传输的文件夹保留目录树。旧编号层级迁移覆盖历史、断点、待发及原生暂存引用，原生确认新路径落盘后才移除旧原件；接收写入前先登记来源，完成后仍正常更新系统索引。
 
