@@ -5,6 +5,7 @@ import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -49,11 +50,40 @@ final class LegacyDragFiles {
     static void restore(Context context) {
         Context app=context.getApplicationContext();
         cleanup.execute(() -> {
-            for(Map.Entry<String,?> entry:app.getSharedPreferences(JOURNAL,0).getAll().entrySet())
-                schedule(app,Uri.parse(entry.getKey()),(Long)entry.getValue());
+            for(Map.Entry<String,?> entry:app.getSharedPreferences(JOURNAL,0).getAll().entrySet()) {
+                Uri uri=Uri.parse(entry.getKey());long expires=(Long)entry.getValue();
+                schedule(app,uri,expires);
+                if(expires>System.currentTimeMillis())hideRestoredExport(app,uri);
+            }
             for(Map.Entry<String,?> entry:app.getSharedPreferences(READ_GRANTS,0).getAll().entrySet())
                 scheduleReadGrant(app,Uri.parse(entry.getKey()),(Long)entry.getValue());
         });
+    }
+
+    /** Reclassify only journaled compatibility copies left by an older build. */
+    static void hideRestoredExport(Context context,Uri uri) {
+        if(!context.getSharedPreferences(JOURNAL,0).contains(uri.toString()))return;
+        try {
+            Row row=readRow(context,uri);File file=new File(row.path).getCanonicalFile();
+            File downloads=Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            File parent=file.getParentFile();
+            if(!new File(downloads,"GlobalSend/Drag-cache").getCanonicalFile().equals(parent) &&
+                    !new File(downloads,"GlobalSend/Dragcache").getCanonicalFile().equals(parent))return;
+            hideDirectory(parent);
+            // .nomedia alone doesn't remove an already indexed Images row.
+            // Re-scan the exact file, not the receive directory or its contents.
+            MediaScannerConnection.scanFile(context,new String[]{file.getPath()},null,(path,scanned) -> {
+                try {DragDiagnostics.record("legacy restored path="+path+" mediaType="+readRow(context,uri).mediaType);}
+                catch(IOException | RuntimeException error){android.util.Log.w("GlobalSend","Cannot inspect restored drag cache",error);}
+            });
+        } catch(IOException | RuntimeException error) {
+            android.util.Log.w("GlobalSend","Cannot hide restored drag cache",error);
+        }
+    }
+
+    private static void hideDirectory(File directory) throws IOException {
+        File marker=new File(directory,".nomedia");
+        if(!marker.createNewFile() && !marker.isFile())throw new IOException("Cannot hide drag cache from media library");
     }
 
     static Export publish(Context context,String name,String type,Source source) throws IOException {
@@ -79,23 +109,44 @@ final class LegacyDragFiles {
                 byte[] bytes=new byte[65536];int count;
                 while((count=input.read(bytes))!=-1)output.write(bytes,0,count);
             }
-            String path;int mediaType;
-            try(Cursor cursor=context.getContentResolver().query(fileAccessUri(uri,0),new String[]{MediaStore.MediaColumns.DATA,MediaStore.Files.FileColumns.MEDIA_TYPE},null,null,null)) {
-                DragDiagnostics.record("legacy pending row query rows="+(cursor==null?-1:cursor.getCount()));
-                if(cursor==null || !cursor.moveToFirst() || cursor.isNull(0))throw new IOException("No exported file path");
-                path=cursor.getString(0);mediaType=cursor.getInt(1);
-            }
-            // The media observer sees the row as soon as IS_PENDING clears.
-            // Record its origin first, not after it has already been suggested.
-            ReceivedFilePublication.remember(context,new File(path));
+            Row pending=readRow(context,uri);
+            // This marker belongs only to our reserved compatibility cache,
+            // never Download/GlobalSend (ordinary receipts must stay indexed).
+            // Create it before publishing: the MediaProvider's publish scan
+            // must classify the copy as a hidden file, not a gallery image.
+            hideDirectory(new File(pending.path).getParentFile());
             values.clear();values.put(MediaStore.MediaColumns.IS_PENDING,0);
-            context.getContentResolver().update(uri,values,null,null);
-            published=true;return new Export(uri,fileAccessUri(uri,mediaType),path);
+            if(context.getContentResolver().update(uri,values,null,null)!=1)throw new IOException("Cannot publish drag export");
+            // Clearing IS_PENDING can rename .pending-... to the final name,
+            // and the publish scan can change IMAGE to NONE under .nomedia.
+            // Both DATA and the FUSE grant URI must come from the final row.
+            Row ready=readRow(context,uri);
+            File file=new File(ready.path);
+            if(!file.isFile() || !file.canRead())throw new IOException("Published drag path is not readable");
+            if((type.startsWith("image/") || type.startsWith("video/")) && ready.mediaType!=MediaStore.Files.FileColumns.MEDIA_TYPE_NONE)
+                throw new IOException("Drag cache is still visible in media library");
+            // The reserved path/owner already excludes this row from media
+            // suggestions during publication; persist only its final path.
+            ReceivedFilePublication.remember(context,file);
+            DragDiagnostics.record("legacy published path="+ready.path+" mediaType="+ready.mediaType);
+            published=true;return new Export(uri,fileAccessUri(uri,ready.mediaType),ready.path);
         } finally {
             if(!published) {
                 context.getContentResolver().delete(uri,null,null);
                 context.getSharedPreferences(JOURNAL,0).edit().remove(uri.toString()).commit();
             }
+        }
+    }
+
+    private static final class Row {
+        final String path;final int mediaType;
+        Row(String path,int mediaType){this.path=path;this.mediaType=mediaType;}
+    }
+    private static Row readRow(Context context,Uri uri) throws IOException {
+        try(Cursor cursor=context.getContentResolver().query(fileAccessUri(uri,0),
+                new String[]{MediaStore.MediaColumns.DATA,MediaStore.Files.FileColumns.MEDIA_TYPE},null,null,null)) {
+            if(cursor==null || !cursor.moveToFirst() || cursor.isNull(0))throw new IOException("No exported file path");
+            return new Row(cursor.getString(0),cursor.getInt(1));
         }
     }
 

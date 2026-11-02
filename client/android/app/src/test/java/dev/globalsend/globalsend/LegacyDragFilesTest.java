@@ -27,6 +27,7 @@ import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowBinder;
 import org.robolectric.shadows.ShadowContentResolver;
+import org.robolectric.shadows.ShadowMediaScannerConnection;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=34,manifest=Config.NONE)
@@ -62,7 +63,10 @@ public class LegacyDragFilesTest {
             assertEquals(original.getName(),cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)));
         }
         assertNotEquals(original.getPath(),path);assertArrayEquals(bytes,Files.readAllBytes(new File(path).toPath()));
-        assertTrue("Origin must be recorded before IS_PENDING clears",media.originRecordedAtPublish);
+        assertTrue("Only the compatibility cache is hidden before publication",media.hiddenAtPublish);
+        assertFalse("The pending filename must not be remembered as the origin",ReceivedFilePublication.receivedPaths(context).contains(media.pendingPath));
+        assertTrue(ReceivedFilePublication.receivedPaths(context).contains(path));
+        assertFalse(new File(path).getName().startsWith(".pending-"));
         assertEquals(1,media.inserted);assertFalse(media.copyThread.contains("main"));
         try(Cursor again=externalQuery(uri,null)){assertTrue(again.moveToFirst());assertEquals(path,again.getString(again.getColumnIndexOrThrow("_data")));}
         assertEquals(1,media.inserted);assertTrue(DockShareProvider.wasAccessedSince(original.getPath(),started));
@@ -128,13 +132,46 @@ public class LegacyDragFilesTest {
         };
         LegacyDragFiles.Export image=LegacyDragFiles.publish(context,"private.png","image/png",()->new java.io.ByteArrayInputStream(new byte[]{1}));
         image.grant(captures,new String[]{"com.target"});
-        assertEquals(java.util.List.of(image.uri,Uri.parse("content://media/external/images/media/1")),granted);
+        assertEquals(java.util.List.of(image.uri,Uri.parse("content://media/external/file/1")),granted);
         LegacyDragFiles.remove(captures,image.uri);assertTrue(revoked.contains(image.readUri));
         granted.clear();
         LegacyDragFiles.Export document=LegacyDragFiles.publish(context,"private.pdf","application/pdf",()->new java.io.ByteArrayInputStream(new byte[]{2}));
         document.grant(captures,new String[]{"com.target"});
         assertEquals(java.util.List.of(document.uri,Uri.parse("content://media/external/file/2")),granted);
         LegacyDragFiles.remove(captures,document.uri);assertTrue(revoked.contains(document.readUri));
+    }
+    @Test public void finalPathAndGrantFollowPublishRenameAndHiddenMediaClassification() throws Exception {
+        setup();byte[] original={8,9,7};
+        LegacyDragFiles.Export image=LegacyDragFiles.publish(context,"drag.png","image/png",()->new java.io.ByteArrayInputStream(original));
+        assertTrue(media.hiddenAtPublish);
+        assertFalse(new File(media.pendingPath).exists());
+        assertTrue(new File(image.path).isFile());assertArrayEquals(original,Files.readAllBytes(new File(image.path).toPath()));
+        assertEquals(MediaStore.Files.FileColumns.MEDIA_TYPE_NONE,(int)media.types.get(image.uri));
+        assertEquals(Uri.parse("content://media/external/file/1"),image.readUri);
+        assertTrue(new File(new File(image.path).getParentFile(),".nomedia").isFile());
+        LegacyDragFiles.remove(context,image.uri);assertFalse(new File(image.path).exists());
+    }
+    @Test public void mediaProviderFailureToPublishHiddenCopyDoesNotReturnStalePathOrConsumeSource() throws Exception {
+        setup();media.keepImageClassification=true;File original=new File(context.getFilesDir(),"still-visible.png");
+        Files.write(original.toPath(),new byte[]{5,1});Uri uri=DockShareProvider.registerReadSource(context,original.getPath());
+        long started=android.os.SystemClock.uptimeMillis();assertNull(externalQuery(uri,null));
+        assertFalse(DockShareProvider.wasAccessedSince(original.getPath(),started));assertTrue(original.isFile());
+        assertEquals(1,media.deleted);assertTrue(context.getSharedPreferences("drag-path-exports",0).getAll().isEmpty());
+    }
+    @Test public void restoredJournalRescansOnlyItsExactCompatibilityCopyAndKeepsOrdinaryReceiptsVisible() throws Exception {
+        setup();File downloads=android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
+        File copy=new File(downloads,"GlobalSend/Drag-cache/restored.png"),receipt=new File(downloads,"GlobalSend/receipt.png");
+        assertTrue(copy.getParentFile().mkdirs() || copy.getParentFile().isDirectory());
+        Files.write(copy.toPath(),new byte[]{2});Files.write(receipt.toPath(),new byte[]{3});
+        Uri owned=Uri.parse("content://media/external/downloads/501"),original=Uri.parse("content://media/external/images/media/502");
+        media.files.put(owned,copy);media.files.put(original,receipt);
+        context.getSharedPreferences("drag-path-exports",0).edit().putLong(owned.toString(),System.currentTimeMillis()+600000).commit();
+        LegacyDragFiles.hideRestoredExport(context,owned);
+        LegacyDragFiles.hideRestoredExport(context,original);
+        assertEquals(java.util.Set.of(copy.getCanonicalPath()),ShadowMediaScannerConnection.getSavedPaths());
+        assertTrue(new File(copy.getParentFile(),".nomedia").isFile());
+        assertFalse(new File(receipt.getParentFile(),".nomedia").exists());
+        assertArrayEquals(new byte[]{3},Files.readAllBytes(receipt.toPath()));assertTrue(copy.isFile());assertEquals(0,media.deleted);
     }
     @Test public void borrowedMediaGrantsExpireWithoutDeletingOrCopyingTheOriginal() throws Exception {
         setup();File original=new File(android.os.Environment.getExternalStorageDirectory(),"Download/borrowed.png");
@@ -158,12 +195,15 @@ public class LegacyDragFilesTest {
         assertEquals(0,media.deleted);assertTrue(original.exists());
     }
     public static final class Media extends ContentProvider {
-        final Map<Uri,File> files=new LinkedHashMap<>();final Map<Uri,Integer> types=new LinkedHashMap<>();int inserted,deleted;Uri last;boolean failOutput,originRecordedAtPublish;String copyThread="";
+        final Map<Uri,File> files=new LinkedHashMap<>();final Map<Uri,Integer> types=new LinkedHashMap<>();int inserted,deleted;Uri last;
+        boolean failOutput,hiddenAtPublish,keepImageClassification;String copyThread="",pendingPath="";
         @Override public boolean onCreate(){return true;}
         @Override public Uri insert(Uri collection,ContentValues values) {
             last=collection.buildUpon().appendPath(Integer.toString(++inserted)).build();
             String type=values.getAsString("mime_type");types.put(last,type.startsWith("image/")?1:0);
-            files.put(last,new File(getContext().getCacheDir(),"public-export-"+inserted));return last;
+            File folder=new File(getContext().getCacheDir(),"public-export-"+inserted);folder.mkdirs();
+            File pending=new File(folder,".pending-12345-"+values.getAsString(MediaStore.MediaColumns.DISPLAY_NAME));
+            pendingPath=pending.getPath();files.put(last,pending);return last;
         }
         @Override public String getType(Uri uri){return "image/png";}
         @Override public Cursor query(Uri uri,String[] projection,String selection,String[] args,String sort) {
@@ -184,8 +224,10 @@ public class LegacyDragFilesTest {
         }
         @Override public int update(Uri uri,ContentValues values,String selection,String[] args){
             if(Integer.valueOf(0).equals(values.getAsInteger(MediaStore.MediaColumns.IS_PENDING))) {
-                try {originRecordedAtPublish=ReceivedFilePublication.receivedPaths(getContext()).contains(files.get(uri).getCanonicalPath());}
-                catch(java.io.IOException unavailable){throw new RuntimeException(unavailable);}
+                File pending=files.get(uri);hiddenAtPublish=new File(pending.getParentFile(),".nomedia").isFile();
+                File ready=new File(pending.getParentFile(),pending.getName().substring(".pending-12345-".length()));
+                if(!pending.renameTo(ready))throw new IllegalStateException("Test publish rename failed");
+                files.put(uri,ready);if(hiddenAtPublish && !keepImageClassification)types.put(uri,MediaStore.Files.FileColumns.MEDIA_TYPE_NONE);
             }
             return 1;
         }
