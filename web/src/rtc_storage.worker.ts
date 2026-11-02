@@ -1,7 +1,7 @@
 // OPFS uses a dedicated worker so Safari can stream into one file without a
 // second permanent copy or a file-sized in-memory Blob.
 import { sha256 } from '@noble/hashes/sha2.js';
-import { cleanupDue, cleanupMatches, defaultCleanup, validateCleanup } from './cleanup';
+import { cleanupDue, cleanupMatches, defaultCleanup, validateCleanup, upgradeDefaultCleanup } from './cleanup';
 import type { CleanupPreferences } from './cleanup';
 import { FolderStorage, destinationSetting, receivingDestination, setReceivedStorageRoot } from './folder_storage';
 import type { StoredLocation } from './folder_storage';
@@ -77,7 +77,7 @@ async function cleanup() {
   for(const meta of expired)await remove(meta.key,false).catch(error=>{if(error.name!=='NotAllowedError')throw error;});
 }
 async function cleanupPreferences():Promise<CleanupPreferences> {
-  try{return JSON.parse(await (await (await appDirectory.getFileHandle('cleanup-preferences.json')).getFile()).text());}
+  try{const stored=JSON.parse(await (await (await appDirectory.getFileHandle('cleanup-preferences.json')).getFile()).text()) as CleanupPreferences;const rules=upgradeDefaultCleanup(stored);if(rules!==stored)await writeCleanup(rules);return rules;}
   catch(error){if((error as Error).name==='NotFoundError')return defaultCleanup();throw error;}
 }
 async function writeCleanup(value:CleanupPreferences) {

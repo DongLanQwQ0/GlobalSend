@@ -25,7 +25,7 @@ class SendUiSession {
   Set<SavedFileCategory> cleanupCategories = Set.of(
     SavedFileCleanupFilter().categories,
   );
-  SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.atMost;
+  SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.smaller;
   String? clipboardChoice;
   final sendTargets = <String>{};
   int? composeIndex;

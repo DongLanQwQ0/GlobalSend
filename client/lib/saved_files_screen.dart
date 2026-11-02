@@ -29,6 +29,17 @@ const _sortLabels = {
   SavedFilesSort.smallest: '最小优先',
 };
 
+const _categoryLabels = {
+  SavedFilesCategoryFilter.all: '全部',
+  SavedFilesCategoryFilter.image: '图片',
+  SavedFilesCategoryFilter.video: '视频',
+  SavedFilesCategoryFilter.audio: '音频',
+  SavedFilesCategoryFilter.text: '文本',
+  SavedFilesCategoryFilter.archive: '压缩包',
+  SavedFilesCategoryFilter.folder: '文件夹',
+  SavedFilesCategoryFilter.other: '其他',
+};
+
 class SavedFilesScreen extends StatefulWidget {
   const SavedFilesScreen({
     super.key,
@@ -48,6 +59,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
     with WidgetsBindingObserver {
   SendController get c => widget.controller;
   SavedFilesSort sort = SavedFilesSort.newest;
+  SavedFilesCategoryFilter category = SavedFilesCategoryFilter.all;
   bool selecting = false, working = false;
   final selected = <String>{};
   String error = '';
@@ -173,10 +185,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              file.name,
-              style: const TextStyle(fontWeight: Ui.weightLabel),
-            ),
+            Text(file.name, style: const TextStyle(fontWeight: Ui.weightLabel)),
             const SizedBox(height: Ui.space1),
             Text(
               '${file.directory ? '文件夹' : bytesLabel(file.size)} · ${compactTime(file.receivedAt)}',
@@ -331,7 +340,12 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
   @override
   Widget build(BuildContext context) {
     final issue = error.isNotEmpty ? error : c.savedFilesIssue;
-    final files = sortSavedFiles(folderLibraryCards(c.savedFiles), sort);
+    final files = sortSavedFiles(
+      folderLibraryCards(c.savedFiles)
+          .where((file) => savedFileMatchesCategory(file, category))
+          .toList(),
+      sort,
+    );
     final scaffold = Scaffold(
       backgroundColor: Ui.colors(context).surface,
       appBar: widget.embedded
@@ -385,6 +399,38 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
               UiContentToolbar(
                 key: const ValueKey('library-toolbar'),
                 children: [
+                  if (!selecting)
+                    PopupMenuButton<SavedFilesCategoryFilter>(
+                      key: const ValueKey('library-category-filter'),
+                      tooltip: '筛选类别',
+                      initialValue: category,
+                      onSelected: (value) => setState(() => category = value),
+                      itemBuilder: (_) => _categoryLabels.entries
+                          .map(
+                            (entry) => AppCheckedPopupMenuItem(
+                              value: entry.key,
+                              checked: category == entry.key,
+                              child: Text(entry.value),
+                            ),
+                          )
+                          .toList(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: Ui.space1,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const AppIcon(Icons.filter_list, size: Ui.iconSm),
+                            const SizedBox(width: Ui.space0),
+                            Text(
+                              _categoryLabels[category]!,
+                              style: const TextStyle(fontSize: Ui.textXs),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   Text(
                     selecting
                         ? '${selected.length}/${files.length} 项'
@@ -500,7 +546,9 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                             ),
                             const SizedBox(height: Ui.space3),
                             Text(
-                              '收到的文件会保存在这里',
+                              category == SavedFilesCategoryFilter.all
+                                  ? '收到的文件会保存在这里'
+                                  : '此分类暂无文件',
                               style: TextStyle(
                                 color: Ui.colors(context).textSecondary,
                               ),

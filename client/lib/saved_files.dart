@@ -17,6 +17,26 @@ enum SavedFileCategory { image, video, audio, text, archive, other }
 
 enum SavedFileSizeRule { any, greater, smaller, atMost }
 
+enum SavedFilesCategoryFilter {
+  all,
+  image,
+  video,
+  audio,
+  text,
+  archive,
+  folder,
+  other,
+}
+
+bool savedFileMatchesCategory(
+  SavedFile file,
+  SavedFilesCategoryFilter filter,
+) =>
+    filter == SavedFilesCategoryFilter.all ||
+    (file.directory
+        ? filter == SavedFilesCategoryFilter.folder
+        : savedFileCategory(file.name).name == filter.name);
+
 SavedFileCategory savedFileCategory(String name) {
   final extension = name.split('.').last.toLowerCase();
   for (final entry in <SavedFileCategory, Set<String>>{
@@ -106,11 +126,9 @@ SavedFileCategory savedFileCategory(String name) {
 class SavedFileCleanupFilter {
   SavedFileCleanupFilter({
     Set<SavedFileCategory>? categories,
-    this.sizeRule = SavedFileSizeRule.atMost,
-    this.sizeMiB = 500000 / 1048576,
-  }) : categories = Set.unmodifiable(
-         categories ?? {SavedFileCategory.image, SavedFileCategory.text},
-       );
+    this.sizeRule = SavedFileSizeRule.smaller,
+    this.sizeMiB = 200000 / 1048576,
+  }) : categories = Set.unmodifiable(categories ?? {SavedFileCategory.image});
   final Set<SavedFileCategory> categories;
   final SavedFileSizeRule sizeRule;
   final double sizeMiB;
@@ -158,7 +176,7 @@ class SavedFile {
     this.contentDigest = '',
   });
 
-  static const defaultRetentionHours = 24;
+  static const defaultRetentionHours = 48;
   final String id, profileKey, deviceId, groupId, transferId, fileId;
   final String path, name;
   final int size, receivedAtMillis;
@@ -361,6 +379,7 @@ class SavedFilesStore {
     if (!await indexFile.exists()) return;
     final decoded = jsonDecode(await indexFile.readAsString());
     final List values;
+    var upgradedCleanupPreset = false;
     if (decoded is List) {
       values = decoded;
     } else {
@@ -370,6 +389,20 @@ class SavedFilesStore {
         cleanupFilter = SavedFileCleanupFilter.fromJson(
           Map<String, dynamic>.from(decoded['cleanupFilter']),
         );
+      }
+      // Upgrade only the complete former default, never an independently
+      // customized age/category/size rule.
+      if (retentionHours == 24 &&
+          cleanupFilter.sizeRule == SavedFileSizeRule.atMost &&
+          cleanupFilter.sizeMiB * 1048576 == 500000 &&
+          cleanupFilter.categories.length == 2 &&
+          cleanupFilter.categories.containsAll({
+            SavedFileCategory.image,
+            SavedFileCategory.text,
+          })) {
+        retentionHours = SavedFile.defaultRetentionHours;
+        cleanupFilter = SavedFileCleanupFilter();
+        upgradedCleanupPreset = true;
       }
       receiveDestinationLocation = decoded['receiveDestinationLocation'] ?? '';
       receiveDestinationLabel = decoded['receiveDestinationLabel'] ?? '';
@@ -393,6 +426,7 @@ class SavedFilesStore {
     if (relocatedLocations.isNotEmpty)
       await ReceiveDestination.relocateReferences(relocatedLocations);
     if (_migrationCopies.isNotEmpty) await _rollbackMigrationCopies();
+    if (upgradedCleanupPreset) await _persist();
   }();
 
   Future<T> _write<T>(Future<T> Function() action) {
@@ -720,6 +754,27 @@ class SavedFilesStore {
     final item = _items[id];
     if (item == null) throw StateError('文件已移除');
     _items[id] = item.renamed(clean);
+    await _persist();
+  });
+
+  /// Forget a formerly indexed automatic-clipboard delivery, not its file.
+  /// A normal delivery may still own the same physical bytes independently.
+  Future<void> forgetEntry(
+    String profileKey,
+    String transferId,
+    String fileId,
+  ) => _write(() async {
+    final ids = _items.values
+        .where(
+          (item) =>
+              item.profileKey == profileKey &&
+              item.transferId == transferId &&
+              item.fileId == fileId,
+        )
+        .map((item) => item.id)
+        .toList();
+    if (ids.isEmpty) return;
+    for (final id in ids) _items.remove(id);
     await _persist();
   });
 

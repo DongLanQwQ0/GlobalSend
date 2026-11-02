@@ -29,12 +29,12 @@ async function save(worker:any,key:string,name:string,text:string,extra:Record<s
   await worker.call('finish',{key});await worker.call('confirm',{key});return data;
 }
 
-test('new cleanup defaults include only text/images through the inclusive 500 KB boundary',()=>{
-  const rules=defaultCleanup();assert.deepEqual(rules.categories,['image','text']);assert.equal(rules.retentionHours,24);
-  for(const name of ['photo.png','page.html']){
-    assert.equal(cleanupMatches({name,size:500000},rules),true);assert.equal(cleanupMatches({name,size:500001},rules),false);
+test('new cleanup defaults retain two days and only images strictly below 200 KB',()=>{
+  const rules=defaultCleanup();assert.deepEqual(rules.categories,['image']);assert.equal(rules.retentionHours,48);assert.equal(rules.sizeRule,'smaller');
+  for(const name of ['photo.png','photo.JPG','screen.heic']){
+    assert.equal(cleanupMatches({name,size:199999},rules),true);assert.equal(cleanupMatches({name,size:200000},rules),false);
   }
-  for(const name of ['video.mp4','song.mp3','file.zip','unknown.bin'])assert.equal(cleanupMatches({name,size:1},rules),false);
+  for(const name of ['notes.txt','page.html','video.mp4','song.mp3','file.zip','unknown.bin'])assert.equal(cleanupMatches({name,size:1},rules),false);
 });
 
 test('changing receive directory really moves old scopes, directory trees and paused prefixes; new files go straight there',async()=>{
@@ -99,7 +99,7 @@ test('file reuse verifies existing bytes, refreshes one library entry and adds o
   const f=await fixture(),old=f.worker('old-scope'),current=f.worker('new-scope');await old.ready;await current.ready;
   const text='same content',sha256=createHash('sha256').update(text).digest('hex');
   await save(old,'old:file','first.txt',text,{sha256});
-  const original=join(f.root.path,'globalsend-received-v1','old-scope','old%3Afile.data'),before=(await old.call('get',{key:'old:file'})).meta.receivedAt;
+  const original=join(f.root.path,'globalsend-received-v1','received','first.txt'),before=(await old.call('get',{key:'old:file'})).meta.receivedAt;
   await new Promise(resolve=>setTimeout(resolve,3));
   const next={key:'new:file',name:'second.txt',size:Buffer.byteLength(text),sha256,transferId:'new'};
   const reused=await current.call('reuse',next);assert.equal(await reused.file.text(),text);assert.ok(reused.receivedAt>before);
@@ -124,7 +124,7 @@ async function savedTree(f:Awaited<ReturnType<typeof fixture>>,worker:ReturnType
     {key:'old:zero',name:'empty.bin',relativePath:'资料/sub/empty.bin',entryKind:'file',size:0,sha256:hash(''),transferId:'old'},
   ];
   for(const file of files){if(file.entryKind==='directory')await worker.call('directory',file);else await save(worker,file.key,file.name,file.size?'good':'',file);}
-  return {files:files.map(file=>({...file,key:file.key.replace('old:','new:'),transferId:'new',name:file.key==='old:root'?'改名资料':file.name,relativePath:file.relativePath.replace(/^资料/,'改名资料')})),base:join(f.root.path,'globalsend-received-v1','old-scope','received','资料')};
+  return {files:files.map(file=>({...file,key:file.key.replace('old:','new:'),transferId:'new',name:file.key==='old:root'?'改名资料':file.name,relativePath:file.relativePath.replace(/^资料/,'改名资料')})),base:join(f.root.path,'globalsend-received-v1','received','资料')};
 }
 
 test('whole folder reuse retains one real tree across restart, forwarding, migration and deletion through its aliases',async()=>{
@@ -162,7 +162,7 @@ for(const changed of ['bytes','empty-directory','extra-user-file','missing-index
 test('reuse never trusts a name, stale digest, deleted source, uncommitted prefix or another folder path',async()=>{
   const f=await fixture(),worker=f.worker('scope');await worker.ready;const sha256=createHash('sha256').update('good').digest('hex');
   await save(worker,'original','same.txt','good',{sha256});const data={key:'repeat',name:'same.txt',size:4,sha256};
-  await writeFile(join(f.root.path,'globalsend-received-v1','scope','original.data'),'evil');
+  await writeFile(join(f.root.path,'globalsend-received-v1','received','same.txt'),'evil');
   assert.equal((await worker.call('reuse',data)).file,undefined,'same size/name metadata cannot hide changed bytes');
   await worker.call('remove',{key:'original'});assert.equal((await worker.call('reuse',data)).file,undefined);
   await save(worker,'folder:file','same.txt','good',{sha256,transferId:'folder',relativePath:'Folder/same.txt'});

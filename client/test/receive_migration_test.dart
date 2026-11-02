@@ -32,9 +32,10 @@ void main() {
     },
   );
 
-  test('cleanup defaults include only images and text at or below 500 KB', () {
+  test('cleanup defaults include only images strictly below 200 KB for two days', () {
     final rules = SavedFileCleanupFilter();
-    expect(rules.categories, {SavedFileCategory.image, SavedFileCategory.text});
+    expect(rules.categories, {SavedFileCategory.image});
+    expect(SavedFile.defaultRetentionHours, 48);
     SavedFile item(String name, int size) => SavedFile(
       id: '',
       profileKey: '',
@@ -47,16 +48,16 @@ void main() {
       size: size,
       receivedAtMillis: 0,
     );
-    for (final name in ['picture.png', 'notes.txt', 'page.html']) {
-      expect(rules.matches(item(name, 500000)), isTrue);
-      expect(rules.matches(item(name, 500001)), isFalse);
+    for (final name in ['picture.png', 'photo.JPG', 'screen.heic']) {
+      expect(rules.matches(item(name, 199999)), isTrue);
+      expect(rules.matches(item(name, 200000)), isFalse);
     }
-    for (final name in ['movie.mp4', 'audio.mp3', 'archive.zip', 'other.bin']) {
+    for (final name in ['notes.txt', 'page.html', 'movie.mp4', 'audio.mp3', 'archive.zip', 'other.bin']) {
       expect(rules.matches(item(name, 1)), isFalse);
     }
     expect(
       SavedFileCleanupFilter.fromJson(rules.toJson()).sizeRule,
-      SavedFileSizeRule.atMost,
+      SavedFileSizeRule.smaller,
     );
   });
 

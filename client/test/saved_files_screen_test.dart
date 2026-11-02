@@ -162,6 +162,7 @@ void main() {
     await tester.runAsync(() async {
       await decode(ResizeImage(FileImage(photo), width: 320));
       await decode(ResizeImage(FileImage(photo), width: 390));
+      await decode(ResizeImage(FileImage(photo), width: 560));
     });
     await tester.pumpWidget(
       RepaintBoundary(
@@ -191,7 +192,7 @@ void main() {
   }
 
   testWidgets(
-    'library uses a two-column grid with real thumbnails and sorting; long press drags and selects the whole tile',
+    'library uses a two-column grid with real thumbnails and sorting; long press drags without entering selection',
     (tester) async {
       final c = controller(), boundary = GlobalKey();
       addTearDown(c.dispose);
@@ -244,6 +245,11 @@ void main() {
       );
       await tester.longPress(find.byKey(const ValueKey('saved-file-archive')));
       await tester.pumpAndSettle();
+      expect(find.text('已选 1 项'), findsNothing);
+      await tester.tap(find.text('编辑'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('saved-file-archive')));
+      await tester.pumpAndSettle();
       expect(find.text('已选 1 项'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('saved-file-slides')));
       await tester.pumpAndSettle();
@@ -264,7 +270,9 @@ void main() {
       final c = controller();
       addTearDown(c.dispose);
       await show(tester, c);
-      await tester.longPress(find.byKey(const ValueKey('saved-file-notes')));
+      await tester.tap(find.text('编辑'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('saved-file-notes')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('重命名'));
       await tester.pumpAndSettle();
@@ -283,7 +291,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(c.forwarded.single.$1, 'online');
       expect(c.forwarded.single.$2, ['notes']);
-      await tester.longPress(find.byKey(const ValueKey('saved-file-notes')));
+      await tester.tap(find.text('编辑'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('saved-file-notes')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('删除'));
       await tester.pumpAndSettle();

@@ -82,6 +82,20 @@ async function save(worker:ReturnType<typeof workerFixture>,key:string,name:stri
   await worker.call('open',{key,name,size,mimeType:name.endsWith('.png')?'image/png':'text/plain',sha256:'a'.repeat(64),expires:Date.now()+86400000});
   await worker.call('write',{key,offset:0,bytes:new Uint8Array(size).buffer});await worker.call('finish',{key});await worker.call('confirm',{key});
 }
+test('worker upgrades and persists the old complete cleanup preset while preserving customized settings',async()=>{
+  let now=1700000000000;const root=new MemoryDirectory('root',()=>now),worker=workerFixture(root,()=>now);
+  await worker.call('init',{});const app=await root.getDirectoryHandle('globalsend-received-v1');
+  const handle=await app.getFileHandle('cleanup-preferences.json',{create:true});
+  const old={retentionHours:24,categories:['text','image'],sizeRule:'atMost',sizeMiB:500000/1048576};
+  handle.bytes=new TextEncoder().encode(JSON.stringify(old));
+  const migrated=(await worker.call('library-preferences')).cleanup;
+  assert.equal(migrated.retentionHours,48);assert.equal(migrated.sizeMiB*1048576,200000);assert.deepEqual(Array.from(migrated.categories),['image']);
+  assert.equal(JSON.parse(await (await handle.getFile()).text()).retentionHours,48);
+  handle.bytes=new TextEncoder().encode(JSON.stringify({...old,retentionHours:72}));
+  assert.equal((await worker.call('library-preferences')).cleanup.retentionHours,72);
+  assert.equal(JSON.parse(await (await handle.getFile()).text()).sizeMiB*1048576,500000);
+});
+
 test('worker library spans session scopes, renames metadata only, and excludes active or unmarked partial files',async()=>{
   let now=1700000000000;const root=new MemoryDirectory('root',()=>now),first=workerFixture(root,()=>now),second=workerFixture(root,()=>now),library=workerFixture(root,()=>now);
   await first.call('init',{scope:'one'});await save(first,'transfer:file','original.txt');

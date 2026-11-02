@@ -156,10 +156,9 @@ void main() {
     }
     expect(store.cleanupFilter.categories, {
       SavedFileCategory.image,
-      SavedFileCategory.text,
     });
-    expect(store.cleanupFilter.sizeRule, SavedFileSizeRule.atMost);
-    expect(store.cleanupFilter.sizeMiB * 1048576, 500000);
+    expect(store.cleanupFilter.sizeRule, SavedFileSizeRule.smaller);
+    expect(store.cleanupFilter.sizeMiB * 1048576, 200000);
     await store.setCleanupFilter(
       SavedFileCleanupFilter(
         categories: {SavedFileCategory.image},
@@ -202,6 +201,7 @@ void main() {
     );
     expect(
       SavedFileCleanupFilter(
+        categories: {SavedFileCategory.text},
         sizeRule: SavedFileSizeRule.any,
         sizeMiB: 100,
       ).matches(zero),
@@ -265,7 +265,7 @@ void main() {
     );
   });
 
-  test('24-hour default expires at the receipt boundary and custom seven days persists without immediate deletion', () async {
+  test('48-hour image default expires at the receipt boundary and custom seven days persists without immediate deletion', () async {
     final folder = await fixtureDirectory(), p = profile();
     final documents = Directory('${folder.path}/documents');
     final store = SavedFilesStore(
@@ -278,16 +278,18 @@ void main() {
     await store.register(
       profile: p,
       entry: old,
-      receivedAt: now.subtract(const Duration(hours: 24)),
+      receivedAt: now.subtract(const Duration(hours: 48)),
     );
     await store.register(
       profile: p,
       entry: recent,
       receivedAt: now
-          .subtract(const Duration(hours: 24))
+          .subtract(const Duration(hours: 48))
           .add(const Duration(milliseconds: 1)),
     );
-    expect(store.retentionHours, 24);
+    await store.rename(store.items.firstWhere((file) => file.fileId == 'old').id, 'old.png');
+    await store.rename(store.items.firstWhere((file) => file.fileId == 'recent').id, 'recent.png');
+    expect(store.retentionHours, 48);
     expect((await store.prune(now)).map((file) => file.fileId), ['old']);
     expect(await File(old.localPath).exists(), false);
     expect(await File(recent.localPath).exists(), true);
@@ -387,6 +389,13 @@ void main() {
         'dock': [recent.toJson(), expired.toJson()],
       }),
     );
+    // This fixture specifically exercises explicit text-cleanup across offline
+    // migration, independently of the new image-only default.
+    await File('${state.path}/saved-files.json').writeAsString(jsonEncode({
+      'retentionHours': 24,
+      'cleanupFilter': SavedFileCleanupFilter(categories: {SavedFileCategory.text}, sizeRule: SavedFileSizeRule.any).toJson(),
+      'files': [],
+    }));
     final c = OfflineLibraryController(folder);
     addTearDown(c.dispose);
     await c.init();

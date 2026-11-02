@@ -1,5 +1,6 @@
 import { OpfsStorage } from './storage.ts';
-import { validateCleanup } from './cleanup.ts';
+import { validateCleanup, fileCategory } from './cleanup.ts';
+import type { FileCategory } from './cleanup';
 import type { CleanupPreferences } from './cleanup';
 
 export interface LocalFileEntry {
@@ -8,6 +9,11 @@ export interface LocalFileEntry {
   entryKind?:'file'|'directory';relativePath?:string;storagePath?:string;transferId?:string;
 }
 export type LibrarySort='received'|'oldest'|'name'|'size';
+export type LibraryCategoryFilter='all'|'folder'|FileCategory;
+export function filterLocalFiles(entries:LocalFileEntry[],category:LibraryCategoryFilter){
+  return entries.filter(entry=>category==='all' || (entry.entryKind==='directory'?category==='folder':fileCategory(entry.name)===category));
+}
+
 export function folderLibraryEntries(entries:LocalFileEntry[]):LocalFileEntry[]{
   const key=(entry:LocalFileEntry)=>entry.scope+':'+entry.transferId+':'+entry.relativePath?.split('/')[0];
   const totals=new Map<string,number>();

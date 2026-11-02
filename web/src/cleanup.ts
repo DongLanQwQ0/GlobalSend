@@ -1,7 +1,7 @@
 export const FILE_CATEGORIES=['image','video','audio','text','archive','other'] as const;
 export type FileCategory=(typeof FILE_CATEGORIES)[number];
 export interface CleanupPreferences {retentionHours:number;categories:FileCategory[];sizeRule:'any'|'greater'|'smaller'|'atMost';sizeMiB:number}
-export const defaultCleanup=():CleanupPreferences=>({retentionHours:24,categories:['image','text'],sizeRule:'atMost',sizeMiB:500000/1048576});
+export const defaultCleanup=():CleanupPreferences=>({retentionHours:48,categories:['image'],sizeRule:'smaller',sizeMiB:200000/1048576});
 const extensions:Record<Exclude<FileCategory,'other'>,string[]>= {
   image:['png','jpg','jpeg','webp','gif','bmp','heic','heif','tif','tiff','svg'],
   video:['mp4','mov','mkv','webm','avi','3gp','flv','wmv','m4v'],
@@ -25,4 +25,11 @@ export function cleanupMatches(file:{name:string;size:number},rules:CleanupPrefe
 }
 export function cleanupDue(file:{name:string;size:number;receivedAt:number},rules:CleanupPreferences,now=Date.now()) {
   return file.receivedAt+rules.retentionHours*3600000<=now && cleanupMatches(file,rules);
+}
+
+/** Upgrade the complete former preset; preserve all independent user choices. */
+export function upgradeDefaultCleanup(value:CleanupPreferences):CleanupPreferences {
+  return value.retentionHours===24 && value.sizeRule==='atMost' && value.sizeMiB*1048576===500000 &&
+    value.categories.length===2 && value.categories.includes('image') && value.categories.includes('text')
+    ?defaultCleanup():value;
 }
