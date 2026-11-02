@@ -16,6 +16,10 @@ GlobalSend 正式支持 **Windows、Android、iOS、iPadOS、Web**。后续需�
 
 iOS 与 iPadOS 共用 Apple 原生工程、通用 IPA 和现有 `ios` 更新通道；当前工程的设备族为 iPhone 与 iPad（`TARGETED_DEVICE_FAMILY = 1,2`）。这是构建与协议复用，不将两个产品平台合并成一个验收项。现有 `ios` 协议值、更新清单及 `ipad` 指南键保留兼容。
 
+## 系统剪贴板的图片写入策略
+
+Windows、iPad保留图片写入；Android、iPhone取消图片写入，自动接收与手动复制使用同一规则。图片接收、预览、建议、拖放、发送及文本复制不受影响。Apple原生包按运行时设备类型区分；移动Web按宿主Android/iPhone/iPad区分，允许写入的浏览器仍遵守系统授权。取消写入的平台不显示图片复制操作。
+
 ## 使用说明与验收
 
 - [Windows 指南](guides/windows.md)、[Android 指南](guides/android.md)、[iOS / iPadOS 共同指南](guides/ipad.md)、[Web 指南](guides/web.md)。共同指南中的多任务、台前调度与窗口控制说明适用于 iPadOS。
