@@ -10,11 +10,8 @@
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.Graphics.Imaging.h>
-#include <cstdint>
 #include <memory>
 #include <map>
-#include <algorithm>
-#include <cmath>
 #include <thread>
 #include <mutex>
 #include <cstdio>
@@ -22,28 +19,10 @@
 #include <utility>
 
 namespace {
-constexpr ULONG_PTR kTouchDragInputMark = 0x47535444;
 bool IsPromotedPointerMouse(ULONG_PTR marker) {
   // Documented Tablet PC signature: the low byte identifies the touch/pen.
   return (marker & 0xffffff00) == 0xff515700;
 }
-}
-
-INPUT GlobalSendTouchMouseInput(POINT point, DWORD flags, RECT desktop) {
-  INPUT input{};
-  input.type = INPUT_MOUSE;
-  const auto scale = [](LONG value, LONG first, LONG last) -> LONG {
-    const auto extent = static_cast<int64_t>(last) - first;
-    if (extent <= 1) return 0;
-    const auto offset = std::clamp(static_cast<int64_t>(value) - first,
-        int64_t{0}, extent - 1);
-    return static_cast<LONG>(std::llround(static_cast<double>(offset) * 65535.0 / (extent - 1)));
-  };
-  input.mi.dx = scale(point.x, desktop.left, desktop.right);
-  input.mi.dy = scale(point.y, desktop.top, desktop.bottom);
-  input.mi.dwFlags = flags | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-  input.mi.dwExtraInfo = kTouchDragInputMark;
-  return input;
 }
 
 namespace {
@@ -68,11 +47,9 @@ struct Operation {
   bool starting = false;
   bool desktop = false;
   bool system_promoted = false;
-  bool synthetic_down = false;
+  bool prepared = false;
   bool cancelled = false;
-  bool input_failed = false;
   HWND source_owner = nullptr;
-  POINT point{};
   uint64_t prepare_serial = 0;
   std::mutex preview_mutex;
   HBITMAP preview = nullptr;
@@ -94,14 +71,12 @@ const auto convert_pointer = []() -> PointerConverter {
   version.dwBuildNumber=22000;
   if(!VerifyVersionInfoW(&version,VER_BUILDNUMBER,
       VerSetConditionMask(0,VER_BUILDNUMBER,VER_GREATER_EQUAL)))return nullptr;
-  return reinterpret_cast<BOOL(WINAPI*)()>(GetProcAddress(
-      GetModuleHandleW(L"user32.dll"),MAKEINTRESOURCEA(2811)));
+  const auto user32 = GetModuleHandleW(L"user32.dll");
+  auto address = GetProcAddress(user32, "ConvertPrimaryPointerToMouseDrag");
+  if (!address) address = GetProcAddress(user32, MAKEINTRESOURCEA(2811));
+  return reinterpret_cast<PointerConverter>(address);
 }();
 #endif
-std::function<bool(const INPUT&)> send_mouse = [](const INPUT& input) {
-  INPUT copy = input;
-  return SendInput(1, &copy, sizeof(copy)) == 1;
-};
 bool MouseButtonsAvailable(HWND source, DWORD pressed) {
   physical_mouse_buttons &= pressed;
   const DWORD own_promotion = contact && contact_primary && owner_window == source &&
@@ -131,87 +106,26 @@ std::function<bool(HWND)> input_available = [](HWND source) {
   return !info.hwndCapture || GetAncestor(info.hwndCapture, GA_ROOT) == source;
 };
 
-bool SendDesktopMouse(const std::shared_ptr<Operation>& state, DWORD flags) {
-  const LONG left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-  const LONG top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-  const RECT desktop{left, top, left + GetSystemMetrics(SM_CXVIRTUALSCREEN),
-      top + GetSystemMetrics(SM_CYVIRTUALSCREEN)};
-  const auto input = GlobalSendTouchMouseInput(state->point, flags, desktop);
-  if (send_mouse(input)) return true;
-  state->input_failed = true;
-  state->cancelled = true;
-  return false;
-}
-
-void ReleaseDesktopMouse(const std::shared_ptr<Operation>& state) {
-  if (!state || !state->synthetic_down) return;
-  state->synthetic_down = false; // Exactly one matching release, even reentrantly.
-  if (!SendDesktopMouse(state, MOUSEEVENTF_LEFTUP)) state->synthetic_down = true;
-}
+void Complete(const std::shared_ptr<Operation>& state, bool copied,
+    const std::string& error);
 
 void CancelDesktop(const std::shared_ptr<Operation>& state) {
   if (!state || !state->desktop) return;
   state->cancelled = true;
-  ReleaseDesktopMouse(state);
+  if (!state->starting) Complete(state, false, "触点已抬起或取消");
 }
-
-void ForeignMouseInput(WPARAM message, ULONG_PTR marker) {
-  if (marker == kTouchDragInputMark || IsPromotedPointerMouse(marker) ||
-      !operation || !operation->desktop ||
-      !operation->starting) return;
-  const auto state = operation;
-  if (message == WM_LBUTTONDOWN || message == WM_LBUTTONUP) {
-    // Another physical/injected left-button owner has taken over. Its own up
-    // must end its press; releasing our old state would release somebody else.
-    state->synthetic_down = false;
-    state->cancelled = true;
-  } else if (message == WM_RBUTTONDOWN || message == WM_MBUTTONDOWN || message == WM_XBUTTONDOWN) {
-    CancelDesktop(state);
-  }
-}
-
-LRESULT CALLBACK DesktopMouseObserver(int code, WPARAM message, LPARAM data) {
-  if (code == HC_ACTION) {
-    const auto* event = reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
-    ForeignMouseInput(message, event->dwExtraInfo);
-  }
-  return CallNextHookEx(nullptr, code, message, data);
-}
-
-struct DesktopMouseGuard {
-  HHOOK hook = nullptr;
-  HWND source = nullptr;
-  HWND previous_capture = nullptr;
-  bool Install(HWND owner) {
-#ifdef GLOBALSEND_TOUCH_DRAG_TESTING
-    (void)owner;
-    return true; // Tests replace both input and OLE; no system hook/input.
-#else
-    hook = SetWindowsHookExW(WH_MOUSE_LL, DesktopMouseObserver, GetModuleHandleW(nullptr), 0);
-    if (!hook) return false;
-    source = owner;
-    previous_capture = GetCapture();
-    // Capture only our source while converting its held touch to mouse input.
-    // A preview readback can finish after the finger has moved farther; DOWN
-    // must not click an unrelated application under that newer position.
-    SetCapture(source);
-    return GetCapture() == source;
-#endif
-  }
-  ~DesktopMouseGuard() {
-    if (hook) UnhookWindowsHookEx(hook);
-    if (source && GetCapture() == source) {
-      ReleaseCapture();
-      if (previous_capture && IsWindow(previous_capture) &&
-          GetAncestor(previous_capture, GA_ROOT) == source) SetCapture(previous_capture);
-    }
-  }
-};
 #ifdef GLOBALSEND_TOUCH_DRAG_TESTING
 std::function<void(size_t)> prepared_for_test;
 #endif
 
-void BeginDesktopDrag(const std::shared_ptr<Operation>& state);
+void BeginDesktopDrag(const std::shared_ptr<Operation>& state, bool already_promoted,
+    const std::function<void()>& forward_input);
+
+bool HasNativeMouseContact(const std::shared_ptr<Operation>& state) {
+  return promoted_mouse_owner == state->source_owner &&
+      promoted_contact_sequence == state->contact_sequence &&
+      (promoted_mouse_buttons & MK_LBUTTON);
+}
 
 void ObserveMouseButton(HWND window, UINT message, WPARAM wparam, ULONG_PTR marker) {
   DWORD bit = 0;
@@ -231,7 +145,6 @@ void ObserveMouseButton(HWND window, UINT message, WPARAM wparam, ULONG_PTR mark
     case WM_XBUTTONUP: bit = HIWORD(wparam) == XBUTTON1 ? MK_XBUTTON1 : MK_XBUTTON2; break;
     default: return;
   }
-  if (marker == kTouchDragInputMark) return;
   if (!IsPromotedPointerMouse(marker)) {
     if (down) physical_mouse_buttons |= bit;
     else physical_mouse_buttons &= ~bit;
@@ -272,7 +185,20 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
   }
   if (message == kDesktopPreviewPrepared) {
     const auto state = operation;
-    if (state && state->desktop && state->prepare_serial == static_cast<uint64_t>(wparam)) BeginDesktopDrag(state);
+    if (state && state->desktop && state->prepare_serial == static_cast<uint64_t>(wparam)) {
+      std::string error;
+      {
+        const std::lock_guard lock(state->preview_mutex);
+        error = state->prepare_error;
+      }
+      if (!error.empty()) Complete(state, false, "Desktop touch preparation: " + error);
+      else state->prepared = true;
+#ifdef GLOBALSEND_TOUCH_DRAG_TESTING
+      if (state->prepared && prepared_for_test) prepared_for_test(0);
+#endif
+      // This posted worker reply has no native input context. Arm the export;
+      // only a real pointer/mouse message may promote it and enter OLE.
+    }
     return 0;
   }
   if (message == WM_POINTERDOWN || message == WM_POINTERUPDATE) {
@@ -287,7 +213,7 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
       contact_primary = !!(info.pointerFlags & POINTER_FLAG_PRIMARY);
       if (message == WM_POINTERDOWN && contact != 0) {
         ++contact_sequence;
-        if (operation && operation->desktop && operation->starting &&
+        if (operation && operation->desktop &&
             (operation->pointer != contact || operation->contact_sequence != contact_sequence)) {
           CancelDesktop(operation);
         }
@@ -297,22 +223,16 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
           owner_window = found->second.second;
         }
       }
-      if (operation && operation->desktop && operation->starting &&
+      if (operation && operation->desktop &&
           info.pointerId == operation->pointer && contact_sequence == operation->contact_sequence) {
-        operation->point = info.ptPixelLocation;
         if ((info.pointerFlags & POINTER_FLAG_CANCELED) || (!contact && !operation->system_promoted)) CancelDesktop(operation);
-        else if (!operation->system_promoted && message == WM_POINTERUPDATE && operation->synthetic_down) {
-          if (!SendDesktopMouse(operation, MOUSEEVENTF_MOVE)) ReleaseDesktopMouse(operation);
-        }
       }
     }
   } else if (message == WM_POINTERUP &&
       GET_POINTERID_WPARAM(wparam) == contact) {
     contact = 0;
     if (operation && operation->desktop && operation->pointer == GET_POINTERID_WPARAM(wparam)) {
-      POINTER_INFO info{};
-      if (read_pointer(operation->pointer, &info)) operation->point = info.ptPixelLocation;
-      ReleaseDesktopMouse(operation);
+      if (!operation->starting) CancelDesktop(operation);
     }
   } else if (message == WM_POINTERCAPTURECHANGED && GET_POINTERID_WPARAM(wparam) == contact &&
       (!operation || !operation->system_promoted) &&
@@ -329,6 +249,32 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
     const auto found = observed_windows.find(window);
     if (found != observed_windows.end()) DetachGlobalSendTouchDragWindow(found->second.second);
   }
+  const auto state = operation;
+  if (state && state->desktop && state->prepared && !state->starting &&
+      contact == state->pointer && contact_sequence == state->contact_sequence &&
+      owner_window == state->source_owner && contact_primary) {
+    const auto found = observed_windows.find(window);
+    const bool own_window = found != observed_windows.end() &&
+        found->second.second == state->source_owner;
+    const bool native_mouse = own_window && IsPromotedPointerMouse(extra) &&
+        (message == WM_MOUSEMOVE || message == WM_LBUTTONDOWN) &&
+        (wparam & MK_LBUTTON) && HasNativeMouseContact(state);
+    const bool native_pointer = own_window && message == WM_POINTERUPDATE &&
+        GET_POINTERID_WPARAM(wparam) == state->pointer && !HasNativeMouseContact(state);
+    if (native_mouse || native_pointer) {
+      // Promote before DefWindowProc can consume this pointer message; then
+      // deliver Flutter's last movement before entering the nested OLE loop.
+      LRESULT result = 0;
+      bool forwarded = false;
+      BeginDesktopDrag(state, native_mouse, [&] {
+        result = DefSubclassProc(window, message, wparam, lparam);
+        forwarded = true;
+      });
+      if (!forwarded && IsWindow(window))
+        result = DefSubclassProc(window, message, wparam, lparam);
+      return result;
+    }
+  }
   // Do not swallow pointer messages: Flutter still receives taps, scrolling
   // and long-press recognition; only the accepted long press starts export.
   return DefSubclassProc(window, message, wparam, lparam);
@@ -337,14 +283,14 @@ LRESULT CALLBACK PointerObserver(HWND window, UINT message, WPARAM wparam,
 void Complete(const std::shared_ptr<Operation>& state, bool copied,
     const std::string& error) {
   if (operation != state) return;
-  ReleaseDesktopMouse(state);
   auto callback = std::move(state->completed);
   if (contact == state->pointer && contact_sequence == state->contact_sequence) contact = 0;
   operation.reset();
   if (callback) callback(copied, error);
 }
 
-void BeginDesktopDrag(const std::shared_ptr<Operation>& state) {
+void BeginDesktopDrag(const std::shared_ptr<Operation>& state, bool already_promoted,
+    const std::function<void()>& forward_input) {
   HBITMAP preview;
   {
     const std::lock_guard lock(state->preview_mutex);
@@ -353,12 +299,7 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state) {
   std::string failure;
   bool copied = false;
   try {
-    if (!state->prepare_error.empty()) throw std::runtime_error(state->prepare_error);
     if (operation != state) { if (preview) DeleteObject(preview); return; }
-#ifdef GLOBALSEND_TOUCH_DRAG_TESTING
-    if (prepared_for_test) prepared_for_test(0);
-    if (operation != state) { if (preview) DeleteObject(preview); return; }
-#endif
     if (contact != state->pointer || contact_sequence != state->contact_sequence ||
         owner_window != state->source_owner || !contact_primary) {
       if (preview) DeleteObject(preview);
@@ -370,24 +311,30 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state) {
       Complete(state, false, "其他鼠标操作正在进行，请松开后重试");
       return;
     }
-    state->point = contact_point;
     state->starting = true;
-#ifndef GLOBALSEND_TOUCH_DRAG_TESTING
-    if (!convert_pointer) {
+    if (!already_promoted && !convert_pointer) {
       if (preview) {DeleteObject(preview);preview=nullptr;}
       Complete(state,false,"此Windows版本不支持原生触屏拖出，请使用鼠标拖放");
       return;
     }
-#endif
-    if (convert_pointer) {
+    {
       // Let Windows own the complete move/up stream. A per-POINTERUPDATE
       // SendInput loop plus a low-level hook on this OLE thread can stall input,
       // and a lost source capture previously turned a legitimate drop into cancel.
       // Conversion can synchronously hand pointer capture over to OLE.
       state->system_promoted = true;
-      if (!convert_pointer()) {
+      SetLastError(ERROR_SUCCESS);
+      if (!already_promoted && !convert_pointer()) {
+        const DWORD code = GetLastError();
         if (preview) {DeleteObject(preview);preview=nullptr;}
-        Complete(state, false, "Windows未能接管触屏拖放，请保持单指接触后重试");
+        Complete(state, false, "ConvertPrimaryPointerToMouseDrag: Windows error " +
+            std::to_string(code) + " (pointer " + std::to_string(state->pointer) + ")");
+        return;
+      }
+      forward_input();
+      if (operation != state || state->cancelled) {
+        if (preview) DeleteObject(preview);
+        Complete(state, false, "");
         return;
       }
       DWORD effect = DROPEFFECT_NONE;
@@ -397,39 +344,12 @@ void BeginDesktopDrag(const std::shared_ptr<Operation>& state) {
       Complete(state, copied, FAILED(result) ? "Windows原生触屏拖放失败" : "");
       return;
     }
-    DesktopMouseGuard mouse_guard;
-    if (!mouse_guard.Install(state->source_owner)) {
-      if (preview) DeleteObject(preview);
-      Complete(state, false, "Desktop touch: could not observe mouse ownership");
-      return;
-    }
-    // Like Chromium's StartTouchDrag/HandleTouchEvent, this is a desktop OLE
-    // adapter driven exclusively by the held primary touch/pen. It is not the
-    // mouse path (which assumes MK_LBUTTON already exists), and never retries
-    // the unbound WinRT operation first.
-    state->synthetic_down = true;
-    if (SendDesktopMouse(state, MOUSEEVENTF_LEFTDOWN)) {
-      DWORD effect = DROPEFFECT_NONE;
-      // OLE requires a DOWN followed by a distinct MOVE (as in Chromium's
-      // desktop touch adapter), not one combined packet at the window edge.
-      const bool moved = !state->cancelled && SendDesktopMouse(state, MOUSEEVENTF_MOVE);
-      const HRESULT result = moved ? state->run_drag(preview, &effect) : DRAGDROP_S_CANCEL;
-      ReleaseDesktopMouse(state);
-      copied = result == DRAGDROP_S_DROP && effect == DROPEFFECT_COPY && !state->cancelled;
-      if (FAILED(result)) {
-        char code[16]{};
-        sprintf_s(code, "0x%08lX", static_cast<unsigned long>(result));
-        failure = std::string("Desktop touch DoDragDrop: ") + code;
-      }
-    } else state->synthetic_down = false; // Rejected down never became ours.
-    if (state->input_failed) failure = "Desktop touch SendInput: Windows rejected drag input";
   } catch (const winrt::hresult_error& error) {
     failure = "Desktop touch preparation: " + winrt::to_string(error.message());
   } catch (const std::exception& error) {
     failure = "Desktop touch drag: " + std::string(error.what());
   }
   if (preview) DeleteObject(preview);
-  ReleaseDesktopMouse(state);
   Complete(state, copied, failure);
 }
 
@@ -549,13 +469,8 @@ winrt::fire_and_forget DragPointer(std::shared_ptr<Operation> state,
 void SetGlobalSendTouchPreparedForTest(std::function<void(size_t)> prepared) {
   prepared_for_test = std::move(prepared);
 }
-void SetGlobalSendDesktopTouchTestHooks(std::function<bool(const INPUT&)> sender,
-    std::function<bool(HWND)> available) {
-  send_mouse = std::move(sender);
+void SetGlobalSendDesktopTouchInputAvailableForTest(std::function<bool(HWND)> available) {
   input_available = std::move(available);
-}
-void GlobalSendDesktopForeignMouseForTest(UINT message, ULONG_PTR marker) {
-  ForeignMouseInput(message, marker);
 }
 bool GlobalSendTouchMouseButtonsAvailableForTest(HWND owner, DWORD pressed) {
   return MouseButtonsAvailable(owner, pressed);
@@ -678,9 +593,7 @@ bool GlobalSendDesktopTouchDragCancelled() {
 
 HRESULT GlobalSendDesktopTouchDragStatus(BOOL escape, DWORD mouse_keys) {
   if (escape || GlobalSendDesktopTouchDragCancelled()) return DRAGDROP_S_CANCEL;
-  if (operation->system_promoted) return (mouse_keys & MK_LBUTTON) ? S_OK : DRAGDROP_S_DROP;
-  return contact == operation->pointer && contact_sequence == operation->contact_sequence
-      ? S_OK : DRAGDROP_S_DROP;
+  return (mouse_keys & MK_LBUTTON) ? S_OK : DRAGDROP_S_DROP;
 }
 
 void UnregisterGlobalSendTouchDrag() {
