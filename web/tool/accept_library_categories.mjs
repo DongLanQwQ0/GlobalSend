@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import assert from 'node:assert/strict';
 
 const root=fileURLToPath(new URL('../../',import.meta.url));
-const run=join(root,'artifacts/tmp/cleanup-library112');await mkdir(run,{recursive:true});
+const run=process.env.GS_LIBRARY_ACCEPTANCE_DIR || join(root,'artifacts/tmp/cleanup-library112');await mkdir(run,{recursive:true});
 await build({entryPoints:[join(root,'web/src/style.css')],bundle:true,outfile:join(run,'style.css'),logLevel:'silent'});
 await build({stdin:{resolveDir:join(root,'web/src'),contents:`
 import {LocalLibraryView} from './library_view';
@@ -38,11 +38,15 @@ try {
   const evaluate=async expression=>{const value=await page('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(value.exceptionDetails)throw new Error(JSON.stringify(value.exceptionDetails));return value.result.value;};
   await page('Page.navigate',{url:base});await until(()=>evaluate('!!window.__view && !!document.querySelector(".library-grid img")?.complete'),Boolean);
   const states=[];
-  for(const width of [950,390]) {
+  for(const width of [950,390,280]) {
     await page('Emulation.setDeviceMetricsOverride',{width,height:width===950?650:844,deviceScaleFactor:1,mobile:width<500});
     await evaluate(`(()=>{const select=document.querySelector('[data-library-filter]');select.value='image';select.dispatchEvent(new Event('change'));})()`);await wait(80);
-    const state=await evaluate(`(()=>{const toolbar=document.querySelector('.library-toolbar').getBoundingClientRect(),filter=document.querySelector('[data-library-filter]').getBoundingClientRect();return {category:window.__view.category,count:document.querySelectorAll('[data-library-id]').length,height:toolbar.height,filterWidth:filter.width,pageOverflow:document.documentElement.scrollWidth>innerWidth,retention:document.querySelector('#library-retention').value,size:document.querySelector('#library-size-mib').value,checked:[...document.querySelectorAll('[data-library-category]:checked')].map(node=>node.dataset.libraryCategory)};})()`);
-    assert.equal(state.category,'image');assert.equal(state.count,1);assert.equal(state.pageOverflow,false);assert.ok(state.height<=56);assert.ok(state.filterWidth>=64);assert.equal(state.retention,'2');assert.equal(state.size,'200');assert.deepEqual(state.checked,['image']);states.push({width,...state});
+    const state=await evaluate(`(()=>{const toolbar=document.querySelector('.library-toolbar').getBoundingClientRect(),filter=document.querySelector('[data-library-filter]').getBoundingClientRect(),count=document.querySelector('.library-toolbar>.count').getBoundingClientRect(),scroll=document.querySelector('.library-toolbar-scroll');return {countLeft:count.left-toolbar.left,actionsWidth:scroll.clientWidth,actionsContentWidth:scroll.scrollWidth,category:window.__view.category,count:document.querySelectorAll('[data-library-id]').length,height:toolbar.height,filterWidth:filter.width,pageOverflow:document.documentElement.scrollWidth>innerWidth,retention:document.querySelector('#library-retention').value,size:document.querySelector('#library-size-mib').value,checked:[...document.querySelectorAll('[data-library-category]:checked')].map(node=>node.dataset.libraryCategory)};})()`);
+    assert.ok(state.countLeft>=8 && state.countLeft<=12);assert.equal(state.category,'image');assert.equal(state.count,1);assert.equal(state.pageOverflow,false);assert.ok(state.height<=56);assert.ok(state.filterWidth>=64);assert.equal(state.retention,'2');assert.equal(state.size,'200');assert.deepEqual(state.checked,['image']);states.push({width,...state});
+    const fixedLeft=await evaluate(`document.querySelector('.library-toolbar>.count').getBoundingClientRect().left`);
+    await evaluate(`document.querySelector('.library-toolbar-scroll').scrollLeft=10000`);
+    assert.equal(await evaluate(`document.querySelector('.library-toolbar>.count').getBoundingClientRect().left`),fixedLeft);
+    if(width===280)assert.ok(state.actionsContentWidth>state.actionsWidth);
     const image=await page('Page.captureScreenshot',{format:'jpeg',quality:85});await writeFile(join(run,`web-category-${width}.jpg`),Buffer.from(image.data,'base64'));
   }
   await evaluate(`(()=>{document.querySelector('[data-library-action="edit"]').click();document.querySelector('[data-library-action="select-all"]').click();})()`);
@@ -50,5 +54,5 @@ try {
   await evaluate('window.__view.deleteSelected()');assert.deepEqual(await evaluate('window.__removed'),['photo']);
   await evaluate("window.__view.setCategory('all')");assert.equal(await evaluate('document.querySelectorAll("[data-library-id]").length'),4);
   assert.deepEqual(await evaluate('window.__errors'),[]);
-  await writeFile(join(run,'browser-result.json'),JSON.stringify({passed:true,browserProfile,states,visibleOnlySelectionAndDeletion:true},null,2));console.log('PASS category selection, compact toolbar, default form, visible-only deletion, 950/390 render');
+  await writeFile(join(run,'browser-result.json'),JSON.stringify({passed:true,browserProfile,states,visibleOnlySelectionAndDeletion:true},null,2));console.log('PASS category selection, compact toolbar, default form, visible-only deletion, 950/390/280 render and fixed left count');
 } finally {await closePage?.().catch(()=>{});socket?.close();await closeSharedBrowser(browser);await new Promise(resolve=>server.close(resolve));}

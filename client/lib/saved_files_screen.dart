@@ -398,6 +398,15 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
             children: [
               UiContentToolbar(
                 key: const ValueKey('library-toolbar'),
+                leading: Text(
+                  selecting
+                      ? '${selected.length}/${files.length} 项'
+                      : '${files.length} 个文件',
+                  style: TextStyle(
+                    color: Ui.colors(context).textSecondary,
+                    fontSize: Ui.text2xs,
+                  ),
+                ),
                 children: [
                   if (!selecting)
                     PopupMenuButton<SavedFilesCategoryFilter>(
@@ -431,15 +440,6 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                         ),
                       ),
                     ),
-                  Text(
-                    selecting
-                        ? '${selected.length}/${files.length} 项'
-                        : '${files.length} 个文件',
-                    style: TextStyle(
-                      color: Ui.colors(context).textSecondary,
-                      fontSize: Ui.text2xs,
-                    ),
-                  ),
                   BulkFileDrag(
                     key: const ValueKey('library-drag-all'),
                     paths: files

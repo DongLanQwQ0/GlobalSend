@@ -85,6 +85,14 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.getSize(toolbar).height, height);
         expect(find.text('1 个文件'), findsOneWidget);
+        final countRect = tester.getRect(find.text('1 个文件'));
+        expect(countRect.left, tester.getRect(toolbar).left + Ui.space2);
+        expect(
+          tester
+              .getRect(find.byKey(const ValueKey('library-category-filter')))
+              .left,
+          greaterThan(countRect.right),
+        );
         expect(
           find.byKey(const ValueKey('saved-file-photo.jpg')),
           findsOneWidget,
@@ -124,6 +132,10 @@ void main() {
           find.byType(SavedFilesScreen),
         );
         expect(state.selected, {'photo.jpg'});
+        expect(
+          tester.getRect(find.text('1/1 项')).left,
+          tester.getRect(toolbar).left + Ui.space2,
+        );
         state.finishSelection();
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey('library-category-filter')));
@@ -143,4 +155,58 @@ void main() {
       },
     );
   }
+  testWidgets(
+    'fixed leading remains left while narrow actions scroll; old callers stay right aligned',
+    (tester) async {
+      tester.view.physicalSize = const Size(280, 650);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                UiContentToolbar(
+                  key: const ValueKey('fixed'),
+                  leading: const Text('1 项'),
+                  children: [
+                    for (var i = 0; i < 6; i++)
+                      SizedBox(
+                        width: 70,
+                        child: TextButton(
+                          onPressed: () {},
+                          child: Text('操作$i'),
+                        ),
+                      ),
+                  ],
+                ),
+                const UiContentToolbar(
+                  key: ValueKey('old'),
+                  children: [Text('原入口')],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final toolbar = find.byKey(const ValueKey('fixed'));
+      final left = tester.getRect(find.text('1 项')).left;
+      expect(left, tester.getRect(toolbar).left + Ui.space2);
+      expect(tester.getRect(find.text('原入口')).right, 280 - Ui.space2);
+      final scroll = find.descendant(
+        of: toolbar,
+        matching: find.byType(SingleChildScrollView),
+      );
+      await tester.drag(scroll, const Offset(-240, 0));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.text('1 项')).left, left);
+      expect(
+        tester.getRect(find.text('操作5')).right,
+        lessThanOrEqualTo(280 - Ui.space2),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

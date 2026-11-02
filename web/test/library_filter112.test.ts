@@ -34,6 +34,8 @@ test('real view filter binding, visible-only select-all and bulk drag, empty cat
   const render=()=>{document.querySelector('#app')!.innerHTML=view.html(true);view.bind();};
   view=new module.exports.LocalLibraryView({changed:render,inventory:()=>{},close:()=>{},peers:()=>[],signedIn:()=>false,copy:()=>{},stage:()=>{},forward:async()=>{},pendingForward:()=>false,discardForward:async()=>{}});
   view.opened=true;view.entries=entries;for(const entry of entries)view.files.set(entry.id,new File(['data'],entry.name));render();
+  assert.ok(document.querySelector('.library-toolbar')!.firstElementChild!.classList.contains('count'));
+  assert.ok(document.querySelector('.library-toolbar-scroll [data-library-filter]'));
   const filter=document.querySelector('[data-library-filter]') as any;
   Object.defineProperty(filter,'value',{value:'image'});filter.dispatchEvent(new window.Event('change'));
   assert.equal(view.category,'image');assert.equal(document.querySelectorAll('[data-library-id]').length,1);

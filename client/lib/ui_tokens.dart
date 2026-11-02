@@ -675,8 +675,9 @@ abstract final class Ui {
 /// The accepted receipt toolbar spacing, shared by local content pages.
 /// Keep the existing 44px batch-drag hit area even when it is temporarily absent.
 class UiContentToolbar extends StatelessWidget {
-  const UiContentToolbar({super.key, required this.children});
+  const UiContentToolbar({super.key, required this.children, this.leading});
   final List<Widget> children;
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -693,20 +694,29 @@ class UiContentToolbar extends StatelessWidget {
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ),
-        child: LayoutBuilder(
-          builder: (context, bounds) => ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context)
-                .copyWith(scrollbars: false),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: bounds.maxWidth),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: children,
-                ),
+        child: leading == null
+            ? _actions(context)
+            : Row(
+                children: [
+                  leading!,
+                  const SizedBox(width: Ui.space1),
+                  Expanded(child: _actions(context)),
+                ],
               ),
-            ),
+      ),
+    ),
+  );
+
+  Widget _actions(BuildContext context) => LayoutBuilder(
+    builder: (context, bounds) => ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minWidth: bounds.maxWidth),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: children,
           ),
         ),
       ),
