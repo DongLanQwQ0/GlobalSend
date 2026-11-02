@@ -12,11 +12,11 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows / Android 最新发布包为 **1.0.82+106**。Windows完整客户端已更新并运行于 `E:\Programs\GlobalSend`；Android包已验签发布，手机仍最后确认103，当前无实机连接。自动检查和自动下载安装默认开启；Windows后台空闲替换且不打断拖放，Android需系统安装确认，见[更新说明](docs/UPDATES.md)。开机自启动与 `GlobalSend.exe --background` 见[启动说明](docs/WINDOWS_STARTUP.md)。
+Windows / Android 最新发布包为 **1.0.82+106**。Windows完整客户端已更新并运行于 `E:\Programs\GlobalSend`；Android包已验签发布，手机已通过当前实机连接确认安装运行106，未重复安装。自动检查和自动下载安装默认开启；Windows后台空闲替换且不打断拖放，Android需系统安装确认，见[更新说明](docs/UPDATES.md)。开机自启动与 `GlobalSend.exe --background` 见[启动说明](docs/WINDOWS_STARTUP.md)。
 
 Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.82+106 完整 ZIP](artifacts/releases/GlobalSend-1.0.82-windows-x64.zip)。不要单独复制 EXE。系统发送到、整卡拖放、指定设备文字/截图同步保留，见[自动剪贴板同步](docs/CLIPBOARD_SYNC.md)。
 
-Android [1.0.82+106 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.82-android-arm64-v8a.apk)已构建验签，无打包字体。悬浮坞可直接点开链接；应用生成、接收和拖放缓存图片不再重复进入媒体建议，系统文件选择器仍正常显示收件。当前没有可交接的实机连接，包已保留，恢复后覆盖安装不清数据；实际状态见[本机发布记录](artifacts/releases/latest-local.json)。
+Android [1.0.82+106 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.82-android-arm64-v8a.apk)已构建验签，无打包字体。悬浮坞可直接点开链接；应用生成、接收和拖放缓存图片不再重复进入媒体建议，系统文件选择器仍正常显示收件。已确认手机安装运行106，发送/接收页切换正常；未重复安装或清除数据，悬浮坞专项仍待实机复验；实际状态见[本机发布记录](artifacts/releases/latest-local.json)。
 
 iPad / iPhone 的[**1.0.82 (107) 未签名 IPA，约15.0 MB**](artifacts/releases/ios-1.0.82-build107/GlobalSend-iPad-unsigned.ipa)已最后构建，真实 NSItemProvider 检查及完整 iOS 编译通过，无打包字体。网页图片优先读取实际图像数据；分享先请求打开宿主，再继续导入；顶栏随真实窗口控制区域避让。由用户用 iloader 手动签名安装并复验，见[iPad输入与窗口说明](docs/IOS_NATIVE_INPUT_AND_WINDOW_LAYOUT.md)。[Windows/Android106](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.82-build106)与[iOS107](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.82-build107)分平台发布；107仅修正测试，产品代码相同。**中心不托管安装包。**
 
