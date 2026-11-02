@@ -157,9 +157,12 @@ void main() {
     'ready package and preferences survive restart without another download',
     () async {
       final file = await stateFile(), downloads = DownloadFixture();
+      final firstFeed = feed(UpdatePlatform.windows);
+      (firstFeed.rows.first['assets'] as List).first['url'] =
+          'https://api.github.com/repos/test/releases/assets/42';
       final first = AppUpdates(
         build: build(UpdatePlatform.windows),
-        feed: feed(UpdatePlatform.windows),
+        feed: firstFeed,
         downloader: downloads,
       );
       await first.initialize(file);
@@ -170,6 +173,10 @@ void main() {
       first.dispose();
       final cached = jsonDecode(await file.readAsString()) as Map;
       expect(cached['package']['asset'], endsWith('.zip'));
+      expect(
+        cached['package']['assetApiUrl'],
+        'https://api.github.com/repos/test/releases/assets/42',
+      );
       final newFeed = Feed(),
           second = AppUpdates(
             build: build(UpdatePlatform.windows),
@@ -182,6 +189,10 @@ void main() {
       expect(second.autoCheck, isFalse);
       expect(second.autoDownload, isFalse);
       expect(second.ready, isTrue);
+      expect(
+        second.available!.assetApiUrl,
+        'https://api.github.com/repos/test/releases/assets/42',
+      );
       expect(newFeed.reads, 0);
       expect(downloads.calls, 1);
     },
@@ -360,6 +371,10 @@ void main() {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
         requests = <String>[];
     final sub = server.listen((request) async {
+      expect(
+        request.headers.value(HttpHeaders.acceptHeader),
+        'application/octet-stream',
+      );
       requests.add(request.headers.value(HttpHeaders.rangeHeader) ?? '');
       if (requests.length == 1) {
         request.response.add([1, 2, 3, 4]);
@@ -384,7 +399,8 @@ void main() {
       platform: UpdatePlatform.android,
       version: const AppReleaseVersion(1, 0, 79, 103),
       assetName: 'test.apk',
-      downloadUrl: 'http://127.0.0.1:${server.port}/test.apk',
+      downloadUrl: 'https://unreachable.invalid/browser-download.apk',
+      assetApiUrl: 'http://127.0.0.1:${server.port}/test.apk',
       releaseUrl: 'https://github.com/release',
       size: 8,
     );

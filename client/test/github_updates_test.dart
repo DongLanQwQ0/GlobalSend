@@ -37,10 +37,147 @@ Future<PlatformUpdate?> select(
   loadManifest: (url) async => manifests[url.split('/').last]!,
 );
 void main() {
+  test('loads the newest platform manifest without requesting clearly older packages', () async {
+    final calls = <String>[];
+    final rows = [
+      release('v1.0.20', [
+        asset('GlobalSend-1.0.20-windows-x64.zip'),
+        asset('globalsend-update-windows.json'),
+      ]),
+      release('v1.0.80', [
+        asset('GlobalSend-1.0.80-windows-x64.zip'),
+        {
+          ...asset('globalsend-update-windows.json'),
+          'browser_download_url': 'https://github.com/latest-manifest',
+        },
+      ]),
+    ];
+    final result = await selectPlatformUpdate(
+      releases: rows,
+      platform: UpdatePlatform.windows,
+      architecture: 'x64',
+      installed: const AppReleaseVersion(1, 0, 79, 103),
+      loadManifest: (url) async {
+        calls.add(url);
+        if (url != 'https://github.com/latest-manifest')
+          throw StateError('old manifest must not be fetched');
+        return {
+          'schema': 1,
+          'platform': 'windows',
+          'version': '1.0.80',
+          'build': 104,
+          'assets': ['GlobalSend-1.0.80-windows-x64.zip'],
+        };
+      },
+    );
+    expect(result!.version.full, '1.0.80+104');
+    expect(calls, ['https://github.com/latest-manifest']);
+  });
+  test('an independent manifest failure neither erases a valid offer nor masquerades as no updates', () async {
+    final valid = release('v1.0.80', [
+      asset('GlobalSend-1.0.80-windows-x64.zip'),
+      {
+        ...asset('globalsend-update-windows.json'),
+        'browser_download_url': 'https://github.com/valid',
+      },
+    ]);
+    final broken = release('v1.0.10', [
+      asset('GlobalSend-windows.zip'),
+      {
+        ...asset('globalsend-update-windows.json'),
+        'browser_download_url': 'https://github.com/broken',
+      },
+    ]);
+    final failure = StateError('asset unavailable');
+    Future<Map<String, dynamic>> load(String url) async {
+      if (url.endsWith('broken')) throw failure;
+      return {
+        'schema': 1,
+        'platform': 'windows',
+        'version': '1.0.80',
+        'build': 104,
+        'assets': ['GlobalSend-1.0.80-windows-x64.zip'],
+      };
+    }
+
+    final result = await selectPlatformUpdate(
+      releases: [broken, valid],
+      platform: UpdatePlatform.windows,
+      architecture: 'x64',
+      installed: const AppReleaseVersion(1, 0, 79, 103),
+      loadManifest: load,
+    );
+    expect(result!.version.full, '1.0.80+104');
+    await expectLater(
+      selectPlatformUpdate(
+        releases: [broken],
+        platform: UpdatePlatform.windows,
+        architecture: 'x64',
+        installed: const AppReleaseVersion(1, 0, 79, 103),
+        loadManifest: load,
+      ),
+      throwsA(same(failure)),
+    );
+  });
+  test(
+    'an old mixed tag does not exclude a newer unversioned platform manifest',
+    () async {
+      final result = await select(
+        [
+          release('v1.0.10', [
+            asset('GlobalSend-iPad-unsigned.ipa'),
+            asset('globalsend-update-ios.json'),
+          ]),
+        ],
+        UpdatePlatform.ios,
+        installed: '1.0.79+103',
+        manifests: {
+          'globalsend-update-ios.json': {
+            'schema': 1,
+            'platform': 'ios',
+            'version': '1.0.80',
+            'build': 104,
+            'assets': ['GlobalSend-iPad-unsigned.ipa'],
+          },
+        },
+      );
+      expect(result!.version.full, '1.0.80+104');
+    },
+  );
+  test(
+    'download asset API is retained separately from the browser download link',
+    () async {
+      final result = await select(
+        [
+          release('v1.0.80', [
+            {
+              ...asset('GlobalSend-1.0.80-windows-x64.zip'),
+              'url': 'https://api.github.com/repos/test/releases/assets/42',
+            },
+          ]),
+        ],
+        UpdatePlatform.windows,
+        arch: 'x64',
+      );
+      expect(result!.downloadUrl, startsWith('https://github.com/'));
+      expect(
+        result.assetApiUrl,
+        'https://api.github.com/repos/test/releases/assets/42',
+      );
+      expect(result.toJson()['assetApiUrl'], result.assetApiUrl);
+    },
+  );
   test('Windows prefers a complete ZIP over an installer in the same platform release', () async {
-    final result = await select([
-      release('v1.0.30', [asset('GlobalSend-1.0.30-windows-x64.exe'), asset('GlobalSend-1.0.30-windows-x64.zip')]),
-    ], UpdatePlatform.windows, arch: 'x64');
+    final result = await select(
+      [
+        release('v1.0.30', [
+          asset('GlobalSend-1.0.30-windows-x64.exe'),
+          asset('GlobalSend-1.0.30-windows-x64.zip'),
+        ]),
+      ],
+      UpdatePlatform.windows,
+      arch: 'x64',
+    );
     expect(result!.assetName, endsWith('.zip'));
   });
   test('version compares numeric semver and same-version build', () {

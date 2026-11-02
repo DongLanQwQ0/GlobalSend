@@ -43,10 +43,11 @@ class PlatformUpdate {
     required this.downloadUrl,
     required this.releaseUrl,
     required this.size,
+    this.assetApiUrl = '',
   });
   final UpdatePlatform platform;
   final AppReleaseVersion version;
-  final String assetName, downloadUrl, releaseUrl;
+  final String assetName, downloadUrl, releaseUrl, assetApiUrl;
   final int size;
   String get notificationKey => '${platform.name}/${version.full}';
   Map<String, dynamic> toJson() => {
@@ -57,6 +58,7 @@ class PlatformUpdate {
     'downloadUrl': downloadUrl,
     'releaseUrl': releaseUrl,
     'size': size,
+    if (assetApiUrl.isNotEmpty) 'assetApiUrl': assetApiUrl,
   };
 }
 
@@ -112,6 +114,18 @@ Future<PlatformUpdate?> selectPlatformUpdate({
   String architecture = '',
 }) async {
   PlatformUpdate? best;
+  Object? manifestFailure;
+  StackTrace? manifestFailureStack;
+  final candidates =
+      <
+        ({
+          Map<String, dynamic> release,
+          List<Map<String, dynamic>> packages,
+          Map<String, dynamic>? metadata,
+          AppReleaseVersion? namedVersion,
+          AppReleaseVersion? hint,
+        })
+      >[];
   for (final release in releases) {
     if (release['draft'] == true || release['prerelease'] == true) continue;
     final assets = List<Map<String, dynamic>>.from(
@@ -137,40 +151,76 @@ Future<PlatformUpdate?> selectPlatformUpdate({
           (asset) => asset['name'] == 'globalsend-update-${platform.name}.json',
         )
         .firstOrNull;
+    final namedVersions = packages
+        .map((asset) => _filenameVersion(asset['name']))
+        .toList();
+    final namedVersion = namedVersions.every((version) => version != null)
+        ? (namedVersions.whereType<AppReleaseVersion>().toList()..sort()).last
+        : null;
+    candidates.add((
+      release: release,
+      packages: packages,
+      metadata: metadata,
+      namedVersion: namedVersion,
+      hint:
+          namedVersion ??
+          AppReleaseVersion.parse(release['tag_name'] as String? ?? ''),
+    ));
+  }
+  candidates.sort(
+    (a, b) => b.hint == null
+        ? a.hint == null
+              ? 0
+              : -1
+        : a.hint == null
+        ? 1
+        : b.hint!.compareTo(a.hint!),
+  );
+  for (final candidate in candidates) {
+    final (:release, :packages, :metadata, :namedVersion, hint: _) = candidate;
+    final floor = best?.version ?? installed;
+    // Explicit platform filenames rule out older semantic versions, not tags:
+    // a mixed release can carry a different platform version. Same-version
+    // builds still require its authoritative manifest.
+    if (namedVersion != null &&
+        _semanticVersion(namedVersion).compareTo(_semanticVersion(floor)) < 0)
+      continue;
     if (metadata != null) {
-      final manifest = await loadManifest(metadata['browser_download_url']);
-      if (manifest['schema'] != 1 || manifest['platform'] != platform.name)
-        continue;
-      final version = AppReleaseVersion.parse(
-        manifest['version'] as String? ?? '',
-        build: manifest['build'] as int?,
-      );
-      final names = List<String>.from(
-        manifest['assets'] ??
-            [if (manifest['asset'] is String) manifest['asset']],
-      );
-      final package = packages
-          .where((asset) => names.contains(asset['name']))
-          .firstOrNull;
-      if (version == null ||
-          package == null ||
-          version.compareTo(installed) <= 0)
-        continue;
-      if (best == null || version.compareTo(best.version) > 0) {
-        best = _offer(platform, version, package, release);
+      try {
+        final manifest = await loadManifest(metadata['browser_download_url']);
+        if (manifest['schema'] != 1 || manifest['platform'] != platform.name)
+          continue;
+        final version = AppReleaseVersion.parse(
+          manifest['version'] as String? ?? '',
+          build: manifest['build'] as int?,
+        );
+        final names = List<String>.from(
+          manifest['assets'] ??
+              [if (manifest['asset'] is String) manifest['asset']],
+        );
+        final package = packages
+            .where((asset) => names.contains(asset['name']))
+            .firstOrNull;
+        if (version == null ||
+            package == null ||
+            version.compareTo(installed) <= 0)
+          continue;
+        if (best == null || version.compareTo(best.version) > 0) {
+          best = _offer(platform, version, package, release);
+        }
+      } catch (failure, stack) {
+        // One historical asset's outage must not discard another valid offer.
+        manifestFailure ??= failure;
+        manifestFailureStack ??= stack;
       }
     } else {
       // Older releases remain usable without inventing a new manifest contract.
       // Versioned filenames win over a global tag; this also handles mixed
       // platform versions in a release. A manifest carries same-version builds.
       for (final package in packages) {
-        final filename = RegExp(
-          r'globalsend[-_](v?\d+\.\d+\.\d+(?:\+\d+|-build\d+)?)',
-          caseSensitive: false,
-        ).firstMatch(package['name']);
-        final version = AppReleaseVersion.parse(
-          filename?[1] ?? release['tag_name'] as String? ?? '',
-        );
+        final version =
+            _filenameVersion(package['name']) ??
+            AppReleaseVersion.parse(release['tag_name'] as String? ?? '');
         if (version == null || version.compareTo(installed) <= 0) continue;
         if (best == null || version.compareTo(best.version) > 0) {
           best = _offer(platform, version, package, release);
@@ -178,8 +228,21 @@ Future<PlatformUpdate?> selectPlatformUpdate({
       }
     }
   }
+  if (best == null && manifestFailure != null) {
+    Error.throwWithStackTrace(manifestFailure, manifestFailureStack!);
+  }
   return best;
 }
+
+AppReleaseVersion _semanticVersion(AppReleaseVersion value) =>
+    AppReleaseVersion(value.major, value.minor, value.patch);
+AppReleaseVersion? _filenameVersion(String name) => AppReleaseVersion.parse(
+  RegExp(
+        r'globalsend[-_](v?\d+\.\d+\.\d+(?:\+\d+|-build\d+)?)',
+        caseSensitive: false,
+      ).firstMatch(name)?[1] ??
+      '',
+);
 
 PlatformUpdate _offer(
   UpdatePlatform platform,
@@ -193,6 +256,7 @@ PlatformUpdate _offer(
   downloadUrl: asset['browser_download_url'],
   releaseUrl: release['html_url'],
   size: (asset['size'] as num).toInt(),
+  assetApiUrl: asset['url'] as String? ?? '',
 );
 
 /// Public GitHub API only: no embedded account token and no installer proxying
@@ -206,8 +270,9 @@ class GitHubUpdateFeed implements UpdateFeed {
   final HttpClient client;
   static const repository = 'DongLanQwQ0/GlobalSend';
   final _responses = <String, ({String? etag, Object value})>{};
+  final _assetUrls = <String, String>{};
 
-  Future<Object> _json(String url) async {
+  Future<Object> _json(String url, {bool asset = false}) async {
     final cached = _responses[url];
     final request = await client.getUrl(Uri.parse(url));
     request.headers.set(
@@ -216,7 +281,7 @@ class GitHubUpdateFeed implements UpdateFeed {
     );
     request.headers.set(
       HttpHeaders.acceptHeader,
-      'application/vnd.github+json',
+      asset ? 'application/octet-stream' : 'application/vnd.github+json',
     );
     if (cached?.etag != null)
       request.headers.set(HttpHeaders.ifNoneMatchHeader, cached!.etag!);
@@ -244,13 +309,26 @@ class GitHubUpdateFeed implements UpdateFeed {
       ).timeout(const Duration(seconds: 12));
       final rows = List<Map<String, dynamic>>.from(value as List);
       result.addAll(rows);
+      for (final release in rows) {
+        for (final asset in List<Map<String, dynamic>>.from(
+          release['assets'] ?? const [],
+        )) {
+          if (asset['url'] is String &&
+              asset['browser_download_url'] is String) {
+            _assetUrls[asset['browser_download_url']] = asset['url'];
+          }
+        }
+      }
       if (rows.length < 100) return result;
     }
   }
 
   Future<Map<String, dynamic>> manifest(String url) async =>
       Map<String, dynamic>.from(
-        await _json(url).timeout(const Duration(seconds: 12)) as Map,
+        await _json(
+          _assetUrls[url] ?? url,
+          asset: _assetUrls.containsKey(url),
+        ).timeout(const Duration(seconds: 12)) as Map,
       );
   void close() => client.close(force: true);
 }

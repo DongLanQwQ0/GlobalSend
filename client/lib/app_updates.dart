@@ -271,6 +271,7 @@ class AppUpdates extends ChangeNotifier {
                 version: version,
                 assetName: saved['asset'] as String,
                 downloadUrl: saved['downloadUrl'] as String,
+                assetApiUrl: saved['assetApiUrl'] as String? ?? '',
                 releaseUrl: saved['releaseUrl'] as String,
                 size: saved['size'] as int,
               );

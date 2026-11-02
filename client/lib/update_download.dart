@@ -46,8 +46,17 @@ class HttpUpdateDownloader implements UpdateDownloader {
     _client = client;
     IOSink? sink;
     try {
-      final request = await client.getUrl(Uri.parse(offer.downloadUrl));
+      final request = await client.getUrl(
+        Uri.parse(
+          offer.assetApiUrl.isNotEmpty ? offer.assetApiUrl : offer.downloadUrl,
+        ),
+      );
       request.headers.set(HttpHeaders.userAgentHeader, 'GlobalSend updater');
+      if (offer.assetApiUrl.isNotEmpty)
+        request.headers.set(
+          HttpHeaders.acceptHeader,
+          'application/octet-stream',
+        );
       if (offset > 0)
         request.headers.set(HttpHeaders.rangeHeader, 'bytes=$offset-');
       final response = await request.close().timeout(
