@@ -33,6 +33,7 @@ final class RemoteReferenceFiles {
         final String token=UUID.randomUUID().toString();
         final Map<String,Object> reference;
         final List<Part> parts;
+        volatile File localDirectory;
         final CompletableFuture<String> local=new CompletableFuture<>();
         final long created=System.currentTimeMillis();
         boolean requested;
@@ -49,7 +50,39 @@ final class RemoteReferenceFiles {
             }
             return local;
         }
-        Part part(String path) throws FileNotFoundException {return parts.stream().filter(value->value.path.equals(path)).findFirst().orElseThrow(()->new FileNotFoundException("远程目录项不存在"));}
+        Part part(String path) throws FileNotFoundException {
+            if(localDirectory!=null) {
+                File target=localChild(path);
+                return new Part(path,target.isDirectory()?0:target.length(),target.isDirectory());
+            }
+            return parts.stream().filter(value->value.path.equals(path)).findFirst().orElseThrow(()->new FileNotFoundException("远程目录项不存在"));
+        }
+        List<Part> children(String path) throws FileNotFoundException {
+            List<Part> result=new ArrayList<>();
+            if(localDirectory!=null) {
+                File[] children=localChild(path).listFiles();
+                if(children==null)throw new FileNotFoundException("目录已移除或无法读取");
+                java.util.Arrays.sort(children,java.util.Comparator.comparing(File::getName));
+                for(File child:children) {
+                    if(java.nio.file.Files.isSymbolicLink(child.toPath()))continue;
+                    result.add(part(path+"/"+child.getName()));
+                }
+            } else {
+                String prefix=path+"/";
+                for(Part part:parts)if(part.path.startsWith(prefix) && part.path.indexOf('/',prefix.length())<0)result.add(part);
+            }
+            return result;
+        }
+        private File localChild(String path) throws FileNotFoundException {
+            String root=parts.get(0).path;
+            if(!path.equals(root) && !path.startsWith(root+"/"))throw new FileNotFoundException("目录项不属于此文件夹");
+            for(String segment:path.split("/",-1))if(segment.isEmpty() || segment.equals(".") || segment.equals(".."))throw new FileNotFoundException("无效目录项");
+            try {
+                File child=path.equals(root)?localDirectory:new File(localDirectory,path.substring(root.length()+1)).getCanonicalFile();
+                if(!child.equals(localDirectory) && !child.toPath().startsWith(localDirectory.toPath()) || !child.exists())throw new FileNotFoundException("目录中的文件已移除");
+                return child;
+            }catch(java.io.IOException error){throw new FileNotFoundException(error.getMessage());}
+        }
         synchronized void revokeTreeGrant() {
             revoked=true;
             if(grantContext!=null && grantedTree!=null)grantContext.revokeUriPermission(grantedTree,android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -80,6 +113,17 @@ final class RemoteReferenceFiles {
         else throw new IllegalArgumentException("目录需先取得完整目录清单，不能作为空目录拖出");
         if(parts.isEmpty())throw new IllegalArgumentException("没有可拖动内容");
         Entry entry=new Entry(reference,parts);entries.put(entry.token,entry);return entry;
+    }
+    /** Register only the root on the UI thread. Children are inspected one
+     * directory at a time by DocumentsProvider queries, with no recursive scan. */
+    static Entry registerLocalDirectory(Map<String,?> value,String path) throws Exception {
+        File directory=new File(path).getCanonicalFile();
+        if(!directory.isDirectory())throw new FileNotFoundException("文件夹已移除");
+        Map<String,Object> reference=new HashMap<>();reference.putAll(value);
+        reference.put("kind","directory");reference.put("entries",List.of(Map.of("relativePath",String.valueOf(value.get("name")),"kind","directory")));
+        Entry entry=register(reference);
+        synchronized(entry){entry.localDirectory=directory;entry.requested=true;entry.local.complete(directory.getPath());}
+        return entry;
     }
     private static long number(Object value){return value instanceof Number?((Number)value).longValue():value==null?0:Long.parseLong(value.toString());}
     static Uri uri(Context context,Entry entry){String id=entry.token+":"+entry.parts.get(0).path;

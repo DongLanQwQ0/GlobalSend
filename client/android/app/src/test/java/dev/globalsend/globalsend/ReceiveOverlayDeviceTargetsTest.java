@@ -190,6 +190,16 @@ public class ReceiveOverlayDeviceTargetsTest {
         assertEquals(List.of(ready.get("localPath")),local.paths);assertNull(local.remoteReference);assertNull(copiedRequest);
         assertTrue(new java.io.File(localRoot,"empty").isDirectory());
         drag(DragEvent.ACTION_DRAG_ENDED,0,0,false);
+        ready.put("kind","directory");ready.put("name","Course files");ready.put("localPath",localRoot.getPath());
+        coordinator.updateCopiedFiles(List.of(ready));draw();
+        assertTrue(row.findViewWithTag("copied-file-reference").performLongClick());
+        DockCoordinator.LocalDrag directory=(DockCoordinator.LocalDrag)AndroidDragTest.NativeDragView.states.get(1);
+        assertEquals(List.of(localRoot.getPath()),directory.paths);assertNull(directory.remoteReference);assertNull(copiedRequest);
+        android.net.Uri tree=AndroidDragTest.NativeDragView.clips.get(1).getItemAt(0).getUri();
+        RemoteReferenceFiles.Entry treeEntry=RemoteReferenceFiles.entry(android.provider.DocumentsContract.getDocumentId(tree));
+        assertEquals(localRoot.getCanonicalPath(),treeEntry.resolve().get());assertEquals(1,treeEntry.parts.size());
+        try(android.database.Cursor children=new RemoteReferenceProvider().queryChildDocuments(android.provider.DocumentsContract.getDocumentId(tree),null,(String)null)){assertEquals(2,children.getCount());}
+        drag(DragEvent.ACTION_DRAG_ENDED,0,0,false);
     }
     private boolean incoming(int action,ClipData clip,float x,float y) {
         DragEvent event=ReflectionHelpers.callConstructor(DragEvent.class);

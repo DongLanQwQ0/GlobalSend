@@ -55,6 +55,33 @@ public class RemoteReferenceProviderTest {
         assertThrows(IllegalArgumentException.class,()->RemoteReferenceFiles.register(Map.of("name","Folder","kind","directory")));
     }
 
+    @Test public void localDirectoryIsLazyAndReadsOriginalChildrenWithoutRemoteResolution() throws Exception {
+        android.content.Context context=org.robolectric.RuntimeEnvironment.getApplication();
+        java.io.File root=new java.io.File(context.getFilesDir(),"local-directory-114");
+        assertTrue(new java.io.File(root,"empty").mkdirs());
+        java.io.File nested=new java.io.File(root,"nested");assertTrue(nested.mkdir());
+        java.io.File file=new java.io.File(nested,"note.txt");
+        java.nio.file.Files.write(file.toPath(),"local-original-bytes".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        AtomicInteger requests=new AtomicInteger();RemoteReferenceFiles.listen(request -> requests.incrementAndGet());
+        RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.registerLocalDirectory(Map.of("name","Folder"),root.getPath());
+        assertEquals(1,entry.parts.size());assertEquals(root.getCanonicalPath(),entry.resolve().get());assertEquals(0,requests.get());
+        RemoteReferenceProvider provider=new RemoteReferenceProvider();
+        try(Cursor children=provider.queryChildDocuments(entry.token+":Folder",null,(String)null)){assertEquals(2,children.getCount());}
+        try(Cursor empty=provider.queryChildDocuments(entry.token+":Folder/empty",null,(String)null)){assertEquals(0,empty.getCount());}
+        try(Cursor nestedChildren=provider.queryChildDocuments(entry.token+":Folder/nested",null,(String)null)) {
+            assertEquals(1,nestedChildren.getCount());assertTrue(nestedChildren.moveToFirst());
+            assertEquals("note.txt",nestedChildren.getString(nestedChildren.getColumnIndexOrThrow(Document.COLUMN_DISPLAY_NAME)));
+        }
+        android.os.ProxyFileDescriptorCallback reader=RemoteReferenceFiles.reader(context,entry,entry.part("Folder/nested/note.txt"));
+        try {byte[] bytes=new byte[64];int count=reader.onRead(0,bytes.length,bytes);assertEquals("local-original-bytes",new String(bytes,0,count,java.nio.charset.StandardCharsets.UTF_8));}
+        finally {reader.onRelease();}
+        assertEquals(0,requests.get());assertEquals(1,entry.parts.size());
+        assertThrows(FileNotFoundException.class,()->entry.part("Folder/../outside.txt"));
+        assertThrows(FileNotFoundException.class,()->entry.part("Other/note.txt"));
+        assertTrue(file.isFile());assertTrue(new java.io.File(root,"empty").isDirectory());
+        assertEquals(2,root.list().length);
+    }
+
     @Test public void failureStopAndFreshRetryCompleteInsteadOfHanging() throws Exception {
         RemoteReferenceFiles.listen(request -> {});
         RemoteReferenceFiles.Entry first=RemoteReferenceFiles.register(file());first.resolve();

@@ -873,9 +873,17 @@ final class DockCoordinator {
             flags |= View.DRAG_FLAG_GLOBAL_URI_READ | View.DRAG_FLAG_GLOBAL_PREFIX_URI_PERMISSION;
         }
         for(String path:paths) {
-            Uri uri=DockShareProvider.registerReadSource(view.getContext(),path);
-            session.exportedUris.add(uri);
-            items.add(new ClipData.Item(uri));String type=view.getContext().getContentResolver().getType(uri);types.add(type==null?"application/octet-stream":type);flags |= View.DRAG_FLAG_GLOBAL_URI_READ;
+            String readable=ReceiveDirectory.readableLocation(view.getContext(),path);
+            Uri uri;String type;
+            if(!readable.startsWith("content://") && new File(readable).isDirectory()) {
+                RemoteReferenceFiles.Entry directory=RemoteReferenceFiles.registerLocalDirectory(Map.of("name",new File(readable).getName()),readable);
+                uri=RemoteReferenceFiles.uri(view.getContext(),directory);type=DocumentsContract.Document.MIME_TYPE_DIR;
+            } else {
+                uri=DockShareProvider.registerReadSource(view.getContext(),path);
+                session.exportedUris.add(uri);type=view.getContext().getContentResolver().getType(uri);
+            }
+            if(DocumentsContract.Document.MIME_TYPE_DIR.equals(type))flags|=View.DRAG_FLAG_GLOBAL_PREFIX_URI_PERMISSION;
+            items.add(new ClipData.Item(uri));types.add(type==null?"application/octet-stream":type);flags |= View.DRAG_FLAG_GLOBAL_URI_READ;
         }
         for(String text:texts){if(text==null||text.length()>100000)throw new IllegalArgumentException("Invalid drag text");items.add(new ClipData.Item(text));types.add("text/plain");}
         if(items.isEmpty())throw new IllegalArgumentException("没有可拖动的内容");

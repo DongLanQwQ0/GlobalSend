@@ -17,8 +17,8 @@ public final class RemoteReferenceProvider extends DocumentsProvider {
         RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.entry(id);grantTreeAccess(entry);MatrixCursor result=new MatrixCursor(projection==null?COLUMNS:projection);add(result,id,entry.part(RemoteReferenceFiles.relative(id)));return result;
     }
     public Cursor queryChildDocuments(String id,String[] projection,String sortOrder) throws FileNotFoundException {
-        RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.entry(id);grantTreeAccess(entry);String parent=RemoteReferenceFiles.relative(id)+"/";MatrixCursor result=new MatrixCursor(projection==null?COLUMNS:projection);
-        for(RemoteReferenceFiles.Part part:entry.parts)if(part.path.startsWith(parent) && part.path.indexOf('/',parent.length())<0)add(result,entry.token+":"+part.path,part);return result;
+        RemoteReferenceFiles.Entry entry=RemoteReferenceFiles.entry(id);grantTreeAccess(entry);MatrixCursor result=new MatrixCursor(projection==null?COLUMNS:projection);
+        for(RemoteReferenceFiles.Part part:entry.children(RemoteReferenceFiles.relative(id)))add(result,entry.token+":"+part.path,part);return result;
     }
     public boolean isChildDocument(String parentId,String childId){try{return RemoteReferenceFiles.entry(parentId)==RemoteReferenceFiles.entry(childId) && RemoteReferenceFiles.relative(childId).startsWith(RemoteReferenceFiles.relative(parentId)+"/");}catch(FileNotFoundException missing){return false;}}
     private void grantTreeAccess(RemoteReferenceFiles.Entry entry) {
