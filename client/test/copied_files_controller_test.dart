@@ -54,6 +54,10 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(SystemBridge.channel, (call) async {
+      if (call.method == 'cancelClipboardImage' && call.arguments is! Map) {
+        throw PlatformException(
+          code: 'BAD_ARGUMENT', message: 'Expected operation map');
+      }
       if (call.method == 'clipboardWatch')
         watches.add((call.arguments as Map)['enabled'] as bool);
       if (call.method == 'clipboardFilePaths') return <String>[];

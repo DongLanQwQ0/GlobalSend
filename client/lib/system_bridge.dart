@@ -419,7 +419,10 @@ class SystemBridge {
       false;
 
   static Future<void> cancelClipboardImage() =>
-      channel.invokeMethod<void>('cancelClipboardImage');
+      channel.invokeMethod<void>(
+        'cancelClipboardImage',
+        <String, dynamic>{},
+      );
 
   /// Determine how an explicit Ctrl+V should be routed, without reading text
   /// or creating an image source until the user actually imports it.
