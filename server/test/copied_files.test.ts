@@ -137,3 +137,24 @@ test("changing the designated target withdraws the previous target instead of pu
     assert.equal((await f.call("PUT", "/clipboard/files", { ...replacement, targetDeviceIds: [] }, source.token)).status, 400);
   } finally { await f.close(); }
 });
+
+
+test('exact copied context survives center restart and metadata requests never create content transfers',async()=>{
+ const f=await fixture();try{
+  const source=await f.enroll('source'),target=await f.enroll('target');await f.connect(source.token);await f.connect(target.token);
+  await f.call('PUT','/clipboard/files',{...clipboard,targetDeviceIds:[target.id]},source.token);
+  const metadata={offerId:clipboard.offerId,requestId:'manifest',itemIds:['folder'],metadataOnly:true};
+  assert.equal((await f.call('POST',`/clipboard/files/${source.id}/pull`,metadata,target.token)).status,200);
+  const entries=[{relativePath:'Course',kind:'directory',size:0},{relativePath:'Course/empty',kind:'directory',size:0},{relativePath:'Course/note.txt',kind:'file',size:7}];
+  assert.equal((await f.call('PUT',`/clipboard/files/pulls/${target.id}/manifest`,{state:'sent',entries},source.token)).status,200);
+  assert.deepEqual((await f.call('GET','/clipboard/files/pulls/manifest',undefined,target.token)).body.entries,entries);
+  assert.deepEqual((await f.call('GET','/transfers',undefined,target.token)).body.transfers,[]);
+  const offer={transferId:'context-transfer',targetDeviceId:target.id,files:[{fileId:'context-file',name:'picture.jpg',size:1024,mimeType:'image/jpeg',sha256:'0'.repeat(64)}],copiedFile:{requestId:'manifest',offerId:clipboard.offerId,itemId:'folder'}};
+  assert.equal((await f.call('POST','/transfers',offer,source.token)).status,403);
+  await f.call('POST',`/clipboard/files/${source.id}/pull`,{offerId:clipboard.offerId,requestId:'real-pull',itemIds:['file']},target.token);
+  offer.copiedFile={requestId:'real-pull',offerId:clipboard.offerId,itemId:'file'};
+  const offered=await f.call('POST','/transfers',offer,source.token);assert.equal(offered.status,201);assert.deepEqual(offered.body.transfer.copiedFile,offer.copiedFile);
+  await f.restart();const restored=(await f.call('GET','/transfers',undefined,target.token)).body.transfers;assert.deepEqual(restored[0].copiedFile,offer.copiedFile);
+  assert.equal((await f.call('POST','/transfers',offer,source.token)).status,200);
+ }finally{await f.close();}
+});

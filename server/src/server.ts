@@ -533,6 +533,7 @@ export async function buildApp(options: Options = {}) {
     expiresAt: iso(t.expires),
     routePreference: transferRoute(t),
     ...(JSON.parse(t.offer).clipboard ? { clipboard: { originDeviceId: t.source, sourceEventId: t.id } } : {}),
+    ...(JSON.parse(t.offer).copiedFile ? { copiedFile: JSON.parse(t.offer).copiedFile } : {}),
     files: all(
       "SELECT * FROM files WHERE transfer_id=? ORDER BY rowid",
       t.id,
@@ -857,6 +858,7 @@ export async function buildApp(options: Options = {}) {
   app.post(`${api}/clipboard/files/:sourceDeviceId/pull`, { schema: { body: {
     type: "object", additionalProperties: false, required: ["offerId", "requestId", "itemIds"], properties: {
       offerId: id, requestId: id, itemIds: { type: "array", minItems: 1, items: id },
+      metadataOnly: { type: "boolean", const: true },
     },
   } } }, async req => copiedFiles.request(device(req).id, (req.params as { sourceDeviceId: string }).sourceDeviceId,
     req.body as { offerId: string; requestId: string; itemIds: string[] }));
@@ -866,6 +868,10 @@ export async function buildApp(options: Options = {}) {
   app.put(`${api}/clipboard/files/pulls/:targetDeviceId/:requestId`, { schema: { body: {
     type: "object", additionalProperties: false, required: ["state"], properties: {
       state: { enum: ["sending", "sent", "failed"] }, error: { type: "string" },
+      entries: { type: "array", maxItems: 10000, items: {
+        type: "object", additionalProperties: false, required: ["relativePath", "size", "kind"],
+        properties: { relativePath: {type:"string"}, size:{type:"integer",minimum:0}, kind:{enum:["file","directory"]} },
+      } },
     },
   } } }, async req => {
     const params = req.params as { targetDeviceId: string; requestId: string };
@@ -1460,6 +1466,9 @@ export async function buildApp(options: Options = {}) {
             targetDeviceId: id,
             routePreference: { enum: ROUTE_PREFERENCES },
             clipboard: { type: "boolean", const: true },
+            copiedFile: { type: "object", additionalProperties: false,
+              required: ["requestId", "offerId", "itemId"],
+              properties: { requestId: id, offerId: id, itemId: id } },
             files: {
               type: "array",
               minItems: 1,
@@ -1474,6 +1483,8 @@ export async function buildApp(options: Options = {}) {
       const d = device(req),
         b = req.body as any;
       target(d, b.targetDeviceId);
+      const old = get("SELECT * FROM transfers WHERE id=?", b.transferId);
+      const copiedFile = b.copiedFile ? old ? b.copiedFile : copiedFiles.transferContext(d.id, b.targetDeviceId, b.copiedFile) : undefined;
       if (b.clipboard && (b.files.length !== 1 || !b.files[0].mimeType?.startsWith("image/") || b.files[0].relativePath || b.files[0].entryKind === "directory"))
         fail("INVALID_CLIPBOARD_IMAGE", "Clipboard image requires one image file");
       const folder = b.files.some((f:any) => f.relativePath || f.entryKind === "directory");
@@ -1493,8 +1504,8 @@ export async function buildApp(options: Options = {}) {
         })),
         ...(b.routePreference && b.routePreference !== "auto" ? { routePreference: b.routePreference } : {}),
         ...(b.clipboard ? { clipboard: true } : {}),
+        ...(copiedFile ? { copiedFile } : {}),
       });
-      const old = get("SELECT * FROM transfers WHERE id=?", b.transferId);
       if (old) {
         if (old.source !== d.id || old.offer !== offer)
           fail("ID_CONFLICT", "Transfer ID already used", 409);

@@ -90,13 +90,14 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           },
         )
         .toList();
-    final references = controller.copiedFiles.references;
+    final references = controller.nativeCopiedReferences;
     final referenceIds = references
         .map((reference) => reference['id']!)
         .toSet();
-    if (referenceIds.difference(copiedReferenceIds).isNotEmpty) {
-      copiedReferenceRevision++;
-    }
+    final referenceArrival = referenceIds
+        .difference(copiedReferenceIds)
+        .isNotEmpty;
+    if (referenceArrival) copiedReferenceRevision++;
     copiedReferenceIds = referenceIds;
     final encoded = jsonEncode({
       'items': items,
@@ -104,17 +105,22 @@ class _GlobalSendAppState extends State<GlobalSendApp>
       'serverKey': controller.profile?.key ?? '',
       'appearance': controller.appearance.value.toJson(),
       'copiedFiles': references,
+      'clipboardSlot': controller.clipboardSlot?.toJson(),
     });
     if (controller.receiptSerial == receiptSerial &&
         encoded == receiptPayload) {
       return;
     }
     final newArrival =
-        receiptSerial != controller.receiptSerial || receiptPayload.isEmpty;
+        receiptSerial != controller.receiptSerial ||
+        referenceArrival ||
+        receiptPayload.isEmpty && items.isNotEmpty;
     receiptSerial = controller.receiptSerial;
     receiptPayload = encoded;
     final request = ++presentationRequest;
-    if (items.isEmpty && references.isEmpty) {
+    if (items.isEmpty &&
+        references.isEmpty &&
+        controller.clipboardSlot == null) {
       controller.receiptPresentedExternally = false;
       final generation = SystemBridge.receiptArrivalGeneration;
       if (generation != null) {
@@ -126,14 +132,17 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     }
     // Suppress the main overlay until native focus decides the presentation.
     if (newArrival) controller.receiptPresentedExternally = true;
-    unawaited(presentReceipts(items, receiptSerial, request));
+    unawaited(
+      presentReceipts(items, receiptSerial, request, quiet: !newArrival),
+    );
   }
 
   Future<void> presentReceipts(
     List<Map<String, dynamic>> items,
     int serial,
-    int request,
-  ) async {
+    int request, {
+    bool quiet = false,
+  }) async {
     try {
       final state = await SystemBridge.presentReceiveDock(
         items: items,
@@ -141,8 +150,10 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         appearance: controller.appearance.value.toJson(),
         devices: controller.sendablePeers,
         serverKey: controller.profile?.key ?? '',
-        copiedFiles: controller.copiedFiles.references,
+        copiedFiles: controller.nativeCopiedReferences,
         referenceRevision: copiedReferenceRevision,
+        clipboardSlot: controller.clipboardSlot?.toJson(),
+        quiet: quiet,
       );
       if (!mounted ||
           request != presentationRequest ||
@@ -152,7 +163,8 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           state['presentation'] == 'superseded') {
         return;
       }
-      controller.receiptPresentedExternally = state['presentation'] == 'dock';
+      if (!quiet)
+        controller.receiptPresentedExternally = state['presentation'] == 'dock';
       controller.changed();
     } catch (error) {
       if (!mounted ||
@@ -170,9 +182,11 @@ class _GlobalSendAppState extends State<GlobalSendApp>
     pendingDockUpdateActions++;
     try {
       final id = action['id'] as String?;
-      final entry = collapseFolderCards(controller.historyDock)
-          .where((item) => item.id == id)
-          .firstOrNull;
+      final entry = id == 'clipboard-slot'
+          ? controller.clipboardSlot
+          : collapseFolderCards(controller.historyDock)
+                .where((item) => item.id == id)
+                .firstOrNull;
       switch (action['action']) {
         case 'pullCopiedFile':
           await controller.pullCopiedFileSelection({
@@ -226,13 +240,20 @@ class _GlobalSendAppState extends State<GlobalSendApp>
         case 'cancel':
           if (entry != null) await controller.cancel(entry);
         case 'stage':
-          if (entry != null) await controller.stageHistoryEntry(entry);
+          if (id == 'clipboard-slot')
+            await controller.stageClipboardSlot();
+          else if (entry != null)
+            await controller.stageHistoryEntry(entry);
           await SystemBridge.activateWindow();
         case 'reveal':
           if (entry != null && entry.localPath.isNotEmpty) {
             await SystemBridge.revealFile(entry.localPath);
           }
         case 'delete':
+          if (id == 'clipboard-slot') {
+            await controller.clearClipboardSlot();
+            return;
+          }
           // Remove the presentation before filesystem/persistence work. Deletion
           // used to notify while the receipt was still present, then dismiss it
           // without notifying again, leaving a stale card until another event.

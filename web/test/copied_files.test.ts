@@ -35,7 +35,7 @@ test('references are metadata-only; explicit click pulls once; fast socket resul
   await client.refresh();assert.equal(client.references.length,1);assert.equal(calls.length,1);assert.equal(client.references[0].item.kind,'directory');
   const click=client.pull(client.references[0].id);await client.pull(client.references[0].id);assert.equal(calls.length,2);assert.equal(client.references[0].state,'pending');
   assert.deepEqual(calls[1],{path:'/clipboard/files/source/pull',body:{offerId:'batch',requestId:'request',itemIds:['folder']}});
-  client.receive(response('sent'));release(response('pending'));await click;assert.equal(client.references[0].state,'sent');
+  client.receive(response('sent'));release(response('pending'));await click;assert.equal(client.references[0].state,'sending');
   client.dismiss(client.references[0].id);assert.equal(client.references.length,0);assert.equal(calls.length,2);
 });
 test('session replacement cannot restore stale offers or an old request status',async()=>{
@@ -53,4 +53,14 @@ test('event refresh coalesces bursts but rechecks after in-flight responses, and
   release({offers:[offer]});await Promise.all([first,second]);assert.equal(requests,2);assert.deepEqual(client.references,[]);
   const failing=new CopiedFilesReceiver(async<T>(path:string)=>{if(path==='/clipboard/files')return {offers:[offer]} as T;throw new Error('source disconnected');},()=>{},()=> 'failed');
   await failing.refresh();await failing.pull(failing.references[0].id);assert.equal(failing.references[0].state,'failed');assert.equal(failing.references[0].error,'source disconnected');
+});
+
+
+test('only completed exact references become local draggable content and deletion allows another pull',async()=>{
+ let calls=0;const client=new CopiedFilesReceiver(async<T>(path:string,body?:unknown)=>{if(path==='/clipboard/files')return {offers:[offer]} as T;calls++;return {...response('sent'),...(body as object)} as T;},()=>{});
+ await client.refresh();const ref=client.references[0];await client.pull(ref.id);assert.equal(ref.localKey,undefined);
+ client.remember('source',{offerId:'batch',itemId:'folder'},'transfer:root');
+ assert.equal(client.references[0].state,'received');await client.pull(ref.id);assert.equal(calls,1);
+ const {document}=parseHTML('<body>'+copiedFilesHtml(client)+'</body>');assert.equal(document.querySelector('[data-drag-file]')?.getAttribute('data-drag-file'),'transfer:root');
+ client.reconcile(()=>false);assert.equal(client.references[0].localKey,undefined);await client.pull(ref.id);assert.equal(calls,2);
 });

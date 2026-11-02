@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'app_icon.dart';
+import 'content_preview.dart';
 import 'ui_tokens.dart';
+import 'text_selection_surface.dart';
 
-/// A remote reference has no local bytes to preview or drag. Reuse the normal
-/// card surface, corner action and quiet footer in the workspace and dock.
+/// Shared reference surface. Local copies preview immediately; remote content
+/// resolves through its native on-demand drag provider.
 class CopiedFileReferenceCard extends StatelessWidget {
   const CopiedFileReferenceCard({
     super.key,
@@ -25,19 +27,23 @@ class CopiedFileReferenceCard extends StatelessWidget {
     final state = reference['state'];
     final busy = state == 'pending' || state == 'sending';
     final failed = state == 'failed';
+    final local = reference['localPath'] as String? ?? '';
+    final ready = state == 'received' && local.isNotEmpty;
     final name = reference['name'] as String;
     final status = busy
         ? '正在准备'
         : failed
         ? '拉取失败'
         : '';
-    final glyph = AppIcon(
-      reference['kind'] == 'directory'
-          ? Icons.folder_outlined
-          : Icons.insert_drive_file_outlined,
-      size: compact ? 24 : 30,
-      color: palette.accent,
-    );
+    final glyph = ready && reference['kind'] != 'directory'
+        ? ContentPreview(location: local, name: name, compact: true)
+        : AppIcon(
+            reference['kind'] == 'directory'
+                ? Icons.folder_outlined
+                : Icons.insert_drive_file_outlined,
+            size: compact ? 24 : 30,
+            color: palette.accent,
+          );
     final title = Text(
       name,
       maxLines: compact ? 1 : 2,
@@ -71,7 +77,7 @@ class CopiedFileReferenceCard extends StatelessWidget {
         children: [
           Semantics(
             button: true,
-            label: '拉取 $name',
+            label: '${ready ? '打开' : '拉取'} $name',
             enabled: !busy,
             child: InkWell(
               onTap: busy ? null : onPull,
@@ -121,12 +127,17 @@ class CopiedFileReferenceCard extends StatelessWidget {
           Positioned(
             top: 0,
             right: 0,
-            child: IconButton(
-              tooltip: '忽略此条目',
-              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-              padding: const EdgeInsets.all(7),
-              icon: const AppIcon(Icons.close, size: 18),
-              onPressed: onDismiss,
+            child: ContentDragControl(
+              child: IconButton(
+                tooltip: '忽略此条目',
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                padding: const EdgeInsets.all(7),
+                icon: const AppIcon(Icons.close, size: 18),
+                onPressed: onDismiss,
+              ),
             ),
           ),
           if (busy)
@@ -142,7 +153,11 @@ class CopiedFileReferenceCard extends StatelessWidget {
               right: Ui.space1,
               child: IgnorePointer(
                 child: AppIcon(
-                  failed ? Icons.refresh_rounded : Icons.download_rounded,
+                  failed
+                      ? Icons.refresh_rounded
+                      : ready
+                      ? Icons.open_in_new
+                      : Icons.download_rounded,
                   size: 16,
                   color: failed ? palette.danger : palette.accent,
                 ),

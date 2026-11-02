@@ -44,6 +44,7 @@ import 'transfer_route_selection.dart';
 import 'url_intents.dart';
 import 'file_share.dart';
 import 'copied_files.dart';
+import 'clipboard_slot.dart';
 
 String newId() {
   final r = Random.secure();
@@ -112,8 +113,59 @@ class SendController extends ChangeNotifier {
   late final CopiedFilesClient copiedFiles = CopiedFilesClient(
     newId: newId,
     sendFiles: (target, paths) => offer(target, paths),
+    sendReference: (target, path, context) =>
+        offerCopiedFile(target, path, context),
     changed: changed,
   );
+  late final ClipboardSlot clipboard = ClipboardSlot(changed: changed);
+  DockEntry? get clipboardSlot => clipboard.value;
+  bool get clipboardReceiveEnabled => clipboard.enabled;
+  Future<void> setClipboardReceiveEnabled(bool enabled) =>
+      clipboard.setEnabled(enabled);
+  Future<void> copyClipboardSlot() async {
+    final item = clipboardSlot;
+    if (item == null) return;
+    clipboard.retain(item.localPath);
+    try {
+      if (item.kind == 'text')
+        await copyDockText(item);
+      else if (Platform.isWindows)
+        await SystemBridge.copyImage(
+          item.localPath,
+          originDeviceId: item.originDeviceId,
+          sourceEventId: item.sourceEventId,
+        );
+      else if (Platform.isAndroid)
+        await DockPlatform.channel.invokeMethod<void>('copyReceivedImage', {
+          'path': item.localPath,
+        });
+      else
+        await FileShareBridge.channel.invokeMethod<void>('copyReceivedImage', {
+          'path': item.localPath,
+        });
+    } finally {
+      await clipboard.release(item.localPath);
+    }
+  }
+
+  Future<void> clearClipboardSlot() => clipboard.clear();
+  Future<void> stageClipboardSlot() async {
+    final item = clipboardSlot;
+    if (item == null) return;
+    if (item.kind == 'text') {
+      await stageInputs([], [item.text]);
+      return;
+    }
+    final directory = Directory(
+      '${(root ?? await stateDirectory()).path}/staged-clipboard',
+    );
+    await directory.create(recursive: true);
+    final path = '${directory.path}/${newId()}-${safeName(item.title)}';
+    await File(item.localPath).copy(path);
+    _temporarySources.add(path);
+    await stageInputs([path], []);
+  }
+
   bool get copiedFilesSupported => info['features']?['copiedFiles'] == true;
 
   Future<void> setCopiedFilePush(bool enabled, List<String> targets) async {
@@ -145,7 +197,153 @@ class SendController extends ChangeNotifier {
       copiedFiles.dismiss(reference['id']!);
       return;
     }
-    await copiedFiles.pull(reference, [reference['itemId']!]);
+    if (reference['localPath']?.isNotEmpty == true) {
+      await ReceivedFileAccess.openExternal(reference['localPath']!);
+    } else {
+      await copiedFiles.pull(reference, [reference['itemId']!]);
+    }
+  }
+
+  Future<List<String>> resolveRemoteReference(
+    Map<String, dynamic> reference,
+  ) async {
+    if (reference['serverKey'] != null &&
+        reference['serverKey'] != profile?.key)
+      throw StateError('请连接原中心后重试');
+    return copiedFiles.resolve(reference);
+  }
+
+  Future<Map<String, dynamic>> prepareRemoteReference(
+    Map<String, dynamic> reference,
+  ) async {
+    final result = <String, dynamic>{
+      ...reference,
+      'serverKey': profile?.key ?? '',
+    };
+    if (result['kind'] == 'directory' &&
+        (result['localPath'] as String? ?? '').isEmpty) {
+      result['entries'] = await copiedFiles.manifest(reference);
+    }
+    return result;
+  }
+
+  StreamSubscription<Map<String, dynamic>>? _remoteReferenceSubscription;
+  StreamSubscription<Map<String, dynamic>>? _clipboardLeaseSubscription;
+  void _bindRemoteReferences() {
+    if (_remoteReferenceSubscription != null) return;
+    final leases = Platform.isWindows
+        ? SystemBridge.clipboardSlotLeases
+        : Platform.isAndroid
+        ? DockPlatform.clipboardSlotLeases
+        : FileShareBridge.clipboardSlotLeases;
+    _clipboardLeaseSubscription = leases.listen((event) {
+      for (final path in List<String>.from(event['paths'] ?? [])) {
+        if (event['active'] == true)
+          clipboard.retain(path);
+        else
+          unawaited(clipboard.release(path));
+      }
+    });
+    final requests = Platform.isWindows
+        ? SystemBridge.remoteReferenceRequests
+        : Platform.isAndroid
+        ? DockPlatform.remoteReferenceRequests
+        : FileShareBridge.remoteReferenceRequests;
+    _remoteReferenceSubscription = requests.listen((request) async {
+      final token = request['token'] as String;
+      List<String> paths = const [];
+      var error = '';
+      try {
+        paths = await resolveRemoteReference(
+          Map<String, dynamic>.from(request['reference'] as Map),
+        );
+      } catch (failure) {
+        error = '$failure';
+      }
+      if (Platform.isWindows)
+        await SystemBridge.completeRemoteReference(
+          token,
+          paths: paths,
+          error: error,
+        );
+      else if (Platform.isAndroid)
+        await DockPlatform.completeRemoteReference(
+          token,
+          paths: paths,
+          error: error,
+        );
+      else
+        await FileShareBridge.completeRemoteReference(
+          token,
+          paths: paths,
+          error: error,
+        );
+    });
+  }
+
+  Future<void> dragCopiedFileReference(
+    Map<String, dynamic> reference, {
+    String pointerKind = 'auto',
+  }) async {
+    await copiedFiles.reconcileReceived();
+    final local = copiedFiles.localReference(
+      reference['id'] as String,
+    )?['localPath'];
+    if (local != null) {
+      await dragOut(
+        DockEntry(
+          id: reference['id'],
+          kind: 'file',
+          title: reference['name'],
+          source: reference['sourceDeviceId'],
+          localPath: local,
+          entryKind: reference['kind'] == 'directory' ? 'directory' : 'file',
+          status: 'received',
+        ),
+        pointerKind: pointerKind,
+      );
+      return;
+    }
+    _bindRemoteReferences();
+    final prepared = await prepareRemoteReference(reference);
+    if (Platform.isWindows)
+      await SystemBridge.startRemoteReferenceDrag(
+        prepared,
+        pointerKind: pointerKind,
+      );
+    else if (Platform.isAndroid)
+      await DockPlatform.startRemoteReferenceDrag(
+        prepared,
+        pointerKind: pointerKind,
+      );
+    else
+      await FileShareBridge.channel.invokeMethod<bool>(
+        'startRemoteReferenceDrag',
+        {'remoteReference': prepared, 'pointerKind': pointerKind},
+      );
+  }
+
+  Future<void> _rememberCopiedReference(DockEntry item) async {
+    if (item.outgoing || item.copiedFileContext.isEmpty) return;
+    final displayed = _folderPresentation(item);
+    final reference = {
+      ...item.copiedFileContext,
+      'sourceDeviceId': item.source,
+    };
+    if (displayed.status == 'failed') {
+      copiedFiles.receiveFailed(
+        reference,
+        displayed.error.isEmpty ? '文件接收失败' : displayed.error,
+      );
+    } else if (displayed.status == 'received' &&
+        displayed.localPath.isNotEmpty) {
+      await copiedFiles.rememberReceived(
+        reference,
+        displayed.localPath,
+        transferId: displayed.transferId,
+        fileId: displayed.fileId,
+      );
+    }
   }
 
   late final UrlIntentIntegration urlIntents = UrlIntentIntegration(
@@ -321,7 +519,7 @@ class SendController extends ChangeNotifier {
   bool clipboardEnabled = false;
   String clipboardTarget = '', clipboardStatus = '自动剪贴板已关闭';
   String clipboardError = '';
-  int _clipboardEnabledAt = 0, _clipboardSequence = -1, _lastClipboardSend = 0;
+  int _clipboardSequence = -1, _lastClipboardSend = 0;
   int _lastRemoteClipboardAt = 0;
   StreamSubscription<Map<String, dynamic>>? _clipboardSubscription;
   Timer? _clipboardDebounce, _ephemeralCleanup;
@@ -450,9 +648,14 @@ class SendController extends ChangeNotifier {
   List<DockEntry> get historyDock {
     final active = {for (final entry in dock) '${profile?.key}:${entry.id}'};
     return [
-      ...dock.where((entry) => !_isHiddenDockId(entry.id)),
+      ...dock.where(
+        (entry) => !_isHiddenDockId(entry.id) && !entry.autoClipboard,
+      ),
       ...?_localHistory?.records.values
-          .where((record) => !active.contains(record.key))
+          .where(
+            (record) =>
+                !active.contains(record.key) && !record.entry.autoClipboard,
+          )
           .map((record) => record.entry),
     ]..sort((a, b) => b.createdAtMillis.compareTo(a.createdAtMillis));
   }
@@ -488,6 +691,7 @@ class SendController extends ChangeNotifier {
       .where(
         (item) =>
             item.outgoing &&
+            !item.autoClipboard &&
             item.kind == 'file' &&
             item.status == 'failed' &&
             !item.locallyPaused &&
@@ -803,6 +1007,21 @@ class SendController extends ChangeNotifier {
           (receivedAt ?? DateTime.now()).millisecondsSinceEpoch;
     }
     final savedOwner = ServerProfile.fromJson(owner.toJson());
+    if (entry.autoClipboard) {
+      _localHistory?.remove('${savedOwner.key}:${entry.id}');
+      await (await _savedStore())?.forgetEntry(
+        savedOwner.key,
+        entry.transferId,
+        entry.fileId,
+      );
+      if (savedOwner.deviceId == profile?.deviceId &&
+          savedOwner.key == profile?.key) {
+        await clipboard.receive(entry);
+        await _applyRemoteClipboardImage(entry);
+      }
+      changed();
+      return;
+    }
     final store = await _savedStore();
     if (store == null) return;
     if (!entry.outgoing && entry.kind == 'file' && !entry.isDirectory) {
@@ -814,6 +1033,7 @@ class SendController extends ChangeNotifier {
       receivedAt: receivedAt,
       managedLocation: managedLocation,
     );
+    await _rememberCopiedReference(entry);
     if (savedOwner.key == profile?.key &&
         savedOwner.deviceId == profile?.deviceId) {
       await _applyRemoteClipboardImage(entry);
@@ -1012,7 +1232,10 @@ class SendController extends ChangeNotifier {
     String? fileName,
     bool updated = false,
   }) {
-    if (item.outgoing) return;
+    if (item.outgoing ||
+        item.autoClipboard ||
+        item.copiedFileContext.isNotEmpty)
+      return;
     final folder = _folderPresentation(item);
     if (folder is FolderCardEntry) {
       if (version == 'received' && folder.status != 'received') {
@@ -1041,6 +1264,7 @@ class SendController extends ChangeNotifier {
   }
 
   void _showReceipt(DockEntry item, String version) {
+    if (item.autoClipboard || item.copiedFileContext.isNotEmpty) return;
     item = _folderPresentation(item);
     if (item.sourceLabel.isEmpty) item.sourceLabel = _noticeSource(item.source);
     if (_receiptVersions[item.id] == version) return;
@@ -1203,6 +1427,37 @@ class SendController extends ChangeNotifier {
     }
   }
 
+  final Set<String> _manifestRequested = {};
+  List<Map<String, String>> get nativeCopiedReferences {
+    final values = copiedFiles.references;
+    for (final reference in values) {
+      if (reference['kind'] != 'directory' ||
+          (reference['localPath'] ?? '').isNotEmpty ||
+          copiedFiles.cachedManifest(reference['id']!) != null ||
+          !_manifestRequested.add(reference['id']!))
+        continue;
+      unawaited(
+        copiedFiles
+            .manifest(Map<String, dynamic>.from(reference))
+            .then((_) {
+              if (!disposed) changed();
+            })
+            .catchError((Object error) {
+              debugPrint('目录拖放元数据未就绪：$error');
+            }),
+      );
+    }
+    return [
+      for (final reference in values)
+        {
+          ...reference,
+          'serverKey': profile?.key ?? '',
+          if (copiedFiles.cachedManifest(reference['id']!) case final entries?)
+            'entries': jsonEncode(entries),
+        },
+    ];
+  }
+
   void _publishDockTargets() {
     if (!Platform.isAndroid || disposed) return;
     final serverKey = profile?.key ?? '';
@@ -1216,8 +1471,13 @@ class SendController extends ChangeNotifier {
               },
           ]
         : <Map<String, dynamic>>[];
-    final references = copiedFiles.references;
-    final snapshot = jsonEncode([serverKey, peers, references]);
+    final references = nativeCopiedReferences;
+    final snapshot = jsonEncode([
+      serverKey,
+      peers,
+      references,
+      clipboardSlot?.toJson(),
+    ]);
     if (snapshot == _dockTargetsSnapshot) return;
     _dockTargetsSnapshot = snapshot;
     unawaited(
@@ -1225,6 +1485,7 @@ class SendController extends ChangeNotifier {
         serverKey,
         peers,
         copiedFiles: references,
+        clipboardSlot: clipboardSlot?.toJson(),
       ).catchError((Object error) {
         if (_dockTargetsSnapshot == snapshot) _dockTargetsSnapshot = '';
         debugPrint('暂存坞设备列表未更新：$error');
@@ -1244,7 +1505,11 @@ class SendController extends ChangeNotifier {
     if (!sendablePeers.any((peer) => peer['deviceId'] == target)) {
       throw StateError('目标设备已离线，请重试');
     }
-    final paths = List<String>.from(selection['paths'] ?? []);
+    final paths = selection['remoteReference'] is Map
+        ? await resolveRemoteReference(
+            Map<String, dynamic>.from(selection['remoteReference'] as Map),
+          )
+        : List<String>.from(selection['paths'] ?? []);
     final texts = List<String>.from(selection['texts'] ?? []);
     // Use the existing transfer entry points without touching unrelated drafts.
     if (paths.isNotEmpty) await offer(target, paths);
@@ -1351,6 +1616,7 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> init() async {
+    _bindRemoteReferences();
     _reachabilityStarted = true;
     reachability.start();
     if (Platform.isWindows) {
@@ -1376,8 +1642,9 @@ class SendController extends ChangeNotifier {
     try {
       await backgroundReceive.initialize();
       root = await stateDirectory();
+      await clipboard.load(root!);
+      await copiedFiles.load(File('${root!.path}/copied-files.json'));
       if (Platform.isWindows) {
-        await copiedFiles.load(File('${root!.path}/copied-files.json'));
         if (copiedFiles.sourceReady) {
           await SystemBridge.watchClipboard(true);
           await copiedFiles.copiedPaths(
@@ -2445,9 +2712,13 @@ class SendController extends ChangeNotifier {
             );
             _localHistory?.restoreLocalEdit(p.key, dock.first);
             if (automatic && !outgoing) {
+              final automaticEntry = dock.firstWhere(
+                (item) => item.id == e['eventId'],
+              );
+              await this.clipboard.receive(automaticEntry);
               await _applyRemoteClipboard(Map<String, dynamic>.from(e));
             }
-            if (!outgoing) {
+            if (!outgoing && !automatic) {
               _postReceivedNotice(
                 dock.firstWhere((item) => item.id == e['eventId']),
                 '${e['cursor']}',
@@ -2541,7 +2812,14 @@ class SendController extends ChangeNotifier {
                     d.transferId == t['transferId'] && ids.contains(d.fileId),
               )
               .firstOrNull;
-          if (entry != null && p.autoReceive) {
+          if (entry != null &&
+              entry.autoClipboard &&
+              !clipboardReceiveEnabled) {
+            await api!.call('POST', '/transfers/${entry.transferId}/accept', {
+              'fileIds': <String>[],
+            });
+          } else if (entry != null &&
+              (entry.autoClipboard ? clipboardReceiveEnabled : p.autoReceive)) {
             await acceptSelected(entry, ids, reconcileAfter: false);
           }
         }
@@ -2567,6 +2845,19 @@ class SendController extends ChangeNotifier {
       final id = f['fileId'] as String;
       if (_isHiddenDockId(id)) continue;
       var item = indexed[id];
+      // Older serialized entries omitted automatic metadata. Upgrade only from
+      // this center's exact transfer record, never from a name or file type.
+      if (item != null && t['clipboard'] is Map) {
+        final marker = t['clipboard'] as Map;
+        item.autoClipboard = true;
+        item.originDeviceId = marker['originDeviceId'] ?? '';
+        item.sourceEventId = marker['sourceEventId'] ?? '';
+        item.expiresAtMillis =
+            DateTime.tryParse(t['expiresAt'] ?? '')?.millisecondsSinceEpoch ??
+            0;
+      }
+      if (item != null && t['copiedFile'] is Map)
+        item.copiedFileContext = Map<String, dynamic>.from(t['copiedFile']);
       if (item == null) {
         item = DockEntry(
           id: id,
@@ -2582,6 +2873,10 @@ class SendController extends ChangeNotifier {
               DateTime.tryParse(t['createdAt'] ?? '')?.millisecondsSinceEpoch ??
               DateTime.now().millisecondsSinceEpoch,
           outgoing: outgoing,
+          autoClipboard: t['clipboard'] is Map,
+          copiedFileContext: Map<String, dynamic>.from(
+            t['copiedFile'] ?? const {},
+          ),
           originDeviceId: (t['clipboard'] as Map?)?['originDeviceId'] ?? '',
           sourceEventId: (t['clipboard'] as Map?)?['sourceEventId'] ?? '',
           expiresAtMillis:
@@ -2689,8 +2984,12 @@ class SendController extends ChangeNotifier {
         unawaited(rtc?.cancelFile(id));
       }
       if (f['status'] == 'received') {
-        if (!outgoing && item.localPath.isNotEmpty)
-          unawaited(_applyRemoteClipboardImage(item));
+        if (!outgoing && item.localPath.isNotEmpty) {
+          if (item.autoClipboard && profile != null)
+            unawaited(_rememberSavedFile(item, profile!));
+          else
+            unawaited(_applyRemoteClipboardImage(item));
+        }
         item.relayConfirmationPending = false;
         item.relayPendingBeforeAccept = false;
         if (outgoing) {
@@ -2876,7 +3175,6 @@ class SendController extends ChangeNotifier {
     await SystemBridge.watchClipboard(true);
     clipboardEnabled = true;
     clipboardTarget = targetDeviceId;
-    _clipboardEnabledAt = DateTime.now().millisecondsSinceEpoch;
     _lastRemoteClipboardAt = 0;
     clipboardStatus = '已开启';
     clipboardError = '';
@@ -3004,13 +3302,10 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> _applyRemoteClipboardImage(DockEntry item) async {
-    if (!Platform.isWindows ||
-        !clipboardEnabled ||
+    if (!clipboardReceiveEnabled ||
         item.outgoing ||
         item.originDeviceId.isEmpty ||
         item.sourceEventId.isEmpty ||
-        item.originDeviceId != clipboardTarget ||
-        item.createdAtMillis < _clipboardEnabledAt ||
         item.createdAtMillis < _lastRemoteClipboardAt ||
         item.localPath.isEmpty ||
         item.expiresAtMillis <= DateTime.now().millisecondsSinceEpoch)
@@ -3020,11 +3315,17 @@ class SendController extends ChangeNotifier {
     _clipboardRoots[identity] = item.expiresAtMillis;
     _lastRemoteClipboardAt = item.createdAtMillis;
     try {
-      final applied = await SystemBridge.copyImage(
-        item.localPath,
-        originDeviceId: item.originDeviceId,
-        sourceEventId: item.sourceEventId,
-      );
+      final bool applied;
+      if (Platform.isWindows) {
+        applied = await SystemBridge.copyImage(
+          item.localPath,
+          originDeviceId: item.originDeviceId,
+          sourceEventId: item.sourceEventId,
+        );
+      } else {
+        await copyClipboardSlot();
+        applied = true;
+      }
       if (applied) {
         clipboardStatus = '已同步';
         clipboardError = '';
@@ -3037,9 +3338,7 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> _applyRemoteClipboard(Map<String, dynamic> event) async {
-    if (!Platform.isWindows ||
-        !clipboardEnabled ||
-        event['sourceDeviceId'] != clipboardTarget) {
+    if (!clipboardReceiveEnabled) {
       return;
     }
     final payload = event['payload'] as Map,
@@ -3057,7 +3356,6 @@ class SendController extends ChangeNotifier {
     final identity = '$origin/$root';
     if (origin == profile?.deviceId ||
         root.isEmpty ||
-        created < _clipboardEnabledAt ||
         created < _lastRemoteClipboardAt ||
         expiry <= now ||
         _clipboardRoots.containsKey(identity) ||
@@ -3076,7 +3374,7 @@ class SendController extends ChangeNotifier {
       );
       clipboardStatus = '已同步';
     } catch (_) {
-      clipboardStatus = '请从接收列表复制';
+      clipboardStatus = '请点按剪贴板槽位复制';
     }
   }
 
@@ -3114,7 +3412,7 @@ class SendController extends ChangeNotifier {
     clipboardTarget = '';
     _clipboardDebounce?.cancel();
     _clipboardRoots.clear();
-    dock.removeWhere((d) => d.autoClipboard);
+    dock.removeWhere((d) => d.autoClipboard && d.outgoing);
     clipboardStatus = '已关闭';
     if (Platform.isWindows) {
       unawaited(
@@ -3820,6 +4118,10 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> handleNativeDockEvent(Map<String, dynamic> event) async {
+    if (event['type'] == 'clipboardSlotDismissed') {
+      await clearClipboardSlot();
+      return;
+    }
     if (event['type'] == 'nativeDrag') {
       final target = event['targetDeviceId'] as String? ?? '';
       nativeHoveredDeviceId = event['active'] == true && target.isNotEmpty
@@ -3846,6 +4148,14 @@ class SendController extends ChangeNotifier {
         _nativeDropIds.remove(_nativeDropIds.first);
       }
       try {
+        if (event['remoteReference'] is Map) {
+          event = {
+            ...event,
+            'paths': await resolveRemoteReference(
+              Map<String, dynamic>.from(event['remoteReference'] as Map),
+            ),
+          };
+        }
         _temporarySources.addAll(
           List<String>.from(event['temporaryPaths'] ?? []),
         );
@@ -3902,22 +4212,27 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> dragOut(DockEntry item, {String pointerKind = 'auto'}) async {
-    if (Platform.isWindows) {
-      await SystemBridge.dragOut(
-        pointerKind: pointerKind,
-        text: item.kind == 'text' ? item.text : null,
-        paths: item.kind == 'file' && item.localPath.isNotEmpty
-            ? [item.localPath]
-            : null,
-      );
-    } else if (Platform.isAndroid) {
-      await DockPlatform.startDrag(
-        text: item.kind == 'text' ? item.text : null,
-        path: item.kind == 'file' && item.localPath.isNotEmpty
-            ? item.localPath
-            : null,
-        label: item.title,
-      );
+    clipboard.retain(item.localPath);
+    try {
+      if (Platform.isWindows) {
+        await SystemBridge.dragOut(
+          pointerKind: pointerKind,
+          text: item.kind == 'text' ? item.text : null,
+          paths: item.kind == 'file' && item.localPath.isNotEmpty
+              ? [item.localPath]
+              : null,
+        );
+      } else if (Platform.isAndroid) {
+        await DockPlatform.startDrag(
+          text: item.kind == 'text' ? item.text : null,
+          path: item.kind == 'file' && item.localPath.isNotEmpty
+              ? item.localPath
+              : null,
+          label: item.title,
+        );
+      }
+    } finally {
+      await clipboard.release(item.localPath);
     }
   }
 
@@ -4061,12 +4376,19 @@ class SendController extends ChangeNotifier {
     displayNames: displayNames,
   );
 
+  Future<void> offerCopiedFile(
+    String target,
+    String path,
+    Map<String, dynamic> context,
+  ) => _offerFiles(target, [path], copiedFileContext: context);
+
   Future<void> _offerFiles(
     String target,
     List<String> paths, {
     String? routePreferenceOverride,
     Map<String, String>? displayNames,
     bool clipboardImage = false,
+    Map<String, dynamic>? copiedFileContext,
     bool Function()? beforePublish,
   }) async {
     final epoch = generation, a = api!, p = profile!;
@@ -4172,6 +4494,7 @@ class SendController extends ChangeNotifier {
       'targetDeviceId': target,
       'files': files,
       if (clipboardImage) 'clipboard': true,
+      if (copiedFileContext != null) 'copiedFile': copiedFileContext,
       if (routePreference != 'auto') 'routePreference': routePreference,
     });
     _requireSession(epoch, a, p);
@@ -4505,12 +4828,14 @@ class SendController extends ChangeNotifier {
     )) {
       entry.receivedAtMillis = receivedAt.millisecondsSinceEpoch;
     }
+    await _rememberCopiedReference(root);
     await save();
     changed();
     return true;
   }
 
   Future<bool> _reuseSavedFile(DockEntry item) async {
+    if (item.autoClipboard) return false;
     if (item.locallyCanceled || item.locallyPaused) return false;
     final epoch = generation, a = api!, owner = profile!;
     final store = await _savedStore();
@@ -5059,6 +5384,7 @@ class SendController extends ChangeNotifier {
     } finally {
       _gate.leave();
       busyFiles.remove(item.fileId);
+      await _rememberCopiedReference(item);
       if (epoch == generation) {
         await save();
         changed();
@@ -6188,13 +6514,17 @@ class SendController extends ChangeNotifier {
       }
       item.localPath = '';
       preparingDestination = true;
-      final store = await _savedStore();
+      final store = item.autoClipboard ? null : await _savedStore();
       _relocateSavedEntry(item);
       final resumeManaged =
           item.partialPath.isNotEmpty &&
           await ReceiveDestination.isOwned(item.partialPath) &&
           (await ReceiveDestination.stat(item.partialPath)).exists;
-      var customDirectory = store?.receiveDestinationLocation ?? '';
+      var customDirectory = item.autoClipboard
+          ? '${(root ?? await stateDirectory()).path}/clipboard-slot-cache'
+          : store?.receiveDestinationLocation ?? '';
+      if (item.autoClipboard)
+        await Directory(customDirectory).create(recursive: true);
       if (customDirectory.isEmpty) {
         customDirectory = '${(await documentsDirectory()).path}/GlobalSend';
         await Directory(customDirectory).create(recursive: true);
@@ -6211,7 +6541,7 @@ class SendController extends ChangeNotifier {
           relativePath: parts.take(parts.length - 1).join('/'),
         );
       }
-      final defaultPartial = resumeManaged
+      final defaultPartial = item.autoClipboard || resumeManaged
           ? null
           : item.relativePath.isNotEmpty
           ? null
@@ -6369,6 +6699,8 @@ class SendController extends ChangeNotifier {
           : managedTemporaryLocation;
       item.partialPath = '';
       item.receivedBytes = item.size;
+      item.status = 'received';
+      item.progress = 1;
       await _rememberSavedFile(
         item,
         p,
@@ -6450,6 +6782,7 @@ class SendController extends ChangeNotifier {
         }
       }
       busyFiles.remove(item.fileId);
+      await _rememberCopiedReference(item);
       if (epoch == generation) {
         await save();
         changed();
@@ -6546,6 +6879,8 @@ class SendController extends ChangeNotifier {
     }
     _restoreTimer?.cancel();
     _dockSubscription?.cancel();
+    _remoteReferenceSubscription?.cancel();
+    _clipboardLeaseSubscription?.cancel();
     _clipboardSubscription?.cancel();
     _ephemeralCleanup?.cancel();
     disposed = true;

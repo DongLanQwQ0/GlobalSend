@@ -63,7 +63,7 @@ export class RtcFileStore {
   private call<T=any>(command:string,data:unknown,transfer:Transferable[]=[]):Promise<T> {
     return this.storage.call<T>(command,data,transfer);
   }
-  async open(key:string,file:TransferFile,expires:number) {await this.ready;return (await this.call('open',{key,name:file.name,mimeType:file.mimeType,size:file.size,sha256:file.sha256,expires,relativePath:file.relativePath,entryKind:file.entryKind,transferId:key.split(':')[0]})).offset as number;}
+  async open(key:string,file:TransferFile,expires:number,ephemeral=false) {await this.ready;return (await this.call('open',{key,name:file.name,mimeType:file.mimeType,size:file.size,sha256:file.sha256,expires,ephemeral,relativePath:file.relativePath,entryKind:file.entryKind,transferId:key.split(':')[0]})).offset as number;}
   async directory(key:string,file:TransferFile){const {meta}=await this.call('directory',{key,name:file.name,size:0,mimeType:'inode/directory',relativePath:file.relativePath,transferId:key.split(':')[0],expires:Date.now()+86400000});this.receivedTimes.set(key,new Date(meta.receivedAt).toISOString());return meta;}
   async destination(){return this.call<{id:string;name:string}>('destination-get',{});}
   async setDestination(handle?:FileSystemDirectoryHandle){return this.call<{id:string;name:string;moved:number;cleanupPending:boolean;relocated?:{scope:string;key:string}[]}>('destination-set',handle?{handle,id:crypto.randomUUID()}:{});}
@@ -97,6 +97,7 @@ export class RtcFileStore {
   async confirmFolderReuse(keys:string[],receivedAt:string){const result=await this.call<{files:{key:string;expires:number}[]}>('confirm-folder-reuse',{keys,receivedAt});for(const {key,expires} of result.files){this.receivedTimes.set(key,receivedAt);this.expiries.set(key,expires);}}
   async close(key:string) {await this.ready;await this.call('close',{key});}
   async remove(key:string) {await this.ready;await this.call('remove',{key});}
+  async releaseClipboard(key:string){await this.ready;await this.call('clipboard-release',{key});}
   async cleanup() {await this.ready;await this.call('cleanup',{});}
   async dispose() {await this.storage.dispose();}
 }

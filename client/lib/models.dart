@@ -132,6 +132,7 @@ class DockEntry {
     this.outgoing = false,
     this.route = 'relay',
     this.autoClipboard = false,
+    this.copiedFileContext = const {},
     this.expiresAtMillis = 0,
     this.originDeviceId = '',
     this.sourceEventId = '',
@@ -194,9 +195,10 @@ class DockEntry {
   }
 
   final bool outgoing;
-  final bool autoClipboard;
-  final int expiresAtMillis;
-  final String originDeviceId, sourceEventId;
+  bool autoClipboard;
+  Map<String, dynamic> copiedFileContext;
+  int expiresAtMillis;
+  String originDeviceId, sourceEventId;
   int receivedBytes;
   String partialPath;
   String status, localPath, error, route;
@@ -225,6 +227,11 @@ class DockEntry {
     'contentId': contentId,
     'contentRevision': contentRevision,
     'contentDigest': contentDigest,
+    'autoClipboard': autoClipboard,
+    'expiresAtMillis': expiresAtMillis,
+    'originDeviceId': originDeviceId,
+    'sourceEventId': sourceEventId,
+    if (copiedFileContext.isNotEmpty) 'copiedFileContext': copiedFileContext,
     'status': status,
     'error': error,
     'transferId': transferId,
@@ -267,6 +274,13 @@ class DockEntry {
     contentId: j['contentId'] ?? '',
     contentRevision: j['contentRevision'] ?? 0,
     contentDigest: j['contentDigest'] ?? '',
+    autoClipboard: j['autoClipboard'] == true,
+    expiresAtMillis: j['expiresAtMillis'] ?? 0,
+    originDeviceId: j['originDeviceId'] ?? '',
+    sourceEventId: j['sourceEventId'] ?? '',
+    copiedFileContext: Map<String, dynamic>.from(
+      j['copiedFileContext'] ?? const {},
+    ),
     status: j['status'],
     error: j['error'] ?? '',
     transferId: j['transferId'] ?? '',

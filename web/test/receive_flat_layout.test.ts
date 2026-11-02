@@ -70,3 +70,21 @@ test('Web startup migrates registered old bytes and folder trees, retains aliase
   assert.equal((await readdir(f.received)).some(name=>name==='old (2).txt'),false,'restart does not migrate a second time');
   await again.call('shutdown');
 });
+
+
+test('automatic clipboard bytes remain private across restart, ordinary cleanup and receive-directory migration',async()=>{
+ const f=await fixture(),w=f.worker();await w.call('init',{scope:'clipboard'});await mkdir(f.received,{recursive:true});
+ await write(w,'slot:image','screenshot.png','actual clipboard bytes',{ephemeral:true});
+ assert.equal((await readdir(f.received)).includes('screenshot.png'),false);
+ assert.equal((await w.call('library-list')).entries.length,0);
+ assert.equal(await (await w.call('get',{key:'slot:image'})).file.text(),'actual clipboard bytes');
+ const privateMeta=join(f.root.path,'globalsend-received-v1','clipboard','slot%3Aimage.json'),meta=JSON.parse(await readFile(privateMeta,'utf8'));meta.receivedAt=Date.now()-10*86400000;await writeFile(privateMeta,JSON.stringify(meta));
+ await w.call('cleanup');assert.equal(await (await w.call('get',{key:'slot:image'})).file.text(),'actual clipboard bytes');
+ await mkdir(join(f.work,'selected'),{recursive:true});const destination=new DiskDirectory(join(f.work,'selected'));await w.call('destination-set',{handle:destination,id:'picked'});
+ assert.equal((await readdir(destination.path)).includes('screenshot.png'),false);
+ await w.call('shutdown');const restarted=f.worker();await restarted.call('init',{scope:'clipboard'});
+ assert.equal(await (await restarted.call('get',{key:'slot:image'})).file.text(),'actual clipboard bytes');
+ assert.equal((await restarted.call('library-list')).entries.length,0);
+ await restarted.call('clipboard-release',{key:'slot:image'});await assert.rejects(restarted.call('get',{key:'slot:image'}),error=>(error as Error).name==='NotFoundError');
+ await write(restarted,'ordinary','kept.png','ordinary bytes');await restarted.call('clipboard-release',{key:'ordinary'});assert.equal(await (await restarted.call('get',{key:'ordinary'})).file.text(),'ordinary bytes');await restarted.call('shutdown');
+});

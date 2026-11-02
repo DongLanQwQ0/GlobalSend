@@ -3,15 +3,25 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'api.dart';
+import 'received_file_access.dart';
+import 'folder_transfer.dart';
+import 'dock_platform.dart';
 
 class CopiedFilesClient {
   CopiedFilesClient({
     required this.newId,
     required this.sendFiles,
     required this.changed,
+    this.sendReference,
   });
   final String Function() newId;
   final Future<void> Function(String target, List<String> paths) sendFiles;
+  final Future<void> Function(
+    String target,
+    String path,
+    Map<String, dynamic> context,
+  )?
+  sendReference;
   final void Function() changed;
   bool enabled = false;
   List<String> targets = [];
@@ -23,6 +33,176 @@ class CopiedFilesClient {
   final Map<String, String> _sources = {};
   final Map<String, Future<void>> _serving = {};
   final Map<String, Map<String, dynamic>> _outcomes = {};
+  final Map<String, Map<String, String>> _received = {};
+  final Map<String, Completer<List<String>>> _waiting = {};
+  static String referenceId(String source, String offer, String item) =>
+      'copied:$source:$offer:$item';
+  Map<String, String>? localReference(String id) => _received[id];
+
+  final Map<String, List<Map<String, dynamic>>> _manifestCache = {};
+  final Map<String, Future<List<Map<String, dynamic>>>> _manifestJobs = {};
+  List<Map<String, dynamic>>? cachedManifest(String id) => _manifestCache[id];
+  final Map<String, Completer<List<Map<String, dynamic>>>> _manifests = {};
+  Future<List<Map<String, dynamic>>> manifest(Map<String, dynamic> reference) {
+    final id = reference['id'] as String;
+    if (_manifestCache[id] case final value?) return Future.value(value);
+    return _manifestJobs[id] ??= _fetchManifest(reference)
+        .then((value) {
+          _manifestCache[id] = value;
+          return value;
+        })
+        .whenComplete(() {
+          _manifestJobs.remove(id);
+        });
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchManifest(
+    Map<String, dynamic> reference,
+  ) async {
+    final api = _api;
+    if (api == null) throw StateError('请连接来源中心');
+    final requestId = newId();
+    final result = Completer<List<Map<String, dynamic>>>();
+    _manifests[requestId] = result;
+    try {
+      final response = await api.call(
+        'POST',
+        '/clipboard/files/${reference['sourceDeviceId']}/pull',
+        {
+          'requestId': requestId,
+          'offerId': reference['offerId'],
+          'itemIds': [reference['itemId']],
+          'metadataOnly': true,
+        },
+      );
+      _acceptManifest(response);
+      return await result.future;
+    } catch (_) {
+      _manifests.remove(requestId);
+      rethrow;
+    }
+  }
+
+  void _acceptManifest(Map<String, dynamic> response) {
+    if (response['metadataOnly'] != true) return;
+    final waiter = _manifests[response['requestId']];
+    if (waiter == null) return;
+    if (response['state'] == 'failed') {
+      _manifests.remove(response['requestId']);
+      waiter.completeError(StateError(response['error'] ?? '目录元数据读取失败'));
+    } else if (response['state'] == 'sent') {
+      _manifests.remove(response['requestId']);
+      waiter.complete(
+        (response['entries'] as List)
+            .map((value) => Map<String, dynamic>.from(value as Map))
+            .toList(),
+      );
+    }
+  }
+
+  Future<void> _settingsWrites = Future.value();
+  Future<void> _persist() {
+    final file = _settings;
+    if (file == null) return Future.value();
+    final value = jsonEncode({
+      'enabled': enabled,
+      'targets': targets,
+      'received': _received,
+      'dismissed': _dismissed.toList(),
+    });
+    return _settingsWrites = _settingsWrites.catchError((Object _) {}).then((
+      _,
+    ) async {
+      await file.writeAsString(value, flush: true);
+    });
+  }
+
+  Future<void> rememberReceived(
+    Map<String, dynamic> reference,
+    String path, {
+    required String transferId,
+    required String fileId,
+  }) async {
+    final id = referenceId(
+      reference['sourceDeviceId'],
+      reference['offerId'],
+      reference['itemId'],
+    );
+    if (_received[id]?['localPath'] == path &&
+        _received[id]?['transferId'] == transferId &&
+        _received[id]?['fileId'] == fileId) {
+      _waiting.remove(id)?.complete([path]);
+      return;
+    }
+    _received[id] = {
+      'localPath': path,
+      'transferId': transferId,
+      'fileId': fileId,
+    };
+    await _persist();
+    _waiting.remove(id)?.complete([path]);
+    changed();
+  }
+
+  void receiveFailed(Map<String, dynamic> reference, String problem) {
+    final id = referenceId(
+      reference['sourceDeviceId'],
+      reference['offerId'],
+      reference['itemId'],
+    );
+    _waiting.remove(id)?.completeError(StateError(problem));
+    for (final request in pulls.values) {
+      if (request['offerId'] == reference['offerId'] &&
+          (request['itemIds'] as List).contains(reference['itemId'])) {
+        request['state'] = 'failed';
+        request['error'] = problem;
+      }
+    }
+    changed();
+  }
+
+  Future<void> reconcileReceived() async {
+    var removed = false;
+    for (final entry in _received.entries.toList()) {
+      if (!await ReceivedFileAccess.exists(entry.value['localPath']!)) {
+        _received.remove(entry.key);
+        pulls.removeWhere(
+          (_, pull) => (pull['itemIds'] as List).any(
+            (item) =>
+                referenceId(pull['sourceDeviceId'], pull['offerId'], item) ==
+                entry.key,
+          ),
+        );
+        removed = true;
+      }
+    }
+    if (removed) {
+      await _persist();
+      changed();
+    }
+  }
+
+  Future<List<String>> resolve(Map<String, dynamic> reference) async {
+    final id = reference['id'] as String;
+    await reconcileReceived();
+    final local = _received[id];
+    if (local != null) return [local['localPath']!];
+    final pending = _waiting[id];
+    if (pending != null) return pending.future;
+    final completion = Completer<List<String>>();
+    _waiting[id] = completion;
+    // Install the waiter before publishing: fast direct reuse may finish first.
+    unawaited(
+      pull(reference, [reference['itemId'] as String]).catchError((
+        Object failure,
+      ) {
+        _waiting.remove(id)?.completeError(failure);
+        return <String, dynamic>{};
+      }),
+    );
+    return completion.future;
+  }
+
   Map<String, dynamic>? _local;
   File? _settings;
   CenterApi? _api;
@@ -48,22 +228,37 @@ class CopiedFilesClient {
             'itemId': value['id'] as String,
             'name': value['name'] as String,
             'kind': value['kind'] as String,
-            'state':
-                pulls.values
-                        .where(
-                          (pull) =>
-                              pull['offerId'] == offer['offerId'] &&
-                              (pull['itemIds'] as List? ?? []).contains(
-                                value['id'],
-                              ),
-                        )
-                        .lastOrNull?['state']
-                    as String? ??
-                '',
+            'size': '${value['size'] ?? 0}',
+            ...?_received[referenceId(
+              offer['sourceDeviceId'],
+              offer['offerId'],
+              value['id'],
+            )],
+            'state': _referenceState(
+              offer['sourceDeviceId'],
+              offer['offerId'],
+              value['id'],
+            ),
           },
   ];
+  String _referenceState(String source, String offer, String item) {
+    if (_received.containsKey(referenceId(source, offer, item)))
+      return 'received';
+    final request = pulls.values
+        .where(
+          (pull) =>
+              pull['sourceDeviceId'] == source &&
+              pull['offerId'] == offer &&
+              (pull['itemIds'] as List).contains(item),
+        )
+        .lastOrNull;
+    final state = request?['state'] as String? ?? '';
+    return state == 'sent' ? 'sending' : state;
+  }
+
   void dismiss(String referenceId) {
     _dismissed.add(referenceId);
+    unawaited(_persist());
     changed();
   }
 
@@ -76,6 +271,13 @@ class CopiedFilesClient {
         .cast<String>()
         .toSet()
         .toList();
+    for (final entry in (settings['received'] as Map? ?? {}).entries) {
+      _received[entry.key as String] = Map<String, String>.from(
+        entry.value as Map,
+      );
+    }
+    _dismissed.addAll((settings['dismissed'] as List? ?? []).cast<String>());
+    await reconcileReceived();
   }
 
   Future<void> configure(bool value, Iterable<String> destinationIds) async {
@@ -89,13 +291,7 @@ class CopiedFilesClient {
     _sources.clear();
     _outcomes.clear();
     _local = null;
-    final file = _settings;
-    if (file != null) {
-      await file.writeAsString(
-        jsonEncode({'enabled': enabled, 'targets': targets}),
-        flush: true,
-      );
-    }
+    await _persist();
     final api = _api;
     if (api != null) await _write(api, _session, _copy, 'DELETE');
     changed();
@@ -153,6 +349,14 @@ class CopiedFilesClient {
   }
 
   void disconnect() {
+    for (final waiter in _waiting.values) {
+      waiter.completeError(StateError('连接已断开，拉取已停止'));
+    }
+    _waiting.clear();
+    for (final waiter in _manifests.values) {
+      waiter.completeError(StateError('连接已断开'));
+    }
+    _manifests.clear();
     ++_session;
     _api = null;
     offers = [];
@@ -170,6 +374,7 @@ class CopiedFilesClient {
     if (api == null) return Future.value();
     return _refresh = () async {
       try {
+        await reconcileReceived();
         do {
           _refreshAgain = false;
           final response = await api.call('GET', '/clipboard/files');
@@ -245,6 +450,22 @@ class CopiedFilesClient {
     Map<String, dynamic> offer,
     List<String> itemIds,
   ) async {
+    await reconcileReceived();
+    final local = itemIds
+        .map(
+          (item) =>
+              _received[referenceId(
+                offer['sourceDeviceId'],
+                offer['offerId'],
+                item,
+              )],
+        )
+        .toList();
+    if (local.every((entry) => entry != null))
+      return {
+        'state': 'received',
+        'localPaths': local.map((entry) => entry!['localPath']).toList(),
+      };
     final api = _api;
     if (api == null) throw StateError('请先连接中心');
     final existing = pulls.values
@@ -252,7 +473,9 @@ class CopiedFilesClient {
           (value) =>
               value['sourceDeviceId'] == offer['sourceDeviceId'] &&
               value['offerId'] == offer['offerId'] &&
-              (value['state'] == 'pending' || value['state'] == 'sending') &&
+              (value['state'] == 'pending' ||
+                  value['state'] == 'sending' ||
+                  value['state'] == 'sent') &&
               itemIds.every((id) => (value['itemIds'] as List).contains(id)),
         )
         .firstOrNull;
@@ -300,8 +523,20 @@ class CopiedFilesClient {
       case 'clipboard.files.pull':
         await serve(message);
       case 'clipboard.files.pull.updated':
+        if (message['metadataOnly'] == true) {
+          _acceptManifest(message);
+          return;
+        }
         if (_api != null && message['targetDeviceId'] == _self) {
           pulls[message['requestId'] as String] = Map.of(message);
+          if (message['state'] == 'failed') {
+            for (final item in message['itemIds'] as List) {
+              receiveFailed({
+                ...message,
+                'itemId': item,
+              }, message['error'] as String? ?? '来源未能提供文件');
+            }
+          }
           changed();
         }
     }
@@ -349,9 +584,50 @@ class CopiedFilesClient {
               !targets.contains(request['targetDeviceId'])) {
             throw StateError('目标设备已取消文件复制推送');
           }
-          await sendFiles(request['targetDeviceId'] as String, paths);
+          if (request['metadataOnly'] == true) {
+            final entries = <Map<String, dynamic>>[];
+            for (final path in paths) {
+              final folder = ReceivedFileAccess.isContentUri(path)
+                  ? (await DockPlatform.directoryEntries(path))
+                        .map(FolderEntry.fromMap)
+                        .toList()
+                  : await readFolderEntries(path);
+              for (final item in folder) {
+                var size = 0;
+                if (!item.directory) {
+                  final source = await ReceivedFileAccess.open(item.location);
+                  try {
+                    size = await source.file.length();
+                  } finally {
+                    await source.close();
+                  }
+                }
+                entries.add({
+                  'relativePath': item.relativePath,
+                  'kind': item.directory ? 'directory' : 'file',
+                  'size': size,
+                });
+              }
+            }
+            outcome = {'state': 'sent', 'entries': entries};
+          } else if (sendReference == null) {
+            await sendFiles(request['targetDeviceId'] as String, paths);
+          } else {
+            final ids = (request['itemIds'] as List).cast<String>();
+            for (var index = 0; index < paths.length; index++) {
+              await sendReference!(
+                request['targetDeviceId'] as String,
+                paths[index],
+                {
+                  'requestId': request['requestId'],
+                  'offerId': request['offerId'],
+                  'itemId': ids[index],
+                },
+              );
+            }
+          }
           // The existing file-transfer flow now owns progress and delivery.
-          outcome = {'state': 'sent'};
+          outcome ??= {'state': 'sent'};
         } catch (failure) {
           outcome = {'state': 'failed', 'error': '$failure'};
         }

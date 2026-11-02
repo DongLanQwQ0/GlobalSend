@@ -31,6 +31,16 @@ class SourceApi extends CenterApi {
 class SourceController extends SendController {
   final sent = <(String, List<String>)>[];
   @override
+  Future<void> offerCopiedFile(
+    String target,
+    String path,
+    Map<String, dynamic> context,
+  ) async {
+    expect(context.keys, containsAll(["requestId", "offerId", "itemId"]));
+    sent.add((target, [path]));
+  }
+
+  @override
   Future<void> offer(
     String target,
     List<String> paths, {
@@ -56,7 +66,9 @@ void main() {
     messenger.setMockMethodCallHandler(SystemBridge.channel, (call) async {
       if (call.method == 'cancelClipboardImage' && call.arguments is! Map) {
         throw PlatformException(
-          code: 'BAD_ARGUMENT', message: 'Expected operation map');
+          code: 'BAD_ARGUMENT',
+          message: 'Expected operation map',
+        );
       }
       if (call.method == 'clipboardWatch')
         watches.add((call.arguments as Map)['enabled'] as bool);

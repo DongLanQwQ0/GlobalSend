@@ -79,6 +79,7 @@ void main() {
         });
       }
       final source = clients[0], target = clients[1], unselected = clients[2];
+      source.profile!.sendRoutePreference = 'lan';
       final targetId = target.profile!.deviceId;
       peer = PeerTransport(source.api!, (id) => source.sources[id]);
       await peer.start(
@@ -110,6 +111,32 @@ void main() {
         isFalse,
       );
 
+      final folderReference = target.copiedFiles.references.singleWhere(
+        (ref) => ref['kind'] == 'directory',
+      );
+      final metadata = await target
+          .prepareRemoteReference(Map<String, dynamic>.from(folderReference))
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw StateError(
+              'source metadata error: ${source.copiedFiles.error}; target=${target.copiedFiles.error}',
+            ),
+          );
+      expect(
+        (metadata['entries'] as List).map((entry) => entry['relativePath']),
+        containsAll([
+          'Bundle',
+          'Bundle/empty',
+          'Bundle/sub',
+          'Bundle/sub/note.txt',
+          'Bundle/zero.bin',
+        ]),
+      );
+      expect(
+        (await source.api!.call('GET', '/transfers'))['transfers'],
+        isEmpty,
+      );
+      expect(source.sources, isEmpty);
       for (final name in ['copied.txt', 'Bundle']) {
         final reference = target.copiedFiles.references.singleWhere(
           (item) => item['name'] == name,
@@ -127,7 +154,10 @@ void main() {
       await until(
         () =>
             target.dock.length == 6 &&
-            target.dock.every((item) => item.status == 'received'),
+            target.dock.every((item) => item.status == 'received') &&
+            target.copiedFiles.references.every(
+              (ref) => ref['state'] == 'received',
+            ),
         refresh,
       );
       final standalone = target.dock.singleWhere(
@@ -150,11 +180,27 @@ void main() {
       expect(IncomingReceiptState(standalone).canExport, isTrue);
       expect(IncomingReceiptState(directory).canExport, isTrue);
       expect(mergeContentCards(target.historyDock), hasLength(2));
-      expect(target.pendingReceipts, hasLength(2));
+      expect(target.pendingReceipts, isEmpty);
       expect(
-        target.pendingReceipts.keys,
-        containsAll([standalone.id, directory.id]),
+        target.copiedFiles.references.every(
+          (ref) => ref['state'] == 'received',
+        ),
+        isTrue,
       );
+      final count =
+          ((await source.api!.call('GET', '/transfers'))['transfers'] as List)
+              .length;
+      final ready = target.copiedFiles.references.first;
+      expect(
+        await target.resolveRemoteReference(Map<String, dynamic>.from(ready)),
+        [ready['localPath']],
+      );
+      expect(
+        ((await source.api!.call('GET', '/transfers'))['transfers'] as List)
+            .length,
+        count,
+      );
+
       expect(source.stagedTexts, ['keep this draft']);
       expect(source.stagedFiles, ['${work.path}/unrelated-draft.bin']);
       expect(unselected.dock, isEmpty);
@@ -178,7 +224,7 @@ void main() {
         () => target.copiedFiles.references.isEmpty,
         () async => Future<void>.delayed(Duration.zero),
       );
-      expect(target.pendingReceipts, hasLength(2));
+      expect(target.pendingReceipts, isEmpty);
       await target.requeueDockEntry(standalone);
       await target.requeueDockEntry(directory);
       expect(target.stagedFiles, [standalone.localPath, directory.localPath]);

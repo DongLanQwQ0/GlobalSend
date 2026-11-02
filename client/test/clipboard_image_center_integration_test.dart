@@ -126,6 +126,7 @@ void main() {
         await c.openSocket(c.generation);
       }
       final source = clients[0];
+      source.profile!.sendRoutePreference = 'lan';
       target = clients[1];
       final unselected = clients[2];
       source.devices = [
@@ -138,16 +139,34 @@ void main() {
       source.stagedTexts.add('keep draft');
       source.stagedFiles.add('${work.path}/unrelated.txt');
       await source.setClipboardSync(true, target.profile!.deviceId);
-      // Two controllers share one test process, not one physical OS clipboard.
-      // Authorize the receiver without subscribing it to the source OS stream.
-      target.clipboardEnabled = true;
-      target.clipboardTarget = source.profile!.deviceId;
+      // Receiving is independent of publishing: no reverse sender switch or target.
+      expect(target.clipboardEnabled, false);
+      expect(target.clipboardReceiveEnabled, true);
+      await target.clipboard.load(target.root!);
       peer = PeerTransport(source.api!, (id) => source.sources[id]);
       await peer.start(
         createPeerIdentity('clipboard-image101'),
         loopbackOnly: true,
       );
       source.peer = peer;
+      final ordinary = await File('${work.path}/ordinary.png')
+          .writeAsBytes(png);
+      await source.offer(target.profile!.deviceId, [ordinary.path]);
+      await until(
+        () => target!.dock.any(
+          (entry) => !entry.autoClipboard && entry.status == 'received',
+        ),
+        () async {
+          await source.reconcile();
+          await target!.reconcile();
+        },
+      );
+      final ordinaryReceived = target.dock.singleWhere(
+        (entry) => !entry.autoClipboard,
+      );
+      final originalPath = ordinaryReceived.localPath;
+      final serial = target.receiptSerial,
+          receiptCount = target.pendingReceipts.length;
       await clipboardEvent({
         'sequence': 1001,
         'kind': 'image',
@@ -160,7 +179,7 @@ void main() {
           () {
             if (source.clipboardError.isNotEmpty)
               throw StateError(source.clipboardError);
-            return target!.dock.any((entry) => entry.status == 'received') &&
+            return target!.clipboardSlot?.status == 'received' &&
                 writes.length == 1;
           },
           () async {
@@ -182,7 +201,15 @@ void main() {
         stdout.writeln(jsonEncode(evidence));
         rethrow;
       }
-      final received = target.dock.single;
+      final received = target.clipboardSlot!;
+      expect(target.clipboardSlot?.localPath, received.localPath);
+      expect(target.historyDock.map((entry) => entry.id), [
+        ordinaryReceived.id,
+      ]);
+      expect(await File(originalPath).readAsBytes(), png);
+      expect(target.pendingReceipts.length, receiptCount);
+      expect(target.receiptSerial, serial);
+      expect(received.localPath, contains('clipboard-slot-cache'));
       expect(received.title, endsWith('.png'));
       expect(received.route, 'lan');
       expect(await File(received.localPath).readAsBytes(), png);
@@ -201,8 +228,28 @@ void main() {
       expect(writes, hasLength(1));
       expect(
         (await source.api!.call('GET', '/transfers'))['transfers'],
-        hasLength(1),
+        hasLength(2),
       );
+      await target.stageClipboardSlot();
+      final staged = target.stagedFiles.single;
+      expect(staged, isNot(received.localPath));
+      await target.clipboard.receive(
+        DockEntry(
+          id: 'next-text',
+          kind: 'text',
+          title: 'text',
+          source: 'another-source',
+          text: 'new clipboard',
+          status: 'ready',
+          autoClipboard: true,
+          createdAtMillis: received.createdAtMillis + 1,
+          originDeviceId: 'another-source',
+          sourceEventId: 'next-text',
+        ),
+      );
+      expect(await File(staged).readAsBytes(), png);
+      expect(await File(originalPath).readAsBytes(), png);
+      expect(await File(received.localPath).exists(), false);
       stdout.writeln(
         'Clipboard image production pipeline evidence: ${work.absolute.path}',
       );

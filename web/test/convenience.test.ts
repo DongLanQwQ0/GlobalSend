@@ -1833,3 +1833,30 @@ test('Web diagnostics do not draw a reachable-address arrow when either observed
  document.querySelector('#app')!.innerHTML=c.deviceNetworkHtml();assert.doesNotMatch(document.querySelector('.probe-addresses')!.textContent!,/→/);assert.match(document.querySelector('.probe-addresses')!.textContent!,/目标：未获取/);
  c.rtcProbes.results[0].responderAddress='10.0.0.2:3000';document.querySelector('#app')!.innerHTML=c.deviceNetworkHtml();assert.match(document.querySelector('.probe-addresses')!.textContent!,/10.0.0.1:2000 → 10.0.0.2:3000/);
 });
+
+
+test('automatic clipboard is one silent slot, not normal history, and manual copied pulls never emphasize',async()=>{
+ const {c,document,render,context}=fixture();let notifications=0;c.notifications.notify=async()=>{notifications++;};c.render=render;
+ const auto=textEvent('auto-slot',false,'first');auto.payload.clipboard={originDeviceId:'sender',sourceEventId:'auto-slot'};
+ c.noticeEvents([auto]);assert.equal(c.clipboardSlot.text,'first');assert.equal(c.modal,null);assert.equal(notifications,0);
+ const latest={...auto,eventId:'new-slot',createdAt:'2099-01-01T00:00:00Z',payload:{...auto.payload,text:'latest'}};c.noticeEvents([latest]);assert.equal(c.clipboardSlot.text,'latest');
+ c.events=[auto,latest];c.persist();assert.equal(c.displayTexts(false).length,0);assert.equal(c.localHistory.scopes.flatMap((scope:any)=>scope.events).length,0);
+ render();assert.equal(document.querySelectorAll('[data-drag-clipboard-slot]').length,1);
+ const transferCopy=transfer('copied-silent','received');transferCopy.copiedFile={requestId:'req',offerId:'offer',itemId:'item'};c.transfers=[transferCopy];c.noticeFile(transferCopy,transferCopy.files[0]);assert.equal(c.modal,null);assert.equal(notifications,0);
+ c.setClipboardReceive(false);await c.adoptClipboard({id:'disabled',source:'sender',at:'2199-01-01',text:'ignored'});assert.equal(c.clipboardSlot,null);c.setClipboardReceive(true);assert.equal(c.clipboardSlot.text,'latest');
+});
+
+test('clipboard slot and toolbar drag publish actual clipboard File or text and never empty placeholders',async()=>{
+ const {c,document,render,context}=fixture();c.render=render;await c.adoptClipboard({id:'slot',source:'sender',at:'2099-01-01',text:'slot body'});render();
+ const written=new Map<string,string>(),files:File[]=[];const dt={types:[],setData:(type:string,value:string)=>written.set(type,value),items:{add:(file:File)=>files.push(file)},setDragImage:()=>{}};
+ const node=document.querySelector<HTMLElement>('[data-drag-clipboard-slot]')!;c.beginContentDrag({target:node,dataTransfer:dt,stopPropagation(){},preventDefault(){assert.fail('real slot should drag');}},node);assert.equal(written.get('text/plain'),'slot body');assert.equal(files.length,0);
+});
+
+
+test('Web slot keeps immutable dragged and staged blobs while retiring only its own private disk key',async()=>{
+ const {c}=fixture(),released:string[]=[];c.ensureFileStore=async()=>({releaseClipboard:async(key:string)=>released.push(key)});
+ const scope=c.dockKey;await c.adoptClipboard({id:'image-slot',source:'sender',at:'2099-01-01',key:'auto:image',scope,file:new File(['pixel body'],'image.png',{type:'image/png'})});
+ const exported=c.clipboardSlot.file;c.stageClipboardSlot();assert.equal(await c.picked[0].text(),'pixel body');
+ await c.adoptClipboard({id:'next-text',source:'other',at:'2099-01-02',text:'latest'});
+ assert.deepEqual(released,['auto:image']);assert.equal(await exported.text(),'pixel body');assert.equal(await c.picked[0].text(),'pixel body');assert.equal(c.clipboardSlot.text,'latest');
+});

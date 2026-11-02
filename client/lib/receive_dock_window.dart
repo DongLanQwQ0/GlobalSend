@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 
@@ -324,6 +325,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
               ..sort(compareReceivedNewestFirst);
         final references = (next['copiedFiles'] as List? ?? []).cast<Map>();
         final ids = [
+          if (next['clipboardSlot'] is Map) 'clipboard-slot',
           ...receiptDisplayOrder(order, entries),
           ...references.map((reference) => reference['id'] as String),
         ];
@@ -356,8 +358,19 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
           });
         }
       });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !identical(payload, next)) return;
+        final slot = next['clipboardSlot'];
+        unawaited(
+          ReceiveDockApp.channel.invokeMethod<void>('clipboardSlotRendered', {
+            'path': slot is Map ? slot['localPath'] ?? '' : '',
+          }),
+        );
+      });
       unawaited(refreshExportableFiles(next));
-      if (items.isEmpty && copiedReferences.isEmpty) {
+      if (items.isEmpty &&
+          copiedReferences.isEmpty &&
+          payload['clipboardSlot'] == null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || !identical(payload, next)) return;
           // This engine belongs only to the dock. Keeping it warm should not
@@ -366,7 +379,10 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
           PaintingBinding.instance.imageCache.clearLiveImages();
         });
       }
-      if (!presented && (items.isNotEmpty || copiedReferences.isNotEmpty)) {
+      if (!presented &&
+          (items.isNotEmpty ||
+              copiedReferences.isNotEmpty ||
+              payload['clipboardSlot'] is Map)) {
         presented = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
@@ -506,16 +522,50 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
 
   Widget card(Map<String, dynamic> value) {
     if (value['copiedReference'] == true) {
+      final ready =
+          value['state'] == 'received' &&
+          (value['localPath'] as String? ?? '').isNotEmpty;
+      final entry = DockEntry(
+        id: value['id'],
+        kind: 'file',
+        title: value['name'],
+        source: value['sourceDeviceId'],
+        localPath: value['localPath'] ?? '',
+        entryKind: value['kind'] == 'directory' ? 'directory' : 'file',
+        status: ready ? 'received' : 'offered',
+      );
       return Builder(
         builder: (context) => MetaData(
           metaData: _dockContentMarker,
           behavior: HitTestBehavior.translucent,
-          child: CopiedFileReferenceCard(
-            reference: value,
-            surfaceColor: Ui.colors(context).surfaceMuted
-                .withValues(alpha: .45),
-            onPull: () => action('pullCopiedFile', value['id'] as String),
-            onDismiss: () => action('dismissCopiedFile', value['id'] as String),
+          child: ContentDragSurface(
+            entry: entry,
+            nativeOnly: !ready,
+            onExport: (kind) async {
+              await ReceiveDockApp.channel.invokeMethod<bool>(
+                ready ? 'dragOut' : 'startRemoteReferenceDrag',
+                {
+                  if (ready)
+                    'paths': [entry.localPath]
+                  else
+                    'remoteReference': {
+                      ...value,
+                      if (value['entries'] is String)
+                        'entries': jsonDecode(value['entries'] as String),
+                    },
+                  'pointerKind': kind,
+                  ...SystemBridge.dragPreviewArguments,
+                },
+              );
+            },
+            child: CopiedFileReferenceCard(
+              reference: value,
+              surfaceColor: Ui.colors(context).surfaceMuted
+                  .withValues(alpha: .45),
+              onPull: () => action('pullCopiedFile', value['id'] as String),
+              onDismiss: () =>
+                  action('dismissCopiedFile', value['id'] as String),
+            ),
           ),
         ),
       );
@@ -867,6 +917,11 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
                                     builder: (context, bounds) {
                                       final edge = bounds.maxHeight;
                                       final values = {
+                                        if (payload['clipboardSlot'] is Map)
+                                          'clipboard-slot':
+                                              Map<String, dynamic>.from(
+                                                payload['clipboardSlot'] as Map,
+                                              ),
                                         for (final item in items)
                                           item['id'] as String: item,
                                         for (final reference

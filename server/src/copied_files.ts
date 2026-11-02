@@ -44,7 +44,10 @@ export class CopiedFiles {
   }
   withdraw(source: string, notify = true) {
     const previous = this.offers.get(source), removed = this.offers.delete(source);
-    for (const [key, pull] of this.pulls) if (pull.sourceDeviceId === source) this.pulls.delete(key);
+    for (const [key, pull] of this.pulls) if (pull.sourceDeviceId === source) {
+      if(pull.state==='pending' || pull.state==='sending')this.connections.send(pull.targetDeviceId,{type:'clipboard.files.pull.updated',...pull,state:'failed',error:'来源已离线或复制内容已更换'});
+      this.pulls.delete(key);
+    }
     if (previous && notify) this.changed(source, previous.targetDeviceIds);
     return { withdrawn: removed };
   }
@@ -61,11 +64,11 @@ export class CopiedFiles {
     offers.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return { offers };
   }
-  request(target: string, source: string, body: { offerId: string; requestId: string; itemIds: string[] }) {
+  request(target: string, source: string, body: { offerId: string; requestId: string; itemIds: string[]; metadataOnly?:boolean }) {
     const key = `${target}/${body.requestId}`;
     const previous = this.pulls.get(key);
     if (previous) {
-      if (previous.sourceDeviceId !== source || previous.offerId !== body.offerId || JSON.stringify(previous.itemIds) !== JSON.stringify(body.itemIds))
+      if (previous.sourceDeviceId !== source || previous.offerId !== body.offerId || previous.metadataOnly !== body.metadataOnly || JSON.stringify(previous.itemIds) !== JSON.stringify(body.itemIds))
         fail("COPIED_PULL_CONFLICT", "该拉取编号已用于其他文件");
       if (!this.connections.commonGroup(source, target)) fail("FORBIDDEN", "设备已离开共同分组", 403);
       return previous;
@@ -93,13 +96,20 @@ export class CopiedFiles {
       fail("COPIED_PULL_UNAVAILABLE", "未找到此文件拉取请求", 404);
     return pull;
   }
+  transferContext(source: string, target: string, context: {requestId:string;offerId:string;itemId:string}) {
+    const pull = this.status(target, context.requestId);
+    if (pull.metadataOnly || pull.sourceDeviceId !== source || pull.offerId !== context.offerId || !pull.itemIds.includes(context.itemId))
+      fail("COPIED_FILE_CONTEXT", "文件传输不属于此拉取请求", 403);
+    return { requestId: pull.requestId, offerId: pull.offerId, itemId: context.itemId };
+  }
   result(source: string, target: string, requestId: string,
-      body: { state: "sending" | "sent" | "failed"; error?: string }) {
+      body: { state: "sending" | "sent" | "failed"; error?: string; entries?:CopiedFilePull['entries'] }) {
     const pull = this.status(target, requestId);
     if (pull.sourceDeviceId !== source) fail("FORBIDDEN", "只能处理本机提供的文件", 403);
     if (pull.state === "sent" || pull.state === "failed") return pull;
     pull.state = body.state;
     if (body.state === "failed") pull.error = body.error || "来源未能发送所选文件";
+    if (pull.metadataOnly && body.entries) pull.entries = body.entries;
     this.connections.send(target, { type: "clipboard.files.pull.updated", ...pull });
     return pull;
   }

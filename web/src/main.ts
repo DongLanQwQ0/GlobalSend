@@ -1,3 +1,4 @@
+import { ClipboardSlot, type ClipboardSlotValue } from './clipboard_slot';
 import './style.css';
 import {userGuideHtml} from './user_guide';
 import {QueueMotion} from './queue_motion';
@@ -88,6 +89,42 @@ class GlobalSend {
   }
   copiedFiles=new CopiedFilesReceiver((...args)=>this.api.request(...args),()=>this.render());
   refreshCopiedFiles(){if(this.session && this.info?.features.copiedFiles)return this.copiedFiles.refresh();return Promise.resolve();}
+  readonly clipboard=new ClipboardSlot(()=>rememberedGet('globalsend:clipboard-slot'),value=>rememberedSet('globalsend:clipboard-slot',value));
+  get clipboardSlot(){return this.clipboard.current;}
+  private clipboardDrag:{text?:string;file?:File}|null=null;
+  setClipboardReceive(enabled:boolean){this.clipboard.setEnabled(enabled);this.render();}
+  private async retireClipboard(value:ClipboardSlotValue|null){
+    if(!value?.key || !value.scope || this.clipboardSlot?.key===value.key)return;
+    this.rtcLocalFiles.delete(value.key);this.retainedSources.delete(value.key);this.previewSources.delete(value.key);
+    const preview=this.previews.get(value.key);if(preview?.url)URL.revokeObjectURL(preview.url);this.previews.delete(value.key);
+    let store:RtcFileStore|undefined;const own=value.scope===this.dockKey;
+    try{store=own?await this.ensureFileStore():new RtcFileStore(value.scope);await store.releaseClipboard(value.key);}finally{if(!own)await store?.dispose();}
+  }
+  async clearClipboardSlot(){const previous=this.clipboard.value;this.clipboard.clear();this.render();await this.retireClipboard(previous);}
+  async adoptClipboard(value:ClipboardSlotValue){
+    // Browser exports own an immutable Blob snapshot, not an OPFS pathname.
+    // OS drag, a staged draft and clipboard.write may keep that Blob alive after
+    // the singleton changes; the retired private disk object is then unnecessary.
+    if(value.file)value={...value,file:new File([await value.file.arrayBuffer()],value.file.name,{type:value.file.type,lastModified:value.file.lastModified})};
+    const previous=this.clipboard.value;
+    if(!this.clipboard.receive(value)){await this.retireClipboard(value);return;}
+    if(value.key && value.file)this.rtcLocalFiles.set(value.key,value.file);
+    if(value.text!==undefined && navigator.clipboard?.writeText)void navigator.clipboard.writeText(value.text).catch(()=>{});
+    else if(value.file && typeof ClipboardItem!=='undefined' && navigator.clipboard?.write && value.file.type.startsWith('image/'))void navigator.clipboard.write([new ClipboardItem({[value.file.type]:value.file})]).catch(()=>{});
+    this.render();
+    await this.retireClipboard(previous);
+  }
+  async copyClipboardSlot(){const value=this.clipboardSlot;if(!value)return;try{if(value.text!==undefined)await navigator.clipboard.writeText(value.text);else if(value.file)await navigator.clipboard.write([new ClipboardItem({[value.file.type]:value.file})]);this.toast('已复制');}catch{this.toast('浏览器未允许写入剪贴板，可拖出或加入待发送',true);}}
+  stageClipboardSlot(){const value=this.clipboardSlot;if(value?.text!==undefined)this.stagedTexts.push({id:id(),text:value.text});else if(value?.file)this.addFiles([value.file]);this.render();}
+  clipboardSlotHtml(){const value=this.clipboardSlot;if(!value)return '';return '<article class="copied-file-reference clipboard-slot-card" draggable="true" data-drag-clipboard-slot aria-label="自动剪贴板槽位"><div class="clipboard-slot-preview">'+(value.key?this.previewHtml(value.key,value.name || '',value.mimeType):'<span>'+e((value.text || '').slice(0,180))+'</span>')+'</div><div class="clipboard-slot-actions"><button class="quiet" data-action="stage-clipboard-slot" title="加入待发送" aria-label="加入待发送">'+icon('plus')+'</button><button class="quiet" data-action="copy-clipboard-slot">'+icon('copy')+'复制</button></div><button class="icon-button quiet" data-action="clear-clipboard-slot" aria-label="清除剪贴板槽位">'+icon('close')+'</button></article>';}
+
+  rememberReferenceFiles(){
+    for(const transfer of [...this.localHistory.scopes.flatMap(scope=>scope.transfers),...this.transfers]){if(!transfer.copiedFile || transfer.targetDeviceId!==this.session?.device.deviceId)continue;
+      const root=transfer.files.find(file=>!file.relativePath || isFolderRoot(file));if(!root)continue;
+      const members=root.relativePath?folderMembers(root,transfer.files):[root];if(!members.every(file=>file.status==='received' && !!this.localFile(fileKey(transfer.transferId,file.fileId))))continue;
+      this.copiedFiles.remember(transfer.sourceDeviceId,transfer.copiedFile,fileKey(transfer.transferId,root.fileId));
+    }
+  }
   clipboardSuggestion: ClipboardSuggestionKind | null = null;
   private clipboardSuggestionDismissed=false;
   private clipboardSuggestionBusy=false;
@@ -617,8 +654,17 @@ class GlobalSend {
     this.clipboardSuggestionBusy=true;const generation=this.generation;
     try {
       const kind=await clipboardSuggestion(navigator);
+      if(kind)await this.captureClipboardDrag();
       if(generation===this.generation && kind!==this.clipboardSuggestion){this.clipboardSuggestion=kind;this.render();}
     } finally {this.clipboardSuggestionBusy=false;}
+  }
+  private async captureClipboardDrag(){
+    if(!navigator.clipboard?.read)return;
+    const generation=this.generation,values=await navigator.clipboard.read();
+    if(generation!==this.generation)return;
+    for(const value of values){const type=value.types.find(type=>type.startsWith('image/'));if(type){const blob=await value.getType(type);if(generation===this.generation)this.clipboardDrag={file:new File([blob],`剪贴板-${Date.now()}.${type.split('/')[1] || 'png'}`,{type})};return;}
+      if(value.types.includes('text/plain')){const text=await (await value.getType('text/plain')).text();if(generation===this.generation)this.clipboardDrag={text};return;}}
+    this.clipboardDrag=null;
   }
   async readClipboard(){
     if(!this.session)return;
@@ -629,15 +675,15 @@ class GlobalSend {
         let added=0;
         for(const value of values){
           const image=value.types.find(type=>type.startsWith('image/'));
-          if(image){const blob=await value.getType(image);if(generation!==this.generation)return;this.addFiles([new File([blob],`剪贴板-${Date.now()}.${image.split('/')[1] || 'png'}`,{type:image})]);added++;}
+          if(image){const blob=await value.getType(image);if(generation!==this.generation)return;const file=new File([blob],`剪贴板-${Date.now()}.${image.split('/')[1] || 'png'}`,{type:image});this.clipboardDrag={file};this.addFiles([file]);added++;}
           else if(value.types.includes('text/plain') || value.types.includes('text/html')){
             const type=value.types.includes('text/plain')?'text/plain':'text/html',blob=await value.getType(type);
             let text=await blob.text();if(type==='text/html')text=new DOMParser().parseFromString(text,'text/html').body.textContent || '';
-            if(generation!==this.generation)return;if(text.trim()){this.stagedTexts.push({id:id(),text});added++;}
+            if(generation!==this.generation)return;if(text.trim()){this.clipboardDrag={text};this.stagedTexts.push({id:id(),text});added++;}
           }
         }
         if(!added)return;
-      }else if(navigator.clipboard?.readText){const text=await navigator.clipboard.readText();if(generation!==this.generation)return;if(!text.trim())return;this.stagedTexts.push({id:id(),text});}
+      }else if(navigator.clipboard?.readText){const text=await navigator.clipboard.readText();if(generation!==this.generation)return;if(!text.trim())return;this.clipboardDrag={text};this.stagedTexts.push({id:id(),text});}
       else throw new Error('浏览器不支持读取剪贴板，请粘贴到文本框');
       this.clipboardSuggestion=null;this.clipboardSuggestionDismissed=true;
       this.setMobileView('send');this.render();
@@ -821,16 +867,20 @@ class GlobalSend {
     if(this.beginSelectedDrag(event,node))return;
     // A native drag of selected glyphs keeps the browser's selected substring.
     if(this.dragOriginOnText || isTextSelectionPoint(drag))return;
-    if((drag.target as Element).closest('button,input,select') && !node.hasAttribute('data-drag-library') && !(node.dataset.dragStaged && (drag.target as Element).closest('[data-edit-staged]'))){drag.preventDefault();return;}
+    const control=(drag.target as Element).closest('button,input,select');
+    if(control && !node.hasAttribute('data-drag-library') && !(node.hasAttribute('data-drag-clipboard-button') && control===node) && !(node.hasAttribute('data-drag-file') && control.matches('.copied-file-pull')) && !(node.dataset.dragStaged && control.matches('[data-edit-staged]'))){drag.preventDefault();return;}
+
     let text:string|undefined,file:File|undefined;
-    if(node.dataset.dragStaged==='text')text=this.stagedTexts.find(item=>item.id===node.dataset.stagedId)?.text;
+    if(node.hasAttribute('data-drag-clipboard-slot')){text=this.clipboardSlot?.text;file=this.clipboardSlot?.file;}
+    else if(node.hasAttribute('data-drag-clipboard-button')){text=this.clipboardDrag?.text;file=this.clipboardDrag?.file;}
+    else if(node.dataset.dragStaged==='text')text=this.stagedTexts.find(item=>item.id===node.dataset.stagedId)?.text;
     else if(node.dataset.dragStaged==='file')file=this.picked.find(item=>this.pickedKey(item)===node.dataset.stagedId);
     else if(node.dataset.dragShared)text=this.shared.draft;
     else if(node.dataset.dragText)text=this.viewedText()?.event.eventId===node.dataset.dragText?this.viewedText()!.draft:this.localEvent(node.dataset.dragText)?.payload.text || '';
     else if(node.dataset.dragReceipt)text=(this.receiptBatch.get(node.dataset.dragReceipt) || this.receipt)?.text || '';
     else if(node.dataset.dragLibrary)file=this.fileLibrary.fileForDrag(node.dataset.dragLibrary);
     else file=this.localFile(node.dataset.dragFile!);
-    if(text===undefined && !file){drag.preventDefault();this.toast('请先将文件接收到本机',true);return;}
+    if(text===undefined && !file){drag.preventDefault();this.toast(node.hasAttribute('data-drag-clipboard-button')?'请先点击剪贴板以授权读取，再拖动':'请先将文件接收到本机',true);return;}
     this.internalPayload={text,file,...(node.dataset.dragLibrary?{libraryId:node.dataset.dragLibrary}:{}),...(node.dataset.dragFile?{receivedKey:node.dataset.dragFile}:{}),...(node.dataset.dragReceipt && file?{receivedKey:(this.receiptBatch.get(node.dataset.dragReceipt) || this.receipt)?.fileKey}: {})};node.dataset.internalDrag='true';drag.stopPropagation();drag.dataTransfer.effectAllowed='copy';drag.dataTransfer.setData('application/x-globalsend-card','1');drag.dataTransfer.setData(this.internalDragType,'1');
     if(text!==undefined)drag.dataTransfer.setData('text/plain',text);
     if(file && file.type!=='inode/directory'){drag.dataTransfer.items.add(file);const url=URL.createObjectURL(file);drag.dataTransfer.setData('DownloadURL',(file.type || 'application/octet-stream')+':'+file.name+':'+url);window.setTimeout(()=>URL.revokeObjectURL(url),60000);}
@@ -986,16 +1036,16 @@ class GlobalSend {
     for(const view of this.textViews.values())if(view.element)view.element.value='';
     this.textViews.clear();this.readingEventId='';
   }
-  persist() { if(this.session){localSet(this.dockKey,JSON.stringify({cursor:this.cursor,events:this.events,hidden:this.hiddenItems,receivedAt:this.receivedAt}));this.archiveLocalContent();} }
+  persist() { if(this.session){localSet(this.dockKey,JSON.stringify({cursor:this.cursor,events:this.events.filter(event=>!event.payload.clipboard),hidden:this.hiddenItems,receivedAt:this.receivedAt}));this.archiveLocalContent();} }
   archiveLocalContent(){
     if(!this.session)return;
-    for(const [key,file] of [...this.fileSources,...this.rtcLocalFiles,...this.previewSources])this.retainedSources.set(key,file);
+    for(const [key,file] of [...this.fileSources,...this.rtcLocalFiles,...this.previewSources])if(!this.localTransfer(key.split(':')[0])?.clipboard)this.retainedSources.set(key,file);
     const names=Object.fromEntries(this.deviceNames);for(const device of [...this.devices,this.session.device])names[device.deviceId]=device.name;
     this.localHistory.remember({scope:this.dockKey,deviceId:this.session.device.deviceId,events:this.events,transfers:this.transfers,names,receivedAt:this.receivedAt,hidden:this.hiddenItems});
   }
   localEvent(id:string){return this.events.find(event=>event.eventId===id) || this.localHistory.event(id)?.event;}
   localTransfer(id:string){return this.transfers.find(transfer=>transfer.transferId===id) || this.localHistory.transfer(id)?.transfer;}
-  localFile(key:string){return this.fileSources.get(key) || this.rtcLocalFiles.get(key) || this.previewSources.get(key) || this.retainedSources.get(key);}
+  localFile(key:string){if(this.clipboardSlot?.key===key)return this.clipboardSlot.file;return this.fileSources.get(key) || this.rtcLocalFiles.get(key) || this.previewSources.get(key) || this.retainedSources.get(key);}
   restoreLocalReferences() {
     if(this.localReferencesRestoring)return this.localReferencesRestoring;
     const saved=this.localHistory.scopes.flatMap(scope=>scope.transfers.flatMap(transfer=>transfer.files.map(file=>({scope,transfer,file,key:fileKey(transfer.transferId,file.fileId)}))));
@@ -1006,7 +1056,7 @@ class GlobalSend {
         this.retainedSources.delete(key);this.previewSources.delete(key);this.localHistory.removeFile(transfer.transferId,file.fileId);
         this.hiddenItems[fileItemKey(transfer.transferId,file.fileId)]=Math.max(Date.parse(transfer.expiresAt) || 0,Date.now()+86400000);
       }
-      this.knownLibraryKeys=new Set(result.entries.map(entry=>entry.key));this.persist();this.render();
+      this.knownLibraryKeys=new Set(result.entries.map(entry=>entry.key));this.rememberReferenceFiles();this.persist();this.render();
     })().catch(()=>{/* Keep references until the next successful local inventory. */});
     this.localReferencesRestoring=restore;return restore.finally(()=>{if(this.localReferencesRestoring===restore)this.localReferencesRestoring=null;});
   }
@@ -1014,7 +1064,7 @@ class GlobalSend {
     const values=new Map<string,WireEvent>();
     for(const scope of this.localHistory.scopes)for(const event of scope.events)if(event.type==='text.created' && (outgoing?event.sourceDeviceId===scope.deviceId:event.targetDeviceId===scope.deviceId) && !(scope.hidden[textItemKey(event.eventId)]>Date.now()) && localTextDeadline(event)>Date.now())values.set(event.eventId,event);
     for(const event of this.events)if(event.type==='text.created' && (outgoing?event.sourceDeviceId===this.session?.device.deviceId:event.targetDeviceId===this.session?.device.deviceId))values.set(event.eventId,event);
-    return [...values.values()].filter(event=>!(this.hiddenItems[textItemKey(event.eventId)]>Date.now()));
+    return [...values.values()].filter(event=>!event.payload.clipboard && !(this.hiddenItems[textItemKey(event.eventId)]>Date.now()));
   }
   displayTexts(outgoing:boolean){
     const seen=new Set<string>();
@@ -1026,7 +1076,7 @@ class GlobalSend {
   allDisplayTransfers(outgoing:boolean){
     const values=new Map<string,Transfer>();for(const scope of this.localHistory.scopes)for(const transfer of scope.transfers)if(outgoing?transfer.sourceDeviceId===scope.deviceId:transfer.targetDeviceId===scope.deviceId)values.set(transfer.transferId,transfer);
     for(const transfer of this.transfers)if(outgoing?transfer.sourceDeviceId===this.session?.device.deviceId:transfer.targetDeviceId===this.session?.device.deviceId)values.set(transfer.transferId,transfer);
-    return [...values.values()];
+    return [...values.values()].filter(transfer=>!transfer.clipboard);
   }
   displayTransfers(outgoing:boolean){
     const seen=new Set<string>();
@@ -1041,7 +1091,11 @@ class GlobalSend {
     this.localHistory.save();this.syncViewedText();this.persist();
   }
   receiptTime(key:string,fallback:string){return this.receivedAt[key] || this.localHistory.scopes.map(scope=>scope.receivedAt[key]).find(Boolean) || fallback;}
-  recordReceipt(key:string,at=new Date().toISOString()){this.receivedAt[key] ||= at;this.persist();}
+  recordReceipt(key:string,at=new Date().toISOString()){
+    const [transferId,fileId]=key.split(':'),transfer=this.localTransfer(transferId),file=transfer?.files.find(value=>value.fileId===fileId);
+    if(transfer?.clipboard){const local=this.localFile(key);if(local && file)void this.adoptClipboard({id:transferId,source:transfer.sourceDeviceId,at:transfer.createdAt,key,name:file.name,mimeType:file.mimeType || undefined,file:local,scope:this.dockKey});return;}
+    this.receivedAt[key] ||= at;this.rememberReferenceFiles();this.persist();
+  }
   showReceipt(receipt:NonNullable<GlobalSend['receipt']>){
     const previous=this.receiptVersions.get(receipt.id);
     if(previous===receipt.version || previous && /^\d+$/.test(previous) && /^\d+$/.test(receipt.version) && Number(receipt.version)<Number(previous))return;
@@ -1059,6 +1113,7 @@ class GlobalSend {
     for(const event of events){
       if(event.sourceDeviceId===this.session?.device.deviceId || event.targetDeviceId!==this.session?.device.deviceId)continue;
       if(event.type!=='text.created' && event.type!=='text.updated')continue;
+      if(event.payload.clipboard){void this.adoptClipboard({id:event.eventId,source:event.sourceDeviceId,at:event.createdAt,text:event.payload.text || ''});continue;}
       const originalId=event.type==='text.updated'?event.payload.sourceEventId:event.eventId;
       if(!originalId || this.events.some(item=>item.eventId===event.eventId))continue;
       const receipt={id:originalId,version:String(event.cursor),source:event.sourceDeviceId,title:event.type==='text.updated'?'文本已更新':'发来一条文本',text:event.payload.text || ''};
@@ -1066,7 +1121,7 @@ class GlobalSend {
     }
   }
   noticeFile(transfer:Transfer,file:TransferFile){
-    if(transfer.targetDeviceId!==this.session?.device.deviceId)return;
+    if(transfer.targetDeviceId!==this.session?.device.deviceId || transfer.clipboard || transfer.copiedFile)return;
     const root=folderRoot(file,transfer.files);
     if(isFolderRoot(root))file=summarizeFolder(root,folderMembers(root,transfer.files));
     const key=fileKey(transfer.transferId,file.fileId),current=this.receiptBatch.get(key);
@@ -1728,7 +1783,7 @@ class GlobalSend {
     const transfer = this.transfers.find(item => item.transferId === transferId);
     if(file.status==='received' && transfer?.targetDeviceId===this.session?.device.deviceId)this.recordReceipt(fileKey(transferId,file.fileId));
     if (transfer) transfer.files = transfer.files.map(item => item.fileId === file.fileId ? file : item);
-    if(transfer)this.noticeFile(transfer,file);
+    if(transfer){this.rememberReferenceFiles();this.noticeFile(transfer,file);}
   }
   fileActive(key:string,controller:AbortController,generation:number){return generation===this.generation && !controller.signal.aborted && !this.paused.has(key) && !this.canceled.has(key);}
   stopFile(key:string){
@@ -1853,7 +1908,9 @@ class GlobalSend {
   async acceptIncoming() {
     const generation=this.generation;
     for(const transfer of this.transfers){
-      if(generation!==this.generation || !this.session || !this.autoAccept)return;
+      if(generation!==this.generation || !this.session)return;
+      if(transfer.clipboard && !this.clipboard.enabled){if(transfer.files.some(file=>file.status==='offered'))await this.acceptFiles(transfer,[],true);continue;}
+      if(!transfer.clipboard && !this.autoAccept)continue;
       if(transfer.targetDeviceId!==this.session.device.deviceId || Date.parse(transfer.expiresAt)<=Date.now() || (this.autoAcceptRetryAt.get(transfer.transferId) || 0)>Date.now())continue;
       const offered=transfer.files.filter(file=>file.status==='offered');
       // Accept is a batch decision: selecting only small items would reject the
@@ -1901,7 +1958,7 @@ class GlobalSend {
         }
         if(folderReused)await this.fileLibrary.refresh();
       }
-      if(this.info?.features?.fileReuse && fileIds.length && localStorageSupported()){
+      if(!transfer.clipboard && this.info?.features?.fileReuse && fileIds.length && localStorageSupported()){
         const store=await this.ensureFileStore();
         for(const file of transfer.files.filter(file=>selected.has(file.fileId) && file.status==='offered' && !file.relativePath && file.entryKind!=='directory')){
           const key=fileKey(transferId,file.fileId),local=await store.reuse(key,file);
@@ -1941,7 +1998,7 @@ class GlobalSend {
     const starting=(async()=>{
       await this.rtcClosing;
       const store=new RtcFileStore(scope);
-      try{await store.ready;if(generation!==this.generation)throw new DOMException('会话已切换','AbortError');this.rtcStore=store;this.receiveDestination=(await store.destination()).name;return store;}
+      try{await store.ready;if(generation!==this.generation)throw new DOMException('会话已切换','AbortError');this.rtcStore=store;this.receiveDestination=(await store.destination()).name;const slot=this.clipboardSlot;if(slot?.key && !slot.file && slot.scope===scope){const file=await store.get(slot.key);if(file)slot.file=new File([await file.arrayBuffer()],file.name,{type:file.type,lastModified:file.lastModified});else this.clipboard.clear();}return store;}
       catch(error){await store.dispose().catch(()=>{});throw error;}
     })();
     this.storeStarting=starting;try{return await starting;}finally{if(this.storeStarting===starting)this.storeStarting=null;}
@@ -2032,7 +2089,7 @@ class GlobalSend {
       store=await receiveStorage(()=>this.ensureFileStore());if(!this.fileActive(key,controller,generation))return;
       let local=await receiveStorage(()=>store!.get(key));if(!this.fileActive(key,controller,generation))return;
       if(!local){
-        let offset=await receiveStorage(()=>store!.open(key,file,Date.now()+86400000));if(!this.fileActive(key,controller,generation))return;
+        let offset=await receiveStorage(()=>store!.open(key,file,Date.now()+86400000,!!transfer.clipboard));if(!this.fileActive(key,controller,generation))return;
         if(offset<file.size){
           const {downloadPath}=await this.api.request<{downloadPath:string}>(`/transfers/${transfer.transferId}/files/${file.fileId}/download-ticket`,this.info?.features?.relayStreaming?{live:true}:{},'POST',controller.signal);
           if(!this.fileActive(key,controller,generation))return;
@@ -2115,7 +2172,7 @@ class GlobalSend {
     for(const entry of entries)if(entry.scope===this.rtcStore?.scope)this.receivedAt[entry.key]=new Date(entry.receivedAt).toISOString();
     const keys=new Set(entries.flatMap(entry=>[entry.key,...entry.aliases || []]));for(const key of this.knownLibraryKeys)if(!keys.has(key)){this.retainedSources.delete(key);this.previewSources.delete(key);const [transferId,fileId]=key.split(':');this.localHistory.removeFile(transferId,fileId);this.hiddenItems[fileItemKey(transferId,fileId)]=Math.max(Date.parse(this.localTransfer(transferId)?.expiresAt || '') || 0,Date.now()+86400000);}
     this.knownLibraryKeys=keys;
-    this.persist();this.rtcCacheRevision++;this.rtcLocalFiles.clear();this.rtcFileExpiry.clear();this.reconcileRtc();
+    this.persist();this.rtcCacheRevision++;this.rtcLocalFiles.clear();this.rtcFileExpiry.clear();this.reconcileRtc();this.copiedFiles.reconcile(key=>keys.has(key));
   }
   async sendRtc(transfer:Transfer,file:TransferFile,attemptId:string) {
     const generation=this.generation,key=fileKey(transfer.transferId,file.fileId),source=this.fileSources.get(key);
@@ -2153,7 +2210,7 @@ class GlobalSend {
       const recovered=this.rtcLocalFiles.get(key) || await receiveStorage(()=>store!.get(key));
       if(!this.fileActive(key,controller,generation))return;
       if(recovered) {local=recovered;complete=true;}
-      let offset=complete?file.size:await receiveStorage(()=>store!.open(key,file,Date.now()+86400000));
+      let offset=complete?file.size:await receiveStorage(()=>store!.open(key,file,Date.now()+86400000,!!transfer.clipboard));
       if(!this.fileActive(key,controller,generation))return;
       const capability=(this.device(transfer.sourceDeviceId) as Device & {rtc?:{scopes:RtcScope[]}}|undefined)?.rtc;
       const automatic=!['lan','public'].includes(transfer.routePreference || 'auto');
@@ -2197,12 +2254,12 @@ class GlobalSend {
           if(attempt.connected && !complete)decision.resumeAfterDisconnect();
           attempt.dispose();await store.close(key);
         }
-        if(!complete && this.fileActive(key,controller,generation))offset=await receiveStorage(()=>store!.open(key,file,Date.now()+86400000));
+        if(!complete && this.fileActive(key,controller,generation))offset=await receiveStorage(()=>store!.open(key,file,Date.now()+86400000,!!transfer.clipboard));
       }
       if(generation!==this.generation || controller.signal.aborted)return;
       if(complete && local) {
-        this.recordReceipt(key,store.receivedAt?.(key) || new Date().toISOString());
-        this.rtcLocalFiles.set(key,local);this.rtcFileExpiry.set(key,store.expiry(key));this.uploadProgress.set(key,file.size);void this.fileLibrary.refresh();
+        this.rtcLocalFiles.set(key,local);
+        this.recordReceipt(key,store.receivedAt?.(key) || new Date().toISOString());this.rtcFileExpiry.set(key,store.expiry(key));this.uploadProgress.set(key,file.size);void this.fileLibrary.refresh();
         const {file:received}=await api.request<{file:TransferFile}>(`/transfers/${transfer.transferId}/files/${file.fileId}/received`,{transport:'direct'},'POST',controller.signal);
         if(!this.fileActive(key,controller,generation))return;this.setFile(transfer.transferId,received);this.uploadErrors.delete(key);return;
       }
@@ -2416,7 +2473,7 @@ class GlobalSend {
   }
   convenienceHtml() {
     const notifications=this.notifications.state(),noticeReason=notifications.reason==='home-screen'?'添加到主屏幕后可开启':notifications.reason==='denied'?'请在浏览器设置中允许通知':notifications.reason==='insecure'?'需要 HTTPS':notifications.reason?'当前浏览器不支持':'';
-    return `<section class="settings-card"><h3>收发</h3><div class="setting-row"><span>显示</span><button class="quiet" data-action="page-fullscreen">${e(this.pageDisplay.label)}</button></div>${this.pageDisplay.hint?`<p class="notification-reason" role="status">${e(this.pageDisplay.hint)}</p>`:''}<label class="setting-row"><span>接收通知${noticeReason?`<small class="notification-reason">${noticeReason}</small>`:''}</span><input data-web-notifications type="checkbox" ${notifications.enabled?'checked':''} ${!notifications.available || notifications.permission==='denied'?'disabled':''}></label><label class="setting-row"><span>记住设备</span><input id="remember-device" type="checkbox" ${this.rememberDevice?'checked':''}></label><label class="setting-row"><span>自动接收</span><input data-auto-accept type="checkbox" ${this.autoAccept?'checked':''}></label><label class="limit-field" for="auto-accept-limit">中继确认阈值 <span><input id="auto-accept-limit" type="number" min="0" step="1" value="${e(this.autoAcceptLimitDraft ?? String(this.autoAcceptMaxBytes/1048576))}" inputmode="numeric" aria-label="中继确认阈值 MiB"> MiB / 文件</span></label><label class="setting-row" for="file-route"><span>传输方式</span><select id="file-route" ${this.pendingOffer?'disabled':''}>${(['auto','lan','public','relay'] as const).map((route,index)=>`<option value="${route}" ${this.routePreference===route?'selected':''}>${['自动','仅局域网','仅公网直连','中继'][index]}</option>`).join('')}</select></label><label class="setting-row" for="transfer-concurrency"><span>传输并发</span><select id="transfer-concurrency">${Array.from({length:16},(_,index)=>index+1).map(value=>`<option value="${value}" ${this.transferConcurrency===value?'selected':''}>${value}</option>`).join('')}</select></label><button class="quiet" data-action="library">文件与自动清理</button></section>`;
+    return `<section class="settings-card"><h3>收发</h3><div class="setting-row"><span>显示</span><button class="quiet" data-action="page-fullscreen">${e(this.pageDisplay.label)}</button></div>${this.pageDisplay.hint?`<p class="notification-reason" role="status">${e(this.pageDisplay.hint)}</p>`:''}<label class="setting-row"><span>接收通知${noticeReason?`<small class="notification-reason">${noticeReason}</small>`:''}</span><input data-web-notifications type="checkbox" ${notifications.enabled?'checked':''} ${!notifications.available || notifications.permission==='denied'?'disabled':''}></label><label class="setting-row"><span>记住设备</span><input id="remember-device" type="checkbox" ${this.rememberDevice?'checked':''}></label><label class="setting-row"><span>接收剪贴板同步</span><input data-clipboard-receive type="checkbox" ${this.clipboard.enabled?'checked':''}></label><label class="setting-row"><span>自动接收</span><input data-auto-accept type="checkbox" ${this.autoAccept?'checked':''}></label><label class="limit-field" for="auto-accept-limit">中继确认阈值 <span><input id="auto-accept-limit" type="number" min="0" step="1" value="${e(this.autoAcceptLimitDraft ?? String(this.autoAcceptMaxBytes/1048576))}" inputmode="numeric" aria-label="中继确认阈值 MiB"> MiB / 文件</span></label><label class="setting-row" for="file-route"><span>传输方式</span><select id="file-route" ${this.pendingOffer?'disabled':''}>${(['auto','lan','public','relay'] as const).map((route,index)=>`<option value="${route}" ${this.routePreference===route?'selected':''}>${['自动','仅局域网','仅公网直连','中继'][index]}</option>`).join('')}</select></label><label class="setting-row" for="transfer-concurrency"><span>传输并发</span><select id="transfer-concurrency">${Array.from({length:16},(_,index)=>index+1).map(value=>`<option value="${value}" ${this.transferConcurrency===value?'selected':''}>${value}</option>`).join('')}</select></label><button class="quiet" data-action="library">文件与自动清理</button></section>`;
   }
   deviceSettingsHtml() {
     const me=this.session!.device;
@@ -2500,7 +2557,10 @@ class GlobalSend {
     on('.modal-backdrop','click',(event,node)=>{if(event.target===node){if(this.modal==='editor')this.toggleEditor(false);else this.closeModal();}});
     on('[data-action]','click',(_event,node)=> {
       const action = node.dataset.action;
-      if(action==='pull-copied-file')void this.copiedFiles.pull(node.dataset.copiedId!);
+      if(action==='pull-copied-file'){const reference=this.copiedFiles.references.find(value=>value.id===node.dataset.copiedId);if(reference?.localKey){const [transfer,file]=reference.localKey.split(':');void this.openFilePreview(transfer,file);}else void this.copiedFiles.pull(node.dataset.copiedId!);}
+      if(action==='copy-clipboard-slot')void this.copyClipboardSlot();
+      if(action==='stage-clipboard-slot')this.stageClipboardSlot();
+      if(action==='clear-clipboard-slot')void this.clearClipboardSlot();
       if(action==='dismiss-copied-file')this.copiedFiles.dismiss(node.dataset.copiedId!);
       if(action==='refresh-copied-files')void this.refreshCopiedFiles();
       if(action==='ip-addresses')void this.openIpAddresses();
@@ -2561,6 +2621,7 @@ class GlobalSend {
     on('[data-shared-group]','change',(_event,node)=>this.selectSharedGroup((node as HTMLSelectElement).value));
     on('#enroll-form','submit',event=>{event.preventDefault(); void this.enroll();});
     on('#remember-device','change',(_event,node)=>{this.rememberDevice=(node as HTMLInputElement).checked;this.saveSession();});
+    on('[data-clipboard-receive]','change',(_event,node)=>this.setClipboardReceive((node as HTMLInputElement).checked));
     on('[data-auto-accept]','change',(_event,node)=>this.setAutoAccept((node as HTMLInputElement).checked));
     on('[data-web-notifications]','change',(_event,node)=>{if((node as HTMLInputElement).checked)void this.notifications.requestEnable();else this.notifications.setEnabled(false);});
     on('#transfer-concurrency','change',(_event,node)=>{try{this.setTransferConcurrency(Number((node as HTMLSelectElement).value));}catch(error){this.toast(errorText(error),true);}});
@@ -2632,8 +2693,8 @@ class GlobalSend {
     on('[data-view-receipt]','click',(event,node)=>{if((event.target as Element).closest('button,a') || window.getSelection?.()?.isCollapsed===false)return;this.receiptFocusId=node.dataset.viewReceipt!;this.render();});
     on('[data-receipt-menu]','click',(event,node)=>{event.stopPropagation();const rect=node.getBoundingClientRect();this.openCardMenu('receipt',node.dataset.receiptMenu!,rect.right-180,rect.bottom+4);});
     on('[data-drag-all]','dragstart',(event,node)=>this.beginBulkDrag(event,node));
-    on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library],[data-drag-staged]','dragstart',(event,node)=>this.beginContentDrag(event,node));
-    on('[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library],[data-drag-staged]','dragend',()=>{this.endContentDrag();this.render();});
+    on('[data-drag-clipboard-slot],[data-drag-clipboard-button],[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library],[data-drag-staged]','dragstart',(event,node)=>this.beginContentDrag(event,node));
+    on('[data-drag-clipboard-slot],[data-drag-clipboard-button],[data-drag-text],[data-drag-file],[data-drag-receipt],[data-drag-library],[data-drag-staged]','dragend',()=>{this.endContentDrag();this.render();});
     on('.content-card[data-drag-text],.content-card[data-drag-file]','contextmenu',(event,node)=>{if(isTextSelectionTarget(event.target))return;event.preventDefault();if(this.heldCardKey===(node.dataset.receiveKey || node.dataset.sentKey) || node.hasAttribute('data-receive-key') && this.receiveSelecting || node.hasAttribute('data-sent-key') && this.sentSelecting)return;const mouse=event as MouseEvent;this.openCardMenu(node.dataset.receiptId?'receipt':node.dataset.dragText?'text':'file',node.dataset.receiptId || node.dataset.dragText || node.dataset.dragFile!,mouse.clientX,mouse.clientY);});
     on('[data-card-menu]','click',(event,node)=>{event.stopPropagation();const card=node.closest<HTMLElement>('[data-drag-text],[data-drag-file]');if(!card)return;const rect=node.getBoundingClientRect();this.openCardMenu(card.dataset.dragText?'text':'file',card.dataset.dragText || card.dataset.dragFile!,rect.right-180,rect.bottom+4);});
     on('[data-card-command]','click',(_event,node)=>{void this.run(()=>this.cardCommand(node.dataset.cardCommand!));});

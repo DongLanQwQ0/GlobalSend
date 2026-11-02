@@ -10,12 +10,12 @@ export class LocalHistory {
   private write:(value:string)=>void;
   constructor(read:()=>string|null,write:(value:string)=>void){
     this.write=write;
-    const stored=read();if(stored){try{this.scopes=JSON.parse(stored).scopes || [];}catch{/* Preserve the live session if an old snapshot is incomplete. */}}
+    const stored=read();if(stored){try{this.scopes=JSON.parse(stored).scopes || [];for(const scope of this.scopes){scope.events=scope.events.filter(event=>!event.payload.clipboard);scope.transfers=scope.transfers.filter(transfer=>!transfer.clipboard);}}catch{/* Preserve the live session if an old snapshot is incomplete. */}}
   }
   remember(value:LocalHistoryScope){
     const previous=this.scopes.find(scope=>scope.scope===value.scope),hidden={...previous?.hidden,...value.hidden};
-    const events=[...new Map([...(previous?.events || []),...value.events].map(event=>[event.eventId,event])).values()].filter(event=>!(hidden['text:'+event.eventId]>Date.now()));
-    const transfers=[...new Map([...(previous?.transfers || []),...value.transfers].map(transfer=>[transfer.transferId,transfer])).values()];
+    const events=[...new Map([...(previous?.events || []),...value.events].map(event=>[event.eventId,event])).values()].filter(event=>!event.payload.clipboard && !(hidden['text:'+event.eventId]>Date.now()));
+    const transfers=[...new Map([...(previous?.transfers || []),...value.transfers].map(transfer=>[transfer.transferId,transfer])).values()].filter(transfer=>!transfer.clipboard);
     const snapshot:LocalHistoryScope={scope:value.scope,deviceId:value.deviceId,events,transfers,names:{...previous?.names,...value.names},receivedAt:{...previous?.receivedAt,...value.receivedAt},hidden};
     this.scopes=[...this.scopes.filter(scope=>scope.scope!==value.scope),JSON.parse(JSON.stringify(snapshot))];this.save();
   }

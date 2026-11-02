@@ -230,6 +230,9 @@ void main() {
     api.onPull = (_) => gate.future;
     final offer = {'offerId': 'remote', 'sourceDeviceId': 'source'};
     final first = copied.pull(offer, ['file']);
+    while (copied.pulls.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
     expect(copied.pulls.values.single['state'], 'pending');
     await copied.pull(offer, ['file']);
     expect(
@@ -238,5 +241,39 @@ void main() {
     );
     gate.complete();
     await first;
+  });
+  test('local readiness persists by exact reference and deleted bytes become pullable again', () async {
+    final file = await picture('local.jpg');
+    final reference = {
+      'id': 'copied:source:remote:file',
+      'sourceDeviceId': 'source',
+      'offerId': 'remote',
+      'itemId': 'file',
+    };
+    await copied.rememberReceived(
+      reference,
+      file.path,
+      transferId: 'transfer',
+      fileId: 'real-file',
+    );
+    expect(await copied.resolve(reference), [file.path]);
+    expect(api.calls.where((call) => call.$1 == 'POST'), isEmpty);
+    final restored = CopiedFilesClient(
+      newId: () => 'restored',
+      sendFiles: (_, _) async {},
+      changed: () {},
+    );
+    await restored.load(File('${temporary.path}/copied-files.json'));
+    expect(
+      restored.localReference(reference['id']!)?['transferId'],
+      'transfer',
+    );
+    await file.delete();
+    await restored.reconcileReceived();
+    expect(restored.localReference(reference['id']!), isNull);
+    await restored.connect(api, self: 'self', supported: true);
+    await restored.pull(reference, ['file']);
+    expect(api.calls.where((call) => call.$1 == 'POST'), hasLength(1));
+    restored.disconnect();
   });
 }

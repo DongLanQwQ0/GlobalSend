@@ -14,7 +14,7 @@ interface Access {
 }
 type Handle = FileSystemFileHandle & {createSyncAccessHandle():Promise<Access>};
 type Directory = FileSystemDirectoryHandle & {values():AsyncIterable<FileSystemHandle>};
-type Metadata = StoredLocation & {key:string;name:string;mimeType?:string;size:number;sha256?:string;receivedAt?:number;expires:number;complete:boolean;alias?:{scope:string;key:string}};
+type Metadata = StoredLocation & {key:string;name:string;mimeType?:string;size:number;sha256?:string;receivedAt?:number;expires:number;complete:boolean;ephemeral?:boolean;alias?:{scope:string;key:string}};
 let appDirectory:Directory;
 let directory: Directory;
 const opened = new Map<string,{access:Access;handle:Handle;offset:number;meta:Metadata}>();
@@ -71,7 +71,7 @@ async function cleanup() {
   for await(const handle of directory.values()) {
     if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
     const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
-    if(meta.complete && !meta.alias && cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},rules) && !opened.has(meta.key))expired.push(meta);
+    if(!meta.ephemeral && meta.complete && !meta.alias && cleanupDue({...meta,receivedAt:meta.receivedAt ?? meta.expires-86400000},rules) && !opened.has(meta.key))expired.push(meta);
   }
   expired.sort((a,b)=>(a.entryKind==='directory'?1:0)-(b.entryKind==='directory'?1:0) || (b.relativePath?.split('/').length || 0)-(a.relativePath?.split('/').length || 0));
   for(const meta of expired)await remove(meta.key,false).catch(error=>{if(error.name!=='NotAllowedError')throw error;});
@@ -95,7 +95,7 @@ async function libraryFile(id:string) {
   const target=await appDirectory.getDirectoryHandle(scope) as Directory;
   let meta=JSON.parse(await (await (await target.getFileHandle(`${keyName(key)}.json`)).getFile()).text()) as Metadata;
   const source=await canonical(meta,target);if(meta.alias)meta={...meta,receivedAt:source.meta.receivedAt,expires:source.meta.expires};
-  if(!meta.complete || cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},await cleanupPreferences()))throw new Error('文件已清理');
+  if(meta.ephemeral || !meta.complete || cleanupDue({...meta,receivedAt:meta.receivedAt ?? meta.expires-86400000},await cleanupPreferences()))throw new Error('文件已清理');
   const file=await dataFile(meta,target);
   return {target,meta,file,scope,key};
 }
@@ -187,7 +187,7 @@ async function changeDestination(data:{id?:string;handle?:FileSystemDirectoryHan
       for await(const handle of target.values()){
         if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
         const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
-        if(!meta.alias && typeof meta.key==='string' && handle.name===`${keyName(meta.key)}.json`)metas.push(meta);
+        if(!meta.ephemeral && !meta.alias && typeof meta.key==='string' && handle.name===`${keyName(meta.key)}.json`)metas.push(meta);
       }
       // Parents precede their files, including intentionally empty directories.
       metas.sort((a,b)=>(a.relativePath?.split('/').length || 0)-(b.relativePath?.split('/').length || 0));
@@ -236,7 +236,7 @@ async function reuseFolder(incoming:Metadata[]) {
     for await(const handle of target.values()){
       if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
       const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
-      if(!meta.alias && meta.complete && meta.relativePath)records.push(meta);
+      if(!meta.ephemeral && !meta.alias && meta.complete && meta.relativePath)records.push(meta);
     }
     for(const root of records.filter(meta=>meta.entryKind==='directory' && !meta.relativePath!.includes('/'))){
       const members=records.filter(meta=>meta.transferId===root.transferId && (meta.key===root.key || meta.relativePath!.startsWith(root.relativePath!+'/')));
@@ -299,7 +299,7 @@ async function flattenLegacyStorage(){
       for await(const handle of target.values()){
         if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
         const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
-        if(typeof meta.key==='string' && handle.name===keyName(meta.key)+'.json' && !meta.alias)metas.push(meta);
+        if(typeof meta.key==='string' && handle.name===keyName(meta.key)+'.json' && !meta.alias && !meta.ephemeral)metas.push(meta);
       }
       metas.sort((a,b)=>(a.relativePath?.split('/').length || 0)-(b.relativePath?.split('/').length || 0));
       const folder=new FolderStorage(target);
@@ -359,7 +359,7 @@ async function execute(command:string,data:any):Promise<unknown> {
     case 'destination-set': return changeDestination(data);
     case 'directory': {
       let previous:Metadata|undefined;try{previous=await readMeta(data.key);}catch(error){if(!((error as Error).name==='NotFoundError'))throw error;}
-      const location=previous?.storagePath?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId,layout:previous.layout}:await new FolderStorage(directory).allocate(data.transferId,data.relativePath);
+      const location=data.ephemeral?{}:previous?.storagePath?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId,layout:previous.layout}:await new FolderStorage(directory).allocate(data.transferId,data.relativePath);
       const meta={...data,...location,entryKind:'directory',complete:true,receivedAt:previous?.receivedAt || Date.now()} as Metadata;
       meta.expires=meta.receivedAt!+86400000;await folderFor(meta,directory).directory(meta);await metadata(meta);return {meta};
     }
@@ -367,7 +367,7 @@ async function execute(command:string,data:any):Promise<unknown> {
       await close(data.key);
       let previous:Metadata|undefined;
       try{previous=await readMeta(data.key);}catch(error){if((error as Error).name!=='NotFoundError')throw error;}
-      const location=previous?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId,layout:previous.layout}:data.relativePath?await new FolderStorage(directory).allocate(data.transferId,data.relativePath):await new FolderStorage(directory).allocateFile(data.name);
+      const location=data.ephemeral?{}:previous?{storagePath:previous.storagePath,destinationId:previous.destinationId,relativePath:previous.relativePath,transferId:previous.transferId,layout:previous.layout}:data.relativePath?await new FolderStorage(directory).allocate(data.transferId,data.relativePath):await new FolderStorage(directory).allocateFile(data.name);
       const meta={...data,...location,complete:false} as Metadata;
       const handle=await dataHandle(meta,directory,true) as Handle;
       const access=await accessFile(handle,!!meta.destinationId && meta.destinationId!=='opfs');
@@ -398,7 +398,7 @@ async function execute(command:string,data:any):Promise<unknown> {
       const source=await canonical(meta,directory);
       if(meta.alias)meta={...meta,receivedAt:source.meta.receivedAt,expires:source.meta.expires};
       const rules=await cleanupPreferences(),receivedAt=meta.receivedAt ?? meta.expires-86400000;
-      if(!meta.complete || cleanupDue({...meta,receivedAt},rules))return {};
+      if(!meta.complete || !meta.ephemeral && cleanupDue({...meta,receivedAt},rules))return {};
       return {file:await dataFile(meta),directory:meta.entryKind==='directory',meta:{...meta,expires:cleanupMatches(meta,rules)?receivedAt+rules.retentionHours*3600000:Infinity}};
     }
     case 'reuse-folder': return reuseFolder(data.files);
@@ -421,8 +421,8 @@ async function execute(command:string,data:any):Promise<unknown> {
         for await(const handle of target.values()){
           if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
           const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
-          if(meta.alias || !meta.complete || meta.relativePath || meta.entryKind==='directory' || meta.sha256!==data.sha256 || meta.size!==data.size)continue;
-          if(cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},await cleanupPreferences()))continue;
+          if(meta.ephemeral || meta.alias || !meta.complete || meta.relativePath || meta.entryKind==='directory' || meta.sha256!==data.sha256 || meta.size!==data.size)continue;
+          if(cleanupDue({...meta,receivedAt:meta.receivedAt ?? meta.expires-86400000},await cleanupPreferences()))continue;
           let file:File;try{file=(await dataFile(meta,target))!;}catch(error){if((error as Error).name==='NotFoundError')continue;throw error;}
           if(file.size!==data.size)continue;
           const hash=sha256.create();
@@ -443,6 +443,11 @@ async function execute(command:string,data:any):Promise<unknown> {
     }
     case 'close': await close(data.key);return {};
     case 'remove': await remove(data.key);return {};
+    case 'clipboard-release': {
+      let meta:Metadata;try{meta=await readMeta(data.key);}catch(error){if((error as Error).name==='NotFoundError')return {};throw error;}
+      if(!meta.ephemeral || meta.alias)return {};
+      await close(data.key);await removeData(meta);await directory.removeEntry(keyName(data.key)+'.json');return {};
+    }
     case 'cleanup': await cleanup();return {};
     case 'library-list': {
       const rules=await cleanupPreferences();
@@ -454,9 +459,10 @@ async function execute(command:string,data:any):Promise<unknown> {
         for await(const handle of target.values()) {
           if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
           const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
+          if(meta.ephemeral)continue;
           if(meta.alias){aliases.push({scope:scopeHandle.name,key:meta.key,alias:meta.alias});continue;}
           if(!meta.complete)continue;
-          if(cleanupDue({name:meta.name,size:meta.size,receivedAt:meta.receivedAt ?? meta.expires-86400000},rules)) {
+          if(cleanupDue({...meta,receivedAt:meta.receivedAt ?? meta.expires-86400000},rules)) {
             // An active receiver may own this file in a second worker. Leave a
             // locked file alone; its receiving session owns the in-progress lease.
             expired.push(meta);
@@ -481,7 +487,7 @@ async function execute(command:string,data:any):Promise<unknown> {
         for await(const handle of target.values()){
           if(handle.kind!=='file' || !handle.name.endsWith('.json'))continue;
           const meta=JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as Metadata;
-          if(!wanted.has(meta.key) || !meta.complete)continue;
+          if(meta.ephemeral || !wanted.has(meta.key) || !meta.complete)continue;
           try{
             const saved=await libraryFile(`${scope.name}/${keyName(meta.key)}`);
             entries.push({entry:libraryEntry(scope.name,saved.meta,saved.file,await cleanupPreferences()),file:saved.file});

@@ -29,6 +29,13 @@ export interface CopiedFilePull {
   itemIds: string[];
   state: "pending" | "sending" | "sent" | "failed";
   error?: string;
+  metadataOnly?: boolean;
+  entries?: {relativePath:string;size:number;kind:"file"|"directory"}[];
+}
+export interface CopiedFileContext {
+  requestId: string;
+  offerId: string;
+  itemId: string;
 }
 export type FileStatus =
   | "offered"
@@ -180,6 +187,8 @@ export interface Transfer {
   routePreference?: RoutePreference;
   /** Automatic image clipboard transfer, stamped by the center. */
   clipboard?: ClipboardContext;
+  /** A recipient explicitly requested this copied root; retain exact identity. */
+  copiedFile?: CopiedFileContext;
   files: TransferFile[];
 }
 /** Receiver verified a complete retained root before accepting its payload. */
