@@ -59,9 +59,16 @@ void main() {
       final regions =
           calls.where((c) => c.method == 'setDragSources').last.arguments
               as Map;
-      final clipboard = (regions['sources'] as List).cast<Map>().singleWhere(
-        (s) => s['clipboardRevision'] == 'ipad-copy-401',
+      final clipboardSources = (regions['sources'] as List)
+          .cast<Map>()
+          .where((s) => s['clipboardRevision'] == 'ipad-copy-401')
+          .toList();
+      expect(
+        clipboardSources,
+        hasLength(2),
+        reason: 'suggestion card and toolbar both expose the clipboard',
       );
+      final clipboard = clipboardSources.first;
       expect(clipboard['paths'], isEmpty);
       expect(clipboard['texts'], isEmpty);
       expect(controller.clipboardReads, 0);

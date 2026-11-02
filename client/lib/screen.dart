@@ -105,8 +105,8 @@ class _SendScreenState extends State<SendScreen>
   final secret = TextEditingController(),
       text = TextEditingController(),
       relayLimit = TextEditingController(text: '32'),
-      retention = TextEditingController(text: '1'),
-      cleanupSize = TextEditingController(text: '500');
+      retention = TextEditingController(text: '2'),
+      cleanupSize = TextEditingController(text: '200');
   bool development = false, showKey = false;
   bool working = false,
       settingsOpen = false,
@@ -124,7 +124,7 @@ class _SendScreenState extends State<SendScreen>
   Set<SavedFileCategory> cleanupCategories = Set.of(
     SavedFileCleanupFilter().categories,
   );
-  SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.atMost;
+  SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.smaller;
   String? target;
   final selected = <String>{};
   final draftFocus = FocusNode();
@@ -739,7 +739,8 @@ class _SendScreenState extends State<SendScreen>
 
   @override
   void dispose() {
-    if (ui.captureUpdateDrafts == captureUpdateDrafts) ui.captureUpdateDrafts = null;
+    if (ui.captureUpdateDrafts == captureUpdateDrafts)
+      ui.captureUpdateDrafts = null;
     WidgetsBinding.instance.removeObserver(this);
     if (Platform.isWindows) {
       FocusManager.instance.removeEarlyKeyEventHandler(windowPasteKey);
@@ -1136,13 +1137,14 @@ class _SendScreenState extends State<SendScreen>
                   label: const Text('文本'),
                 ),
                 const SizedBox(width: Ui.space0),
-                TextButton.icon(
-                  key: const ValueKey('add-clipboard'),
-                  style: headerActionStyle,
-                  onPressed: working ? null : () => perform(c.stageClipboard),
-                  onLongPress: clipboardDragAction(),
-                  icon: const AppIcon(Icons.content_paste_rounded, size: 19),
-                  label: const Text('剪贴板'),
+                clipboardActionDragSource(
+                  TextButton.icon(
+                    key: const ValueKey('add-clipboard'),
+                    style: headerActionStyle,
+                    onPressed: working ? null : () => perform(c.stageClipboard),
+                    icon: const AppIcon(Icons.content_paste_rounded, size: 19),
+                    label: const Text('剪贴板'),
+                  ),
                 ),
               ],
             ],
@@ -2005,7 +2007,6 @@ class _SendScreenState extends State<SendScreen>
             Icons.content_paste_rounded,
             () => perform(c.stageClipboard),
             key: 'add-clipboard',
-            onLongPress: clipboardDragAction(),
           ),
           const SizedBox(width: Ui.space0),
           actionTile(
@@ -2301,35 +2302,91 @@ class _SendScreenState extends State<SendScreen>
     bool quiet = false,
     VoidCallback? onLongPress,
   }) => Expanded(
-    child: TextButton(
-      key: ValueKey(key),
-      style: TextButton.styleFrom(
-        minimumSize: const Size(0, Ui.touch),
-        padding: const EdgeInsets.symmetric(horizontal: Ui.space0),
-        backgroundColor: quiet
-            ? Ui.colors(context).canvas
-            : Ui.colors(context).accentSoft,
-        shape: const RoundedRectangleBorder(borderRadius: Ui.fieldRadius),
-      ),
-      onPressed: working ? null : onTap,
-      onLongPress: working ? null : onLongPress,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          AppIcon(icon, size: 16),
-          const SizedBox(width: Ui.space0),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              softWrap: false,
-              style: const TextStyle(fontSize: Ui.textXs),
-            ),
+    child: key == 'add-clipboard'
+        ? clipboardActionDragSource(
+            actionButton(label, icon, onTap, key: key, quiet: quiet),
+          )
+        : actionButton(
+            label,
+            icon,
+            onTap,
+            key: key,
+            quiet: quiet,
+            onLongPress: onLongPress,
           ),
-        ],
-      ),
+  );
+
+  Widget actionButton(
+    String label,
+    IconData icon,
+    VoidCallback onTap, {
+    required String key,
+    bool quiet = false,
+    VoidCallback? onLongPress,
+  }) => TextButton(
+    key: ValueKey(key),
+    style: TextButton.styleFrom(
+      minimumSize: const Size(0, Ui.touch),
+      padding: const EdgeInsets.symmetric(horizontal: Ui.space0),
+      backgroundColor: quiet
+          ? Ui.colors(context).canvas
+          : Ui.colors(context).accentSoft,
+      shape: const RoundedRectangleBorder(borderRadius: Ui.fieldRadius),
+    ),
+    onPressed: working ? null : onTap,
+    onLongPress: working ? null : onLongPress,
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        AppIcon(icon, size: 16),
+        const SizedBox(width: Ui.space0),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            style: const TextStyle(fontSize: Ui.textXs),
+          ),
+        ),
+      ],
     ),
   );
+
+  Widget clipboardActionDragSource(Widget child) {
+    final revision = clipboardSuggestions.item?.revision;
+    if (Theme.of(context).platform == TargetPlatform.iOS) {
+      return IOSDragSource.clipboard(
+        revision: revision ?? '',
+        enabled: !working,
+        onDragAccepted: () {
+          if (revision != null)
+            unawaited(clipboardSuggestions.dismissRevision(revision));
+        },
+        child: child,
+      );
+    }
+    return ContentDragSurface(
+      key: const ValueKey('clipboard-action-drag-source'),
+      entry: DockEntry(
+        id: 'clipboard-action',
+        kind: 'text',
+        title: '剪贴板',
+        source: '',
+      ),
+      nativeOnly: Theme.of(context).platform == TargetPlatform.windows,
+      previewFromSource: false,
+      enabled: !working,
+      onExport: (kind) => performExport(() async {
+        if (Theme.of(context).platform == TargetPlatform.windows) {
+          await exportClipboardSuggestion(revision, pointerKind: kind);
+        } else if (Theme.of(context).platform == TargetPlatform.android) {
+          await DockPlatform.dragClipboardSuggestion(revision ?? '');
+          await clipboardSuggestions.refresh();
+        }
+      }),
+      child: child,
+    );
+  }
 
   Widget queuePanel() {
     final count = c.stagedFiles.length + c.stagedTexts.length;
@@ -2353,6 +2410,7 @@ class _SendScreenState extends State<SendScreen>
         .where(
           (item) =>
               item.outgoing &&
+              !item.autoClipboard &&
               item.kind == 'file' &&
               ![
                 'received',
@@ -3613,12 +3671,7 @@ class _SendScreenState extends State<SendScreen>
               ],
             ),
           ),
-          CopiedFileOffers(
-            client: c.copiedFiles,
-            onPull: (offer, id) => perform(() async {
-              await c.copiedFiles.pull(offer, [id]);
-            }),
-          ),
+          sharedContentSlots(),
           if (expanded)
             Expanded(child: field)
           else
@@ -3710,6 +3763,63 @@ class _SendScreenState extends State<SendScreen>
       localPath: path,
     ),
   );
+
+  Widget sharedContentSlots() {
+    final references = CopiedFileOffers(
+      client: c.copiedFiles,
+      onPull: (offer, _) => perform(
+        () =>
+            c.pullCopiedFileSelection({...offer, 'serverKey': c.profile?.key}),
+      ),
+      onExport: (reference, kind) => performExport(
+        () => c.dragCopiedFileReference(reference, pointerKind: kind),
+      ),
+    );
+    final slot = c.clipboardSlot;
+    if (slot == null) return references;
+    return SizedBox(
+      key: const ValueKey('shared-content-slots'),
+      height: 140,
+      child: Row(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: Ui.space2,
+              vertical: Ui.space1,
+            ),
+            child: SizedBox(
+              width: 124,
+              height: 124,
+              child: ContentDragSurface(
+                key: const ValueKey('clipboard-slot'),
+                entry: slot,
+                enabled: !working,
+                onExport: (kind) =>
+                    performExport(() => c.dragOut(slot, pointerKind: kind)),
+                child: CompactContentCard(
+                  entry: slot,
+                  sender: '剪贴板',
+                  timestamp: '',
+                  previewOnly: true,
+                  onOpen: () =>
+                      slot.kind == 'text' ? readText(slot) : openFile(slot),
+                  onCopy: () => perform(c.copyClipboardSlot, done: '已复制'),
+                  menu: IconButton(
+                    tooltip: '加入待发送',
+                    icon: const AppIcon(Icons.add, size: 18),
+                    onPressed: working
+                        ? null
+                        : () => perform(c.stageClipboardSlot),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(child: references),
+        ],
+      ),
+    );
+  }
 
   Future<void> pickFolder() => perform(c.chooseSendDirectory);
 
@@ -5388,6 +5498,16 @@ class _SendScreenState extends State<SendScreen>
                     ? null
                     : (value) => perform(() => c.setCellularAllowed(value)),
               ),
+            SwitchListTile.adaptive(
+              key: const ValueKey('clipboard-receive-enabled'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('接收剪贴板同步'),
+              value: c.clipboardReceiveEnabled,
+              onChanged: working
+                  ? null
+                  : (value) =>
+                        perform(() => c.setClipboardReceiveEnabled(value)),
+            ),
             if (Platform.isWindows) clipboardSettings(),
           ]),
           settingsSection('存储', [

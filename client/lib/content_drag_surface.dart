@@ -29,6 +29,7 @@ class ContentDragSurface extends StatefulWidget {
     this.touchDrags = true,
     this.itemCount,
     this.nativeOnly = false,
+    this.previewFromSource = true,
   });
   final DockEntry entry;
   final Widget child;
@@ -39,6 +40,10 @@ class ContentDragSurface extends StatefulWidget {
   /// Content resolved on demand (for example clipboard recommendations) must
   /// use the native drop target, not a placeholder Flutter drag payload.
   final bool nativeOnly;
+
+  /// Clipboard controls export content resolved by the native provider, not a
+  /// picture of the toolbar button. Ordinary content cards keep their pixels.
+  final bool previewFromSource;
 
   /// Windows long-press touch/pen belongs to drag, not the mouse context menu.
   /// Real mouse/trackpad secondary clicks and other platforms retain menus.
@@ -346,7 +351,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
     nativePending = true;
     try {
       if (widget.nativeOnly) {
-        final preview = await capturePreview();
+        final preview = widget.previewFromSource ? await capturePreview() : null;
         if (!mounted || pointer == null || sourcePointer != pointer) return;
         if (!windowsHandoff) GestureBinding.instance.cancelPointer(pointer);
         await SystemBridge.withDragPreview(
