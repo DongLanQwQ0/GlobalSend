@@ -12,9 +12,9 @@
 
 同一设备可以同时加入多个组：**设置 → 分组 → 加入分组**。各组在线设备按设备 ID 合并去重，不按名称或 IP 合并；共享文本按组独立切换，加入/切组不清本地文件和历史。详见 [多组连接](docs/MULTI_GROUP.md)。
 
-Windows 最新版为 **1.0.84+109**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`；Android维持已实测的 **1.0.82+106**。109仅修正Windows触屏启动等待与拖影交接，不重建未改动的平台。自动更新、Android系统安装确认见[更新说明](docs/UPDATES.md)；开机自启动与后台参数见[启动说明](docs/WINDOWS_STARTUP.md)。
+Windows 最新版为 **1.0.85+110**，完整客户端已更新并运行于 `E:\Programs\GlobalSend`；Android维持已实测的 **1.0.82+106**。110修复切换剪贴板同步时的原生参数错误，保留109触屏交接修复，不重建未改动的平台。自动更新、Android系统安装确认见[更新说明](docs/UPDATES.md)；开机自启动与后台参数见[启动说明](docs/WINDOWS_STARTUP.md)。
 
-Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.84+109 完整 ZIP](artifacts/releases/GlobalSend-1.0.84-windows-x64.zip)。不要单独复制 EXE。[触屏修复](docs/WINDOWS_TOUCH_DRAG.md)通过原生组件与编译检查，实际触屏跨应用投放仍由用户验收；系统发送到、整卡拖放与指定设备[剪贴板同步](docs/CLIPBOARD_SYNC.md)保留。
+Windows：[运行最新版](E:/Programs/GlobalSend/globalsend.exe) / [1.0.85+110 完整 ZIP](artifacts/releases/GlobalSend-1.0.85-windows-x64.zip)。不要单独复制 EXE。[触屏修复](docs/WINDOWS_TOUCH_DRAG.md)通过原生组件与编译检查，实际触屏跨应用投放仍由用户验收；系统发送到、整卡拖放与指定设备[剪贴板同步](docs/CLIPBOARD_SYNC.md)保留。
 
 Android [1.0.82+106 arm64 APK，约16.4 MB](artifacts/releases/GlobalSend-1.0.82-android-arm64-v8a.apk)已在手机运行，无打包字体。悬浮坞链接实际点开Edge通过；真实Drag-cache图片未重复进入发送页或坞建议，外部图片正对照及删除后建议移除均通过。本次测试分组和文件已清理，未清除用户数据；实际状态见[本机发布记录](artifacts/releases/latest-local.json)。
 
