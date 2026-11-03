@@ -17,10 +17,13 @@
   "phonePending": true,
   "windowsPackage": "F:\\Codes\\Java\\GlobalSend\\artifacts\\releases\\GlobalSend-1.0.95-windows-x64.zip",
   "windowsPackageBytes": 22612382,
-  "githubWindowsVersion": "1.0.92+117",
   "lastConfirmedPhoneSerial": "10AG5S1SR4005X7",
-  "githubAndroidVersion": "1.0.92+117",
-  "githubPublishPending": false,
   "windowsBuildNumber": 120,
-  "sourceCommit": "7da04a7b8e48fa63e5568b350cc79f81df2daad9"
+  "sourceCommit": "7da04a7b8e48fa63e5568b350cc79f81df2daad9",
+  "githubReleaseUrl": "https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.95-build120",
+  "githubPublishedAt": "2026-11-03T13:42:03Z",
+  "githubAndroidVersion": "1.0.95+120",
+  "githubWindowsVersion": "1.0.95+120",
+  "githubPublishPending": false,
+  "githubReleaseTag": "v1.0.95-build120"
 }

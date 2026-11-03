@@ -6,6 +6,8 @@
 
 当前Windows已更新并重启 **1.0.95+120**（源`7da04a7`），Windows/Android接收坞的外部悬停改为1秒进入、移出1秒恢复，返回取消恢复，可反复触发；恢复视图不破坏本地源拖动。3项Flutter及16项Android检查通过，APK已构建，但没有实体手机连接，手机最后确认117，尚未推送120。见`artifacts/reports/dock-hover120.md`。
 
+[120 GitHub Release](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.95-build120)已正式发布为latest，Windows/Android包及各自更新清单均uploaded并回读核对；没有新的IPA或iOS更新清单。
+
 119版文本拖到桌面/资源管理器时以UTF-8 TXT交付，文件名用首行短标题（最多12个字符），本次运行内重复标题加简短编号，已包含在120中；文字插入和窗口内回投保留。实际Shell文件生成及原生拖放回归通过，真实Windows手势由用户验收。见`artifacts/reports/windows119-text-names.md`。
 
 Android与中心/Web保留 **1.0.92+117**（源`67d39eb`），普通发送使用次数按设备唯一ID持久保存，设备区和坞的设备列表默认常用优先；不重复统计同ID重试，也不让自动剪贴板同步影响排序。Android使用用户新地址流式覆盖安装Success，实际读回117并启动，保留数据；IPA仍114。具体检查与交付见`artifacts/reports/device-usage117.md`。以下116/115保留各自修复背景，118已包含其修复。

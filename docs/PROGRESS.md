@@ -1,5 +1,7 @@
 ## 接收坞悬停与恢复：1.0.95+120
 
+已按后续发布指令上线[GitHub Release 120](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.95-build120)，正式latest；Windows/Android包及平台更新清单均已回读确认uploaded、版本120、源码标签`7da04a7`。发布不操作手机、不新增IPA，不把安装包放中心。
+
 Windows完整覆盖并重启120，APK也已构建验签。两端外部悬停1秒进入设备模式、移出1秒恢复，期间返回取消恢复，同一次拖动可反复触发；Android恢复普通内容不结束仍在进行的本地拖动。3项Flutter及16项Android检查通过，教程同步更新。当前无实体ADB手机，旧端口超时，APK保留本地，手机最后确认117；未动共享模拟器、中心/Web或IPA。交付与失败排查见`artifacts/reports/dock-hover120.md`。
 
 ## Windows 文本文件名：1.0.94+119

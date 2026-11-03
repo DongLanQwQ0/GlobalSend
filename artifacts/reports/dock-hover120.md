@@ -29,4 +29,12 @@
 - Windows完整覆盖`E:\Programs\GlobalSend`并重启，进程28972。本地ZIP `artifacts/releases/GlobalSend-1.0.95-windows-x64.zip`，22,612,382字节。
 - APK `artifacts/releases/GlobalSend-1.0.95-android-arm64-v8a.apk`，16,495,287字节。
 - 仅检测到共享模拟器，没有实体手机；最后提供的`10.195.25.59:34553`连接超时。未操作模拟器，未推送手机，手机最后确认117。实体手机重新连接后才能覆盖安装120并实机验收。
-- 没有进行用户Windows界面/触屏操作或手机操作。中心/Web保留117，IPA仍114，不另发GitHub Release，不将安装包放服务器。
+- 没有进行用户Windows界面/触屏操作或手机操作。中心/Web保留117，IPA仍114；本地交付阶段未发布GitHub，安装包不放中心。
+
+## GitHub 发布
+
+按用户后续“release GitHub”指令，2026-11-03发布[1.0.95（120）](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.95-build120)，GitHub实际publishedAt为`2026-11-03T13:42:03Z`。正式非草稿、非预发布，latest端点已确认120。
+
+Windows ZIP 22,612,382字节、Android APK 16,495,287字节及两份更新清单均为`uploaded`。远端两份清单已下载回读：各自platform/asset正确，version=1.0.95、build=120、sourceCommit均为`7da04a7b8e48fa63e5568b350cc79f81df2daad9`，实际标签SHA一致。源码及发布记录已推送main，未提交工作区其它修改。
+
+直连GitHub超时后，单次发布命令复用系统已有的`127.0.0.1:7890`代理，不改系统代理、不读取认证token。证据`artifacts/tmp/github-release120/remote.json`、`latest.json`和`remote-manifests/`。IPA保持114，没有新iOS清单；发布没有操作手机或服务器。
