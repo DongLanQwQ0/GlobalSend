@@ -4,10 +4,13 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <cwchar>
+#include <cwctype>
 #include <gdiplus.h>
 #include <memory>
 #include <atomic>
+#include <map>
+#include <mutex>
+#include <set>
 #pragma comment(lib, "gdiplus.lib")
 
 namespace {
@@ -18,14 +21,43 @@ CLIPFORMAT TextContentsFormat() {
   return static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_FILECONTENTS));
 }
 
-std::wstring TextFileName() {
-  SYSTEMTIME now{};
-  GetLocalTime(&now);
-  static std::atomic<unsigned long> sequence{0};
-  wchar_t name[96]{};
-  swprintf_s(name, L"GlobalSend 文本 %04d%02d%02d-%02d%02d%02d-%03d-%lu.txt",
-      now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
-      now.wMilliseconds, sequence.fetch_add(1, std::memory_order_relaxed) + 1);
+std::wstring TextFileName(const std::wstring& text) {
+  std::wstring title;
+  size_t characters = 0;
+  for (size_t i = 0; i < text.size() && characters < 12; ++i) {
+    auto c = text[i];
+    if (c == L'\r' || c == L'\n') {
+      if (!title.empty()) break;
+      continue;
+    }
+    if (c < L' ' || wcschr(L"<>:\"/\\|?*", c)) c = L' ';
+    if (iswspace(c)) {
+      if (!title.empty() && title.back() != L' ') { title += L' '; ++characters; }
+      continue;
+    }
+    title += c;
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.size() &&
+        text[i + 1] >= 0xdc00 && text[i + 1] <= 0xdfff) title += text[++i];
+    ++characters;
+  }
+  while (!title.empty() && (title.back() == L' ' || title.back() == L'.')) title.pop_back();
+  if (title.empty()) title = L"文本";
+  auto stem = title.substr(0, title.find(L'.'));
+  while (!stem.empty() && stem.back() == L' ') stem.pop_back();
+  std::transform(stem.begin(), stem.end(), stem.begin(), towupper);
+  if (stem == L"CON" || stem == L"PRN" || stem == L"AUX" || stem == L"NUL" ||
+      (stem.size() == 4 && (stem.starts_with(L"COM") || stem.starts_with(L"LPT")) &&
+       stem[3] >= L'1' && stem[3] <= L'9')) title = L"文本 " + title;
+  static std::mutex mutex;
+  static std::map<std::wstring, unsigned long> exports;
+  static std::set<std::wstring> issued;
+  const std::lock_guard<std::mutex> lock(mutex);
+  auto& count = exports[title];
+  std::wstring name;
+  do {
+    ++count;
+    name = title + (count > 1 ? L" (" + std::to_wstring(count) + L")" : L"") + L".txt";
+  } while (!issued.insert(name).second);
   return name;
 }
 
@@ -37,9 +69,9 @@ std::wstring TextFileName() {
 class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapability {
  public:
   explicit AsyncShellData(IDataObject* shell, std::function<void(bool)> lease,
-      std::vector<uint8_t> text_file)
+      std::vector<uint8_t> text_file, std::wstring text_file_name)
       : shell_(shell), lease_(std::move(lease)), text_file_(std::move(text_file)),
-        text_file_name_(text_file_.empty() ? L"" : TextFileName()) {
+        text_file_name_(std::move(text_file_name)) {
     if (lease_) lease_(true);
   }
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** output) override {
@@ -90,7 +122,7 @@ class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapabili
     file.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
     file.nFileSizeLow = static_cast<DWORD>(text_file_.size());
     // Keep the name stable throughout this gesture's repeated Shell requests,
-    // but give the next gesture its own name, even within the same millisecond.
+    // but give repeated exports of this short title a numbered suffix.
     wcscpy_s(file.cFileName, text_file_name_.c_str());
     GlobalUnlock(m->hGlobal); m->tymed = TYMED_HGLOBAL;
     return S_OK;
@@ -189,6 +221,7 @@ HRESULT CreateGlobalSendDragData(CLIPFORMAT format,
     return result;
   }
   std::vector<uint8_t> text_file;
+  std::wstring text_file_name;
   if (format == CF_UNICODETEXT && bytes.size() >= sizeof(wchar_t)) {
     std::wstring text(bytes.size() / sizeof(wchar_t), L'\0');
     memcpy(text.data(), bytes.data(), text.size() * sizeof(wchar_t));
@@ -204,9 +237,10 @@ HRESULT CreateGlobalSendDragData(CLIPFORMAT format,
       WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(),
           static_cast<int>(text.size()), reinterpret_cast<char*>(text_file.data() + 3),
           length, nullptr, nullptr);
+      text_file_name = TextFileName(text);
     }
   }
-  *output = new AsyncShellData(data, std::move(lease), std::move(text_file));
+  *output = new AsyncShellData(data, std::move(lease), std::move(text_file), std::move(text_file_name));
   return S_OK;
 }
 

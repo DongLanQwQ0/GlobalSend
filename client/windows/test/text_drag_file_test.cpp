@@ -76,7 +76,7 @@ int wmain(int argc, wchar_t** argv) {
   const auto* group = static_cast<const FILEGROUPDESCRIPTORW*>(GlobalLock(metadata.hGlobal));
   assert(group && group->cItems == 1);
   const std::wstring name = group->fgd[0].cFileName;
-  assert(name.starts_with(L"GlobalSend 文本 ") && name.ends_with(L".txt"));
+  assert(name == L"中文拖放🙂.txt");
   assert(name.find_first_of(L"<>:\"/\\|?*") == std::wstring::npos);
   const auto size = group->fgd[0].nFileSizeLow;
   GlobalUnlock(metadata.hGlobal); ReleaseStgMedium(&metadata);
@@ -89,8 +89,8 @@ int wmain(int argc, wchar_t** argv) {
   IDataObject* second = nullptr;
   assert(SUCCEEDED(CreateGlobalSendDragData(CF_UNICODETEXT, bytes, &second)));
   const auto second_name = FileName(second, descriptor);
-  assert(second_name != name && second_name != old_file.filename());
-  // Rapid gestures, including several within a millisecond, remain distinct.
+  assert(second_name == L"中文拖放🙂 (2).txt");
+  // Rapid gestures have distinct short suffixes, with no clock dependence.
   std::set<std::wstring> names{name, second_name};
   for (int i = 0; i < 8; ++i) {
     IDataObject* rapid = nullptr;
@@ -99,6 +99,18 @@ int wmain(int argc, wchar_t** argv) {
     rapid->Release();
   }
   assert(std::distance(std::filesystem::directory_iterator(root), {}) == 1);
+  auto titled = [&](const std::wstring& value) {
+    std::vector<uint8_t> source((value.size() + 1) * sizeof(wchar_t));
+    memcpy(source.data(), value.c_str(), source.size());
+    IDataObject* object = nullptr;
+    assert(SUCCEEDED(CreateGlobalSendDragData(CF_UNICODETEXT, source, &object)));
+    const auto title = FileName(object, descriptor);
+    object->Release(); return title;
+  };
+  assert(titled(L"\n\r\nABCDEFGHIJK🙂more text\nbody") == L"ABCDEFGHIJK🙂.txt");
+  assert(titled(L"CON") == L"文本 CON.txt");
+  assert(titled(L"\"a:b/c*\"\nbody") == L"a b c.txt");
+  assert(titled(L"中文拖放🙂 (2)") != second_name); // Existing suffix in the actual text.
 
   IEnumFORMATETC* formats = nullptr;
   assert(SUCCEEDED(data->EnumFormatEtc(DATADIR_GET, &formats)));
