@@ -97,7 +97,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
   }
 
   final dropQueueKey = GlobalKey();
-  Timer? hoverTimer;
+  Timer? hoverTimer, restoreTimer;
   bool dropInside = false, deviceMode = false;
   String hoverDevice = '';
   Offset dropPointer = Offset.zero;
@@ -117,23 +117,29 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
       hoverTimer = null;
       edgeTicker.stop();
       dropInside = false;
-      if (deviceMode || hoverDevice.isNotEmpty)
-        setState(() {
-          deviceMode = false;
-          hoverDevice = '';
+      if (hoverDevice.isNotEmpty) setState(() => hoverDevice = '');
+      if (deviceMode && restoreTimer == null) {
+        restoreTimer = Timer(const Duration(seconds: 1), () {
+          restoreTimer = null;
+          if (mounted && !dropInside) setState(() => deviceMode = false);
         });
+      }
       return;
     }
+    restoreTimer?.cancel();
+    restoreTimer = null;
     if (!dropInside) {
       dropInside = true;
-      hoverTimer = Timer(const Duration(seconds: 2), () {
-        hoverTimer = null;
-        if (!mounted || !dropInside) return;
-        setState(() => deviceMode = true);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) updateEdgeScroll();
+      if (!deviceMode) {
+        hoverTimer = Timer(const Duration(seconds: 1), () {
+          hoverTimer = null;
+          if (!mounted || !dropInside) return;
+          setState(() => deviceMode = true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) updateEdgeScroll();
+          });
         });
-      });
+      }
     }
     final target = event['targetDeviceId'] as String? ?? '';
     if (target != hoverDevice) setState(() => hoverDevice = target);
@@ -691,6 +697,7 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
     WidgetsBinding.instance.removeObserver(this);
     scroll.dispose();
     hoverTimer?.cancel();
+    restoreTimer?.cancel();
     edgeTicker.dispose();
     deviceScroll.dispose();
     ReceiveDockApp.channel.setMethodCallHandler(null);

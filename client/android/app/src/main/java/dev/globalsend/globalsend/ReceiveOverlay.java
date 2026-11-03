@@ -66,7 +66,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private HorizontalScrollView targetScroll;
     private LinearLayout targetRow;
     private ForwardDrag forwarding;
-    private Runnable sendTargetHover;
+    private Runnable sendTargetHover, sendTargetRestore;
     private View hoveredTarget;
     private String hapticTargetId="";
     private int targetScrollDirection;
@@ -99,7 +99,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         final List<ReceiveNotifications.Receipt> staged;
         final String serverKey;
         final boolean incoming;
-        boolean sentToDevice;
+        boolean sentToDevice, targetsShown;
         ForwardDrag(List<String> paths,List<String> texts,List<ReceiveNotifications.Receipt> staged) {
             this(paths,texts,staged,false);
         }
@@ -500,10 +500,15 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                     dragExpand=null;
                 }
                 if(event.getAction()==DragEvent.ACTION_DRAG_STARTED) {
-                    if(starting)dragInside=false;
+                    if(starting) {
+                        cancelSendTargetRestore();
+                        if(forwarding!=null && forwarding.incoming)finishForwarding(forwarding);
+                        dragInside=false;
+                    }
                     suggestionTouch=false;suggestionDrag=event.getClipDescription()!=null;
                     updateSuggestionVisibility();
                 } else if(event.getAction()==DragEvent.ACTION_DRAG_ENDED) {
+                    cancelSendTargetRestore();
                     suggestionDrag=false;post(ReceiveOverlay.this::updateSuggestionVisibility);
                     if(forwarding!=null && forwarding.incoming)finishForwarding(forwarding);
                 }
@@ -519,7 +524,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 }
                 if(event.getAction()!=DragEvent.ACTION_DRAG_LOCATION)
                     DockCoordinator.traceDrag("overlay action="+event.getAction()+" forwarding="+(forwarding!=null));
-                if(forwarding!=null && event.getAction()==DragEvent.ACTION_DRAG_EXITED)showSendTargets();
+                if(action==DragEvent.ACTION_DRAG_EXITED)leaveSendTargets();
                 if(forwarding!=null && targetScroll.getVisibility()==View.VISIBLE &&
                     event.getAction()!=DragEvent.ACTION_DRAG_STARTED && event.getAction()!=DragEvent.ACTION_DRAG_ENDED)
                     return dragOverTargets(event);
@@ -1300,7 +1305,30 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         if(sendTargetHover!=null)main.removeCallbacks(sendTargetHover);
         sendTargetHover=null;
     }
+    private void cancelSendTargetRestore() {
+        if(sendTargetRestore!=null)main.removeCallbacks(sendTargetRestore);
+        sendTargetRestore=null;
+    }
+    private void leaveSendTargets() {
+        dragInside=false;
+        cancelSendTargetHover();
+        stopTargetScroll();
+        if(targetRow!=null)highlightTarget(-1,-1,false);
+        // Dragging our own card out still reveals devices immediately. After
+        // restoring, another EXITED notification must not revive that strip.
+        if(forwarding!=null && !forwarding.incoming && !forwarding.targetsShown)showSendTargets();
+        if(root==null || targetScroll.getVisibility()!=View.VISIBLE || sendTargetRestore!=null)return;
+        final View owner=root;
+        sendTargetRestore=() -> {
+            sendTargetRestore=null;
+            if(root!=owner || dragInside)return;
+            if(forwarding!=null && forwarding.incoming)finishForwarding(forwarding);
+            else hideSendTargets(); // Retain the active local drag's payload/completion.
+        };
+        main.postDelayed(sendTargetRestore,1000);
+    }
     private void scheduleSendTargetHover() {
+        cancelSendTargetRestore();
         if(root==null || sendTargetHover!=null || targetScroll.getVisibility()==View.VISIBLE)return;
         final View owner=root;
         sendTargetHover=() -> {
@@ -1320,12 +1348,14 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
                 }
             });
         };
-        main.postDelayed(sendTargetHover,2000);
+        main.postDelayed(sendTargetHover,1000);
     }
     private void showSendTargets() {
         cancelSendTargetHover();
+        cancelSendTargetRestore();
         DockCoordinator.traceDrag("show targets requested forwarding="+(forwarding!=null));
         if(forwarding==null || root==null || targetScroll.getVisibility()==View.VISIBLE)return;
+        forwarding.targetsShown=true;
         feedback(HapticFeedbackConstants.LONG_PRESS);
         hapticTargetId="";
         renderSendTargets();
@@ -1383,7 +1413,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     }
     private boolean dragOverTargets(DragEvent event) {
         int action=event.getAction();
-        if(action==DragEvent.ACTION_DRAG_EXITED) {dragInside=false;stopTargetScroll();highlightTarget(-1,-1,false);return true;}
+        if(action==DragEvent.ACTION_DRAG_EXITED) {leaveSendTargets();return true;}
         if(action==DragEvent.ACTION_DRAG_ENTERED || action==DragEvent.ACTION_DRAG_LOCATION) {
             if(action==DragEvent.ACTION_DRAG_ENTERED)feedbackDragEntry();
             updateTargetHover(event.getX(),event.getY());
@@ -1436,7 +1466,12 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
         DockCoordinator.traceDrag("finish forwarding current="+(forwarding==drag));
         if(forwarding!=drag)return;
         cancelSendTargetHover();
-        stopTargetScroll();forwarding=null;hoveredTarget=null;
+        cancelSendTargetRestore();
+        forwarding=null;
+        hideSendTargets();
+    }
+    private void hideSendTargets() {
+        stopTargetScroll();hoveredTarget=null;
         hapticTargetId="";
         if(targetScroll!=null) {targetScroll.animate().cancel();targetScroll.setVisibility(View.GONE);}
         if(expanded!=null)expanded.setAlpha(1);
@@ -1463,25 +1498,29 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
     private boolean receiveDrop(DragEvent event) {
         switch (event.getAction()) {
             case DragEvent.ACTION_DRAG_STARTED:
+                suggestionDrag=event.getClipDescription()!=null;
                 cancelPendingOpen();
                 if (shelf.cancelRemoval()) { main.removeCallbacks(countdown); shelfChanged(); }
                 return event.getClipDescription() != null;
             case DragEvent.ACTION_DRAG_ENTERED:
                 feedbackDragEntry();
+                scheduleSendTargetHover();
                 surface.setBackground(shape(glass(appearance.soft,0x99), 18)); return true;
             case DragEvent.ACTION_DRAG_EXITED:
                 dragInside=false;
                 // Since Android N, enter/exit is delivered to the innermost
                 // interested View, not through dispatchDragEvent on every parent.
                 // The dock root owns this gesture, including its completion.
-                if(forwarding!=null)showSendTargets();
-                stopTargetScroll();
+                leaveSendTargets();
                 if (dragExpand != null) main.removeCallbacks(dragExpand);
                 dragExpand = null;
                 if (root != null) styleSurface();
                 return true;
             case DragEvent.ACTION_DRAG_ENDED:
                 dragInside=false;
+                suggestionDrag=false;
+                cancelSendTargetHover();cancelSendTargetRestore();
+                if(forwarding!=null && forwarding.incoming)finishForwarding(forwarding);
                 if(root!=null)DockCoordinator.finishExportFrom(root,event);
                 if (dragExpand != null) main.removeCallbacks(dragExpand);
                 dragExpand = null;
@@ -1847,6 +1886,7 @@ final class ReceiveOverlay implements ReceiveNotifications.Presenter {
             cancelPendingOpen();
             main.removeCallbacks(countdown);
             cancelSendTargetHover();
+            cancelSendTargetRestore();
             stopTargetScroll();
             if (dragExpand != null) main.removeCallbacks(dragExpand);
             dragExpand = null;

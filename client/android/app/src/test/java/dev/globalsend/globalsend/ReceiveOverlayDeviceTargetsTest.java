@@ -34,7 +34,8 @@ import org.robolectric.util.ReflectionHelpers;
 
 /** Framework gestures/channel checks; physical OEM drag acceptance is separate. */
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk=34,manifest=Config.NONE,qualifiers="w800dp-h1200dp",shadows=AndroidDragTest.NativeDragView.class)
+@Config(sdk=34,manifest=Config.NONE,qualifiers="w800dp-h1200dp",
+    shadows={AndroidDragTest.NativeDragView.class,AndroidDragTest.NativeDragGroup.class})
 public class ReceiveOverlayDeviceTargetsTest {
     private Activity activity;
     private DockCoordinator coordinator;
@@ -73,7 +74,14 @@ public class ReceiveOverlayDeviceTargetsTest {
         root.getViewTreeObserver().dispatchOnPreDraw();idle(250);
         AndroidDragTest.NativeDragView.resetFixture();
     }
-    @After public void tearDown() {coordinator.dispose();overlay.hide();activity.finish();}
+    @After public void tearDown() throws Exception {
+        // The native drag is shadowed, so Android will not deliver its final
+        // ENDED automatically. Close this fixture's source before hiding the
+        // window; otherwise the real export lease intentionally delays hide.
+        if(root!=null && !AndroidDragTest.NativeDragView.states.isEmpty())
+            drag(DragEvent.ACTION_DRAG_ENDED,0,0,false);
+        coordinator.dispose();overlay.hide();activity.finish();
+    }
     private void idle(long millis) {Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(millis));}
     private void draw() {
         WindowManager.LayoutParams size=(WindowManager.LayoutParams)root.getLayoutParams();
@@ -140,7 +148,6 @@ public class ReceiveOverlayDeviceTargetsTest {
         devices.add(devices.get(0));coordinator.updateSendTargets("center",devices);
     }
     @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
-    @Config(shadows={AndroidDragTest.NativeDragView.class,AndroidDragTest.NativeDragGroup.class})
     public void completedCopiedFileMovesAheadOfStagedContentOnlyAtItsReceiptTime() throws Exception {
         TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
         shelf.add(List.of(),List.of("regular"),Map.of());
@@ -185,7 +192,10 @@ public class ReceiveOverlayDeviceTargetsTest {
         // The actual file branch must retain the ready-copy native drag path.
         ready.put("kind","file");ready.put("name","child.txt");ready.put("localPath",new java.io.File(localRoot,"child.txt").getPath());
         coordinator.updateCopiedFiles(List.of(ready));draw();
-        assertTrue(row.findViewWithTag("copied-file-reference").performLongClick());
+        boolean startedLocal=row.findViewWithTag("copied-file-reference").performLongClick();
+        assertTrue("native copy drag: "+org.robolectric.shadows.ShadowToast.getTextOfLatestToast()+
+            "; callbacks="+AndroidDragTest.NativeDragView.clips.size()+
+            "; active="+ReflectionHelpers.getStaticField(DockCoordinator.class,"activeExport"),startedLocal);
         DockCoordinator.LocalDrag local=(DockCoordinator.LocalDrag)AndroidDragTest.NativeDragView.states.get(0);
         assertEquals(List.of(ready.get("localPath")),local.paths);assertNull(local.remoteReference);assertNull(copiedRequest);
         assertTrue(new java.io.File(localRoot,"empty").isDirectory());
@@ -215,10 +225,10 @@ public class ReceiveOverlayDeviceTargetsTest {
         assertNotNull("dropped payload reaches the existing native importer",imported);
     }
     @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
-    public void incomingHoverWaitsTwoSecondsThenSendsActualTextWithoutStoringInShelf() throws Exception {
+    public void incomingHoverWaitsOneSecondThenSendsActualTextWithoutStoringInShelf() throws Exception {
         targets();ClipData clip=ClipData.newPlainText("outside","外部拖入的文本");
         assertTrue(incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55));
-        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(1500);
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(500);
         org.robolectric.shadows.ShadowView haptics=Shadows.shadowOf(root);
         ReflectionHelpers.setField(haptics,"hapticFeedbackPerformed",-1);
         Object hover=field(overlay,"sendTargetHover");
@@ -257,10 +267,10 @@ public class ReceiveOverlayDeviceTargetsTest {
     @Test public void leavingEndingOrHidingCancelsHoverAndEarlyDropStillStoresContent() throws Exception {
         targets();ClipData clip=ClipData.newPlainText("outside","快速放入暂存");
         incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);
-        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(1900);
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(900);
         incoming(DragEvent.ACTION_DRAG_EXITED,clip,-1,55);idle(300);
         assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
-        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(1999);
+        incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(999);
         assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
         incoming(DragEvent.ACTION_DRAG_ENDED,clip,0,0);idle(100);
         assertNull(field(overlay,"forwarding"));assertNull(field(overlay,"sendTargetHover"));
@@ -275,6 +285,60 @@ public class ReceiveOverlayDeviceTargetsTest {
         incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);
         incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);overlay.hide();idle(2100);
         assertNull(field(overlay,"root"));assertNull(field(overlay,"sendTargetHover"));
+    }
+    @Test public void oneSecondExitGraceCancelsOnReentryAndCanRepeatWithoutSending() throws Exception {
+        targets();ClipData clip=ClipData.newPlainText("outside","反复悬停");
+        incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);
+        for(int cycle=0;cycle<3;cycle++) {
+            incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(999);
+            assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
+            idle(1);draw();root.getViewTreeObserver().dispatchOnPreDraw();
+            assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
+            incoming(DragEvent.ACTION_DRAG_EXITED,clip,-1,55);idle(600);
+            incoming(DragEvent.ACTION_DRAG_EXITED,clip,-1,55);idle(399);
+            assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
+            if(cycle==0) {
+                incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);idle(1100);
+                assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
+                assertNull(field(overlay,"sendTargetRestore"));
+                incoming(DragEvent.ACTION_DRAG_EXITED,clip,-1,55);idle(999);
+                assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
+            }
+            idle(1);
+            assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
+            assertNull(field(overlay,"forwarding"));assertNull(field(overlay,"sendTargetRestore"));
+            assertEquals(1f,((View)field(overlay,"expanded")).getAlpha(),0f);
+        }
+        incoming(DragEvent.ACTION_DRAG_ENDED,clip,0,0);idle(1100);
+        assertNull(field(overlay,"sendTargetHover"));assertNull(sent);assertNull(imported);
+        assertEquals(1,((Map<?,?>)field(overlay,"items")).size());
+    }
+    @Test public void restoringOwnOutgoingDragKeepsPayloadAndRearmsWithoutDetachingSource() throws Exception {
+        targets();TemporaryShelf shelf=begin();
+        try {
+            // Keep real VSync running: each target highlight/layout can post a
+            // traversal barrier ahead of the synchronous Handler dwell timer.
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+            Object original=field(overlay,"forwarding");
+            drag(DragEvent.ACTION_DRAG_ENTERED,60,55,false);
+            for(int cycle=0;cycle<2;cycle++) {
+                // Exact 999/1000ms boundaries are covered above with the
+                // paused clock. Here VSync must run to retain the real source.
+                drag(DragEvent.ACTION_DRAG_EXITED,-1,55,false);idle(1100);
+                assertEquals(View.GONE,((View)field(overlay,"targetScroll")).getVisibility());
+                assertSame(original,field(overlay,"forwarding"));assertTrue(root.isAttachedToWindow());
+                assertEquals(2,shelf.items.size());
+                drag(DragEvent.ACTION_DRAG_ENTERED,60,55,false);idle(1100);
+                assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
+                assertSame(original,field(overlay,"forwarding"));
+            }
+        } finally {
+            drag(DragEvent.ACTION_DRAG_ENDED,0,0,false);
+            org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        }
+        idle(1100);
+        assertNull(field(overlay,"forwarding"));assertNull(field(overlay,"sendTargetRestore"));
+        assertEquals(2,shelf.items.size());assertNull(sent);assertNull(imported);
     }
     @Test public void controlsAndNewArrivalsHaveFeedbackButPassiveUpdatesDoNot() throws Exception {
         TemporaryShelf shelf=(TemporaryShelf)field(overlay,"shelf");
@@ -314,7 +378,7 @@ public class ReceiveOverlayDeviceTargetsTest {
         provider.attachInfo(activity,info);org.robolectric.shadows.ShadowContentResolver.registerProviderInternal(info.authority,provider);
         ClipData clip=ClipData.newUri(activity.getContentResolver(),"outside file",android.net.Uri.parse("content://hover-fixture/hover.bin"));
         incoming(DragEvent.ACTION_DRAG_STARTED,clip,60,55);incoming(DragEvent.ACTION_DRAG_ENTERED,clip,60,55);
-        idle(2000);draw();root.getViewTreeObserver().dispatchOnPreDraw();idle(150);assertEquals(0,provider.opens);assertNull(imported);
+        idle(1000);draw();root.getViewTreeObserver().dispatchOnPreDraw();idle(150);assertEquals(0,provider.opens);assertNull(imported);
         assertEquals("inside="+field(overlay,"dragInside")+", dragging="+field(overlay,"suggestionDrag")+", collapsed="+field(overlay,"collapsed"),View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());
         Rect target=bounds(((LinearLayout)field(overlay,"targetRow")).getChildAt(1));
         assertTrue(incoming(DragEvent.ACTION_DROP,clip,target.centerX(),target.centerY()));
@@ -347,7 +411,7 @@ public class ReceiveOverlayDeviceTargetsTest {
         org.robolectric.shadows.ShadowChoreographer.setPaused(false);
         idle(1);assertFalse((Boolean)field(overlay,"collapsed"));idle(300);
         org.robolectric.shadows.ShadowChoreographer.setPaused(true);
-        long remaining=entered+2001-android.os.SystemClock.uptimeMillis();
+        long remaining=entered+1001-android.os.SystemClock.uptimeMillis();
         if(remaining>0)idle(remaining);
         draw();root.getViewTreeObserver().dispatchOnPreDraw();
         assertEquals(View.VISIBLE,((View)field(overlay,"targetScroll")).getVisibility());

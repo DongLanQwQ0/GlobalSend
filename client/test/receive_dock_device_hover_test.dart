@@ -48,7 +48,7 @@ void main() {
     messenger.setMockMethodCallHandler(SystemBridge.channel, null);
   });
   testWidgets(
-    'two second dock dwell shows targets, cancels on exit and publishes scroll-aware device regions',
+    'one second dwell and exit grace repeat, cancel on reentry and publish scroll-aware device regions',
     (tester) async {
       tester.view.physicalSize = const Size(480, 184);
       tester.view.devicePixelRatio = 1;
@@ -88,12 +88,12 @@ void main() {
       await tester.pumpAndSettle();
       debugPrint('dock hover fixture mounted');
       await hover(tester, true);
-      await tester.pump(const Duration(milliseconds: 1900));
+      await tester.pump(const Duration(milliseconds: 900));
       await hover(tester, false);
       await tester.pump(const Duration(milliseconds: 200));
       expect(find.text('发送至设备'), findsNothing);
       await hover(tester, true);
-      await tester.pump(const Duration(milliseconds: 1999));
+      await tester.pump(const Duration(milliseconds: 999));
       expect(find.text('发送至设备'), findsNothing);
       await hover(tester, true, x: 75);
       await tester.pump(const Duration(milliseconds: 1));
@@ -147,10 +147,36 @@ void main() {
         isEmpty,
       ); // Hover never sends.
       await hover(tester, false);
+      await tester.pump(const Duration(milliseconds: 999));
+      expect(find.text('发送至设备'), findsOneWidget);
+      await hover(tester, true);
+      await tester.pump(const Duration(milliseconds: 1100));
+      expect(find.text('发送至设备'), findsOneWidget);
+      await hover(tester, false);
+      await tester.pump(const Duration(milliseconds: 600));
+      await hover(
+        tester,
+        false,
+      ); // Duplicate exits must not extend the deadline.
+      await tester.pump(const Duration(milliseconds: 399));
+      expect(find.text('发送至设备'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 1));
       await tester.pumpAndSettle();
       expect(find.text('发送至设备'), findsNothing);
       expect(geometry.last['enabled'], false);
       expect(find.byKey(const ValueKey('dock-tile-original')), findsOneWidget);
+      for (var cycle = 0; cycle < 2; cycle++) {
+        await hover(tester, true);
+        await tester.pump(const Duration(milliseconds: 999));
+        expect(find.text('发送至设备'), findsNothing);
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pumpAndSettle();
+        expect(find.text('发送至设备'), findsOneWidget);
+        await hover(tester, false);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpAndSettle();
+        expect(find.text('发送至设备'), findsNothing);
+      }
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
