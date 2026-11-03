@@ -23,3 +23,7 @@ Windows完整目录已覆盖并重启，`E:\Programs\GlobalSend\globalsend.exe`�
 中心/Web镜像 `globalsend:device-usage-1.0.92-20261103` healthy，中心实例不变；实际公开JS `index-Dn5R_C-H.js` 返回200/JavaScript MIME，包含新使用频率逻辑，见`public.json`。安装包不托管中心，评审页没有随本次部署上线。
 
 当前ADB只有共享模拟器、没有实体手机，未推送APK；手机最后确认114。IPA仍114，按约定等原生更新稳定后最后构建，不能把共享代码与编译结果称作iPad实机通过。
+
+### 手机补交付（2026-11-03）
+
+用户提供`10.195.25.59:34553`后，实际连接到原V2527A（10AG5S1SR4005X7）。流式`adb install -r`返回Success，读回versionCode117/versionName1.0.92、lastUpdateTime13:26:47；主Activity启动Status ok，289ms，进程24000。覆盖保留数据，不测试或操作其它应用，不操作共享模拟器，也未向手机日常目录复制任何测试文件。证据`phone-install.log`、`phone-version.txt`和`phone-launch.txt`。IPA仍114，未由本次手机覆盖安装代替iPad验收。
