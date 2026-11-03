@@ -3248,10 +3248,6 @@ class SendController extends ChangeNotifier {
     }
   }
 
-  bool _sensitiveClipboard(String text) => RegExp(
-    r'-----BEGIN .*PRIVATE KEY-----|(?:password|passwd|secret|token|api[_-]?key)\s*[:=]|验证码|一次性密码|recovery\s+code',
-    caseSensitive: false,
-  ).hasMatch(text);
   void _onClipboard(Map<String, dynamic> event) {
     if (copiedFiles.sourceReady) {
       final allowed =
@@ -3279,14 +3275,7 @@ class SendController extends ChangeNotifier {
       return;
     final image = event['kind'] == 'image';
     final value = event['text'] as String? ?? '';
-    if (!image &&
-        (value.trim().isEmpty ||
-            utf8.encode(value).length > 8192 ||
-            _sensitiveClipboard(value))) {
-      clipboardStatus = '已跳过此内容';
-      changed();
-      return;
-    }
+    if (!image && value.trim().isEmpty) return;
     final elapsed = DateTime.now().millisecondsSinceEpoch - _lastClipboardSend;
     final epoch = generation, destination = clipboardTarget;
     _clipboardDebounce = Timer(
@@ -3425,9 +3414,7 @@ class SendController extends ChangeNotifier {
         root.isEmpty ||
         created < _lastRemoteClipboardAt ||
         expiry <= now ||
-        _clipboardRoots.containsKey(identity) ||
-        _sensitiveClipboard(text) ||
-        utf8.encode(text).length > 8192) {
+        _clipboardRoots.containsKey(identity)) {
       return;
     }
     _clipboardRoots[identity] = expiry;

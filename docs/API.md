@@ -55,11 +55,11 @@ Clients connected to an older center without this feature retain normal send/rec
 - `transfer.offered|transfer.updated`: payload `{transferId,routePreference?:"auto"|"lan"|"public"|"relay"}`; fetch current transfer state. Older events omit routePreference.
 - `device.revoked`: payload `{deviceId}`.
 
-### Optional automatic clipboard context (source added, verification paused)
+### Optional automatic clipboard context
 
 `POST /texts` keeps `{eventId,targetDeviceId,text}` and optionally accepts `clipboard:{sourceEventId?:string}`. First automatic send uses `clipboard:{}`. Center derives payload clipboard `{originDeviceId:authenticatedDeviceId,sourceEventId:eventId}`; clients cannot supply originDeviceId. A forwarded automatic item may reference the **immediate previous text.created eventId visible to this authenticated device**, not an arbitrary root ID. The parent must be unexpired and its text identical; otherwise SOURCE_EVENT_UNAVAILABLE 403 / SOURCE_EVENT_CONFLICT 409. Center propagates its root origin/sourceEventId and adds parentEventId for provenance and stable retry comparison.
 
-Automatic clipboard text is limited to 8192 UTF-8 bytes and retained for `min(global TTL,300 seconds)`. Manual text without clipboard retains the existing global TTL and independent manual-repeat semantics. The authenticated transport sender remains sourceDeviceId even when original clipboard origin differs. Clients suppress re-export of a remote clipboard write using the root pair and platform-local clipboard markers; metadata does not enable background clipboard access or guarantee detection of all sensitive text. No device should mark a text copied merely because the server accepted it.
+Automatic clipboard text uses the same `limits.maxTextLength` as manual text (currently 100000 UTF-16 code units); there is no separate 8 KiB limit or keyword filter. It is retained for `min(global TTL,300 seconds)`. Manual text without clipboard retains the existing global TTL and independent manual-repeat semantics. The authenticated transport sender remains sourceDeviceId even when original clipboard origin differs. Clients suppress re-export of a remote clipboard write using the root pair and platform-local clipboard markers, and respect OS-provided private-content flags. Metadata does not enable background clipboard access. No device should mark a text copied merely because the server accepted it.
 
 ## Multi-file relay
 

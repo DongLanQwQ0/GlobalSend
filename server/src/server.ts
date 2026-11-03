@@ -1249,7 +1249,6 @@ export async function buildApp(options: Options = {}) {
       }
       const payload: { text: string; clipboard?: { originDeviceId: string; sourceEventId: string; parentEventId?: string } } = { text: b.text };
       if (b.clipboard !== undefined) {
-        if (Buffer.byteLength(b.text, "utf8") > 8192) fail("CLIPBOARD_TOO_LARGE", "Automatic clipboard text is limited to 8 KiB", 413);
         payload.clipboard = { originDeviceId: d.id, sourceEventId: b.eventId };
         if (b.clipboard.sourceEventId) {
           const parent = get("SELECT * FROM events WHERE id=? AND type='text.created' AND (source=? OR target=?) AND expires>?", b.clipboard.sourceEventId, d.id, d.id, Date.now());
@@ -1291,7 +1290,6 @@ export async function buildApp(options: Options = {}) {
     target(d, original.target);
     const { text } = req.body as { text: string }, payload = JSON.parse(original.payload);
     if (!text.trim()) fail("EMPTY_TEXT", "Text must not be blank");
-    if (payload.clipboard && Buffer.byteLength(text, "utf8") > 8192) fail("CLIPBOARD_TOO_LARGE", "Automatic clipboard text is limited to 8 KiB", 413);
     if (text === payload.text) return { event: eventView(original) };
     const editedAt = iso();
     const event = tx(() => {

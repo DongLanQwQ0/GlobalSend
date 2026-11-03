@@ -4,6 +4,8 @@
 
 它只读取项目根 `artifacts/live-device-session.json` 的测试中心地址和 groupKey，凭据使用进程内 FixtureVault。不要输出 groupKey、identity token 或控制 token。状态、合成样本与接收文件留在 `artifacts/live-native-peer/`。
 
+独立任务可通过`GLOBALSEND_LIVE_FIXTURE`指定合成会话JSON、`GLOBALSEND_LIVE_WORKSPACE`指定项目内任务目录；省略时沿用上述入口，不触碰用户运行中的客户端或凭据。可选`name`指定合成来源名称。
+
 在 `client/` 中使用现有 F Pub cache 与项目 TEMP/TMP 执行：
 
 ```powershell
@@ -26,6 +28,8 @@ $env:TMP = $env:TEMP
 | `POST /peer/close` | 关闭真实 listener，停止发布心跳；中心尚未过期的候选可用于不可达回退观察 |
 | `POST /peer/reopen` | 使用同一内存身份重新监听、发布当前真实地址和新端口 |
 | `POST /stop` | 消费完成后明确停止控制服务与客户端连接 |
+
+另有`POST /copied/publish {targetDeviceId}`，将任务内合成的`GS114-remaining-check`目录作为真实文件复制引用仅发布给指定目标；`POST /copied/withdraw`撤回它。来源使用生产`CopiedFilesClient`和传输流程，不读取/修改Windows系统剪贴板。目录包含嵌套文本与空目录，适用于消费端拉取、排序和原生目录拖放检查。停止时撤回合成引用并退出本工具自身分组，不操作消费者的分组或真实文件。
 
 `routePreference` 为 `auto / lan / public / relay`。`kind=multi` 包含中文名的 2,621,441 字节样本、中文文本文件与零字节文件；`large` 和 `empty` 可单独发送。每次 offer 的 IDs 与模式记录在 `offers.jsonl`，方便公网 referee 对账。
 
