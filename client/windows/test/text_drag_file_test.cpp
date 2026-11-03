@@ -7,6 +7,49 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
+
+namespace {
+std::wstring FileName(IDataObject* data, FORMATETC descriptor) {
+  STGMEDIUM medium{};
+  assert(SUCCEEDED(data->GetData(&descriptor, &medium)));
+  const auto* group = static_cast<const FILEGROUPDESCRIPTORW*>(GlobalLock(medium.hGlobal));
+  assert(group && group->cItems == 1);
+  const std::wstring name = group->fgd[0].cFileName;
+  GlobalUnlock(medium.hGlobal); ReleaseStgMedium(&medium);
+  return name;
+}
+
+void DropAndRead(IDataObject* data, IDropTarget* target,
+    const std::filesystem::path& destination, const std::string& expected) {
+  POINTL point{}; DWORD effect = DROPEFFECT_COPY;
+  assert(SUCCEEDED(target->DragEnter(data, MK_LBUTTON, point, &effect)) && (effect & DROPEFFECT_COPY));
+  effect = DROPEFFECT_COPY;
+  assert(SUCCEEDED(target->Drop(data, 0, point, &effect)));
+  const auto deadline = GetTickCount64() + 5000;
+  // Async Shell copy creates/extends the destination before closing its
+  // exclusive write handle. Wait for EndOperation, not just file existence.
+  IDataObjectAsyncCapability* asynchronous = nullptr;
+  assert(SUCCEEDED(data->QueryInterface(IID_PPV_ARGS(&asynchronous))));
+  auto copied = [&] {
+    BOOL running = FALSE;
+    assert(SUCCEEDED(asynchronous->InOperation(&running)));
+    std::error_code error;
+    return !running && std::filesystem::file_size(destination, error) == expected.size() && !error;
+  };
+  while (!copied() && GetTickCount64() < deadline) {
+    MSG message{};
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&message); DispatchMessageW(&message);
+    }
+    Sleep(5);
+  }
+  std::ifstream file(destination, std::ios::binary);
+  const std::string actual((std::istreambuf_iterator<char>(file)), {});
+  assert(file.is_open() && actual == expected);
+  asynchronous->Release();
+}
+}
 
 // Production OLE data object and the actual Shell folder drop handler. No
 // desktop/Explorer UI, system clipboard, user files or physical input involved.
@@ -15,6 +58,8 @@ int wmain(int argc, wchar_t** argv) {
   const auto root = std::filesystem::absolute(argv[1]);
   assert(!std::filesystem::exists(root));
   std::filesystem::create_directories(root);
+  const auto old_file = root / L"GlobalSend 文本.txt";
+  std::ofstream(old_file) << "existing text must stay unchanged";
   const std::wstring text = L"中文拖放🙂\nhttps://example.test/a?b=1\n第二行\r\n";
   std::vector<uint8_t> bytes((text.size() + 1) * sizeof(wchar_t));
   memcpy(bytes.data(), text.c_str(), bytes.size());
@@ -31,7 +76,8 @@ int wmain(int argc, wchar_t** argv) {
   const auto* group = static_cast<const FILEGROUPDESCRIPTORW*>(GlobalLock(metadata.hGlobal));
   assert(group && group->cItems == 1);
   const std::wstring name = group->fgd[0].cFileName;
-  assert(name == L"GlobalSend 文本.txt");
+  assert(name.starts_with(L"GlobalSend 文本 ") && name.ends_with(L".txt"));
+  assert(name.find_first_of(L"<>:\"/\\|?*") == std::wstring::npos);
   const auto size = group->fgd[0].nFileSizeLow;
   GlobalUnlock(metadata.hGlobal); ReleaseStgMedium(&metadata);
   std::string expected = "\xef\xbb\xbf";
@@ -39,6 +85,20 @@ int wmain(int argc, wchar_t** argv) {
   expected.resize(3 + length);
   WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), expected.data() + 3, length, nullptr, nullptr);
   assert(size == expected.size());
+  assert(FileName(data, descriptor) == name); // Repeated metadata requests are stable.
+  IDataObject* second = nullptr;
+  assert(SUCCEEDED(CreateGlobalSendDragData(CF_UNICODETEXT, bytes, &second)));
+  const auto second_name = FileName(second, descriptor);
+  assert(second_name != name && second_name != old_file.filename());
+  // Rapid gestures, including several within a millisecond, remain distinct.
+  std::set<std::wstring> names{name, second_name};
+  for (int i = 0; i < 8; ++i) {
+    IDataObject* rapid = nullptr;
+    assert(SUCCEEDED(CreateGlobalSendDragData(CF_UNICODETEXT, bytes, &rapid)));
+    assert(names.insert(FileName(rapid, descriptor)).second);
+    rapid->Release();
+  }
+  assert(std::distance(std::filesystem::directory_iterator(root), {}) == 1);
 
   IEnumFORMATETC* formats = nullptr;
   assert(SUCCEEDED(data->EnumFormatEtc(DATADIR_GET, &formats)));
@@ -73,34 +133,15 @@ int wmain(int argc, wchar_t** argv) {
   assert(SUCCEEDED(SHCreateItemFromParsingName(root.c_str(), nullptr, IID_PPV_ARGS(&folder))));
   IDropTarget* target = nullptr;
   assert(SUCCEEDED(folder->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&target))));
-  POINTL point{}; DWORD effect = DROPEFFECT_COPY;
-  assert(SUCCEEDED(target->DragEnter(data, MK_LBUTTON, point, &effect)) && (effect & DROPEFFECT_COPY));
-  effect = DROPEFFECT_COPY;
-  const auto status = target->Drop(data, 0, point, &effect);
-  assert(SUCCEEDED(status));
-  const auto deadline = GetTickCount64() + 5000;
-  // Async Shell copy creates/extends the destination before closing its
-  // exclusive write handle. Wait for EndOperation, not just file existence.
-  IDataObjectAsyncCapability* asynchronous = nullptr;
-  assert(SUCCEEDED(data->QueryInterface(IID_PPV_ARGS(&asynchronous))));
-  auto copied = [&] {
-    BOOL running = FALSE;
-    assert(SUCCEEDED(asynchronous->InOperation(&running)));
-    std::error_code error;
-    return !running && std::filesystem::file_size(root / name, error) == expected.size() && !error;
-  };
-  while (!copied() && GetTickCount64() < deadline) {
-    MSG message{};
-    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
-      TranslateMessage(&message); DispatchMessageW(&message);
-    }
-    Sleep(5);
-  }
-  std::ifstream file(root / name, std::ios::binary);
-  const std::string actual((std::istreambuf_iterator<char>(file)), {});
-  assert(file.is_open() && actual == expected);
-  file.close(); target->Release(); folder->Release(); asynchronous->Release(); data->Release();
-  std::filesystem::remove(root / name); std::filesystem::remove(root);
+  DropAndRead(data, target, root / name, expected);
+  DropAndRead(second, target, root / second_name, expected);
+  assert(FileName(data, descriptor) == name && FileName(second, descriptor) == second_name);
+  std::ifstream old(old_file);
+  const std::string preserved((std::istreambuf_iterator<char>(old)), {});
+  assert(preserved == "existing text must stay unchanged");
+  old.close(); target->Release(); folder->Release(); data->Release(); second->Release();
+  std::filesystem::remove(root / name); std::filesystem::remove(root / second_name);
+  std::filesystem::remove(old_file); std::filesystem::remove(root);
   OleUninitialize();
-  std::cout << "PASS: actual Shell folder drop creates UTF-8 TXT; Unicode text/internal drop, native preview, fresh streams and indexed formats preserved\n";
+  std::cout << "PASS: two actual Shell drops create distinct UTF-8 TXT files; old fixed-name file preserved, per-gesture name stable, Unicode and native drag formats retained\n";
 }

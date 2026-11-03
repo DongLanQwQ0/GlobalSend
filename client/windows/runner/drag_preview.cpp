@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 #include <gdiplus.h>
 #include <memory>
 #include <atomic>
@@ -17,6 +18,17 @@ CLIPFORMAT TextContentsFormat() {
   return static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_FILECONTENTS));
 }
 
+std::wstring TextFileName() {
+  SYSTEMTIME now{};
+  GetLocalTime(&now);
+  static std::atomic<unsigned long> sequence{0};
+  wchar_t name[96]{};
+  swprintf_s(name, L"GlobalSend 文本 %04d%02d%02d-%02d%02d%02d-%03d-%lu.txt",
+      now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
+      now.wMilliseconds, sequence.fetch_add(1, std::memory_order_relaxed) + 1);
+  return name;
+}
+
 // SHCreateDataObject exposes AsyncCapability but this Shell implementation
 // accepts SetAsyncMode(TRUE) without enabling it. Forward its entire data store
 // (including private drag-image streams), add async ownership and expose text
@@ -26,7 +38,8 @@ class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapabili
  public:
   explicit AsyncShellData(IDataObject* shell, std::function<void(bool)> lease,
       std::vector<uint8_t> text_file)
-      : shell_(shell), lease_(std::move(lease)), text_file_(std::move(text_file)) {
+      : shell_(shell), lease_(std::move(lease)), text_file_(std::move(text_file)),
+        text_file_name_(text_file_.empty() ? L"" : TextFileName()) {
     if (lease_) lease_(true);
   }
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** output) override {
@@ -76,7 +89,9 @@ class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapabili
     file.dwFlags = static_cast<DWORD>(FD_ATTRIBUTES | FD_FILESIZE | FD_UNICODE);
     file.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
     file.nFileSizeLow = static_cast<DWORD>(text_file_.size());
-    wcscpy_s(file.cFileName, L"GlobalSend 文本.txt");
+    // Keep the name stable throughout this gesture's repeated Shell requests,
+    // but give the next gesture its own name, even within the same millisecond.
+    wcscpy_s(file.cFileName, text_file_name_.c_str());
     GlobalUnlock(m->hGlobal); m->tymed = TYMED_HGLOBAL;
     return S_OK;
   }
@@ -132,6 +147,7 @@ class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapabili
   IDataObject* shell_;
   std::function<void(bool)> lease_;
   std::vector<uint8_t> text_file_;
+  std::wstring text_file_name_;
 };
 
 std::unique_ptr<Gdiplus::GraphicsPath> Rounded(float x, float y, float width, float height, float radius) {
