@@ -33,6 +33,7 @@ import 'group_shared_text.dart';
 import 'receive_notifications.dart';
 import 'background_receive.dart';
 import 'recent_devices.dart';
+import 'device_usage.dart';
 import 'local_history.dart';
 import 'connection_window.dart';
 import 'route_probes.dart';
@@ -588,16 +589,33 @@ class SendController extends ChangeNotifier {
   Map<String, dynamic> info = {};
   List<Map<String, dynamic>> devices = [];
   final recentDevices = RecentDevices();
+  final deviceUsage = DeviceUsage();
+  Future<void>? _deviceUsageLoading;
+  Future<void> _loadDeviceUsage() async {
+    if (root == null) return;
+    await (_deviceUsageLoading ??= () async {
+      final file = File('${root!.path}/device-usage.json');
+      if (await file.exists()) {
+        deviceUsage.restore(
+          Map<String, dynamic>.from(jsonDecode(await file.readAsString()) as Map),
+        );
+      }
+    }());
+  }
+  Future<void> _recordDeviceUse(String target, String operation) async {
+    await _loadDeviceUsage();
+    deviceUsage.record(target, operation);
+  }
   int Function() discoveryNow = () => DateTime.now().millisecondsSinceEpoch;
   Timer? _deviceGraceTimer;
   int _deviceRevision = 0;
-  List<Map<String, dynamic>> get sendablePeers => devices
-      .where(
-        (device) =>
-            device['deviceId'] != profile?.deviceId &&
-            recentDevices.available(device, discoveryNow()),
-      )
-      .toList();
+  List<Map<String, dynamic>> get sendablePeers => deviceUsage.rank(
+    devices.where(
+      (device) =>
+          device['deviceId'] != profile?.deviceId &&
+          recentDevices.available(device, discoveryNow()),
+    ),
+  );
 
   void updateDiscoveredDevices(List<Map<String, dynamic>> snapshot) {
     devices = recentDevices.merge(devices, snapshot, discoveryNow());
@@ -618,14 +636,14 @@ class SendController extends ChangeNotifier {
   }
 
   List<Map<String, dynamic>> get onlinePeers => connected
-      ? devices
-            .where(
+      ? deviceUsage.rank(
+          devices.where(
               (device) =>
                   device['deviceId'] != profile?.deviceId &&
                   device['revoked'] != true &&
                   device['online'] == true,
-            )
-            .toList()
+          ),
+        )
       : [];
   List<DockEntry> dock = [];
   LocalHistoryStore? _localHistory;
@@ -1669,6 +1687,7 @@ class SendController extends ChangeNotifier {
             .toList();
       }
       await _loadLocalHistory();
+      await _loadDeviceUsage();
       _nextSavedFilesCleanup = DateTime.now()
           .add(const Duration(minutes: 15))
           .millisecondsSinceEpoch;
@@ -1754,12 +1773,16 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> save() {
+    if (root != null && _deviceUsageLoading == null) {
+      return _loadDeviceUsage().then((_) => save());
+    }
     final commit = _credentialCommitFinished;
     if (commit != null) return commit.future.then((_) => save());
     final directory = root;
     if (directory == null) return Future<void>.value();
     if (profile != null) dock = _restoreLocalHistoryEntries(profile!, dock);
     final profileJson = jsonEncode(profiles.map((p) => p.toJson()).toList());
+    final usageJson = jsonEncode(deviceUsage.toJson());
     final key = profile?.storageKey;
     final logicalKey = profile?.key;
     final historyOwner = profile == null
@@ -1817,6 +1840,7 @@ class SendController extends ChangeNotifier {
       if (key != null) await write('$key.json', stateJson);
       await write('outbox.json', outboxJson);
       await write('profiles.json', profileJson);
+      await write('device-usage.json', usageJson);
       if (key != null) {
         await write(
           'recent-center.json',
@@ -4406,6 +4430,7 @@ class SendController extends ChangeNotifier {
     });
     _requireSession(epoch, a, p);
     pendingTexts.remove(key);
+    await _recordDeviceUse(target, 'text:$eventId');
     _recordShareInteraction(target);
     await save();
     _requireSession(epoch, a, p);
@@ -4547,6 +4572,9 @@ class SendController extends ChangeNotifier {
     });
     _requireSession(epoch, a, p);
     sources.addAll(pending);
+    if (!clipboardImage && copiedFileContext == null) {
+      await _recordDeviceUse(target, 'transfer:${j['transfer']['transferId']}');
+    }
     _recordShareInteraction(target);
     updateTransfer(j['transfer']);
     await save();

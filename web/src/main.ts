@@ -36,6 +36,7 @@ import type { SharedDocument } from './shared_text';
 import { filePreviewKind, readLocalText } from './library';
 import { workspaceHtml, dockHtml, fileCard, historyHtml } from './workspace_view';
 import { SendBatch } from './send_batch';
+import { deviceUsage } from './device_usage';
 import { RecentDevices } from './recent_devices';
 import { linkifyHtml, webLinkActions } from './web_links';
 import { enableTextSelection, isTextSelectionTarget, isTextSelectionPoint, textSelectionActive } from './text_selection';
@@ -1309,8 +1310,8 @@ class GlobalSend {
   }
   device(deviceId: string) { return this.devices.find(device => device.deviceId === deviceId); }
   deviceLabel(deviceId: string) { return this.device(deviceId)?.name || this.deviceNames.get(deviceId) || this.localHistory.scopes.map(scope=>scope.names[deviceId]).find(Boolean) || '另一台设备'; }
-  peers() { return this.devices.filter(device => device.deviceId !== this.session?.device.deviceId && this.recentDevices.available(device)); }
-  onlinePeers() { return this.connected && this.helloReceived ? this.devices.filter(device=>device.deviceId!==this.session?.device.deviceId && !device.revoked && device.online) : []; }
+  peers() { return deviceUsage.rank(this.devices.filter(device => device.deviceId !== this.session?.device.deviceId && this.recentDevices.available(device))); }
+  onlinePeers() { return this.connected && this.helloReceived ? deviceUsage.rank(this.devices.filter(device=>device.deviceId!==this.session?.device.deviceId && !device.revoked && device.online)) : []; }
   selectOnlineTarget() {
     const peers=this.peers();
     if(!peers.some(device=>device.deviceId===this.target))this.target=peers[0]?.deviceId || '';

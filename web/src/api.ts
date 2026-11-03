@@ -1,4 +1,5 @@
 import type { Session } from './model';
+import { recordAcceptedDeviceSend } from './device_usage.ts';
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
@@ -20,6 +21,7 @@ export class Api {
       const data = await response.json().catch(() => null);
       if(signal?.aborted)throw new DOMException('操作已停止','AbortError');
       if (!response.ok) throw new ApiError(response.status, data?.error?.code || 'HTTP_ERROR', data?.error?.message || `请求失败 (${response.status})`);
+      recordAcceptedDeviceSend(path,method,body);
       return data as T;
     } catch (error) {
       if(signal?.aborted)throw new DOMException('操作已停止','AbortError');
