@@ -1,6 +1,10 @@
+## Windows 文本拖出 TXT：1.0.93+118
+
+已完整覆盖`E:\Programs\GlobalSend`并重启，实际EXE读回118。文本拖放同时提供Unicode原文和UTF-8 TXT虚拟文件；桌面/资源管理器可创建`GlobalSend 文本.txt`，不提前落临时文件。实际Shell文件夹处理程序已在项目专用目录完成文件生成及字节检查，原生拖影、文字回投、文件引用和异步复制回归通过；未操作用户真实Windows界面，手势由用户验收。Android/中心/Web保留117，IPA保留114；本轮不推手机、不改服务端，见`artifacts/reports/windows118-text-drag.md`。
+
 ## 设备常用排序：1.0.92+117
 
-Windows已完整覆盖并重启117，中心/Web也已上线。设备按本机普通发送次数排序，唯一ID去重和持久保存，重试不重复计数；不统计自动剪贴板同步或被动引用拉取。主界面、转发目标及两端坞统一使用排序后的设备列表，在线与离线30秒语义不变。原生生产发送/恢复、Web生产Api/main及各模型检查通过，APK与Windows包已发布GitHub。当前没有实体ADB设备，手机仍114，未动共享模拟器；IPA仍114。见`artifacts/reports/device-usage117.md`。
+Windows已完整覆盖并重启117，中心/Web也已上线。设备按本机普通发送次数排序，唯一ID去重和持久保存，重试不重复计数；不统计自动剪贴板同步或被动引用拉取。主界面、转发目标及两端坞统一使用排序后的设备列表，在线与离线30秒语义不变。原生生产发送/恢复、Web生产Api/main及各模型检查通过，APK与Windows包已发布GitHub。手机随后使用用户新地址覆盖安装成功、读回117并启动，未动共享模拟器；IPA仍114。见`artifacts/reports/device-usage117.md`。
 
 ## Windows 拖影与显示适配：1.0.91+116
 
