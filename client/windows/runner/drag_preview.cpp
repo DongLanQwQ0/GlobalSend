@@ -10,14 +10,25 @@
 #pragma comment(lib, "gdiplus.lib")
 
 namespace {
+CLIPFORMAT TextDescriptorFormat() {
+  return static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW));
+}
+CLIPFORMAT TextContentsFormat() {
+  return static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_FILECONTENTS));
+}
+
 // SHCreateDataObject exposes AsyncCapability but this Shell implementation
 // accepts SetAsyncMode(TRUE) without enabling it. Forward its entire data store
-// (including private drag-image streams) and implement only async ownership.
+// (including private drag-image streams), add async ownership and expose text
+// as a virtual TXT without replacing its ordinary Unicode representation.
 // OLE uses the standard IDataObject proxy; no raw COM pointer crosses threads.
 class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapability {
  public:
-  explicit AsyncShellData(IDataObject* shell, std::function<void(bool)> lease)
-      : shell_(shell), lease_(std::move(lease)) { if (lease_) lease_(true); }
+  explicit AsyncShellData(IDataObject* shell, std::function<void(bool)> lease,
+      std::vector<uint8_t> text_file)
+      : shell_(shell), lease_(std::move(lease)), text_file_(std::move(text_file)) {
+    if (lease_) lease_(true);
+  }
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** output) override {
     if (!output) return E_POINTER;
     *output = nullptr;
@@ -34,12 +45,68 @@ class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapabili
     if (!left) delete this;
     return left;
   }
-  HRESULT STDMETHODCALLTYPE GetData(FORMATETC* f, STGMEDIUM* m) override { return shell_->GetData(f, m); }
+  HRESULT STDMETHODCALLTYPE GetData(FORMATETC* f, STGMEDIUM* m) override {
+    if (!f || !m) return E_POINTER;
+    if (!IsTextFileFormat(f)) return shell_->GetData(f, m);
+    *m = {};
+    const auto valid = QueryGetData(f);
+    if (FAILED(valid)) return valid;
+    if (f->cfFormat == TextContentsFormat()) {
+      // A fresh stream per request: one consumer reading/closing it must not
+      // change another consumer's offset, including async Shell copies.
+      IStream* stream = nullptr;
+      auto status = CreateStreamOnHGlobal(nullptr, TRUE, &stream);
+      if (FAILED(status)) return status;
+      ULONG written = 0;
+      status = stream->Write(text_file_.data(), static_cast<ULONG>(text_file_.size()), &written);
+      if (SUCCEEDED(status) && written != text_file_.size()) status = STG_E_WRITEFAULT;
+      if (SUCCEEDED(status)) status = stream->Seek({}, STREAM_SEEK_SET, nullptr);
+      if (FAILED(status)) { stream->Release(); return status; }
+      m->tymed = TYMED_ISTREAM; m->pstm = stream;
+      return S_OK;
+    }
+    m->hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(FILEGROUPDESCRIPTORW));
+    auto* group = m->hGlobal ? static_cast<FILEGROUPDESCRIPTORW*>(GlobalLock(m->hGlobal)) : nullptr;
+    if (!group) {
+      if (m->hGlobal) GlobalFree(m->hGlobal);
+      *m = {}; return E_OUTOFMEMORY;
+    }
+    group->cItems = 1;
+    auto& file = group->fgd[0];
+    file.dwFlags = static_cast<DWORD>(FD_ATTRIBUTES | FD_FILESIZE | FD_UNICODE);
+    file.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+    file.nFileSizeLow = static_cast<DWORD>(text_file_.size());
+    wcscpy_s(file.cFileName, L"GlobalSend 文本.txt");
+    GlobalUnlock(m->hGlobal); m->tymed = TYMED_HGLOBAL;
+    return S_OK;
+  }
   HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC* f, STGMEDIUM* m) override { return shell_->GetDataHere(f, m); }
-  HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* f) override { return shell_->QueryGetData(f); }
+  HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* f) override {
+    if (!f) return E_POINTER;
+    if (!IsTextFileFormat(f)) return shell_->QueryGetData(f);
+    if (f->dwAspect != DVASPECT_CONTENT) return DV_E_DVASPECT;
+    const bool contents = f->cfFormat == TextContentsFormat();
+    if (f->lindex != (contents ? 0 : -1)) return DV_E_LINDEX;
+    return (f->tymed & (contents ? TYMED_ISTREAM : TYMED_HGLOBAL)) ? S_OK : DV_E_TYMED;
+  }
   HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC* f, FORMATETC* out) override { return shell_->GetCanonicalFormatEtc(f, out); }
   HRESULT STDMETHODCALLTYPE SetData(FORMATETC* f, STGMEDIUM* m, BOOL own) override { return shell_->SetData(f, m, own); }
-  HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** out) override { return shell_->EnumFormatEtc(direction, out); }
+  HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** out) override {
+    if (text_file_.empty() || direction != DATADIR_GET) return shell_->EnumFormatEtc(direction, out);
+    std::vector<FORMATETC> formats;
+    IEnumFORMATETC* existing = nullptr;
+    auto status = shell_->EnumFormatEtc(direction, &existing);
+    if (FAILED(status)) return status;
+    FORMATETC item{};
+    while (existing->Next(1, &item, nullptr) == S_OK) formats.push_back(item);
+    existing->Release();
+    // Keep Unicode text first for editors and GlobalSend's own drop target.
+    formats.push_back({TextDescriptorFormat(), nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL});
+    formats.push_back({TextContentsFormat(), nullptr, DVASPECT_CONTENT, 0, TYMED_ISTREAM});
+    status = SHCreateStdEnumFmtEtc(static_cast<UINT>(formats.size()), formats.data(), out);
+    for (const auto& format : formats) CoTaskMemFree(format.ptd);
+    return status;
+  }
   HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC* f, DWORD flags, IAdviseSink* sink, DWORD* connection) override { return shell_->DAdvise(f, flags, sink, connection); }
   HRESULT STDMETHODCALLTYPE DUnadvise(DWORD connection) override { return shell_->DUnadvise(connection); }
   HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA** out) override { return shell_->EnumDAdvise(out); }
@@ -55,11 +122,16 @@ class AsyncShellData final : public IDataObject, public IDataObjectAsyncCapabili
     return S_OK;
   }
  private:
+  bool IsTextFileFormat(const FORMATETC* format) const {
+    return !text_file_.empty() && (format->cfFormat == TextDescriptorFormat() ||
+        format->cfFormat == TextContentsFormat());
+  }
   ~AsyncShellData() { shell_->Release(); if (lease_) lease_(false); }
   std::atomic<ULONG> references_{1};
   std::atomic<bool> enabled_{true}, running_{false};
   IDataObject* shell_;
   std::function<void(bool)> lease_;
+  std::vector<uint8_t> text_file_;
 };
 
 std::unique_ptr<Gdiplus::GraphicsPath> Rounded(float x, float y, float width, float height, float radius) {
@@ -100,7 +172,25 @@ HRESULT CreateGlobalSendDragData(CLIPFORMAT format,
     data->Release();
     return result;
   }
-  *output = new AsyncShellData(data, std::move(lease));
+  std::vector<uint8_t> text_file;
+  if (format == CF_UNICODETEXT && bytes.size() >= sizeof(wchar_t)) {
+    std::wstring text(bytes.size() / sizeof(wchar_t), L'\0');
+    memcpy(text.data(), bytes.data(), text.size() * sizeof(wchar_t));
+    text.resize(wcsnlen(text.data(), text.size()));
+    const auto length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(),
+        static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    if (length > 0) {
+      // UTF-8 BOM lets Windows text editors reliably recognize Chinese/emoji.
+      // This virtual file lives only in the IDataObject; no drag-cache file or
+      // history item is created when the gesture is canceled.
+      text_file = {0xef, 0xbb, 0xbf};
+      text_file.resize(3 + length);
+      WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(),
+          static_cast<int>(text.size()), reinterpret_cast<char*>(text_file.data() + 3),
+          length, nullptr, nullptr);
+    }
+  }
+  *output = new AsyncShellData(data, std::move(lease), std::move(text_file));
   return S_OK;
 }
 

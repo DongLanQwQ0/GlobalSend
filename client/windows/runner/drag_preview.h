@@ -28,6 +28,8 @@ HBITMAP GlobalSendContentDragBitmap(const std::wstring& text,
     const std::vector<std::wstring>& paths, GlobalSendDragPalette palette = {});
 // Shell IDataObject retains drag-helper private HGLOBAL and IStream formats.
 // A payload-only IDataObject must not stand in for this cross-process store.
+// Unicode text also exposes an in-memory UTF-8 .txt virtual file to Explorer;
+// text targets and internal drops retain the original CF_UNICODETEXT payload.
 HRESULT CreateGlobalSendDragData(CLIPFORMAT format,
     const std::vector<uint8_t>& bytes, IDataObject** output,
     std::function<void(bool)> lease = {});
