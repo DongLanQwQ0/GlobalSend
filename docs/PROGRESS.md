@@ -1,3 +1,7 @@
+## Windows 文本文件名：1.0.94+119
+
+已覆盖并重启119。文件名改用文本首个非空行的短标题（最多12个字符），连续同名导出加` (2)`、` (3)`；不塞产品名和时间串。用户否定的长模板构建已停止，没有交付。真实Shell同一目录连续两次生成不同短名TXT、原旧文件保留和原生拖放回归通过；Android/中心/Web仍117，IPA仍114，见`artifacts/reports/windows119-text-names.md`。
+
 ## Windows 文本拖出 TXT：1.0.93+118
 
 已完整覆盖`E:\Programs\GlobalSend`并重启，实际EXE读回118。文本拖放同时提供Unicode原文和UTF-8 TXT虚拟文件；桌面/资源管理器可创建`GlobalSend 文本.txt`，不提前落临时文件。实际Shell文件夹处理程序已在项目专用目录完成文件生成及字节检查，原生拖影、文字回投、文件引用和异步复制回归通过；未操作用户真实Windows界面，手势由用户验收。Android/中心/Web保留117，IPA保留114；本轮不推手机、不改服务端，见`artifacts/reports/windows118-text-drag.md`。
