@@ -1,6 +1,7 @@
 #ifndef GLOBALSEND_RECEIVE_DOCK_H_
 #define GLOBALSEND_RECEIVE_DOCK_H_
 #include "win32_window.h"
+#include "receive_dock_geometry.h"
 #include "update_interaction.h"
 #include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
@@ -36,20 +37,6 @@ class GlobalSendDockDragReply final : public flutter::MethodResult<flutter::Enco
   std::function<void()> done_;
 };
 
-inline RECT GlobalSendReceiveDockBounds(const RECT& work, UINT dpi, bool /*multiple*/) {
-  const int margin = MulDiv(16, static_cast<int>(dpi), 96);
-  const int width = std::min(MulDiv(480, static_cast<int>(dpi), 96),
-      static_cast<int>(std::max(1L, work.right - work.left - margin * 2)));
-  const int height = std::min(MulDiv(184, static_cast<int>(dpi), 96),
-      static_cast<int>(std::max(1L, work.bottom - work.top - margin * 2)));
-  return {work.right - width - margin, work.bottom - height - margin,
-      work.right - margin, work.bottom - margin};
-}
-
-inline POINT GlobalSendReceiveDockMoveOrigin(RECT start, POINT down, POINT now) {
-  return {start.left + now.x - down.x, start.top + now.y - down.y};
-}
-
 // A display-only engine: no plugins, credentials, network controller or tray.
 class GlobalSendReceiveDock final : public Win32Window {
  public:
@@ -76,6 +63,7 @@ class GlobalSendReceiveDock final : public Win32Window {
   LRESULT MessageHandler(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) noexcept override;
  private:
   void Position();
+  void ReflowDisplay(const RECT* suggested = nullptr);
   void Animate(bool closing);
   void Tick();
   void BeginMove(const Map& args);
@@ -109,6 +97,7 @@ class GlobalSendReceiveDock final : public Win32Window {
   bool closing_ = false;
   bool closing_finished_ = false;
   bool dragging_ = false, moving_ = false;
+  bool animating_ = false;
   bool hovering_drop_ = false;
   POINTL drop_pointer_{};
   SIZE drop_surface_{};

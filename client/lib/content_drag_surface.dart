@@ -64,6 +64,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   String pointerKind = 'mouse';
   int? sourcePointer;
   bool nativePending = false;
+  _ContentDrag? activeDrag;
   final previewKey = GlobalKey();
 
   Map<String, int> get previewPalette {
@@ -79,7 +80,27 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
   void retireFlutterDrag(int pointer) {
     if (!mounted || sourcePointer != pointer || !nativePending) return;
     external.value = true;
+    activeDrag?.cancel();
     GestureBinding.instance.cancelPointer(pointer);
+  }
+
+  Drag? startFlutterDrag(GestureMultiDragStartCallback start, Offset position) {
+    if (nativePending || activeDrag != null) return null;
+    final avatar = start(position);
+    if (avatar == null) return null;
+    return activeDrag = _ContentDrag(avatar, () => activeDrag = null);
+  }
+
+  void finishFlutterDrag(int? pointer) {
+    // Pointer cancellation is queued by Flutter, and can be held while the
+    // native modal drag loop owns dispatch. End our avatar itself now; a late
+    // pointer cancel must not resurrect or end a subsequent drag.
+    if (mounted) external.value = true;
+    activeDrag?.cancel();
+    if (pointer != null && sourcePointer == pointer) {
+      GestureBinding.instance.cancelPointer(pointer);
+      sourcePointer = null;
+    }
   }
 
   Future<NativeDragPreview?> capturePreview() async {
@@ -134,6 +155,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
 
   @override
   void dispose() {
+    activeDrag?.cancel();
     external.dispose();
     super.dispose();
   }
@@ -177,12 +199,8 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
           onStarted: windowsHandoff ? () => retireFlutterDrag(pointer) : null,
         );
       } finally {
-        if (sourcePointer == pointer) {
-          GestureBinding.instance.cancelPointer(pointer);
-          sourcePointer = null;
-        }
+        finishFlutterDrag(pointer);
         nativePending = false;
-        if (mounted) external.value = false;
       }
     }());
   }
@@ -306,6 +324,7 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
       );
     }
     Widget draggable(bool delayed, Widget child) => _ContentDraggable(
+      start: startFlutterDrag,
       enabled: widget.enabled,
       delayed: delayed,
       allowSelectedText: () => widget.selectedText,
@@ -378,19 +397,36 @@ class _ContentDragSurfaceState extends State<ContentDragSurface> {
       }
     } finally {
       if (widget.nativeOnly && windowsHandoff) {
-        if (pointer != null && sourcePointer == pointer) {
-          GestureBinding.instance.cancelPointer(pointer);
-          sourcePointer = null;
-        }
-        if (mounted) external.value = false;
+        finishFlutterDrag(pointer);
       }
       nativePending = false;
     }
   }
 }
 
+/// Owns exactly one Flutter avatar, independently of native/pointer timing.
+class _ContentDrag implements Drag {
+  _ContentDrag(this.avatar, this.finished);
+  Drag? avatar;
+  final VoidCallback finished;
+  @override
+  void update(DragUpdateDetails details) => avatar?.update(details);
+  @override
+  void end(DragEndDetails details) => _finish((drag) => drag.end(details));
+  @override
+  void cancel() => _finish((drag) => drag.cancel());
+  void _finish(void Function(Drag) close) {
+    final drag = avatar;
+    if (drag == null) return;
+    avatar = null;
+    finished();
+    close(drag);
+  }
+}
+
 class _ContentDraggable extends Draggable<DockEntry> {
   const _ContentDraggable({
+    required this.start,
     required bool enabled,
     required this.delayed,
     required this.allowSelectedText,
@@ -408,6 +444,7 @@ class _ContentDraggable extends Draggable<DockEntry> {
          hitTestBehavior: HitTestBehavior.opaque,
        );
   final bool delayed;
+  final Drag? Function(GestureMultiDragStartCallback, Offset) start;
   final bool Function() allowSelectedText;
   final void Function(PointerDeviceKind) onKind;
   @override
@@ -417,7 +454,7 @@ class _ContentDraggable extends Draggable<DockEntry> {
       (delayed
             ? _ContentDelayedRecognizer(onKind, allowSelectedText)
             : _ContentMouseRecognizer(onKind, allowSelectedText))
-        ..onStart = onStart;
+        ..onStart = (position) => start(onStart, position);
 }
 
 class _ContentMouseRecognizer extends ImmediateMultiDragGestureRecognizer {

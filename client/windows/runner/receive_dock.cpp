@@ -115,6 +115,31 @@ void GlobalSendReceiveDock::Position() {
       bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOACTIVATE);
 }
 
+void GlobalSendReceiveDock::ReflowDisplay(const RECT* suggested) {
+  if (moving_) EndMove();
+  RECT origin = suggested ? *suggested : resting_;
+  const auto target = MonitorFromRect(&origin, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor{sizeof(monitor)};
+  if (!GetMonitorInfoW(target, &monitor)) return;
+  const auto size = GlobalSendReceiveDockBounds(monitor.rcWork, FlutterDesktopGetDpiForMonitor(target), false);
+  origin.right = origin.left + size.right - size.left;
+  origin.bottom = origin.top + size.bottom - size.top;
+  resting_ = GlobalSendReceiveDockFitBounds(origin, monitor.rcWork);
+  // An animation's old monitor coordinates are invalid after a display change.
+  // Finish that transition without showing a hidden dock or replaying arrival.
+  KillTimer(GetHandle(), kAnimation);
+  animating_ = false;
+  SetWindowPos(GetHandle(), nullptr, resting_.left, resting_.top,
+      resting_.right - resting_.left, resting_.bottom - resting_.top,
+      SWP_NOZORDER | SWP_NOACTIVATE);
+  if (closing_ && shown_) {
+    ShowWindow(GetHandle(), SW_HIDE);
+    shown_ = false;
+    closing_finished_ = true;
+    if (closed_) closed_(Generation());
+  }
+}
+
 bool GlobalSendReceiveDock::OnCreate() {
   const HWND window = GetHandle();
   // Let DWM compose the outer curve and shadow. A binary window region would
@@ -255,6 +280,7 @@ void GlobalSendReceiveDock::Update(Map payload) {
   if ((closing_ || closing_finished_) && !fresh_arrival) return;
   if (fresh_arrival && (closing_ || closing_finished_)) {
     KillTimer(GetHandle(), kAnimation);
+    animating_ = false;
     closing_ = closing_finished_ = false;
     SetWindowPos(GetHandle(), nullptr, resting_.left, resting_.top, 0, 0,
         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -334,6 +360,7 @@ void GlobalSendReceiveDock::ClearContent() {
 void GlobalSendReceiveDock::BeginMove(const Map& args) {
   if (closing_ || dragging_ || moving_) return;
   KillTimer(GetHandle(), kAnimation);
+  animating_ = false;
   GetWindowRect(GetHandle(), &move_start_);
   move_anchor_ = {move_start_.left + static_cast<LONG>(Number(args, "x")),
       move_start_.top + static_cast<LONG>(Number(args, "y"))};
@@ -374,6 +401,7 @@ void GlobalSendReceiveDock::EndMove() {
 }
 
 void GlobalSendReceiveDock::Animate(bool closing) {
+  animating_ = true;
   closing_ = closing;
   closing_finished_ = false;
   RECT current{};
@@ -391,6 +419,7 @@ void GlobalSendReceiveDock::Animate(bool closing) {
 }
 
 void GlobalSendReceiveDock::Tick() {
+  if (!animating_) return;
   const double t = std::min(1.0, (GetTickCount64() - animation_start_) / (closing_ ? 230.0 : 300.0));
   const double eased = closing_ ? t * t * t : 1 - (1 - t) * (1 - t) * (1 - t);
   const int x = animation_from_ + static_cast<int>((animation_to_ - animation_from_) * eased);
@@ -398,6 +427,7 @@ void GlobalSendReceiveDock::Tick() {
       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
   if (t < 1) return;
   KillTimer(GetHandle(), kAnimation);
+  animating_ = false;
   if (closing_) {
     ShowWindow(GetHandle(), SW_HIDE);
     shown_ = false;
@@ -449,9 +479,13 @@ LRESULT GlobalSendReceiveDock::MessageHandler(HWND hwnd, UINT message,
     return 0;
   }
   if (message == WM_DPICHANGED) {
-    const auto result = Win32Window::MessageHandler(hwnd, message, wp, lp);
-    GetWindowRect(hwnd, &resting_);
-    return result;
+    ReflowDisplay(reinterpret_cast<const RECT*>(lp));
+    return 0;
+  }
+  if (message == WM_DISPLAYCHANGE ||
+      (message == WM_SETTINGCHANGE && wp == SPI_SETWORKAREA)) {
+    ReflowDisplay();
+    return 0;
   }
   if (message == WM_CLOSE) {
     flutter::EncodableList ids;
