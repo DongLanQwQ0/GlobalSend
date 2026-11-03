@@ -22,6 +22,8 @@
 
 Windows ZIP22,599,441字节。构建日志`artifacts/logs/release-clipboard-text115.log`及两平台release-local日志；部署与公开检查`artifacts/tmp/release115/`。安装包只放本地与GitHub，不上传中心。功能评审页仍仅本地，部署解包排除了该目录，没有上线未确认的UI方案。
 
+公开发布后的生产选包检查：真实GitHub30条Release中，Windows/Android从113找到115，iOS从113找到114；当前版本等于各自最新实际包时均无更新，未将其它平台的新Release误报给iOS。读取17份元数据耗时20.5秒，无大包下载或实机操作，见`artifacts/tmp/release115/public-feed.json`。同步修正`docs/IPAD.md`和`docs/UPDATES.md`中仍把105写成当前版本的旧文字，保留当时的历史验收记录。
+
 ## 下一步
 
 ADB恢复后覆盖安装115并读回版本，保留数据，不终止Chrona。原生稳定后从同源码tag最后构建通用IPA。Windows真实重启偏好、触屏/虚拟桌面/系统坞，以及iPad目标应用行为仍由用户验收，不能用编译或组件检查代替。

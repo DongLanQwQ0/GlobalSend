@@ -41,11 +41,19 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-最新发布为 **1.0.81+105**：Windows完整客户端已更新并启动；APK为16,431,707字节，Windows ZIP为22,530,094字节，均无打包字体。手机由其它任务使用后断开，尚未覆盖105，最后实际读回仍为1.0.79+103；新包保留在本地与[GitHub 105版](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.81-build105)，不以包生成代替手机安装。Web分区拖放反馈已在中心上线，105没有新的Web/中心产品改动，不重复部署相同代码。
+当前 Windows/Android 已发布 **1.0.90+115**，iOS/iPadOS 的实际 IPA 为 **1.0.89+114**。Windows完整目录已覆盖并重启115，中心/Web也已更新；手机ADB断开，最后读回仍是114，不能把已发布APK当作手机安装成功。安装/部署状态以[本机发布记录](../artifacts/releases/latest-local.json)和[115交付记录](../artifacts/reports/current115.md)为准。
+
+Windows真实自更新/系统剪贴板和Android应用内安装确认仍需各自实机验收；ADB覆盖安装不能替代应用内更新流程。IPA继续由用户手动签名安装，不提前发布未构建的iOS清单。
+
+115发布后，以生产更新选择器匿名读取真实GitHub Release和清单：Windows/Android从113正确找到115，iOS从113找到114；各端已安装自身最新版时均不再提示更新，iOS没有因115 Release而误报。共检查30条Release，读取17份元数据，耗时20.5秒，未下载安装包、未操作应用或系统剪贴板。证据`artifacts/tmp/release115/public-feed.json`；这是公开选包链路检查，不代替系统通知或安装验收。
+
+### 105版的历史检查
+
+当时发布 **1.0.81+105**：Windows完整客户端已更新并启动；APK为16,431,707字节，Windows ZIP为22,530,094字节，均无打包字体。手机由其它任务使用后断开，当时尚未覆盖105、最后实际读回为1.0.79+103；新包保留在本地与[GitHub 105版](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.81-build105)，不以包生成代替手机安装。Web分区拖放反馈已在中心上线，105没有新的Web/中心产品改动，没有重复部署相同代码。
 
 105真实匿名检查21条Release，Windows/Android各读取1份清单，约5.2秒选出各自105包。生产下载器已完整下载22,527,511字节的104版Windows ZIP，实际版本及ZIP内容核对通过；105实际包由发布脚本另行读回版本。此前github.com下载入口在当前网络失败，改用同一GitHub公开资源API后通过，未改变代理设置。证据：`artifacts/tmp/completion104/public-feed-before.json`、`public-download.json`，以及`artifacts/tmp/completion105/public-feed.json`。
 
-最后构建的105 IPA为14,913,965字节，主应用与扩展均为真机arm64/105，App Group配置一致，无打包字体；实际包和iOS独立清单已发布，交用户手动签名安装。核对记录：`artifacts/tmp/completion105/ios-verified.json`。
+当时构建的105 IPA为14,913,965字节，主应用与扩展均为真机arm64/105，App Group配置一致，无打包字体；实际包和iOS独立清单已发布，交用户手动签名安装。核对记录：`artifacts/tmp/completion105/ios-verified.json`。
 
 自动更新引擎、真实HTTP续传、草稿恢复、Windows隐藏辅助程序替换与回滚、平台筛选和操作门禁检查通过。新增22项公网更新合同检查、15项交互/取消回归及单helper等待31秒后取消均通过。Android安装器与权限检查通过；实际FileProvider读取仍需在Android应用内安装时确认。按用户要求未操作真实Windows界面，真实自更新与实体触屏由用户验收。见 `artifacts/reports/completion105.json`、[Windows更新机制](WINDOWS_SELF_UPDATE.md)和[本机发布记录](../artifacts/releases/latest-local.json)。
 
