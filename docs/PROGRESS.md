@@ -1,3 +1,7 @@
+## 设备常用排序：1.0.92+117
+
+Windows已完整覆盖并重启117，中心/Web也已上线。设备按本机普通发送次数排序，唯一ID去重和持久保存，重试不重复计数；不统计自动剪贴板同步或被动引用拉取。主界面、转发目标及两端坞统一使用排序后的设备列表，在线与离线30秒语义不变。原生生产发送/恢复、Web生产Api/main及各模型检查通过，APK与Windows包已发布GitHub。当前没有实体ADB设备，手机仍114，未动共享模拟器；IPA仍114。见`artifacts/reports/device-usage117.md`。
+
 ## Windows 拖影与显示适配：1.0.91+116
 
 修复版已完整覆盖`E:\Programs\GlobalSend`并重启，实际EXE读回116。旧源码在指针派发锁定时可复现拖影残留；改为会话直接结束avatar，交接/取消/完成后不会复活旧拖影。接收窗口响应分辨率、DPI、工作区和显示器移除，尺寸/坐标校正至最近可用屏幕，不意外唤起隐藏坞。13项定向Flutter检查和生产C++几何检查通过，完整Windows release无字体；实际桌面/触屏与显示切换仍由用户验收。Android、中心/Web与IPA本轮不变，GitHub443失败使116暂未公开，详见`artifacts/reports/windows116-drag-display.md`。

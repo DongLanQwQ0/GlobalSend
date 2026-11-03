@@ -8,7 +8,7 @@
 
 当前已发布的 IPA 为 **1.0.89（114）**，源码 `c02248f`：[构建记录](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41460934497) / [GitHub 下载](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.89-build114)。本地文件：`artifacts/releases/ios-1.0.89-build114/GlobalSend-iPad-unsigned.ipa`，15,041,149 字节。实际包中主应用与分享扩展均为114版真机 arm64，共享组模板一致，支持iPhone与iPad且无内置字体；未签名，需用原账号手动覆盖安装。核对记录：`artifacts/tmp/release114/ios114-verified.json`。
 
-Windows/Android另有115包，不代表iOS/iPadOS已有115 IPA。115须等原生更新稳定后最后构建；更新检查只使用本平台的实际IPA及iOS清单，不因其它平台Release而通知。
+Windows/Android已发布117包，不代表iOS/iPadOS已有117 IPA。新IPA须等原生更新稳定后最后构建；更新检查只使用本平台的实际IPA及iOS清单，不因其它平台Release而通知。
 
 剪贴板与媒体建议均接入真实系统拖放，抬起、移动和取消使用卡片自身画面，不抬起整页。媒体建议跟随照片库变化与删除，每条只累计真正可见、闲置的30秒；取消拖放保留，成功后移除。按实际容器补齐缺失或 `.pic` 等占位后缀，不改原件或转码。Mac上的Swift回归与完整真机编译通过；实际iPad卡片强调和拖影仍需安装后确认，见[修复记录](IPAD_DRAG_AND_GUIDES.md)。
 

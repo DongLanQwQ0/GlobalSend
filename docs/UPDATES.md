@@ -41,7 +41,7 @@ iPad Actions 仍仅由 `workflow_dispatch` 手动触发。Windows、Android 稳�
 
 ## 当前验收边界
 
-当前 Windows/Android 已发布 **1.0.90+115**，iOS/iPadOS 的实际 IPA 为 **1.0.89+114**。Windows完整目录已覆盖并重启115，中心/Web也已更新；手机ADB断开，最后读回仍是114，不能把已发布APK当作手机安装成功。安装/部署状态以[本机发布记录](../artifacts/releases/latest-local.json)和[115交付记录](../artifacts/reports/current115.md)为准。
+当前 Windows/Android 已发布 **1.0.92+117**，iOS/iPadOS 的实际 IPA 为 **1.0.89+114**。Windows完整目录已覆盖并重启117，中心/Web也已更新；目前没有实体ADB设备，手机最后读回仍是114，不能把已发布APK当作手机安装成功。安装/部署状态以[本机发布记录](../artifacts/releases/latest-local.json)和[117交付记录](../artifacts/reports/device-usage117.md)为准。
 
 Windows真实自更新/系统剪贴板和Android应用内安装确认仍需各自实机验收；ADB覆盖安装不能替代应用内更新流程。IPA继续由用户手动签名安装，不提前发布未构建的iOS清单。
 
