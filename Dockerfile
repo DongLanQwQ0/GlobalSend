@@ -1,19 +1,23 @@
 FROM node:24.19.0-bookworm-slim AS server-build
 WORKDIR /build/server
-COPY server/package.json server/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm install -g pnpm@11.8.0
+COPY server/package.json server/pnpm-lock.yaml ./
+# Hoisted node_modules keeps the runtime stage copy free of symlinks into the
+# pnpm store, which does not exist in the final image.
+RUN pnpm install --frozen-lockfile --config.node-linker=hoisted
 COPY server/src ./src
 COPY server/tsconfig.json ./
 COPY packages/protocol /build/packages/protocol
-RUN npm run build && npm prune --omit=dev --no-audit --no-fund
+RUN pnpm run build && pnpm prune --prod
 
 FROM node:24.19.0-bookworm-slim AS web-build
 WORKDIR /build/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm install -g pnpm@11.8.0
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --config.node-linker=hoisted
 COPY web/ ./
 COPY packages/protocol /build/packages/protocol
-RUN npm run build
+RUN pnpm run build
 
 FROM node:24.19.0-bookworm-slim AS runtime
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8787 DATA_DIR=/data RELAY_DIR=/relay STATIC_DIR=/app/web/dist WEB_ENABLED=true

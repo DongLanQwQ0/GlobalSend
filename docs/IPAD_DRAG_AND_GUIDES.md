@@ -9,7 +9,7 @@
 - `.pic`、无后缀及错误图片后缀根据实际容器补齐；PNG、JPEG、WebP、GIF、BMP、HEIC/HEIF、AVIF 不转码。iPad 分享、剪贴板和拖入共用导入器；原生和 Web 发送入口也处理占位名称。目录树成员保留原名称和相对路径，原始文件不改名。
 - 设置增加“使用指南”，未连接的原生首页也可打开。Android、iPad、Windows、Web 分别说明各平台操作，Android 重点介绍悬浮暂存坞。
 
-指南统一编辑源为 `packages/guides/usage.json`。执行 `npm run guides:generate` 更新应用内容及 `docs/guides`；构建检查生成物是否同步。没有增加字体或教程运行依赖。
+指南统一编辑源为 `packages/guides/usage.json`。执行 `pnpm run guides:generate` 更新应用内容及 `docs/guides`；构建检查生成物是否同步。没有增加字体或教程运行依赖。
 
 ## 样本与检查
 

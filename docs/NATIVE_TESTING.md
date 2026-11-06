@@ -209,7 +209,7 @@ Android 目录框架使用真实 DocumentsProvider/PFD 生命周期，但 Window
 - Windows：[完整 ZIP](../artifacts/releases/GlobalSend-1.0.0-library-network-20261025-windows.zip)，16,330,492 字节；Release 148.5 秒构建成功，日志 `client/build/logs/windows-release-library-network.log`。
 - Android：[内部测试 APK](../artifacts/releases/GlobalSend-1.0.0-library-network-20261025-android-debug-signed.apk)，62,223,289 字节；`assembleRelease` 150.1 秒成功，日志 `client/build/logs/android-release-library-network.log`。沿用测试签名，不是商店正式签名。
 
-需要切换时，先自行退出旧 Windows 窗口；保留现有项目身份和接收记录用以下隔离入口，不用指向旧标准构建的 npm 命令：
+需要切换时，先自行退出旧 Windows 窗口；保留现有项目身份和接收记录用以下隔离入口，不用指向旧标准构建的 pnpm 命令：
 
 ```powershell
 $env:GLOBALSEND_DATA_DIR = 'F:\Codes\Java\GlobalSend\artifacts\native-state'

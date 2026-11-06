@@ -6,7 +6,7 @@ import { localEnvironment } from './local-environment.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = resolve(root, 'server', 'dist', 'index.js');
 if (!existsSync(entry)) {
-  console.error('Center build is missing. Run npm run build when builds are permitted.');
+  console.error('Center build is missing. Run pnpm run build when builds are permitted.');
   process.exitCode = 1;
 } else {
   Object.assign(process.env, localEnvironment(root));

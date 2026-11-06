@@ -7,7 +7,7 @@ import { localEnvironment } from './local-environment.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 if (args.some(argument => argument !== '--release')) {
-  throw new Error('Usage: npm run client:windows [-- --release]');
+  throw new Error('Usage: pnpm run client:windows [-- --release]');
 }
 if (process.platform !== 'win32') {
   throw new Error('This launcher is for the Windows client.');

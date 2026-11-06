@@ -20,7 +20,7 @@ Android [1.0.89+114 arm64 APK，约16.5 MB](artifacts/releases/GlobalSend-1.0.89
 
 iPad / iPhone 的[**1.0.89 (114) 未签名 IPA**](artifacts/releases/ios-1.0.89-build114/GlobalSend-iPad-unsigned.ipa)已按约定最后构建。[Mac 工作流](https://github.com/DongLanQwQ0/GlobalSend/actions/runs/41460934497)已完成真实提供方检查、iOS主应用与分享扩展编译及打包。实际包两个目标均为114/arm64，共享组模板匹配，无内置字体，支持iPhone和iPad；iPhone禁用系统图片写入，iPad保留。iPad微信及跨应用按需拖放仍由用户手动签名安装后验收，不把QQ或Android结果替代为iPad/iPhone结果。说明见[iPad输入与窗口说明](docs/IOS_NATIVE_INPUT_AND_WINDOW_LAYOUT.md)，下载见[分平台发布](https://github.com/DongLanQwQ0/GlobalSend/releases/tag/v1.0.89-build114)。**中心不托管安装包。**
 
-网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 npm 入口仍指标准开发构建。
+网页版刷新即可使用新版；使用步骤见 [实机测试](docs/QUICK_TEST.md)，原 pnpm 入口仍指标准开发构建。
 
 已上线版本包含 WebRTC，并完成 Windows ↔ 浏览器的真实双向断点续传。浏览器直接接收至 OPFS，再由用户下载；不要求摄像头或麦克风。验证入口和平台缺口见 [WebRTC 开发验收](docs/WEBRTC_DEVELOPMENT.md)。
 
@@ -51,26 +51,40 @@ Web 的“本机文件”两列库支持图片/文本预览、排序、多选、
 
 iPad 未签名真机包通过 GitHub Actions 构建，下载后手动签名安装，见 [iPad 构建说明](docs/IPAD.md)。
 
-原生版本构建、复制到`E:\Programs\GlobalSend`并重启、ADB推送/覆盖安装/启动统一使用`npm run release:local`；细节见[原生说明](client/README.md)。
+原生版本构建、复制到`E:\Programs\GlobalSend`并重启、ADB推送/覆盖安装/启动统一使用`pnpm run release:local`；细节见[原生说明](client/README.md)。
 
 GitHub 平台更新检查与发布入口见[版本更新](docs/UPDATES.md)。客户端只提示自己平台的新包，不因其他平台的 Release 误报；安装包不经过中心服务器。
 
-需要 Node.js 24.19+（24.x）和 npm。各子项目有独立锁文件，根目录不使用 npm workspaces。
+需要 Node.js 24.19+（24.x）和 pnpm 11.8（`npm install -g pnpm@11.8.0` 或 `corepack enable`）。server 与 web 各自维护一份 `pnpm-lock.yaml`，根目录不使用 pnpm workspace，与原有模块边界一致；client 的 Dart 依赖仍由 pub 管理，见 `client/pubspec.lock`。两个子项目各有一份 `pnpm-workspace.yaml`，只承载依赖构建批准（`allowBuilds`，目前为 esbuild），不声明 `packages`，因此不构成 workspace。
 
 ```sh
-npm run setup
-npm run build
-npm test
-npm run dev
+pnpm run setup   # server + web 各执行 pnpm install --frozen-lockfile
+pnpm run build
+pnpm test
+pnpm run dev
 ```
 
-`npm run dev` 同时启动中心与 Web 开发服务，Ctrl+C 关闭本次启动的两个进程树。在原生客户端填写中心地址及至少十位组密码，Web 使用页面所在中心；相同密码直接加入同组，其他组不可见。
+`pnpm run dev` 同时启动中心与 Web 开发服务，Ctrl+C 关闭本次启动的两个进程树。在原生客户端填写中心地址及至少十位组密码，Web 使用页面所在中心；相同密码直接加入同组，其他组不可见。
+
+### 五端开发与测试
+
+中心与 Web 在本机即可开发和验证；原生客户端共用一份 Flutter 代码，但需要在对应平台主机上构建，系统能力（拖放、托盘、悬浮坞、分享扩展）只能在目标平台检查。
+
+| 目标 | 开发运行 | 自动检查 | 前置条件 |
+| --- | --- | --- | --- |
+| 中心 | `pnpm run dev`（热重载）或 `pnpm start`（用已编译产物） | `pnpm test` 中的 server 部分 | Node 24.19+、pnpm 11.8 |
+| Web | `pnpm run dev` | `pnpm test` 中的 web 部分 | 同上；真实浏览器行为另按[实机测试](docs/QUICK_TEST.md) |
+| Windows 客户端 | `flutter run -d windows` | `cd client && flutter test` | **Windows 主机** + Visual Studio C++ 工具链 + Flutter |
+| Android 客户端 | `flutter run -d <设备>` | `cd client && flutter test` | Android SDK + Flutter + 已连接设备 |
+| iOS / iPadOS 客户端 | `flutter build ios --debug --no-codesign`（编译检查） | `cd client && flutter test` | **macOS 主机** + Xcode + CocoaPods；可安装 IPA 走[手动工作流](docs/IPAD.md) |
+
+`pnpm test` 只覆盖中心与 Web。原生测试集中在 `client/test`，需要单独执行 `flutter test`；`scripts/` 下的发布与构建脚本（`Release-Local.ps1`、`build-android*.mjs`、`Publish-GitHubRelease.ps1`）按 Windows 主机编写，在其它系统上请直接使用 `flutter` 命令。macOS 与 Linux 只作为构建 iOS/iPadOS 包的主机环境，不在正式支持平台范围内。
 
 组密码用于入组，已有设备凭据可直接恢复登录。新登记不再接受引导码或邀请码；旧设备无需重新配对，文件与历史保留。设备地址仅保存在中心进程内，不作为永久设备清单。
 
 Flutter SDK 使用现有的 `E:\Programs\flutter`，Android SDK 为 `F:\Android\Sdk`。原生客户端的具体运行与构建说明见 `client/README.md`。
 
-允许构建和运行后，`npm start` 使用已编译中心；`npm run client:windows` 启动已构建的 Windows Debug，`npm run client:windows -- --release` 明确选择 Release。启动器不自动构建，也不悄悄改用另一配置；当前运行的旧版窗口不会因源码变化自动升级。
+允许构建和运行后，`pnpm start` 使用已编译中心；`pnpm run client:windows` 启动已构建的 Windows Debug，`pnpm run client:windows -- --release` 明确选择 Release。启动器不自动构建，也不悄悄改用另一配置；当前运行的旧版窗口不会因源码变化自动升级。
 
 根入口统一使用 `artifacts/local-center/` 保存本地中心数据，`artifacts/native-state/` 保存客户端状态与接收文件，临时文件留在 `artifacts/tmp/`。显式设置的部署目录仍优先，不改全局环境。直接在 `server/` 启动则沿用该模块的目录约定。
 
