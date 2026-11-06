@@ -8,9 +8,13 @@ on:
         description: Compile the iOS targets without packaging or publishing an IPA
         type: boolean
         default: false
+      publish_release:
+        description: Also publish the verified IPA to GitHub Releases and enable iOS update notices
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ios-unsigned-${{ github.ref }}
@@ -51,21 +55,52 @@ jobs:
       - name: Package unsigned IPA
         if: ${{ !inputs.compile_only }}
         run: bash scripts/package-ios-unsigned.sh
+      - name: Verify the IPA and share extension
+        if: ${{ !inputs.compile_only }}
+        run: |
+          python3 scripts/inspect-ipa-version.py --verify-share-package artifacts/releases/GlobalSend-iPad-unsigned.ipa > artifacts/releases/ios-package-version.json
+          python3 scripts/verify-no-fonts.py artifacts/releases/GlobalSend-iPad-unsigned.ipa
       - name: Downloadable IPA
         if: ${{ !inputs.compile_only }}
         uses: actions/upload-artifact@v4
         with:
           name: GlobalSend-iPad-unsigned-${{ github.run_number }}
-          path: artifacts/releases/GlobalSend-iPad-unsigned.ipa
+          path: |
+            artifacts/releases/GlobalSend-iPad-unsigned.ipa
+            artifacts/releases/ios-package-version.json
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-      - name: Publish the iPhone / iPad update lane
+      - name: Build summary
         if: ${{ !inputs.compile_only }}
+        run: |
+          {
+            echo '## GlobalSend iPad'
+            echo 'Download **GlobalSend-iPad-unsigned** from the artifacts below.'
+            echo 'This is an **unsigned physical-device IPA**, not a Simulator build.'
+            echo 'Extract the artifact ZIP, then sign the IPA with your own tool before installing.'
+            echo 'No Apple signing secrets or TestFlight upload are used by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Compile-only summary
+        if: ${{ inputs.compile_only }}
+        run: echo 'iOS host and share extension compiled. No IPA packaged or published.' >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: build
+    if: ${{ inputs.publish_release && !inputs.compile_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: GlobalSend-iPad-unsigned-${{ github.run_number }}
+          path: artifacts/releases
+      - name: Publish the iPhone / iPad update lane
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          python3 scripts/inspect-ipa-version.py artifacts/releases/GlobalSend-iPad-unsigned.ipa > artifacts/releases/ios-package-version.json
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -88,16 +123,3 @@ jobs:
             exit 1
           fi
           gh release upload "$tag" artifacts/releases/GlobalSend-iPad-unsigned.ipa artifacts/releases/globalsend-update-ios.json --clobber
-      - name: Build summary
-        if: ${{ !inputs.compile_only }}
-        run: |
-          {
-            echo '## GlobalSend iPad'
-            echo 'Download **GlobalSend-iPad-unsigned** from the artifacts below.'
-            echo 'This is an **unsigned physical-device IPA**, not a Simulator build.'
-            echo 'Extract the artifact ZIP, then sign the IPA with your own tool before installing.'
-            echo 'No Apple signing secrets or TestFlight upload are used by this workflow.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Compile-only summary
-        if: ${{ inputs.compile_only }}
-        run: echo 'iOS host and share extension compiled. No IPA packaged or published.' >> "$GITHUB_STEP_SUMMARY"

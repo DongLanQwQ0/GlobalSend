@@ -241,6 +241,8 @@ class AndroidRtcConnection implements RtcDataConnection {
   static final Map<String, AndroidRtcConnection> _connections = {};
   final String sessionId;
   bool _closed = false;
+  String? _failure;
+  String? get failure => _failure;
   _AndroidChannel? _dataChannel;
   final List<Map<String, dynamic>> _earlyEvents = [];
   void Function(RTCIceCandidate)? _candidate;
@@ -338,6 +340,9 @@ class AndroidRtcConnection implements RtcDataConnection {
           ),
         );
       case 'connection':
+        if (event['error'] case final String cause when cause.isNotEmpty) {
+          _failure = cause;
+        }
         if (_state == null) {
           _earlyEvents.add(event);
           return;

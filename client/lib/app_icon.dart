@@ -23,7 +23,7 @@ class AppIcon extends Icon {
   });
 
   static bool supports(IconData value) =>
-      appIconPaths.containsKey(value.codePoint);
+      value == Icons.search || appIconPaths.containsKey(value.codePoint);
 
   @override
   Widget build(BuildContext context) {
@@ -104,7 +104,14 @@ class _VectorIconPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final outline = path();
+    // Lucide Search, shared with the history toolbar on Web.
+    final search = codePoint == Icons.search.codePoint;
+    final outline = search
+        ? (Path()
+            ..addOval(Rect.fromCircle(center: const Offset(11, 11), radius: 8))
+            ..moveTo(21, 21)
+            ..lineTo(16.65, 16.65))
+        : path();
     if (outline == null) return;
     canvas.save();
     // Tight, non-square parents must not stretch a gear or a chain. Center the
@@ -129,6 +136,9 @@ class _VectorIconPainter extends CustomPainter {
       outline,
       Paint()
         ..color = color
+        ..style = search ? PaintingStyle.stroke : PaintingStyle.fill
+        ..strokeWidth = 1.65
+        ..strokeCap = StrokeCap.round
         ..isAntiAlias = true,
     );
     canvas.restore();

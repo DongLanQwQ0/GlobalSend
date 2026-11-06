@@ -21,6 +21,7 @@ class NativeQueueDropHost extends StatefulWidget {
     this.sendNavigationEnabled = false,
     this.deviceTargets = const {},
     this.excludedTargets = const [],
+    this.stagedCards,
     this.serverKey = '',
   });
   final GlobalKey target;
@@ -30,6 +31,7 @@ class NativeQueueDropHost extends StatefulWidget {
   final bool sendNavigationEnabled;
   final Map<String, GlobalKey> deviceTargets;
   final List<GlobalKey> excludedTargets;
+  final Map<int, GlobalKey> Function()? stagedCards;
   final String serverKey;
   @override
   State<NativeQueueDropHost> createState() => _NativeQueueDropHostState();
@@ -128,7 +130,22 @@ class _NativeQueueDropHostState extends State<NativeQueueDropHost>
                 'bottom': bounds.bottom,
               },
       ];
-      final deviceSignature = '${widget.serverKey}:$devices:$exclusions';
+      final stagedCards = <Map<String, Object>>[
+        if (Platform.isAndroid && area != null)
+          for (final entry
+              in (widget.stagedCards?.call() ?? const <int, GlobalKey>{})
+                  .entries)
+            if (boundsFor(entry.value) case final Rect bounds)
+              {
+                'id': entry.key,
+                'left': bounds.left,
+                'top': bounds.top,
+                'right': bounds.right,
+                'bottom': bounds.bottom,
+              },
+      ];
+      final deviceSignature =
+          '${widget.serverKey}:$devices:$exclusions:$stagedCards';
       final serverKey = widget.enabled ? widget.serverKey : '';
       if (reported &&
           last == area &&
@@ -148,6 +165,7 @@ class _NativeQueueDropHostState extends State<NativeQueueDropHost>
             surface: surface,
             sendNavigation: navigation,
             devices: devices,
+            stagedCards: stagedCards,
             serverKey: serverKey,
           ),
         );

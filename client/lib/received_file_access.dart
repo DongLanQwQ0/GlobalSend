@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:open_filex/open_filex.dart';
 
 import 'receive_destination.dart';
@@ -42,6 +43,11 @@ class ReceivedFileAccess {
   );
 
   bool get descriptorOnly => file is _DescriptorFile;
+
+  Future<String> offerSha256() async => Platform.isAndroid
+      ? Digest(await ReceiveDestination.sha256ReadSource(_handle, file.path))
+            .toString()
+      : (await sha256.bind(file.openRead()).first).toString();
 
   static Future<bool> exists(String location) async => isContentUri(location)
       ? (await ReceiveDestination.stat(location)).exists

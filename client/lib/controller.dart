@@ -17,6 +17,8 @@ import 'content_groups.dart';
 import 'network_bridge.dart';
 import 'network_proxy.dart';
 import 'peer.dart';
+import 'peer_receive.dart' show PeerPartialRecoveryException;
+import 'windows_receive_sha256.dart';
 import 'vault.dart';
 import 'credential_recovery.dart';
 import 'directories.dart';
@@ -46,6 +48,7 @@ import 'url_intents.dart';
 import 'file_share.dart';
 import 'copied_files.dart';
 import 'clipboard_slot.dart';
+import 'desktop_commands.dart';
 
 String newId() {
   final r = Random.secure();
@@ -103,6 +106,7 @@ class TransferGate {
 typedef _PreparedRoutes = ({
   Map<String, dynamic>? senderPeer,
   Map<String, dynamic>? sourceRtc,
+  String? sourcePlatform,
   List<String> advertised,
   ({List<String> lan, List<String> public}) stages,
   RouteProbes probes,
@@ -111,6 +115,50 @@ typedef _PreparedRoutes = ({
 });
 
 class SendController extends ChangeNotifier {
+  // Opt in only from the Windows engine host; headless controller callers do
+  // not acquire a new native-plugin precondition merely by initializing.
+  final bool enableDesktopCommands;
+  late final desktopCommands = DesktopCommands(
+    snapshot: () => {
+      'connected': connected,
+      'server': profile?.baseUrl,
+      'deviceId': profile?.deviceId,
+      'name': profile?.name,
+      'entries': [
+        for (final entry in dock.where(
+          (entry) => entry.outgoing && !entry.autoClipboard,
+        ))
+          {
+            'id': entry.id,
+            'transferId': entry.transferId,
+            'fileId': entry.fileId,
+            'name': entry.title,
+            'kind': entry.kind,
+            'deviceId': entry.targetDeviceId,
+            'size': entry.size,
+            'status': entry.status,
+            'progress': entry.progress,
+            'bytesPerSecond': entry.transferBytesPerSecond,
+            'route': entry.route,
+            if (entry.error.isNotEmpty) 'error': entry.error,
+          },
+      ],
+    },
+    devices: () => sendablePeers,
+    refresh: refreshGroupDevices,
+    send: (target, paths, text, accepted) async {
+      if (text != null && text.trim().isNotEmpty) {
+        await _sendText(target, text, onAccepted: (id) => accepted('text', id));
+      }
+      if (paths.isNotEmpty) {
+        await _offerFiles(
+          target,
+          paths,
+          onOffered: (id) => accepted('file', id),
+        );
+      }
+    },
+  );
   late final CopiedFilesClient copiedFiles = CopiedFilesClient(
     newId: newId,
     sendFiles: (target, paths) => offer(target, paths),
@@ -377,6 +425,7 @@ class SendController extends ChangeNotifier {
       : 'other';
 
   SendController({
+    this.enableDesktopCommands = false,
     Future<Directory> Function()? documentsDirectory,
     Future<Directory> Function()? stateDirectory,
     PlatformVault? vault,
@@ -443,6 +492,7 @@ class SendController extends ChangeNotifier {
   Timer? rtcHeartbeat;
   final Map<String, String> _sendingRtc = {}, _startedRtc = {};
   final Map<String, Map<String, dynamic>> _pendingRtc = {};
+  final Set<String> _relayAfterDirect = {};
   final Map<String, String> _rtcNetwork = {};
   Timer? peerHeartbeat;
   final Map<String, Timer> routeTimers = {};
@@ -597,15 +647,19 @@ class SendController extends ChangeNotifier {
       final file = File('${root!.path}/device-usage.json');
       if (await file.exists()) {
         deviceUsage.restore(
-          Map<String, dynamic>.from(jsonDecode(await file.readAsString()) as Map),
+          Map<String, dynamic>.from(
+            jsonDecode(await file.readAsString()) as Map,
+          ),
         );
       }
     }());
   }
+
   Future<void> _recordDeviceUse(String target, String operation) async {
     await _loadDeviceUsage();
     deviceUsage.record(target, operation);
   }
+
   int Function() discoveryNow = () => DateTime.now().millisecondsSinceEpoch;
   Timer? _deviceGraceTimer;
   int _deviceRevision = 0;
@@ -638,10 +692,10 @@ class SendController extends ChangeNotifier {
   List<Map<String, dynamic>> get onlinePeers => connected
       ? deviceUsage.rank(
           devices.where(
-              (device) =>
-                  device['deviceId'] != profile?.deviceId &&
-                  device['revoked'] != true &&
-                  device['online'] == true,
+            (device) =>
+                device['deviceId'] != profile?.deviceId &&
+                device['revoked'] != true &&
+                device['online'] == true,
           ),
         )
       : [];
@@ -695,18 +749,40 @@ class SendController extends ChangeNotifier {
   }
 
   Future<void> stageHistoryEntry(DockEntry entry) => requeueDockEntry(entry);
-  Future<void> removeHistoryEntries(Iterable<DockEntry> entries) async {
+  Future<void> removeHistoryEntries(
+    Iterable<DockEntry> entries, {
+    bool Function(DockEntry)? matches,
+  }) async {
     final keys = entries
         .map((entry) => '${entry.outgoing}:${contentKey(entry)}')
         .toSet();
-    for (final entry
-        in historyDock
-            .where(
-              (entry) =>
-                  keys.contains('${entry.outgoing}:${contentKey(entry)}'),
-            )
-            .toList()) {
-      await deleteDockEntry(entry);
+    final history = historyDock;
+    final removed = collapseFolderCards(history)
+        .where(
+          (entry) =>
+              keys.contains('${entry.outgoing}:${contentKey(entry)}') &&
+              (matches == null || matches(entry)),
+        )
+        .expand((entry) => folderCardMembers(entry, history))
+        .toSet();
+    final retainedPaths = {
+      for (final entry in history)
+        if (!entry.outgoing &&
+            entry.localPath.isNotEmpty &&
+            !removed.contains(entry))
+          ReceivedFileAccess.canonical(entry.localPath),
+    };
+    final ordered = removed.toList()
+      ..sort((a, b) => b.relativePath.length.compareTo(a.relativePath.length));
+    for (final entry in ordered) {
+      await _deleteSingleDockEntry(
+        entry,
+        keepSharedCopy:
+            entry.localPath.isNotEmpty &&
+            retainedPaths.contains(
+              ReceivedFileAccess.canonical(entry.localPath),
+            ),
+      );
     }
   }
 
@@ -738,6 +814,7 @@ class SendController extends ChangeNotifier {
   Map<String, String> sources = {};
   Map<String, String> pendingTexts = {};
   Future<void> _saveTail = Future<void>.value();
+  Future<void>? _queuedTransferSave;
   Future<void> get persistenceIdle => _saveTail;
   final Set<String> busyFiles = {};
   final TransferGate _gate = TransferGate();
@@ -745,6 +822,7 @@ class SendController extends ChangeNotifier {
   final Map<String, Set<Completer<void>>> _sourceGateWaits = {};
   final Set<String> _receiveErrorReports = {};
   int get transferConcurrency => profile?.transferConcurrency ?? 4;
+  int get transferConnections => profile?.transferConnections ?? 1;
   String connection = '未连接', message = '';
   String rememberedCenter = '';
   bool busy = false, connected = false;
@@ -758,6 +836,11 @@ class SendController extends ChangeNotifier {
   bool _startTransportsOnConnect = false;
   Timer? _restoreTimer;
   final Set<String> _acceptingTransfers = {};
+  final Map<String, int> _transferRefreshes = {};
+  Set<String>? _transfersSignaledDuringSnapshot;
+  static const _transferControlTimeout = Duration(seconds: 3);
+  static const _verifiedRtcFileHandshake = Duration(seconds: 5);
+  static const _bulkHttpsMinimumBytes = 32 * 1024 * 1024;
   Directory? root;
   SavedFilesStore? _savedFilesStore;
   Future<SavedFilesStore?>? _savedFilesLoading;
@@ -1422,6 +1505,7 @@ class SendController extends ChangeNotifier {
   }
 
   void changed() {
+    if (enableDesktopCommands) desktopCommands.notifyChanged();
     updates.activityChanged();
     for (final entry in pendingReceipts.entries.toList()) {
       pendingReceipts[entry.key] = _folderPresentation(entry.value);
@@ -1745,6 +1829,7 @@ class SendController extends ChangeNotifier {
       changed();
     } finally {
       backgroundReceive.ready();
+      if (enableDesktopCommands && !disposed) await desktopCommands.start();
     }
   }
 
@@ -2278,6 +2363,7 @@ class SendController extends ChangeNotifier {
         (id) => paths[id],
         addressReader: localIpAddresses,
         pushEnabled: info['features']?['directPush'] == true,
+        parallelPushEnabled: info['features']?['parallelPush'] == true,
         httpsProbeEnabled: info['features']?['httpsPeerProbes'] == true,
         cellularPushAllowed: () => Platform.isAndroid && cellularUploads,
         acquireSource: (fileId) async {
@@ -2395,6 +2481,7 @@ class SendController extends ChangeNotifier {
           'cellular' => '蜂窝',
           'wifi' => 'Wi-Fi',
           'ethernet' => '以太网',
+          'local' => '本机',
           'vpn' => 'VPN',
           _ => '网络未识别',
         };
@@ -2596,6 +2683,27 @@ class SendController extends ChangeNotifier {
       await rtcProbes?.signalChanged();
       return;
     }
+    if (message['type'] == 'rtc.changed') {
+      if (message['transferId'] case final String transferId) {
+        if (message['fileId'] case final String fileId) {
+          if (message['attemptId'] case final String attemptId) {
+            rtc?.signalChanged(transferId, fileId, attemptId);
+          }
+        }
+      }
+      return;
+    }
+    if (message['type'] == 'event' && message['event'] is Map) {
+      final event = message['event'] as Map;
+      final type = event['type'];
+      final id = (event['payload'] as Map?)?['transferId'];
+      if ((type == 'transfer.offered' || type == 'transfer.updated') &&
+          id is String &&
+          id.isNotEmpty) {
+        await _refreshSignaledTransfer(id);
+        return;
+      }
+    }
     if (message['type'] == 'presence') {
       _deviceRevision++;
       final device = devices
@@ -2666,6 +2774,48 @@ class SendController extends ChangeNotifier {
         connection = '授权失效 · 请重新输入组密码';
       }
       changed();
+    }
+  }
+
+  Future<void> _refreshSignaledTransfer(String id) async {
+    final a = api, p = profile, epoch = generation;
+    if (a == null || p == null || disposed) return;
+    _transfersSignaledDuringSnapshot?.add(id);
+    final key = '$epoch:$id';
+    final queued = _transferRefreshes[key];
+    _transferRefreshes[key] = (queued ?? 0) + 1;
+    if (queued != null) return;
+    try {
+      try {
+        while (true) {
+          final revision = _transferRefreshes[key];
+          final result = await ConnectionWindow(_transferControlTimeout)
+              .run(() => a.call('GET', '/transfers/$id'));
+          _requireSession(epoch, a, p);
+          // A newer notification arrived while the response was in flight.
+          if (_transferRefreshes[key] != revision) continue;
+          final transfer = Map<String, dynamic>.from(result['transfer']);
+          updateTransfer(transfer);
+          changed();
+          await _autoAcceptTransfer(transfer, a, p);
+          _requireSession(epoch, a, p);
+          changed();
+          if (_transferRefreshes[key] == revision) break;
+        }
+      } finally {
+        _transferRefreshes.remove(key);
+      }
+      // A batch emits multiple updates per file. Snapshot the latest state
+      // once after the existing write, rather than enqueueing each snapshot.
+      await (_queuedTransferSave ??= _saveTail
+          .catchError((Object _) {})
+          .then<void>((_) async {
+            _queuedTransferSave = null;
+            if (!disposed) await save();
+          }));
+    } catch (_) {
+      // The full replay also covers a missed or timed-out notification.
+      if (!disposed && epoch == generation) unawaited(safeReconcile());
     }
   }
 
@@ -2794,70 +2944,33 @@ class SendController extends ChangeNotifier {
           applyTextDocument(Map<String, dynamic>.from(value));
         }
       }
-      final transfers = await a.call('GET', '/transfers');
-      if (epoch != generation) return;
-      for (final t in transfers['transfers']) {
-        updateTransfer(Map<String, dynamic>.from(t));
-      }
-      if (p.autoReceive) {
-        for (final transfer in transfers['transfers']) {
-          _requireSession(epoch, a, p);
-          final t = Map<String, dynamic>.from(transfer);
-          if (t['targetDeviceId'] != p.deviceId ||
-              t['sourceDeviceId'] == p.deviceId) {
-            continue;
-          }
-          final ids = (t['files'] as List)
-              .where((f) => f['status'] == 'offered')
-              .map((f) => f['fileId'] as String)
-              .toList();
-          if (ids.isEmpty) continue;
-          final batch = dock
-              .where(
-                (d) =>
-                    d.transferId == t['transferId'] && ids.contains(d.fileId),
-              )
-              .toList();
-          if (batch.any((d) => d.locallyCanceled || d.locallyPaused)) continue;
-          if (p.receiveRoutePreference == 'relay') {
-            for (final item in batch.where(
-              (d) => !d.relayConfirmationPending,
-            )) {
-              item.relayConfirmed = true;
-            }
-          }
-          // /accept rejects omitted offered items. Keep a mixed relay batch
-          // intact until the receiver explicitly accepts it.
-          final needsConsent = batch.any(
-            (d) =>
-                d.relayConfirmationPending ||
-                (d.offerRoutePreference == 'relay' ||
-                        info['features']?['direct'] != true && rtc == null) &&
-                    needsRelayConsent(d),
-          );
-          if (needsConsent) {
-            for (final item in batch) {
-              markRelayPending(item, beforeAccept: true);
-            }
-            continue;
-          }
-          final entry = dock
-              .where(
-                (d) =>
-                    d.transferId == t['transferId'] && ids.contains(d.fileId),
-              )
-              .firstOrNull;
-          if (entry != null &&
-              entry.autoClipboard &&
-              !clipboardReceiveEnabled) {
-            await api!.call('POST', '/transfers/${entry.transferId}/accept', {
-              'fileIds': <String>[],
-            });
-          } else if (entry != null &&
-              (entry.autoClipboard ? clipboardReceiveEnabled : p.autoReceive)) {
-            await acceptSelected(entry, ids, reconcileAfter: false);
-          }
+      final prefix = '$epoch:';
+      final signaled = {
+        for (final key in _transferRefreshes.keys)
+          if (key.startsWith(prefix)) key.substring(prefix.length),
+      };
+      _transfersSignaledDuringSnapshot = signaled;
+      List<Map<String, dynamic>> transfers;
+      try {
+        final snapshot = await a.call('GET', '/transfers');
+        _requireSession(epoch, a, p);
+        transfers = (snapshot['transfers'] as List)
+            .map((t) => Map<String, dynamic>.from(t))
+            .where((t) {
+              final id = t['transferId'];
+              return !signaled.contains(id) &&
+                  !_transferRefreshes.containsKey('$epoch:$id');
+            })
+            .toList();
+        for (final transfer in transfers) {
+          updateTransfer(transfer);
         }
+      } finally {
+        _transfersSignaledDuringSnapshot = null;
+      }
+      for (final transfer in transfers) {
+        _requireSession(epoch, a, p);
+        await _autoAcceptTransfer(transfer, a, p);
       }
       await save();
       changed();
@@ -2869,6 +2982,63 @@ class SendController extends ChangeNotifier {
           unawaited(safeReconcile());
         }
       }
+    }
+  }
+
+  Future<void> _autoAcceptTransfer(
+    Map<String, dynamic> transfer,
+    CenterApi center,
+    ServerProfile owner,
+  ) async {
+    if (!owner.autoReceive ||
+        transfer['targetDeviceId'] != owner.deviceId ||
+        transfer['sourceDeviceId'] == owner.deviceId)
+      return;
+    final ids = (transfer['files'] as List)
+        .where((file) => file['status'] == 'offered')
+        .map((file) => file['fileId'] as String)
+        .toSet();
+    if (ids.isEmpty) return;
+    final batch = dock
+        .where(
+          (item) =>
+              item.transferId == transfer['transferId'] &&
+              ids.contains(item.fileId) &&
+              (item.status == 'offered' || item.relayPendingBeforeAccept),
+        )
+        .toList();
+    if (batch.isEmpty ||
+        batch.any((item) => item.locallyCanceled || item.locallyPaused))
+      return;
+    if (owner.receiveRoutePreference == 'relay') {
+      for (final item in batch.where(
+        (item) => !item.relayConfirmationPending,
+      )) {
+        item.relayConfirmed = true;
+      }
+    }
+    // /accept rejects omitted offers; keep mixed batches intact for consent.
+    if (batch.any(
+      (item) =>
+          item.relayConfirmationPending ||
+          (item.offerRoutePreference == 'relay' ||
+                  info['features']?['direct'] != true && rtc == null) &&
+              needsRelayConsent(item),
+    )) {
+      for (final item in batch) {
+        markRelayPending(item, beforeAccept: true);
+      }
+      return;
+    }
+    final entry = batch.first;
+    if (entry.autoClipboard && !clipboardReceiveEnabled) {
+      await ConnectionWindow(_transferControlTimeout).run(
+        () => center.call('POST', '/transfers/${entry.transferId}/accept', {
+          'fileIds': <String>[],
+        }),
+      );
+    } else {
+      await acceptSelected(entry, ids.toList(), reconcileAfter: false);
     }
   }
 
@@ -3072,6 +3242,12 @@ class SendController extends ChangeNotifier {
         _startedPushes.remove(id);
       }
       final activePush = _sendingPush[id];
+      if (outgoing &&
+          (activeRtc != null || activePush != null) &&
+          f['transport'] == 'relay' &&
+          ['accepted', 'uploading'].contains(f['status'])) {
+        _relayAfterDirect.add(id);
+      }
       if (activePush != null &&
           (requestedPush is! Map ||
               requestedPush['attemptId'] != activePush ||
@@ -3121,8 +3297,12 @@ class SendController extends ChangeNotifier {
           !busyFiles.contains(id) &&
           (f['status'] == 'ready' ||
               item.isDirectory && f['status'] == 'accepted' ||
-              f['status'] == 'accepted' && f['transport'] != 'relay')) {
-        unawaited(receive(item, preferDirect: f['status'] == 'accepted'));
+              f['status'] == 'accepted' && f['transport'] != 'relay' ||
+              f['transport'] == 'relay' &&
+                  item.size > 0 &&
+                  info['features']?['relayStreaming'] == true &&
+                  ['accepted', 'uploading'].contains(f['status']))) {
+        unawaited(receive(item));
       }
     }
     if (!outgoing) {
@@ -3949,18 +4129,26 @@ class SendController extends ChangeNotifier {
     for (final member in members) await _deleteSingleDockEntry(member);
   }
 
-  Future<void> _deleteSingleDockEntry(DockEntry item) async {
+  Future<void> _deleteSingleDockEntry(
+    DockEntry item, {
+    bool? keepSharedCopy,
+  }) async {
+    final keep = keepSharedCopy == true;
+    final ownedPath = keepSharedCopy == false && item.localPath.isNotEmpty
+        ? ReceivedFileAccess.canonical(item.localPath)
+        : null;
     if (isLocalHistory(item)) {
       final record = _localHistory?.recordFor(item);
       if (record == null) return;
-      if (!item.outgoing && item.kind == 'file') {
+      if (!keep && !item.outgoing && item.kind == 'file') {
         final store = await _savedStore();
         final ids = savedFiles
             .where(
               (file) =>
-                  file.profileKey == record.profileKey &&
-                  file.transferId == item.transferId &&
-                  file.fileId == item.fileId,
+                  file.path == ownedPath ||
+                  (file.profileKey == record.profileKey &&
+                      file.transferId == item.transferId &&
+                      file.fileId == item.fileId),
             )
             .map((file) => file.id);
         if (store != null) _forgetSavedCopies(await store.remove(ids.toList()));
@@ -3987,15 +4175,19 @@ class SendController extends ChangeNotifier {
         // an unavailable center cannot make a dismissed card reappear.
       }
     }
-    if (!item.outgoing && item.kind == 'file' && item.localPath.isNotEmpty) {
+    if (!keep &&
+        !item.outgoing &&
+        item.kind == 'file' &&
+        item.localPath.isNotEmpty) {
       final store = await _savedStore();
       if (store != null) {
         final registered = savedFiles
             .where(
               (file) =>
-                  file.fileId == item.fileId &&
-                  file.transferId == item.transferId &&
-                  file.profileKey == profile?.key,
+                  file.path == ownedPath ||
+                  (file.fileId == item.fileId &&
+                      file.transferId == item.transferId &&
+                      file.profileKey == profile?.key),
             )
             .map((file) => file.id)
             .toList();
@@ -4283,7 +4475,11 @@ class SendController extends ChangeNotifier {
     }
   }
 
-  Future<void> dragOut(DockEntry item, {String pointerKind = 'auto'}) async {
+  Future<void> dragOut(
+    DockEntry item, {
+    String pointerKind = 'auto',
+    int? stagedCardId,
+  }) async {
     clipboard.retain(item.localPath);
     try {
       if (Platform.isWindows) {
@@ -4301,6 +4497,7 @@ class SendController extends ChangeNotifier {
               ? item.localPath
               : null,
           label: item.title,
+          stagedCardId: stagedCardId,
         );
       }
     } finally {
@@ -4416,7 +4613,13 @@ class SendController extends ChangeNotifier {
     changed();
   }
 
-  Future<void> sendText(String target, String text) async {
+  Future<void> sendText(String target, String text) => _sendText(target, text);
+
+  Future<void> _sendText(
+    String target,
+    String text, {
+    void Function(String)? onAccepted,
+  }) async {
     if (text.trim().isEmpty) return;
     final epoch = generation, a = api!, p = profile!;
     final key = sha256.convert(utf8.encode('$target\n$text')).toString();
@@ -4429,6 +4632,7 @@ class SendController extends ChangeNotifier {
       'text': text,
     });
     _requireSession(epoch, a, p);
+    onAccepted?.call(eventId);
     pendingTexts.remove(key);
     await _recordDeviceUse(target, 'text:$eventId');
     _recordShareInteraction(target);
@@ -4463,6 +4667,7 @@ class SendController extends ChangeNotifier {
     bool clipboardImage = false,
     Map<String, dynamic>? copiedFileContext,
     bool Function()? beforePublish,
+    void Function(String)? onOffered,
   }) async {
     final epoch = generation, a = api!, p = profile!;
     final maxFileSize = info['limits']['maxFileSize'] as int;
@@ -4529,7 +4734,7 @@ class SendController extends ChangeNotifier {
         final size = await file.length();
         _requireSession(epoch, a, p);
         if (size > maxFileSize) throw const FormatException('文件超过中心限制');
-        final hash = await sha256.bind(file.openRead()).first;
+        final hash = await source.offerSha256();
         _requireSession(epoch, a, p);
         var name = entry.relativePath.isNotEmpty
             ? entry.name
@@ -4551,7 +4756,7 @@ class SendController extends ChangeNotifier {
           'name': name,
           'size': size,
           'mimeType': media?.$1 ?? 'application/octet-stream',
-          'sha256': hash.toString(),
+          'sha256': hash,
           if (entry.relativePath.isNotEmpty) 'relativePath': entry.relativePath,
           if (entry.relativePath.isNotEmpty) 'entryKind': 'file',
         });
@@ -4562,21 +4767,40 @@ class SendController extends ChangeNotifier {
     }
     _requireSession(epoch, a, p);
     if (beforePublish != null && !beforePublish()) return;
-    final j = await a.call('POST', '/transfers', {
-      'transferId': newId(),
-      'targetDeviceId': target,
-      'files': files,
-      if (clipboardImage) 'clipboard': true,
-      if (copiedFileContext != null) 'copiedFile': copiedFileContext,
-      if (routePreference != 'auto') 'routePreference': routePreference,
-    });
-    _requireSession(epoch, a, p);
+    final transferId = newId();
+    // The receiver can accept via WebSocket before the offer response arrives.
     sources.addAll(pending);
+    bool alreadyObserved() => dock.any((item) => item.transferId == transferId);
+    Map<String, dynamic>? response;
+    try {
+      response = await a.call('POST', '/transfers', {
+        'transferId': transferId,
+        'targetDeviceId': target,
+        'files': files,
+        if (clipboardImage) 'clipboard': true,
+        if (copiedFileContext != null) 'copiedFile': copiedFileContext,
+        if (routePreference != 'auto') 'routePreference': routePreference,
+      });
+    } catch (_) {
+      if (epoch != generation || !alreadyObserved()) {
+        if (epoch == generation) {
+          for (final id in pending.keys) {
+            sources.remove(id);
+          }
+        }
+        rethrow;
+      }
+    }
+    _requireSession(epoch, a, p);
+    // An older POST snapshot must not overwrite an acceptance or receipt.
+    if (response != null && !alreadyObserved()) {
+      updateTransfer(response['transfer']);
+    }
     if (!clipboardImage && copiedFileContext == null) {
-      await _recordDeviceUse(target, 'transfer:${j['transfer']['transferId']}');
+      await _recordDeviceUse(target, 'transfer:$transferId');
     }
     _recordShareInteraction(target);
-    updateTransfer(j['transfer']);
+    onOffered?.call(transferId);
     await save();
     changed();
   }
@@ -4711,6 +4935,13 @@ class SendController extends ChangeNotifier {
     if (value < 1 || value > 16) throw const FormatException('并发数需为 1–16');
     profile!.transferConcurrency = value;
     _gate.limit = value;
+    await save();
+    changed();
+  }
+
+  Future<void> setTransferConnections(int value) async {
+    if (value < 1 || value > 16) throw const FormatException('连接数需为 1–16');
+    profile!.transferConnections = value;
     await save();
     changed();
   }
@@ -5019,10 +5250,10 @@ class SendController extends ChangeNotifier {
       if (reconcileAfter) await reconcile();
       return;
     }
-    final result = await a.call(
-      'POST',
-      '/transfers/${item.transferId}/accept',
-      {'fileIds': ids},
+    final result = await ConnectionWindow(_transferControlTimeout).run(
+      () => a.call('POST', '/transfers/${item.transferId}/accept', {
+        'fileIds': ids,
+      }),
     );
     _requireSession(epoch, a, p);
     if (result['transfer'] != null) {
@@ -5278,7 +5509,7 @@ class SendController extends ChangeNotifier {
           await _sendRtcFile(item, Map<String, dynamic>.from(remote['rtc']));
         }
       } else {
-        await _receiveFile(item, preferDirect: remote['transport'] != 'relay');
+        await _receiveFile(item);
       }
     } on TransferStopped {
       rethrow;
@@ -5298,6 +5529,7 @@ class SendController extends ChangeNotifier {
     final previous = _fileOperations[item.fileId];
     if (previous != null) return previous.finished.future;
     if (busyFiles.contains(item.fileId)) return;
+    final epoch = generation;
     final operation = TransferOperation();
     _fileOperations[item.fileId] = operation;
     operation.onCancel(() async {
@@ -5314,7 +5546,9 @@ class SendController extends ChangeNotifier {
       /* Pause/cancel already owns the visible state. */
     } finally {
       await operation.dispose();
+      var relayAfterDirect = false;
       if (identical(_fileOperations[item.fileId], operation)) {
+        relayAfterDirect = _relayAfterDirect.remove(item.fileId);
         _fileOperations.remove(item.fileId);
         busyFiles.remove(item.fileId);
         _sendingPush.remove(item.fileId);
@@ -5328,6 +5562,19 @@ class SendController extends ChangeNotifier {
         item.status = 'failed';
       if (!operation.finished.isCompleted) operation.finished.complete();
       if (!disposed) {
+        final relayReadyWhileReceiving =
+            !item.outgoing &&
+            ['accepted', 'ready'].contains(item.status) &&
+            item.route == 'relay' &&
+            item.localPath.isEmpty;
+        if (epoch == generation &&
+            !item.locallyCanceled &&
+            !item.locallyPaused &&
+            (relayAfterDirect || relayReadyWhileReceiving)) {
+          // The receiver may pick relay while the source is closing direct,
+          // or finish uploading while an empty receive still owns the slot.
+          await _refreshSignaledTransfer(item.transferId);
+        }
         await save();
         changed();
       }
@@ -5343,23 +5590,16 @@ class SendController extends ChangeNotifier {
   ) => _runFileOperation(item, () => _sendPushFile(item, target, attempt));
   Future<void> _sendRtc(DockEntry item, Map<String, dynamic> attempt) =>
       _runFileOperation(item, () => _sendRtcFile(item, attempt));
-  Future<void> receive(
-    DockEntry item, {
-    bool preferDirect = false,
-    String? routeOverride,
-  }) => _folderAction(
-    item,
-    (member) => _runFileOperation(
-      member,
-      () => _receiveFile(
-        member,
-        preferDirect: preferDirect,
-        routeOverride: routeOverride,
-      ),
-    ),
-    eligible: (entry) => !folderMemberComplete(entry),
-    presentationOnly: true,
-  );
+  Future<void> receive(DockEntry item, {String? routeOverride}) =>
+      _folderAction(
+        item,
+        (member) => _runFileOperation(
+          member,
+          () => _receiveFile(member, routeOverride: routeOverride),
+        ),
+        eligible: (entry) => !folderMemberComplete(entry),
+        presentationOnly: true,
+      );
 
   Future<void> _uploadFile(DockEntry item) async {
     await _receiveDirectoryMigration?.future;
@@ -5378,7 +5618,8 @@ class SendController extends ChangeNotifier {
         return;
       final path = sources[item.fileId];
       if (path == null) throw const FileSystemException('原文件不可用，请重新选择发送');
-      final j = await a.call('GET', '/transfers/${item.transferId}');
+      final j = await ConnectionWindow(_transferControlTimeout)
+          .run(() => a.call('GET', '/transfers/${item.transferId}'));
       TransferOperation.current?.check();
       final remote = (j['transfer']['files'] as List).firstWhere(
         (f) => f['fileId'] == item.fileId,
@@ -5401,16 +5642,20 @@ class SendController extends ChangeNotifier {
               item.status != 'canceled' &&
               !item.locallyPaused) {
             final length = min(chunk, item.size - offset);
-            if (Platform.isAndroid && cellularUploads) {
+            final chunkPath = '${fileRoute(item)}/chunks?offset=$offset';
+            final chunkUrl = a.uri(chunkPath);
+            // An explicitly configured HTTP center uses the normal client.
+            // The network-bound native sender only accepts HTTPS endpoints.
+            if (Platform.isAndroid &&
+                cellularUploads &&
+                chunkUrl.scheme == 'https') {
               TransferOperation.current?.check();
               final nativeId = newId();
               nativeOperations[item.fileId] = nativeId;
               try {
                 await TransferOperation.current!.wait(
                   NetworkBridge.putFile(
-                    a
-                        .uri('${fileRoute(item)}/chunks?offset=$offset')
-                        .toString(),
+                    chunkUrl.toString(),
                     source.file.path,
                     cellular: true,
                     authorization: 'Bearer ${a.token}',
@@ -5428,7 +5673,7 @@ class SendController extends ChangeNotifier {
               if (bytes.length != length) {
                 throw const FileSystemException('原文件已改变');
               }
-              await a.upload('${fileRoute(item)}/chunks?offset=$offset', bytes);
+              await a.upload(chunkPath, bytes);
             }
             TransferOperation.current?.check();
             offset += length;
@@ -5640,12 +5885,6 @@ class SendController extends ChangeNotifier {
     } finally {
       _gate.leave();
       if (!disposed && epoch == generation) {
-        if (_sendingPush[item.fileId] == attemptId) {
-          _sendingPush.remove(item.fileId);
-        }
-        busyFiles.remove(item.fileId);
-        await save();
-        changed();
         _resumePendingRtc(item, attemptId);
         unawaited(safeReconcile());
       }
@@ -5755,12 +5994,6 @@ class SendController extends ChangeNotifier {
       await source?.close();
       _gate.leave();
       if (!disposed && epoch == generation) {
-        if (_sendingRtc[item.fileId] == attemptId) {
-          _sendingRtc.remove(item.fileId);
-        }
-        busyFiles.remove(item.fileId);
-        await save();
-        changed();
         _resumePendingRtc(item, attemptId);
       }
     }
@@ -5810,6 +6043,7 @@ class SendController extends ChangeNotifier {
             scope: _waitRtcReadiness(item.source, scope, deadline.remaining),
     };
     if (rtcChecks.isNotEmpty &&
+        !_rtcReady(item.source, rtcChecks.keys.first) &&
         rtcProbes?.active == true &&
         rtcProbes?.parallel == true) {
       // Legacy/background discovery eligibility is not a file prerequisite.
@@ -5841,6 +6075,7 @@ class SendController extends ChangeNotifier {
     return (
       senderPeer: senderPeer,
       sourceRtc: sourceRtc,
+      sourcePlatform: device?['platform'] as String?,
       advertised: advertised,
       stages: stages,
       probes: probes,
@@ -5849,17 +6084,20 @@ class SendController extends ChangeNotifier {
     );
   }
 
-  bool _rtcReady(String id, String phase) => reachability
-      .forDevice(id)
-      .any(
-        (check) =>
-            check.transport == 'rtc' &&
-            check.reachable &&
-            check.scope ==
-                (phase == 'lan'
-                    ? ReachabilityScope.lan
-                    : ReachabilityScope.public),
-      );
+  bool _rtcReady(String id, String phase) {
+    final scope = phase == 'lan'
+        ? ReachabilityScope.lan
+        : ReachabilityScope.public;
+    return reachability.hasRecentRtcFileHandshake(id, scope) ||
+        reachability
+            .forDevice(id)
+            .any(
+              (check) =>
+                  check.transport == 'rtc' &&
+                  check.reachable &&
+                  check.scope == scope,
+            );
+  }
 
   Future<bool?> _waitRtcReadiness(
     String id,
@@ -5886,7 +6124,7 @@ class SendController extends ChangeNotifier {
     }
   }
 
-  Future<void> _pullByStages(
+  Future<String?> _pullByStages(
     DockEntry item,
     File temporary,
     String hash,
@@ -5900,6 +6138,7 @@ class SendController extends ChangeNotifier {
     Future<_PreparedRoutes>? preparedRoutes,
   }) async {
     final failures = <String>[];
+    String? receivedDigest;
     final deadline = connectionDeadline ?? RouteDeadline();
     final phases = [if (mode != 'public') 'lan', if (mode != 'lan') 'public'];
     final plan =
@@ -6060,7 +6299,7 @@ class SendController extends ChangeNotifier {
           window?.check();
           _requireSession(epoch, a, p);
           if (item.status == 'canceled') throw StateError('传输已取消');
-          await PeerTransport.pull(
+          receivedDigest = await PeerTransport.pull(
             candidate,
             grant['certificateSha256'],
             grant['ticket'],
@@ -6071,6 +6310,7 @@ class SendController extends ChangeNotifier {
             expectedSha256: hash,
             expectedSize: item.size,
             sourceAddress: chosenSource,
+            hashWhileWriting: Platform.isWindows && phase == 'lan',
           );
         }
         _requireSession(epoch, a, p);
@@ -6101,7 +6341,11 @@ class SendController extends ChangeNotifier {
       }
     }
 
-    Future<bool> reverse(String phase, bool cellular) async {
+    Future<bool> reverse(
+      String phase,
+      bool cellular, {
+      bool allowParallel = true,
+    }) async {
       final window = ConnectionWindow.current;
       final service = peer;
       if (info['features']?['directPush'] != true ||
@@ -6111,10 +6355,25 @@ class SendController extends ChangeNotifier {
           cellular && senderPeer['cellularPush'] != true) {
         return false;
       }
-      final label =
-          '${phase == 'lan' ? '局域网' : '公网'}反向直传${cellular ? '（发送方蜂窝）' : ''}';
       final attemptId = newId();
       final offset = await temporary.exists() ? await temporary.length() : 0;
+      final connections =
+          allowParallel &&
+              phase == 'lan' &&
+              !cellular &&
+              service!.parallelPushEnabled &&
+              senderPeer['parallelPush'] == true &&
+              item.size - offset >= _bulkHttpsMinimumBytes
+          ? min(
+              p.transferConnections,
+              (item.size - offset) ~/ (2 * 1024 * 1024),
+            )
+          : 1;
+      final label =
+          '${phase == 'lan' ? '局域网' : '公网'}反向直传${cellular ? '（发送方蜂窝）' : ''}'
+          '${connections > 1 ? ' · $connections 连接' : ''}';
+      final waiting = Stopwatch()..start();
+      var lastProgress = Duration.zero;
       final slot = await service!.prepareReceive(
         transferId: item.transferId,
         fileId: item.fileId,
@@ -6122,8 +6381,11 @@ class SendController extends ChangeNotifier {
         file: temporary,
         size: item.size,
         offset: offset,
+        connections: connections,
+        hashWhileWriting: Platform.isWindows && phase == 'lan',
         onProgress: (bytes) {
           if (window?.canceled == true) return;
+          lastProgress = waiting.elapsed;
           window?.connected();
           item.route = phase;
           item.routeDetail = label;
@@ -6142,8 +6404,8 @@ class SendController extends ChangeNotifier {
           'scope': phase,
           'cellular': cellular,
           'offset': offset,
+          if (connections > 1) 'connections': connections,
         });
-        final waiting = Stopwatch()..start();
         while (!slot.finished) {
           _requireSession(epoch, a, p);
           if (item.locallyCanceled) throw StateError('接收已取消');
@@ -6151,23 +6413,45 @@ class SendController extends ChangeNotifier {
               waiting.elapsed > Duration(seconds: cellular ? 25 : 12)) {
             throw TimeoutException('发送方未建立反向连接');
           }
-          if (slot.started) {
+          if (slot.started && connections == 1) {
             window?.connected();
             await slot.completed;
             break;
           }
-          final state = await a.call('GET', '/transfers/${item.transferId}');
-          final file = (state['transfer']['files'] as List).firstWhere(
-            (f) => f['fileId'] == item.fileId,
-          );
-          final push = file['directPush'];
+          if (slot.started &&
+              waiting.elapsed - lastProgress > const Duration(seconds: 20)) {
+            throw TimeoutException('并行接收已无进度');
+          }
+          Map<String, dynamic>? state;
+          try {
+            state = await Future.any<Map<String, dynamic>?>([
+              a.call('GET', '/transfers/${item.transferId}'),
+              slot.completed.then((_) => null),
+            ]);
+          } catch (error) {
+            window?.check();
+            // The center only carries control state. Keep an active direct
+            // stream on a lost read; a real stalled range still times out.
+            if (!slot.started ||
+                (error is! SocketException &&
+                    error is! HttpException &&
+                    error is! TimeoutException)) {
+              rethrow;
+            }
+          }
           if (slot.finished) break;
-          if (push is! Map ||
-              push['attemptId'] != attemptId ||
-              push['state'] == 'failed') {
-            throw StateError(
-              push is Map ? push['error'] ?? '反向连接已结束' : '反向连接已结束',
+          if (state != null) {
+            final file = (state['transfer']['files'] as List).firstWhere(
+              (f) => f['fileId'] == item.fileId,
             );
+            final push = file['directPush'];
+            if (push is! Map ||
+                push['attemptId'] != attemptId ||
+                push['state'] == 'failed') {
+              throw StateError(
+                push is Map ? push['error'] ?? '反向连接已结束' : '反向连接已结束',
+              );
+            }
           }
           await Future.any([
             slot.completed,
@@ -6177,6 +6461,16 @@ class SendController extends ChangeNotifier {
         final error = await slot.completed;
         if (error != null) throw StateError(error);
         _requireSession(epoch, a, p);
+        receivedDigest = slot.digest;
+        if (connections > 1 && Platform.isWindows) {
+          receivedDigest = await hashWindowsReceiveFile(
+            temporary,
+            check: () {
+              window?.check();
+              TransferOperation.current?.check();
+            },
+          );
+        }
         item.route = phase;
         item.routeDetail = label;
         return true;
@@ -6185,7 +6479,7 @@ class SendController extends ChangeNotifier {
         _requireSession(epoch, a, p);
         if (item.locallyCanceled) rethrow;
         failures.add('$label不可用：$error');
-        return false;
+        if (connections == 1) return false;
       } finally {
         await service.stopReceiving(slot);
         cleanupConnection(() async {
@@ -6194,6 +6488,8 @@ class SendController extends ChangeNotifier {
           });
         });
       }
+      if (slot.recoveryError case final error?) throw error;
+      return reverse(phase, cellular, allowParallel: false);
     }
 
     Future<bool> dataChannel(String phase) async {
@@ -6206,6 +6502,7 @@ class SendController extends ChangeNotifier {
       }
       final label = '${phase == 'lan' ? '局域网' : '公网'} WebRTC 直传';
       _rtcNetwork.remove(item.fileId);
+      var opened = false;
       try {
         _requireSession(epoch, a, p);
         if (item.locallyCanceled) throw StateError('接收已取消');
@@ -6219,6 +6516,15 @@ class SendController extends ChangeNotifier {
           size: item.size,
           onProgress: (bytes) {
             if (window?.canceled == true) return;
+            if (!opened) {
+              opened = true;
+              reachability.recordRtcFileHandshake(
+                item.source,
+                phase == 'lan'
+                    ? ReachabilityScope.lan
+                    : ReachabilityScope.public,
+              );
+            }
             item.route = phase;
             item.routeDetail = _rtcLabel(item.fileId, phase);
             progress(bytes);
@@ -6233,6 +6539,7 @@ class SendController extends ChangeNotifier {
         if (ConnectionWindow.current?.canceled == true) rethrow;
         _requireSession(epoch, a, p);
         if (item.locallyCanceled) rethrow;
+        if (error is RtcChannelClosed) rethrow;
         failures.add('$label不可用：$error');
         return false;
       }
@@ -6242,6 +6549,22 @@ class SendController extends ChangeNotifier {
     final forwardPairs = <TransferRouteChoice, CandidateRoute? Function()>{};
     for (final phase in phases) {
       final scopeLabel = phase == 'lan' ? '局域网' : '公网';
+      // RTT predicts startup, not file throughput. On native LAN peers,
+      // verified HTTPS carries bulk files faster than the RTC data channel.
+      final preferBulkHttps =
+          phase == 'lan' && item.size >= _bulkHttpsMinimumBytes;
+      VerifiedRoutePreference bulkPreference({required bool reverse}) {
+        if (!preferBulkHttps) return VerifiedRoutePreference.latency;
+        // On the tested Windows–Android pair, throughput was higher when
+        // Android initiated the TLS connection, in either payload direction.
+        final preferInitiator = reverse
+            ? Platform.isWindows && plan.sourcePlatform == 'android'
+            : Platform.isAndroid && plan.sourcePlatform == 'windows';
+        return preferInitiator
+            ? VerifiedRoutePreference.preferredBulkHttps
+            : VerifiedRoutePreference.bulkHttps;
+      }
+
       final preferRtc = reachability.preferRtc(
         item.source,
         phase == 'lan' ? ReachabilityScope.lan : ReachabilityScope.public,
@@ -6302,6 +6625,8 @@ class SendController extends ChangeNotifier {
         ready: _rtcReady(item.source, phase) ? true : null,
         readiness: plan.rtcChecks[phase],
         latency: () => measuredLatency('rtc'),
+        // Probe RTT excludes the sender starting its next ICE/DTLS session.
+        verifiedHandshake: _verifiedRtcFileHandshake,
       );
       TransferRouteChoice reverseChoice(bool cellular) {
         var result = reverseHttpsProbes?.cached(item.source, phase);
@@ -6311,10 +6636,14 @@ class SendController extends ChangeNotifier {
           run: () => reverse(phase, cellular),
           ready: reverseReady(result, cellular),
           readiness: plan.reverseChecks[phase]?.then((value) {
-            result = value;
-            return reverseReady(value, cellular);
+            final reachable = reverseReady(value, cellular);
+            if (reachable != null) result = value;
+            return reachable;
           }),
           latency: () => result?['elapsedMs'] as int?,
+          preference: cellular
+              ? VerifiedRoutePreference.latency
+              : bulkPreference(reverse: true),
         );
       }
 
@@ -6331,6 +6660,7 @@ class SendController extends ChangeNotifier {
           // candidates. Keep that entry point usable without preflight.
           readiness: advertised.isEmpty ? null : forwardReady(),
           latency: () => measuredLatency('https'),
+          preference: bulkPreference(reverse: false),
         );
         choices.add(choice);
         forwardPairs[choice] = () => probes.readyRoute(
@@ -6346,6 +6676,7 @@ class SendController extends ChangeNotifier {
         choices.add(reverseChoice(true));
     }
     final selection = TransferRouteSelection(choices);
+    final restartedRtc = <TransferRouteChoice>{};
     try {
       for (final phase in phases) {
         if (deadline.expired && !selection.readyIn(phase)) continue;
@@ -6381,12 +6712,23 @@ class SendController extends ChangeNotifier {
           try {
             // Exactly one file writer; cancellation/teardown completes before
             // any other ready transport is allowed to acquire its file grant.
-            if (await window.run(choice.run)) return;
+            receivedDigest = null;
+            if (await window.run(choice.run)) return receivedDigest;
           } catch (error) {
             _requireSession(epoch, a, p);
             if (item.locallyCanceled) rethrow;
-            if (error is TransferStopped) rethrow;
+            if (error is TransferStopped || error is PeerPartialRecoveryException) {
+              rethrow;
+            }
             failures.add('${choice.label}不可用：$error');
+            if (error is RtcChannelClosed &&
+                choice.ready == true &&
+                restartedRtc.add(choice)) {
+              // Retry one closed channel on the proven route, preserving its
+              // committed offset. This does not retry unreachable candidates.
+              choice.attempted = false;
+              continue;
+            }
             if (window.canceled && selectedPair != null) {
               probes.discard(selectedPair);
               reachability.markFailed(
@@ -6450,11 +6792,7 @@ class SendController extends ChangeNotifier {
     });
   }
 
-  Future<void> _receiveFile(
-    DockEntry item, {
-    bool preferDirect = false,
-    String? routeOverride,
-  }) async {
+  Future<void> _receiveFile(DockEntry item, {String? routeOverride}) async {
     if (item.locallyCanceled ||
         item.locallyPaused ||
         item.relayConfirmationPending)
@@ -6485,6 +6823,7 @@ class SendController extends ChangeNotifier {
     String managedTemporaryLocation = '';
     var legacyManagedPartial = false;
     var directAttempt = false;
+    String? receivedDigest;
     var preparingDestination = false;
     var discardPartial = false;
     await _gate.enter(stopped: TransferOperation.current?.stopped.future);
@@ -6496,7 +6835,10 @@ class SendController extends ChangeNotifier {
     Future<_PreparedRoutes>? preparedRoutes;
     _PreparedRoutes? readyRoutes;
     var routesFinished = false;
-    if (!item.isDirectory && mode != 'relay' && supportsDirect) {
+    if (!item.isDirectory &&
+        item.route != 'relay' &&
+        mode != 'relay' &&
+        supportsDirect) {
       // Start discovered-address probes before the center metadata request,
       // local file checks and persistent writes, not after those round trips.
       preparedRoutes = _prepareRouteProbes(
@@ -6524,10 +6866,8 @@ class SendController extends ChangeNotifier {
           item.locallyPaused)
         return;
       item.error = '';
-      final t = preparedRoutes == null
-          ? await a.call('GET', '/transfers/${item.transferId}')
-          : await ConnectionWindow(connectionDeadline.remaining)
-                .run(() => a.call('GET', '/transfers/${item.transferId}'));
+      final t = await ConnectionWindow(_transferControlTimeout)
+          .run(() => a.call('GET', '/transfers/${item.transferId}'));
       _requireSession(epoch, a, p);
       final remote = (t['transfer']['files'] as List).firstWhere(
         (f) => f['fileId'] == item.fileId,
@@ -6666,14 +7006,20 @@ class SendController extends ChangeNotifier {
           rethrow;
         }
       }
-      item.partialPath = managedTemporaryLocation;
       // Persist the canonical location before network I/O so a restarted client
       // can resume the same app-created partial in its chosen destination.
-      await save();
+      if (!resumeManaged || item.partialPath != managedTemporaryLocation) {
+        item.partialPath = managedTemporaryLocation;
+        await save();
+      }
       _requireSession(epoch, a, p);
       item.status = 'downloading';
       preparingDestination = false;
       changed();
+      const progressIntervalMs = 150;
+      final progressClock = Stopwatch()..start();
+      int? previousNotificationMs;
+      var firstPayloadAnnounced = false;
       void progress(int n) {
         if (n > item.size) throw const FormatException('接收数据超过声明大小');
         if (epoch != generation ||
@@ -6681,10 +7027,26 @@ class SendController extends ChangeNotifier {
             item.locallyPaused) {
           throw const FileSystemException('接收已取消');
         }
+        final previous = item.receivedBytes;
+        if (n < previous) firstPayloadAnnounced = false;
+        final last = previousNotificationMs;
+        final firstPayload =
+            last != null && !firstPayloadAnnounced && n > previous;
+        if (firstPayload) firstPayloadAnnounced = true;
         item.progress = item.size == 0 ? 1 : n / item.size;
         item.recordTransferBytes(n);
         item.receivedBytes = n;
-        changed();
+        final now = progressClock.elapsedMilliseconds;
+        // Keep the exact committed offset for the next attempt. Only publish
+        // intermediate progress at UI cadence; don't delay attempt boundaries.
+        if (last == null ||
+            firstPayload ||
+            n < previous ||
+            n == item.size ||
+            now - last >= progressIntervalMs) {
+          previousNotificationMs = now;
+          changed();
+        }
       }
 
       if ((mode == 'relay' || mode == 'auto' && !supportsDirect) &&
@@ -6707,26 +7069,49 @@ class SendController extends ChangeNotifier {
       }
       if (supportsDirect &&
           mode != 'relay' &&
-          (preferDirect || remote['transport'] != 'relay') &&
+          remote['transport'] != 'relay' &&
           ['accepted', 'uploading'].contains(remote['status'])) {
-        directAttempt = true;
         item.route = 'direct';
-        await _pullByStages(
-          item,
-          temporary,
-          remote['sha256'],
-          mode,
-          allowCellular,
-          epoch,
-          a,
-          p,
-          progress,
-          // Preflight overlaps metadata and disk preparation. Slow local IO
-          // must not consume a proven path's actual connection budget.
-          connectionDeadline: RouteDeadline(),
-          preparedRoutes: preparedRoutes,
-        );
-      } else {
+        try {
+          receivedDigest = await _pullByStages(
+            item,
+            temporary,
+            remote['sha256'],
+            mode,
+            allowCellular,
+            epoch,
+            a,
+            p,
+            progress,
+            // Preflight overlaps metadata and disk preparation. Slow local IO
+            // must not consume a proven path's actual connection budget.
+            connectionDeadline: RouteDeadline(),
+            preparedRoutes: preparedRoutes,
+          );
+          directAttempt = true;
+        } catch (error) {
+          _requireSession(epoch, a, p);
+          if (error is PeerPartialRecoveryException) {
+            discardPartial = true;
+            rethrow;
+          }
+          if (mode != 'auto' || item.locallyCanceled || item.locallyPaused)
+            rethrow;
+          if (needsRelayConsent(item)) {
+            markRelayPending(item);
+            return;
+          }
+          try {
+            await ConnectionWindow(_transferControlTimeout)
+                .run(() => a.call('POST', '${fileRoute(item)}/relay', {}));
+          } catch (relayError) {
+            throw StateError('直连失败：$error；中继连接失败：$relayError');
+          }
+          remote['transport'] = 'relay';
+          item.routeDetail = '局域网与公网直连不可用，已切换中继：$error';
+        }
+      }
+      if (!directAttempt) {
         if (mode == 'lan' || mode == 'public') {
           throw StateError('此文件已走中继，与手动直连约束不兼容；可重试或取消后重新发送');
         }
@@ -6743,23 +7128,28 @@ class SendController extends ChangeNotifier {
           item.status = 'accepted';
           return;
         }
-        final j = await a.call('POST', '${fileRoute(item)}/download-ticket', {
-          if (liveRelay) 'live': true,
-        });
-        await a.download(
-          j['downloadPath'],
-          temporary,
-          progress,
-          expectedSha256: remote['sha256'],
-          expectedSize: item.size,
-        );
+        if (item.size > 0) {
+          final j = await ConnectionWindow(_transferControlTimeout).run(
+            () => a.call('POST', '${fileRoute(item)}/download-ticket', {
+              if (liveRelay) 'live': true,
+            }),
+          );
+          await a.download(
+            j['downloadPath'],
+            temporary,
+            progress,
+            expectedSha256: remote['sha256'],
+            expectedSize: item.size,
+          );
+        }
       }
       if (epoch != generation ||
           item.status == 'canceled' ||
           item.locallyPaused)
         return;
       if (await temporary.length() != item.size ||
-          (await sha256.bind(temporary.openRead()).first).toString() !=
+          (receivedDigest ??
+                  (await sha256.bind(temporary.openRead()).first).toString()) !=
               remote['sha256']) {
         discardPartial = true;
         throw const FormatException('文件完整性校验失败');
@@ -6810,13 +7200,14 @@ class SendController extends ChangeNotifier {
             return;
           }
           try {
-            await a.call('POST', '${fileRoute(item)}/relay', {});
+            await ConnectionWindow(_transferControlTimeout)
+                .run(() => a.call('POST', '${fileRoute(item)}/relay', {}));
             item.status = 'accepted';
             item.route = 'relay';
             item.routeDetail = '局域网与公网直连不可用，已切换中继：$e';
-          } catch (_) {
+          } catch (relayError) {
             item.status = 'failed';
-            item.error = '$e';
+            item.error = '直连失败：$e；中继连接失败：$relayError';
           }
         } else {
           item.status = 'failed';
@@ -6857,12 +7248,9 @@ class SendController extends ChangeNotifier {
           item.partialPath = temporary.path;
         }
       }
-      busyFiles.remove(item.fileId);
       await _rememberCopiedReference(item);
-      if (epoch == generation) {
-        await save();
-        changed();
-      }
+      // _runFileOperation releases the busy marker and the operation owner
+      // together, then saves. A notification must not see a half-free slot.
     }
   }
 
@@ -6921,6 +7309,7 @@ class SendController extends ChangeNotifier {
     _sendingRtc.clear();
     _startedRtc.clear();
     _pendingRtc.clear();
+    _relayAfterDirect.clear();
     _rtcNetwork.clear();
     for (final timer in routeTimers.values) {
       timer.cancel();
@@ -6947,6 +7336,7 @@ class SendController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (enableDesktopCommands) desktopCommands.dispose();
     FileShareBridge.imageClipboardSupported.removeListener(changed);
     if (Platform.isAndroid &&
         DockPlatform.onPullCopiedFile == pullCopiedFileSelection) {

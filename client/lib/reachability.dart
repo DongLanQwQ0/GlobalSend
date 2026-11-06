@@ -142,7 +142,8 @@ class ReachabilityMonitor extends ChangeNotifier {
   final Future<void> Function()? onNetworkChanged;
   final List<AddressCheck> _results = [];
   List<Map<String, dynamic>> devices = [];
-  String center = '', _inputSignature = '', _lastNetwork = '';
+  String center = '', _inputSignature = '';
+  String? _lastNetwork;
   String lastError = '';
   bool connected = false, allowCellular = false, running = false;
   bool _disposed = false, _tickRunning = false, _refreshAgain = false;
@@ -151,6 +152,7 @@ class ReachabilityMonitor extends ChangeNotifier {
   Timer? _timer;
   static const interval = Duration(minutes: 1);
   final List<AddressCheck> _rtcResults = [];
+  final Map<(String, ReachabilityScope), DateTime> _rtcFileHandshakes = {};
   final Map<String, Future<void>> _deviceRefreshes = {};
   final Map<String, int> _deviceVersions = {};
   final Map<String, String> _deviceErrors = {};
@@ -282,6 +284,7 @@ class ReachabilityMonitor extends ChangeNotifier {
       _cancelProbes(exceptDevice: requestingDevice);
       _results.clear();
       _rtcResults.clear();
+      _rtcFileHandshakes.clear();
       lastChecked = null;
       if (running) _refreshAgain = connected;
     }
@@ -755,8 +758,28 @@ class ReachabilityMonitor extends ChangeNotifier {
 
   bool preferRtc(String deviceId, ReachabilityScope scope) {
     final checks = forDevice(deviceId).where((r) => r.scope == scope);
-    return checks.any((r) => r.transport == 'rtc' && r.reachable) &&
+    return (hasRecentRtcFileHandshake(deviceId, scope) ||
+            checks.any((r) => r.transport == 'rtc' && r.reachable)) &&
         !checks.any((r) => r.transport == 'https' && r.reachable);
+  }
+
+  void recordRtcFileHandshake(String deviceId, ReachabilityScope scope) {
+    if (_disposed ||
+        !connected ||
+        !devices.any((d) => d['deviceId'] == deviceId))
+      return;
+    final fresh = hasRecentRtcFileHandshake(deviceId, scope);
+    _rtcFileHandshakes[(deviceId, scope)] = _clock().add(
+      const Duration(minutes: 2),
+    );
+    if (!fresh) notifyListeners();
+  }
+
+  bool hasRecentRtcFileHandshake(String deviceId, ReachabilityScope scope) {
+    final key = (deviceId, scope);
+    if (_rtcFileHandshakes[key]?.isAfter(_clock()) == true) return true;
+    _rtcFileHandshakes.remove(key);
+    return false;
   }
 
   void _pruneExpired() {
@@ -846,6 +869,10 @@ class ReachabilityMonitor extends ChangeNotifier {
           changedIds.contains(r.deviceId),
     );
     if (policyChanged) _rtcResults.clear();
+    _rtcFileHandshakes.removeWhere(
+      (key, _) =>
+          policyChanged || !ids.contains(key.$1) || changedIds.contains(key.$1),
+    );
     if (!online) {
       _results.clear();
       lastChecked = null;
@@ -867,13 +894,15 @@ class ReachabilityMonitor extends ChangeNotifier {
     try {
       final signature = await _networkSignature();
       if (_disposed) return;
-      final changed = signature != _lastNetwork;
+      // The first poll establishes the baseline; it is not a network switch.
+      final changed = _lastNetwork != null && signature != _lastNetwork;
       _lastNetwork = signature;
       if (changed) {
         _revision++;
         _cancelProbes();
         _results.clear();
         _rtcResults.clear();
+        _rtcFileHandshakes.clear();
         lastChecked = null;
         notifyListeners();
         await onNetworkChanged?.call();

@@ -51,6 +51,7 @@ class ServerProfile {
     this.cellularAllowed = true,
     this.relayConfirmMiB = 32,
     this.transferConcurrency = 4,
+    this.transferConnections = 1,
     this.storageId = '',
     this.legacyPeerIdentity = true,
   }) : groups = groups ?? [];
@@ -66,6 +67,7 @@ class ServerProfile {
   bool cellularAllowed;
   int relayConfirmMiB;
   int transferConcurrency;
+  int transferConnections;
   String sendRoutePreference, receiveRoutePreference;
   String get key => profileKey(baseUrl, instanceId);
   String get storageKey {
@@ -92,6 +94,7 @@ class ServerProfile {
     'cellularAllowed': cellularAllowed,
     'relayConfirmMiB': relayConfirmMiB,
     'transferConcurrency': transferConcurrency,
+    'transferConnections': transferConnections,
     'storageId': storageId,
     'legacyPeerIdentity': legacyPeerIdentity,
   };
@@ -113,6 +116,7 @@ class ServerProfile {
     cellularAllowed: j['cellularAllowed'] ?? true,
     relayConfirmMiB: j['relayConfirmMiB'] ?? 32,
     transferConcurrency: j['transferConcurrency'] ?? 4,
+    transferConnections: (j['transferConnections'] as int? ?? 1).clamp(1, 16),
     storageId: j['storageId'] ?? '',
     legacyPeerIdentity: j['legacyPeerIdentity'] ?? true,
   );

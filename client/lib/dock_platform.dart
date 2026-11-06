@@ -150,11 +150,13 @@ class DockPlatform {
     Size? surface,
     Rect? sendNavigation,
     List<Map<String, Object>> devices = const [],
+    List<Map<String, Object>> stagedCards = const [],
     String serverKey = '',
   }) {
     bounds ??= devices.isEmpty ? null : Rect.zero;
     return channel.invokeMethod('queueDropBounds', {
       'enabled': bounds != null,
+      if (stagedCards.isNotEmpty) 'stagedCards': stagedCards,
       if (devices.isNotEmpty || serverKey.isNotEmpty) ...{
         'devices': devices,
         'serverKey': serverKey,
@@ -189,6 +191,7 @@ class DockPlatform {
     List<String>? paths,
     List<String>? texts,
     String label = 'GlobalSend',
+    int? stagedCardId,
   }) => channel.invokeMethod('startDrag', {
     if (paths != null || texts != null) ...{
       'paths': paths ?? const <String>[],
@@ -198,5 +201,6 @@ class DockPlatform {
     else
       'text': text ?? '',
     'label': label,
+    if (stagedCardId != null) 'stagedCardId': stagedCardId,
   });
 }

@@ -16,6 +16,10 @@ const rtcWindowBytes = 512 * 1024;
 
 /// One disk-backed file per authenticated, receiver-owned WebRTC attempt.
 /// Center credentials stay in signaling requests, never in the data channel.
+class RtcChannelClosed extends StateError {
+  RtcChannelClosed(super.message);
+}
+
 class RtcFileTransport {
   RtcFileTransport(
     this.api, {
@@ -186,6 +190,13 @@ class RtcFileTransport {
     }
   }
 
+  void signalChanged(String transferId, String fileId, String attemptId) {
+    final session = _active['/transfers/$transferId/files/$fileId'];
+    if (session != null && session.attemptId == attemptId) {
+      session.wakeSignaling();
+    }
+  }
+
   Future<void> revokeCellular() async {
     final entries = _active.entries
         .where((entry) => entry.value.allowCellular)
@@ -220,7 +231,7 @@ class _RtcFileSession {
   _RtcFileSession(
     this.api,
     String fileRoute,
-    String attemptId,
+    this.attemptId,
     this.scope,
     this.size,
     this.offset,
@@ -233,14 +244,14 @@ class _RtcFileSession {
       count = offset,
       acknowledged = offset;
   final CenterApi api;
-  final String route, scope;
+  final String route, scope, attemptId;
   final int size, offset;
   final void Function(int) progress;
   final List<Map<String, dynamic>> iceServers;
   final bool allowCellular;
   final RtcConnectionFactory connectionFactory;
   final void Function(String network, String family) network;
-  final _result = Completer<String?>();
+  final _result = Completer<StateError?>();
   final _opened = Completer<void>();
   RtcDataConnection? pc;
   Future<RtcDataConnection>? _creating;
@@ -259,13 +270,29 @@ class _RtcFileSession {
   int count, acknowledged, queuedBytes = 0, _lastFlush = 0;
   DateTime _lastActivity = DateTime.now();
   Timer? _watchdog;
+  Completer<void>? _signalWake;
+  bool _signalDirty = false;
+
+  void wakeSignaling() {
+    _signalDirty = true;
+    final wake = _signalWake;
+    if (wake != null && !wake.isCompleted) wake.complete();
+  }
 
   void fail(Object error) {
-    if (!_result.isCompleted) _result.complete('$error');
+    if (!_result.isCompleted) {
+      _result.complete(
+        error is RtcChannelClosed ? error : StateError('$error'),
+      );
+      wakeSignaling();
+    }
   }
 
   void success() {
-    if (!_result.isCompleted) _result.complete(null);
+    if (!_result.isCompleted) {
+      _result.complete(null);
+      wakeSignaling();
+    }
   }
 
   void check() {
@@ -297,6 +324,7 @@ class _RtcFileSession {
       final text = candidate.candidate ?? '';
       if (!stopped && policy!.allows(text)) {
         _localCandidates.add(candidate.toMap());
+        wakeSignaling();
       }
     };
     pc!.onNetwork = (value, family) {
@@ -311,7 +339,13 @@ class _RtcFileSession {
         if (_completeSent) {
           success();
         } else {
-          fail('WebRTC连接已关闭');
+          final connection = pc;
+          fail(
+            RtcChannelClosed(
+              (connection is AndroidRtcConnection ? connection.failure : null) ??
+                  'WebRTC连接已关闭',
+            ),
+          );
         }
       }
     };
@@ -339,7 +373,7 @@ class _RtcFileSession {
         if (_completeSent) {
           success();
         } else {
-          fail('文件通道已关闭');
+          fail(RtcChannelClosed('文件通道已关闭'));
         }
       }
     };
@@ -384,9 +418,19 @@ class _RtcFileSession {
 
   Future<void> sync() async {
     check();
-    final state = Map<String, dynamic>.from(
-      (await api.call('GET', route))['rtc'],
-    );
+    final Map<String, dynamic> snapshot;
+    try {
+      snapshot = await api.call('GET', route);
+    } catch (error) {
+      // A lost status read cannot tear down a healthy file data channel.
+      // A definitive center response or a real channel close still stops it.
+      if (_opened.isCompleted &&
+          (error is SocketException ||
+              error is HttpException ||
+              error is TimeoutException)) return;
+      rethrow;
+    }
+    final state = Map<String, dynamic>.from(snapshot['rtc']);
     check();
     if (state['state'] == 'failed') {
       throw StateError(state['error'] ?? '对方直连失败');
@@ -425,13 +469,22 @@ class _RtcFileSession {
 
   Future<void> polling() async {
     while (!stopped && !_result.isCompleted) {
+      _signalDirty = false;
       try {
         await sync();
       } catch (error) {
         if (!_result.isCompleted) fail(error);
       }
-      if (!_result.isCompleted) {
-        await Future<void>.delayed(const Duration(milliseconds: 250));
+      if (!stopped && !_result.isCompleted && !_signalDirty) {
+        final wake = _signalWake = Completer<void>();
+        // Targeted events normally drive signaling. Keep a polling fallback
+        // when the socket is reconnecting or an event arrives out of order.
+        final timer = Timer(const Duration(milliseconds: 250), () {
+          if (!wake.isCompleted) wake.complete();
+        });
+        await wake.future;
+        timer.cancel();
+        _signalWake = null;
       }
     }
   }
@@ -466,7 +519,7 @@ class _RtcFileSession {
       progress(offset);
     }
     final error = await _result.future;
-    if (error != null) throw StateError(error);
+    if (error != null) throw error;
   }
 
   Future<void> send(File source) async {
@@ -475,7 +528,7 @@ class _RtcFileSession {
     _source = source;
     _signals = polling();
     final error = await _result.future;
-    if (error != null) throw StateError(error);
+    if (error != null) throw error;
   }
 
   File? _source;

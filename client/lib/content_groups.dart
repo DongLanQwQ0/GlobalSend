@@ -21,7 +21,10 @@ String contentKey(DockEntry entry) {
 }
 
 /// Group the display, retaining each delivery and external file reference.
-List<DockEntry> mergeContentCards(Iterable<DockEntry> entries) {
+List<DockEntry> mergeContentCards(
+  Iterable<DockEntry> entries, {
+  bool Function(DockEntry)? matches,
+}) {
   final ordered = collapseFolderCards(entries)
     ..sort(
       (a, b) =>
@@ -32,6 +35,10 @@ List<DockEntry> mergeContentCards(Iterable<DockEntry> entries) {
     );
   final seen = <String>{};
   return ordered
-      .where((entry) => seen.add('${entry.outgoing}:${contentKey(entry)}'))
+      .where(
+        (entry) =>
+            (matches == null || matches(entry)) &&
+            seen.add('${entry.outgoing}:${contentKey(entry)}'),
+      )
       .toList();
 }

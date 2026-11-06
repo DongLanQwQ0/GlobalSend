@@ -101,6 +101,12 @@ class ReceiveDestination {
     'length': length,
   }))!;
 
+  static Future<List<int>> sha256ReadSource(String handle, String path) async =>
+      (await channel.invokeMethod<List<int>>('sha256ReadSource', {
+        'handle': handle,
+        if (handle.isEmpty) 'path': path,
+      }))!;
+
   static Future<bool> allFilesAccess() async =>
       Platform.isAndroid &&
       (await channel.invokeMethod<bool>('allFilesAccess') ?? false);

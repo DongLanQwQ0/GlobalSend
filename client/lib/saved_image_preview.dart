@@ -11,6 +11,10 @@ import 'package:flutter/material.dart';
 import 'received_file_access.dart';
 import 'image_kind.dart';
 import 'ui_tokens.dart';
+import 'content_actions.dart';
+import 'content_drag_surface.dart';
+import 'file_share.dart';
+import 'system_bridge.dart';
 
 bool isSavedImage(String path) => knownImageName(path);
 
@@ -18,12 +22,14 @@ Future<bool> showSavedImagePreview(
   BuildContext context, {
   required String path,
   required String title,
+  Future<void> Function()? onQueue,
 }) async {
   if (!await imageAtLocation(path, title)) return false;
   if (!context.mounted) return true;
   await Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => SavedImagePreview(path: path, title: title),
+      builder: (_) =>
+          SavedImagePreview(path: path, title: title, onQueue: onQueue),
     ),
   );
   return true;
@@ -35,9 +41,11 @@ class SavedImagePreview extends StatefulWidget {
     required this.path,
     required this.title,
     this.onOpenExternal,
+    this.onQueue,
   });
   final String path, title;
   final Future<void> Function()? onOpenExternal;
+  final Future<void> Function()? onQueue;
   @override
   State<SavedImagePreview> createState() => _SavedImagePreviewState();
 }
@@ -88,6 +96,36 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
     }
   }
 
+  Future<void> showActions(Offset position) async {
+    final action = await showContentMenuAt(context, position, [
+      if (Theme.of(context).platform == TargetPlatform.windows)
+        const PopupMenuItem(value: 'locate', child: Text('定位文件')),
+      if (widget.onQueue != null)
+        const PopupMenuItem(value: 'queue', child: Text('加入待发送')),
+      if (FileShareBridge.canWriteImageClipboard)
+        const PopupMenuItem(value: 'copy', child: Text('复制')),
+    ]);
+    if (!mounted || action == null) return;
+    try {
+      switch (action) {
+        case 'locate':
+          await SystemBridge.revealFile(widget.path);
+        case 'queue':
+          await widget.onQueue!();
+          if (mounted) _notice('已加入待发送');
+        case 'copy':
+          await copySavedImage(widget.path);
+          if (mounted) _notice('已复制');
+      }
+    } catch (error) {
+      if (mounted) _notice(action == 'copy' ? '无法复制图片' : '$error');
+    }
+  }
+
+  void _notice(String message) =>
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+
   @override
   Widget build(BuildContext context) => Scaffold(
     // An image viewer sits on the canvas, never on a bright surface.
@@ -110,6 +148,11 @@ class _SavedImagePreviewState extends State<SavedImagePreview> {
             (bounds.maxWidth * MediaQuery.devicePixelRatioOf(context)).round();
         return GestureDetector(
           onDoubleTap: openExternal,
+          onSecondaryTapDown: (details) {
+            if (ContentDragSurface.allowsContextMenu(context, details.kind)) {
+              unawaited(showActions(details.globalPosition));
+            }
+          },
           child: InteractiveViewer(
             key: const ValueKey('saved-image-viewer'),
             transformationController: transform,

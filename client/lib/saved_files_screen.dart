@@ -16,6 +16,9 @@ import 'received_file_access.dart';
 import 'compact_content_card.dart';
 import 'compact_time.dart';
 import 'content_drag_surface.dart';
+import 'content_actions.dart';
+import 'adaptive_content_grid.dart';
+import 'image_kind.dart';
 import 'system_bridge.dart';
 import 'bulk_file_drag.dart';
 import 'file_share.dart';
@@ -154,6 +157,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
       context,
       path: file.path,
       title: file.name,
+      onQueue: () => queueFile(file),
     )) {
       return;
     }
@@ -174,6 +178,60 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
     }
     await ReceivedFileAccess.openExternal(file.path);
   }, '');
+
+  Future<void> queueFile(SavedFile file) => file.directory
+      ? c.stageDirectory(file.path)
+      : c.stageInputs([file.path], []);
+
+  Future<void> fileMenuAction(String action, SavedFile file) async {
+    switch (action) {
+      case 'open':
+        await perform(() => ReceivedFileAccess.openExternal(file.path), '');
+      case 'locate':
+        await perform(() => SystemBridge.revealFile(file.path), '');
+      case 'copy':
+        await perform(() => copySavedImage(file.path), '已复制');
+      case 'queue':
+        await perform(() => queueFile(file), '');
+      case 'share':
+        await perform(() => FileShareBridge.share(paths: [file.path]), '');
+      case 'select':
+        toggle(file);
+      case 'rename':
+      case 'delete':
+        updateSelection(() {
+          selected
+            ..clear()
+            ..add(file.id);
+        });
+        if (action == 'rename') {
+          await rename();
+        } else {
+          await delete();
+        }
+      case 'details':
+        await details(file);
+    }
+  }
+
+  List<PopupMenuEntry<String>> fileMenu(
+    SavedFile file, {
+    required bool image,
+  }) => [
+    if (!file.directory && (image || isTextPreviewFile(file.name)))
+      const PopupMenuItem(value: 'open', child: Text('用其他应用打开')),
+    if (Theme.of(context).platform == TargetPlatform.windows)
+      const PopupMenuItem(value: 'locate', child: Text('定位文件')),
+    if (image && FileShareBridge.canWriteImageClipboard)
+      const PopupMenuItem(value: 'copy', child: Text('复制')),
+    const PopupMenuItem(value: 'queue', child: Text('加入待发送')),
+    if (FileShareBridge.supported)
+      const PopupMenuItem(value: 'share', child: Text('分享')),
+    const PopupMenuItem(value: 'rename', child: Text('重命名')),
+    const PopupMenuItem(value: 'select', child: Text('多选')),
+    const PopupMenuItem(value: 'delete', child: Text('删除')),
+    const PopupMenuItem(value: 'details', child: Text('详情')),
+  ];
 
   Future<void> details(SavedFile file) => showDialog<void>(
     context: context,
@@ -564,20 +622,7 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
                           Ui.space3,
                           Ui.space4,
                         ),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: Ui.space2,
-                          mainAxisSpacing: Ui.space2,
-                          mainAxisExtent:
-                              230 +
-                              math.max(
-                                    0,
-                                    MediaQuery.textScalerOf(context)
-                                            .scale(Ui.textSm) -
-                                        Ui.textSm,
-                                  ) *
-                                  4,
-                        ),
+                        gridDelegate: AdaptiveContentGrid(context),
                         itemCount: files.length,
                         itemBuilder: (context, index) => tile(files[index]),
                       ),
@@ -683,54 +728,12 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
       selecting: selecting,
       selected: selected.contains(file.id),
       onToggle: () => toggle(file),
-      menu: PopupMenuButton<String>(
+      menuBuilder: (_, image) => PopupMenuButton<String>(
         tooltip: '更多',
         icon: const AppIcon(Icons.more_horiz, size: 20),
         padding: EdgeInsets.zero,
-        onSelected: (action) async {
-          if (action == 'open')
-            await ReceivedFileAccess.openExternal(file.path);
-          if (action == 'locate') await SystemBridge.revealFile(file.path);
-          if (action == 'queue')
-            await perform(
-              () => file.directory
-                  ? c.stageDirectory(file.path)
-                  : c.stageInputs([file.path], []),
-              '',
-            );
-          if (action == 'share')
-            await perform(() => FileShareBridge.share(paths: [file.path]), '');
-          if (action == 'select') toggle(file);
-          if (action == 'rename') {
-            updateSelection(() {
-              selected
-                ..clear()
-                ..add(file.id);
-            });
-            await rename();
-          }
-          if (action == 'delete') {
-            updateSelection(() {
-              selected
-                ..clear()
-                ..add(file.id);
-            });
-            await delete();
-          }
-          if (action == 'details') await details(file);
-        },
-        itemBuilder: (_) => [
-          const PopupMenuItem(value: 'open', child: Text('打开')),
-          if (windows)
-            const PopupMenuItem(value: 'locate', child: Text('定位文件')),
-          const PopupMenuItem(value: 'queue', child: Text('加入待发送')),
-          if (FileShareBridge.supported)
-            const PopupMenuItem(value: 'share', child: Text('分享')),
-          const PopupMenuItem(value: 'rename', child: Text('重命名')),
-          const PopupMenuItem(value: 'select', child: Text('多选')),
-          const PopupMenuItem(value: 'delete', child: Text('删除')),
-          const PopupMenuItem(value: 'details', child: Text('详情')),
-        ],
+        onSelected: (action) => fileMenuAction(action, file),
+        itemBuilder: (_) => fileMenu(file, image: image),
       ),
     );
     return ContentDragSurface(
@@ -755,7 +758,26 @@ class SavedFilesScreenState extends State<SavedFilesScreen>
           label: '${paths.isEmpty ? 1 : paths.length} 项',
         );
       }, ''),
-      child: card,
+      child: GestureDetector(
+        onSecondaryTapDown: selecting
+            ? null
+            : (tap) async {
+                if (!ContentDragSurface.allowsContextMenu(context, tap.kind))
+                  return;
+                final image =
+                    !file.directory &&
+                    await imageAtLocation(file.path, file.name);
+                if (!mounted) return;
+                final action = await showContentMenuAt(
+                  context,
+                  tap.globalPosition,
+                  fileMenu(file, image: image),
+                );
+                if (mounted && action != null)
+                  await fileMenuAction(action, file);
+              },
+        child: card,
+      ),
     );
   }
 

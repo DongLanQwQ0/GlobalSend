@@ -1,5 +1,7 @@
 import 'dart:async';
 
+enum VerifiedRoutePreference { latency, bulkHttps, preferredBulkHttps }
+
 /// Read-only probes may run together; only the returned choice may open a file
 /// grant/writer. Unknown (including legacy/background RTC) remains usable.
 class TransferRouteChoice {
@@ -8,13 +10,17 @@ class TransferRouteChoice {
     required this.label,
     required this.run,
     this.latency,
+    this.verifiedHandshake,
+    this.preference = VerifiedRoutePreference.latency,
     bool? ready,
     Future<bool?>? readiness,
   }) : ready = ready,
        pending = readiness != null {
     readiness?.then(
       (value) {
-        this.ready = value;
+        // A refresh can end without a measurement (e.g. signaling timeout).
+        // Only an actual result supersedes a proven path.
+        if (value != null) this.ready = value;
         pending = false;
         _changed?.call();
       },
@@ -29,6 +35,8 @@ class TransferRouteChoice {
   final String phase, label;
   final Future<bool> Function() run;
   final int? Function()? latency;
+  final Duration? verifiedHandshake;
+  final VerifiedRoutePreference preference;
   bool? ready;
   bool pending;
   bool attempted = false;
@@ -69,6 +77,8 @@ class TransferRouteSelection {
           .toList();
       final proven = remaining.where((choice) => choice.ready == true).toList();
       proven.sort((a, b) {
+        final preference = b.preference.index.compareTo(a.preference.index);
+        if (preference != 0) return preference;
         final timing = (a.latency?.call() ?? 0x7fffffff).compareTo(
           b.latency?.call() ?? 0x7fffffff,
         );
@@ -92,6 +102,7 @@ class TransferRouteSelection {
       // The one-second decision races read-only probes. A selected, proven
       // path still needs a center grant and a fresh TLS/file handshake; slicing
       // those round trips between alternatives creates false relay fallbacks.
+      if (choice.verifiedHandshake case final Duration budget) return budget;
       final handshakeMs = ((choice.latency?.call() ?? 0) * 4 + 100).clamp(
         1000,
         3000,

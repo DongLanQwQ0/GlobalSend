@@ -1,10 +1,9 @@
-import 'app_icon.dart';
-
 import 'package:flutter/material.dart';
 
+import 'app_icon.dart';
 import 'recent_photos.dart';
+import 'suggestion_card_corner.dart';
 import 'ui_tokens.dart';
-import 'text_selection_surface.dart';
 
 class RecentPhotoTile extends StatelessWidget {
   const RecentPhotoTile({
@@ -37,37 +36,15 @@ class RecentPhotoTile extends StatelessWidget {
             }),
             onTap: onAdd,
             onLongPress: onDrag,
-            child: Align(
-              alignment: Alignment.bottomRight,
-              child: Padding(
-                padding: EdgeInsets.all(Ui.space0),
-                child: CircleAvatar(
-                  radius: 12,
-                  backgroundColor: Ui.colors(context).surface,
-                  child: AppIcon(
-                    Icons.add_rounded,
-                    size: Ui.iconSm,
-                    color: Ui.colors(context).accent,
-                  ),
-                ),
-              ),
-            ),
+            child: const SizedBox.expand(),
           ),
         ),
+        const SuggestionCardCorner.add(),
         if (onDismiss != null)
-          Positioned(
-            top: 0,
-            right: 0,
-            child: ContentDragControl(
-              child: IconButton(
-                tooltip: '忽略此媒体建议',
-                onPressed: onDismiss,
-                icon: const AppIcon(Icons.close, size: 19),
-                style: IconButton.styleFrom(
-                  foregroundColor: Ui.colors(context).accent,
-                ),
-              ),
-            ),
+          SuggestionCardCorner.dismiss(
+            tooltip: '忽略此媒体建议',
+            onDismiss: onDismiss,
+            overImage: true,
           ),
       ],
     ),

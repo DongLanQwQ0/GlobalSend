@@ -15,6 +15,8 @@ import 'app_icon.dart';
 import 'system_bridge.dart';
 import 'compact_time.dart';
 import 'content_drag_surface.dart';
+import 'content_actions.dart';
+import 'image_kind.dart';
 import 'models.dart';
 import 'text_selection_surface.dart';
 import 'ui_tokens.dart';
@@ -588,10 +590,11 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
         state.failed ||
         entry.relayConfirmationPending;
     final active = state.pending;
-    List<PopupMenuEntry<String>> menuItems(BuildContext _) => [
-      const PopupMenuItem(value: 'open', height: 32, child: Text('打开')),
+    List<PopupMenuEntry<String>> menuItems(bool image) => [
       if (state.canExport && entry.localPath.isNotEmpty)
         const PopupMenuItem(value: 'reveal', height: 32, child: Text('定位文件')),
+      if (entry.kind == 'text' || image && state.canExport)
+        const PopupMenuItem(value: 'copy', height: 32, child: Text('复制')),
       if (state.canExport)
         const PopupMenuItem(value: 'stage', height: 32, child: Text('加入待发送')),
       if (state.pending || state.paused)
@@ -621,21 +624,16 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
               )) {
                 return;
               }
-              final overlay =
-                  Navigator.of(context).overlay!.context.findRenderObject()!
-                      as RenderBox;
-              final selected = await showMenu<String>(
-                context: context,
-                position: RelativeRect.fromRect(
-                  Rect.fromLTWH(
-                    details.globalPosition.dx,
-                    details.globalPosition.dy,
-                    0,
-                    0,
-                  ),
-                  Offset.zero & overlay.size,
-                ),
-                items: menuItems(context),
+              final image =
+                  state.canExport &&
+                  entry.kind == 'file' &&
+                  !entry.isDirectory &&
+                  await imageAtLocation(entry.localPath, entry.title);
+              if (!context.mounted) return;
+              final selected = await showContentMenuAt(
+                context,
+                details.globalPosition,
+                menuItems(image),
               );
               if (selected != null && mounted) await action(selected, entry.id);
             },
@@ -663,14 +661,14 @@ class _ReceiveDockAppState extends State<ReceiveDockApp>
               onCopy: entry.kind == 'text'
                   ? () => action('copy', entry.id)
                   : null,
-              menu: Semantics(
+              menuBuilder: (_, image) => Semantics(
                 label: '更多',
                 child: PopupMenuButton<String>(
                   tooltip: '更多',
                   onSelected: (value) {
                     action(value, entry.id);
                   },
-                  itemBuilder: menuItems,
+                  itemBuilder: (_) => menuItems(image),
                   icon: const AppIcon(Icons.more_horiz, size: Ui.iconSm),
                 ),
               ),

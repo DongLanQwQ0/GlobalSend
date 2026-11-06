@@ -51,6 +51,7 @@ class PeerTransport {
     this.pushEnabled = false,
     this.httpsProbeEnabled = false,
     this.cellularPushAllowed,
+    this.parallelPushEnabled = false,
     this.addressReader,
     this.acquireSource,
     this.releaseSource,
@@ -63,6 +64,7 @@ class PeerTransport {
   final bool pushEnabled;
   final bool httpsProbeEnabled;
   final bool Function()? cellularPushAllowed;
+  final bool parallelPushEnabled;
   final Future<List<LocalIpAddress>> Function()? addressReader;
   final Future<bool> Function(String fileId)? acquireSource;
   final void Function()? releaseSource;
@@ -98,6 +100,8 @@ class PeerTransport {
     required int size,
     required int offset,
     required void Function(int) onProgress,
+    bool hashWhileWriting = false,
+    int connections = 1,
   }) async {
     await _receives.remove(fileId)?.stop();
     ConnectionWindow.current?.check();
@@ -109,6 +113,8 @@ class PeerTransport {
       size: size,
       offset: offset,
       onProgress: onProgress,
+      hashWhileWriting: hashWhileWriting,
+      connections: connections,
     );
     _receives[fileId] = slot;
     return slot;
@@ -179,6 +185,7 @@ class PeerTransport {
         'certificateSha256': fingerprint,
         if (pushEnabled) 'push': true,
         if (pushEnabled) 'cellularPush': cellularPushAllowed?.call() ?? false,
+        if (pushEnabled && parallelPushEnabled) 'parallelPush': true,
         if (httpsProbeEnabled) 'httpsProbe': true,
       });
     }
@@ -586,7 +593,7 @@ class PeerTransport {
     }
   }
 
-  static Future<void> pull(
+  static Future<String?> pull(
     String candidate,
     String fingerprint,
     String ticket,
@@ -597,11 +604,12 @@ class PeerTransport {
     String? expectedSha256,
     int? expectedSize,
     String? sourceAddress,
+    bool hashWhileWriting = false,
   }) async {
     final client = pinnedClient(fingerprint, sourceAddress: sourceAddress);
     final connection = ConnectionWindow.current;
     connection?.onCancel(() => client.close(force: true));
-    IOSink? sink;
+    StreamIterator<List<int>>? reader;
     try {
       final request = await client.getUrl(
         Uri.parse(candidate).replace(path: '/files/$transferId/$fileId'),
@@ -629,7 +637,7 @@ class PeerTransport {
         await response.drain<void>();
         connection?.connected();
         progress(offset);
-        return;
+        return null;
       }
       if (response.statusCode != 200 && response.statusCode != 206) {
         throw const HttpException('直连授权或文件已失效');
@@ -650,20 +658,20 @@ class PeerTransport {
         offset = 0;
       }
       connection?.connected();
-      sink = file.openWrite(
-        mode: offset > 0 ? FileMode.append : FileMode.write,
+      reader = StreamIterator(response.timeout(const Duration(seconds: 20)));
+      final result = await writePeerReceiveBody(
+        reader,
+        file,
+        offset: offset,
+        expectedSize: expectedSize,
+        onProgress: progress,
+        check: connection?.check,
+        hashWhileWriting: hashWhileWriting,
       );
-      var count = offset;
-      progress(count);
-      await for (final data in response.timeout(const Duration(seconds: 20))) {
-        sink.add(data);
-        count += data.length;
-        progress(count);
-      }
-      await sink.flush();
+      return result.digest;
     } finally {
-      await sink?.close();
       client.close(force: true);
+      await reader?.cancel();
     }
   }
 
@@ -682,7 +690,6 @@ class PeerTransport {
     );
     _pushClients[fileId] = client;
     ReceivedFileAccess? source;
-    Timer? idle;
     final offset = grant['offset'] as int, size = grant['size'] as int;
     try {
       source = await ReceivedFileAccess.open(path);
@@ -690,57 +697,77 @@ class PeerTransport {
       if (await source.file.length() != size) {
         throw const FileSystemException('发送源文件已变化');
       }
-      final request = await client.putUrl(
-        Uri.parse(candidate)
-            .replace(path: '/push/$transferId/$fileId/${grant['attemptId']}'),
-      );
-      request.followRedirects = false;
-      request.headers.set('X-GlobalSend-Ticket', grant['ticket']);
-      request.headers.contentType = ContentType.binary;
-      request.contentLength = size - offset;
-      var count = offset;
-      progress(count);
-      void touch() {
-        idle?.cancel();
-        idle = Timer(
-          const Duration(seconds: 20),
-          () => client.close(force: true),
-        );
+      final parts =
+          (grant['parts'] as List?)?.cast<Map>() ??
+          [
+            {'offset': offset, 'end': size, 'ticket': grant['ticket']},
+          ];
+      client.maxConnectionsPerHost = parts.length;
+      var total = offset;
+      progress(total);
+      Future<void> sendPart(Map part) async {
+        final start = part['offset'] as int, end = part['end'] as int;
+        Timer? idle;
+        void touch() {
+          idle?.cancel();
+          idle = Timer(
+            const Duration(seconds: 20),
+            () => client.close(force: true),
+          );
+        }
+
+        try {
+          touch();
+          final request = await client.putUrl(
+            Uri.parse(
+              candidate,
+            ).replace(path: '/push/$transferId/$fileId/${grant['attemptId']}'),
+          );
+          request.followRedirects = false;
+          request.headers.set('X-GlobalSend-Ticket', part['ticket']);
+          request.headers.contentType = ContentType.binary;
+          request.contentLength = end - start;
+          await request.addStream(
+            source!.file
+                .openRead(start, end)
+                .timeout(const Duration(seconds: 20))
+                .map((bytes) {
+                  if (canceledFiles.contains(fileId)) throw StateError('发送已取消');
+                  total += bytes.length;
+                  touch();
+                  progress(total);
+                  return bytes;
+                }),
+          );
+          final response = await request.close().timeout(
+            const Duration(seconds: 20),
+          );
+          final body = await response
+              .fold<List<int>>([], (buffer, chunk) {
+                if (buffer.length + chunk.length > 4096) {
+                  throw const FormatException('反向直传响应过大');
+                }
+                return buffer..addAll(chunk);
+              })
+              .timeout(const Duration(seconds: 20));
+          if (response.statusCode != 200) {
+            throw HttpException('反向直传 HTTP ${response.statusCode}');
+          }
+          final result = jsonDecode(utf8.decode(body));
+          if (result['bytes'] != end ||
+              result['attemptId'] != grant['attemptId']) {
+            throw const FormatException('反向直传响应不匹配');
+          }
+        } catch (_) {
+          client.close(force: true);
+          rethrow;
+        } finally {
+          idle?.cancel();
+        }
       }
 
-      touch();
-      await request.addStream(
-        source.file.openRead(offset).timeout(const Duration(seconds: 20)).map((
-          bytes,
-        ) {
-          if (canceledFiles.contains(fileId)) throw StateError('发送已取消');
-          count += bytes.length;
-          touch();
-          progress(count);
-          return bytes;
-        }),
-      );
-      final response = await request.close().timeout(
-        const Duration(seconds: 20),
-      );
-      final body = await response
-          .fold<List<int>>([], (buffer, chunk) {
-            if (buffer.length + chunk.length > 4096) {
-              throw const FormatException('反向直传响应过大');
-            }
-            return buffer..addAll(chunk);
-          })
-          .timeout(const Duration(seconds: 20));
-      if (response.statusCode != 200) {
-        throw HttpException('反向直传 HTTP ${response.statusCode}');
-      }
-      final result = jsonDecode(utf8.decode(body));
-      if (result['bytes'] != size ||
-          result['attemptId'] != grant['attemptId']) {
-        throw const FormatException('反向直传响应不匹配');
-      }
+      await Future.wait(parts.map(sendPart));
     } finally {
-      idle?.cancel();
       await source?.close();
       if (identical(_pushClients[fileId], client)) _pushClients.remove(fileId);
       client.close(force: true);

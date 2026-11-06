@@ -21,6 +21,7 @@ class CompactContentCard extends StatelessWidget {
     required this.onOpen,
     this.onCopy,
     this.menu,
+    this.menuBuilder,
     this.action,
     this.status = '',
     this.speed = '',
@@ -40,6 +41,7 @@ class CompactContentCard extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback? onCopy, onToggle, onLongPress;
   final Widget? menu, action;
+  final Widget Function(BuildContext, bool isImage)? menuBuilder;
   final bool selecting, selected;
   final Key? copyKey;
   final Color? surfaceColor, metadataColor;
@@ -69,6 +71,7 @@ class CompactContentCard extends StatelessWidget {
         entry.kind == 'file' &&
         detectedImage &&
         (!receive.incomingFile || receive.canExport);
+    final menu = menuBuilder?.call(context, image) ?? this.menu;
     final active =
         ['uploading', 'downloading', 'directSending'].contains(entry.status) ||
         receive.showProgress;
@@ -146,9 +149,7 @@ class CompactContentCard extends StatelessWidget {
                     location: entry.localPath,
                     name: entry.title,
                     text: entry.kind == 'text' ? entry.text : null,
-                    topInset: menu != null || selecting
-                        ? (previewOnly ? 24 : 28)
-                        : 0,
+                    topInset: menu != null || selecting ? Ui.space4 : 0,
                     maxTextLines: previewOnly && onCopy != null ? 3 : null,
                     backgroundColor: previewColor,
                     borderRadius: BorderRadius.zero,

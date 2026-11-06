@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'controller.dart';
+import 'content_actions.dart';
 import 'folder_cards.dart';
 import 'screen.dart';
 import 'system_bridge.dart';
@@ -31,7 +32,11 @@ void main(List<String> args) {
       'Google Material icon vectors',
     ], await rootBundle.loadString('assets/licenses/material-icons.txt'));
   });
-  runApp(GlobalSendApp(controller: SendController()));
+  runApp(
+    GlobalSendApp(
+      controller: SendController(enableDesktopCommands: Platform.isWindows),
+    ),
+  );
 }
 
 class GlobalSendApp extends StatefulWidget {
@@ -218,8 +223,14 @@ class _GlobalSendAppState extends State<GlobalSendApp>
           }
           controller.changed();
         case 'copy':
-          if (entry != null && entry.kind == 'text') {
-            await controller.copyDockText(entry);
+          if (id == 'clipboard-slot') {
+            await controller.copyClipboardSlot();
+          } else if (entry != null) {
+            if (entry.kind == 'text') {
+              await controller.copyDockText(entry);
+            } else {
+              await copySavedImage(entry.localPath);
+            }
           }
         case 'receive':
           if (entry != null) {

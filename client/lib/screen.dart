@@ -34,6 +34,10 @@ import 'receipt_preview.dart';
 import 'text_selection_surface.dart';
 import 'content_drag_surface.dart';
 import 'compact_content_card.dart';
+import 'content_actions.dart';
+import 'image_kind.dart';
+import 'history_search.dart';
+import 'adaptive_content_grid.dart';
 import 'compact_time.dart';
 import 'content_groups.dart';
 import 'bulk_file_drag.dart';
@@ -45,6 +49,7 @@ import 'clipboard_suggestions.dart';
 import 'clipboard_slot.dart';
 import 'copied_files_view.dart';
 import 'recent_photos_view.dart';
+import 'suggestion_card_corner.dart';
 import 'installed_apps_picker.dart';
 import 'windows_startup_control.dart';
 import 'user_guide_screen.dart';
@@ -128,6 +133,9 @@ class _SendScreenState extends State<SendScreen>
   SavedFileSizeRule cleanupSizeRule = SavedFileSizeRule.smaller;
   String? target;
   final selected = <String>{};
+  final historySearch = List.generate(2, (_) => TextEditingController());
+  final historyQuery = ['', ''];
+  final historySearchOpen = [false, false];
   final draftFocus = FocusNode();
   final sharedText = TextEditingController();
   final sharedFocus = FocusNode();
@@ -150,6 +158,8 @@ class _SendScreenState extends State<SendScreen>
   final _nativeQueueKey = GlobalKey();
   final _clipboardSuggestionDropKey = GlobalKey();
   final _nativeDeviceKeys = <String, GlobalKey>{};
+  final _nativeStagedCards = <Object, (int, GlobalKey)>{};
+  int _nextStagedCardId = 0;
   final _savedFilesKey = GlobalKey<SavedFilesScreenState>();
   bool? _allFilesAccess;
   final _nativeSendNavigationKey = GlobalKey();
@@ -173,6 +183,17 @@ class _SendScreenState extends State<SendScreen>
   @override
   void initState() {
     super.initState();
+    for (final (index, controller) in historySearch.indexed) {
+      controller.addListener(() {
+        if (historyQuery[index] == controller.text) return;
+        setState(() {
+          historyQuery[index] = controller.text;
+          if (contentTab == index) {
+            selected.retainAll(historyItems(index).map((item) => item.id));
+          }
+        });
+      });
+    }
     ui.captureUpdateDrafts = captureUpdateDrafts;
     WidgetsBinding.instance.addObserver(this);
     c.addListener(refresh);
@@ -336,6 +357,10 @@ class _SendScreenState extends State<SendScreen>
         return KeyEventResult.handled;
       }
       if (!settingsOpen && exitContentSelection()) {
+        return KeyEventResult.handled;
+      }
+      if (!settingsOpen && activeHistorySearch) {
+        closeHistorySearch(contentTab);
         return KeyEventResult.handled;
       }
       if (settingsOpen || contentTab != 0 || page != 1) {
@@ -783,6 +808,7 @@ class _SendScreenState extends State<SendScreen>
       relayLimit,
       retention,
       cleanupSize,
+      ...historySearch,
     ]) {
       controller.dispose();
     }
@@ -909,9 +935,15 @@ class _SendScreenState extends State<SendScreen>
     if (touching)
       recentPhotos.setShowing({}, interacting: true);
     else
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => reportPhotoVisibility(),
-      );
+      _reportPhotoVisibilityAfterFrame();
+  }
+
+  void _reportPhotoVisibilityAfterFrame() {
+    final binding = WidgetsBinding.instance;
+    binding.addPostFrameCallback((_) => reportPhotoVisibility());
+    // A stationary pointer release or a finished native drag need not
+    // invalidate layout. An idle callback must still get its frame.
+    binding.ensureVisualUpdate();
   }
 
   Widget photoSuggestionTile(SuggestedPhoto photo) {
@@ -1030,6 +1062,11 @@ class _SendScreenState extends State<SendScreen>
       (page == 0 || MediaQuery.sizeOf(context).width >= 900) &&
       (_savedFilesKey.currentState?.selectionActive ?? false);
 
+  bool get activeHistorySearch =>
+      contentTab < historySearchOpen.length &&
+      (page == 0 || MediaQuery.sizeOf(context).width >= 900) &&
+      historySearchOpen[contentTab];
+
   bool exitContentSelection() {
     if (fileSelectionActive &&
         _savedFilesKey.currentState!.exitSelectionIfActive()) {
@@ -1075,10 +1112,15 @@ class _SendScreenState extends State<SendScreen>
           !selecting &&
           !ui.multiSend &&
           !fileSelectionActive &&
+          !activeHistorySearch &&
           page == 1,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
           if (!settingsOpen && exitContentSelection()) return;
+          if (!settingsOpen && activeHistorySearch) {
+            closeHistorySearch(contentTab);
+            return;
+          }
           setState(() {
             settingsOpen = false;
             page = 1;
@@ -1407,6 +1449,9 @@ class _SendScreenState extends State<SendScreen>
       target: _nativeQueueKey,
       excludedTargets: [_clipboardSuggestionDropKey],
       deviceTargets: _nativeDeviceKeys,
+      stagedCards: () => {
+        for (final (id, key) in _nativeStagedCards.values) id: key,
+      },
       serverKey: c.profile?.key ?? '',
       enabled:
           loggedIn &&
@@ -2189,94 +2234,130 @@ class _SendScreenState extends State<SendScreen>
     );
   }
 
-  Widget sentPage() {
-    final items = mergeContentCards(
-      c.historyDock.where((item) => item.outgoing),
+  List<DockEntry> historyItems(int tab, {bool filtered = true}) {
+    return mergeContentCards(
+      c.historyDock.where((item) => item.outgoing == (tab == 1)),
+      matches: filtered ? historyMatch(tab) : null,
     );
-    return items.isEmpty
-        ? const UiEmpty(icon: Icons.history, title: '暂无发送记录')
-        : Column(
-            children: [
-              UiContentToolbar(
-                key: const ValueKey('sent-toolbar'),
-                children: [
-                  Text(
-                    selecting
-                        ? '${selected.length}/${items.length} 项'
-                        : '${items.length} 项',
-                    style: TextStyle(
-                      fontSize: Ui.text2xs,
-                      color: Ui.colors(context).textSecondary,
-                    ),
-                  ),
-                  BulkFileDrag(
-                    key: const ValueKey('sent-drag-all'),
-                    paths: items
-                        .where(
-                          (item) =>
-                              item.kind == 'file' &&
-                              item.localPath.isNotEmpty &&
-                              (!selecting || selected.contains(item.id)),
-                        )
-                        .map((item) => item.localPath)
-                        .toList(),
-                    enabled: !working,
-                    onError: (error) => notice(shortError('$error')),
-                  ),
-                  if (selecting)
-                    TextButton(
-                      key: const ValueKey('sent-select-all'),
-                      onPressed: () => setState(() {
-                        if (items.every((item) => selected.contains(item.id))) {
-                          selected.clear();
-                        } else {
-                          selected.addAll(items.map((item) => item.id));
-                        }
-                      }),
-                      child: Text(
-                        items.every((item) => selected.contains(item.id))
-                            ? '取消全选'
-                            : '全选',
-                      ),
-                    ),
-                  if (selecting)
-                    TextButton(
-                      key: const ValueKey('sent-delete-selected'),
-                      onPressed: selected.isEmpty || working
-                          ? null
-                          : deleteSelected,
-                      child: const Text('删除'),
-                    ),
-                  TextButton(
-                    key: const ValueKey('sent-multi-select'),
-                    onPressed: () => setState(() {
-                      selecting = !selecting;
-                      selected.clear();
-                    }),
-                    child: Text(selecting ? '取消' : '多选'),
-                  ),
-                ],
+  }
+
+  bool Function(DockEntry)? historyMatch(int tab) {
+    final query = historyQuery[tab];
+    if (query.trim().isEmpty) return null;
+    return (item) => matchesHistoryQuery(
+      item,
+      query,
+      deviceLabel: item.outgoing && item.targetDeviceId.isNotEmpty
+          ? sourceName(item.targetDeviceId)
+          : item.sourceLabel.isNotEmpty
+          ? item.sourceLabel
+          : sourceName(item.source),
+    );
+  }
+
+  void closeHistorySearch(int tab) {
+    historySearch[tab].clear();
+    setState(() => historySearchOpen[tab] = false);
+  }
+
+  Widget historySearchControl(int tab, {required bool expanded}) =>
+      HistorySearchControl(
+        key: ValueKey('history-search-$tab-$expanded'),
+        controller: historySearch[tab],
+        expanded: expanded,
+        onOpen: () => setState(() => historySearchOpen[tab] = true),
+        onClose: () => closeHistorySearch(tab),
+      );
+
+  Widget historySearchField(int tab) => Padding(
+    padding: const EdgeInsets.fromLTRB(Ui.space2, 0, Ui.space2, Ui.space2),
+    child: historySearchControl(tab, expanded: true),
+  );
+
+  Widget sentPage() {
+    final items = historyItems(1);
+    return Column(
+      children: [
+        UiContentToolbar(
+          key: const ValueKey('sent-toolbar'),
+          children: [
+            Text(
+              selecting
+                  ? '${selected.length}/${items.length} 项'
+                  : '${items.length} 项',
+              style: TextStyle(
+                fontSize: Ui.text2xs,
+                color: Ui.colors(context).textSecondary,
               ),
-              Expanded(
-                child: GridView.builder(
+            ),
+            if (!historySearchOpen[1]) historySearchControl(1, expanded: false),
+            BulkFileDrag(
+              key: const ValueKey('sent-drag-all'),
+              paths: items
+                  .where(
+                    (item) =>
+                        item.kind == 'file' &&
+                        item.localPath.isNotEmpty &&
+                        (!selecting || selected.contains(item.id)),
+                  )
+                  .map((item) => item.localPath)
+                  .toList(),
+              enabled: !working,
+              onError: (error) => notice(shortError('$error')),
+            ),
+            if (selecting)
+              TextButton(
+                key: const ValueKey('sent-select-all'),
+                onPressed: () => setState(() {
+                  if (items.every((item) => selected.contains(item.id))) {
+                    selected.clear();
+                  } else {
+                    selected.addAll(items.map((item) => item.id));
+                  }
+                }),
+                child: Text(
+                  items.every((item) => selected.contains(item.id))
+                      ? '取消全选'
+                      : '全选',
+                ),
+              ),
+            if (selecting)
+              TextButton(
+                key: const ValueKey('sent-delete-selected'),
+                onPressed: selected.isEmpty || working ? null : deleteSelected,
+                child: const Text('删除'),
+              ),
+            if (items.isNotEmpty || selecting)
+              TextButton(
+                key: const ValueKey('sent-multi-select'),
+                onPressed: () => setState(() {
+                  selecting = !selecting;
+                  selected.clear();
+                }),
+                child: Text(selecting ? '取消' : '多选'),
+              ),
+          ],
+        ),
+        if (historySearchOpen[1]) historySearchField(1),
+        Expanded(
+          child: items.isEmpty
+              ? UiEmpty(
+                  icon: historyQuery[1].trim().isEmpty
+                      ? Icons.history
+                      : Icons.search,
+                  title: historyQuery[1].trim().isEmpty ? '暂无发送记录' : '没有匹配的内容',
+                )
+              : GridView.builder(
                   key: const ValueKey('sent-grid'),
                   padding: const EdgeInsets.all(Ui.space2),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    mainAxisExtent: cardExtent(),
-                  ),
+                  gridDelegate: AdaptiveContentGrid(context),
                   itemCount: items.length,
                   itemBuilder: (_, index) => entryCard(items[index]),
                 ),
-              ),
-            ],
-          );
+        ),
+      ],
+    );
   }
-
-  double cardExtent() =>
-      230 + math.max(0, MediaQuery.textScalerOf(context).scale(14) - 14) * 8;
 
   Widget workspacePane(Widget child, {bool joined = false}) => DecoratedBox(
     key: joined ? const ValueKey('desktop-content-pane') : null,
@@ -2406,6 +2487,14 @@ class _SendScreenState extends State<SendScreen>
           tile: photoSuggestionTile(photo),
         ),
     ]..sort((a, b) => b.at.compareTo(a.at));
+    if (Theme.of(context).platform == TargetPlatform.android &&
+        suggestions.isNotEmpty) {
+      suggestions.add((
+        id: 'clear-android-suggestions',
+        at: 0,
+        tile: _clearSuggestionsTile(),
+      ));
+    }
     final failed = c.failedOutgoingFiles;
     final active = c.dock
         .where(
@@ -2422,9 +2511,31 @@ class _SendScreenState extends State<SendScreen>
               ].contains(item.status),
         )
         .toList();
-    final queueIdentities = <Object>[
+    final textOccurrences = <String, int>{};
+    final stagedIdentities = <Object>[
       for (final path in c.stagedFiles) ('file', path),
-      for (final text in c.stagedTexts) ('text', text),
+      // Identical drafts are distinct cards and must occupy distinct slots.
+      for (final text in c.stagedTexts)
+        (
+          'text',
+          text,
+          textOccurrences.update(text, (n) => n + 1, ifAbsent: () => 0),
+        ),
+    ];
+    if (Theme.of(context).platform == TargetPlatform.android) {
+      final stagedSet = stagedIdentities.toSet();
+      _nativeStagedCards.removeWhere(
+        (identity, _) => !stagedSet.contains(identity),
+      );
+      for (final identity in stagedIdentities) {
+        _nativeStagedCards.putIfAbsent(
+          identity,
+          () => (++_nextStagedCardId, GlobalKey()),
+        );
+      }
+    }
+    final queueIdentities = <Object>[
+      ...stagedIdentities,
       for (final entry in active) ('active', entry.id),
       for (final suggestion in suggestions) suggestion.id,
     ];
@@ -2609,10 +2720,7 @@ class _SendScreenState extends State<SendScreen>
                                     }
                                     if (event is ScrollEndNotification) {
                                       _photoScrolling = false;
-                                      WidgetsBinding.instance
-                                          .addPostFrameCallback(
-                                            (_) => reportPhotoVisibility(),
-                                          );
+                                      _reportPhotoVisibilityAfterFrame();
                                     }
                                     return false;
                                   },
@@ -2642,16 +2750,21 @@ class _SendScreenState extends State<SendScreen>
                                           active.length +
                                           suggestions.length,
                                       itemBuilder: (_, index) {
+                                        final identity = queueIdentities[index];
+                                        final stagedCard =
+                                            _nativeStagedCards[identity];
                                         final tile =
                                             index < c.stagedFiles.length
                                             ? stagedTile(
                                                 path: c.stagedFiles[index],
+                                                nativeCardId: stagedCard?.$1,
                                               )
                                             : index < count
                                             ? stagedTile(
                                                 textIndex:
                                                     index -
                                                     c.stagedFiles.length,
+                                                nativeCardId: stagedCard?.$1,
                                               )
                                             : index < count + active.length
                                             ? activeTransferTile(
@@ -2665,7 +2778,6 @@ class _SendScreenState extends State<SendScreen>
                                         // fades in once instead of jumping in; the
                                         // key keeps the state with the entry, so a
                                         // rebuild never replays the animation.
-                                        final identity = queueIdentities[index];
                                         final card = UiAppear(
                                           animate: _seenQueueEntries.add(
                                             identity,
@@ -2684,6 +2796,7 @@ class _SendScreenState extends State<SendScreen>
                                         return KeyedSubtree(
                                           key: ValueKey<Object>(identity),
                                           child: AspectRatio(
+                                            key: stagedCard?.$2,
                                             aspectRatio: 1,
                                             // The entire card slot is excluded,
                                             // including during its entrance animation.
@@ -2766,6 +2879,40 @@ class _SendScreenState extends State<SendScreen>
       await clipboardSuggestions.dismissRevision(revision);
   }
 
+  Widget _clearSuggestionsTile() {
+    final colors = Ui.colors(context);
+    return Material(
+      color: colors.accentSoft,
+      borderRadius: Ui.cardRadius,
+      clipBehavior: Clip.antiAlias,
+      child: Tooltip(
+        message: '清空建议',
+        child: InkWell(
+          onTap: working
+              ? null
+              : () => perform(() async {
+                  await DockPlatform.channel.invokeMethod<void>(
+                    'clearSuggestions',
+                    const <String, dynamic>{},
+                  );
+                  await Future.wait([
+                    recentPhotos.refresh(),
+                    clipboardSuggestions.refresh(),
+                  ]);
+                }),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AppIcon(Icons.close, size: 26, color: colors.accent),
+              const SizedBox(height: Ui.space0),
+              const Text('清空', style: TextStyle(fontSize: Ui.textXs)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget clipboardSuggestionTile(ClipboardSuggestion suggestion) {
     final tile = Material(
       key: const ValueKey('clipboard-suggestion'),
@@ -2810,36 +2957,36 @@ class _SendScreenState extends State<SendScreen>
                       ),
                     ),
                     const SizedBox(height: Ui.space0),
-                    Text(
-                      '${suggestion.label} · 点按添加',
-                      style: TextStyle(
-                        fontSize: Ui.text2xs,
-                        color: Ui.colors(context).textSecondary,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: Ui.space1,
+                      ),
+                      child: DefaultTextStyle.merge(
+                        style: TextStyle(
+                          fontSize: Ui.text2xs,
+                          color: Ui.colors(context).textSecondary,
+                        ),
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: Ui.space0,
+                          children: [
+                            Text(suggestion.label),
+                            const Text('点按添加'),
+                          ],
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            Positioned(
-              top: 2,
-              right: 2,
-              child: ContentDragControl(
-                child: SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: IconButton(
-                    tooltip: '忽略剪贴板建议',
-                    padding: EdgeInsets.zero,
-                    onPressed: working
-                        ? null
-                        : () => clipboardSuggestions.dismissRevision(
-                            suggestion.revision,
-                          ),
-                    icon: const AppIcon(Icons.close, size: 16),
-                  ),
-                ),
-              ),
+            SuggestionCardCorner.dismiss(
+              tooltip: '忽略剪贴板建议',
+              onDismiss: working
+                  ? null
+                  : () => clipboardSuggestions.dismissRevision(
+                      suggestion.revision,
+                    ),
             ),
           ],
         ),
@@ -2873,7 +3020,7 @@ class _SendScreenState extends State<SendScreen>
     );
   }
 
-  Widget stagedTile({String? path, int? textIndex}) {
+  Widget stagedTile({String? path, int? textIndex, int? nativeCardId}) {
     final isText = textIndex != null;
     final value = isText ? c.stagedTexts[textIndex] : '';
     final title = isText
@@ -2896,8 +3043,9 @@ class _SendScreenState extends State<SendScreen>
       key: ValueKey(entry.id),
       entry: entry,
       enabled: !working,
-      onExport: (kind) =>
-          performExport(() => c.dragOut(entry, pointerKind: kind)),
+      onExport: (kind) => performExport(
+        () => c.dragOut(entry, pointerKind: kind, stagedCardId: nativeCardId),
+      ),
       child: Material(
         color: Ui.colors(context).surface,
         borderRadius: Ui.cardRadius,
@@ -3763,6 +3911,7 @@ class _SendScreenState extends State<SendScreen>
       source: '',
       localPath: path,
     ),
+    canQueue: false,
   );
 
   Widget sharedContentSlots() {
@@ -3805,8 +3954,9 @@ class _SendScreenState extends State<SendScreen>
                     sender: '剪贴板',
                     timestamp: '',
                     previewOnly: true,
-                    onOpen: () =>
-                        slot.kind == 'text' ? readText(slot) : openFile(slot),
+                    onOpen: () => slot.kind == 'text'
+                        ? readText(slot)
+                        : openFile(slot, canQueue: false),
                     onCopy: c.canCopyClipboardSlot
                         ? () => perform(() async {
                             if (await c.copyClipboardSlot() && mounted)
@@ -3871,21 +4021,26 @@ class _SendScreenState extends State<SendScreen>
   });
 
   Widget receivePage() {
-    final items = mergeContentCards(
-      c.historyDock.where((item) => !item.outgoing),
-    )..sort(compareReceivedNewestFirst);
+    final items = historyItems(0)..sort(compareReceivedNewestFirst);
+    final visibleIds = items.map((item) => item.id).toSet();
     final batches = <String, List<DockEntry>>{};
-    final cards = <DockEntry>[];
-    for (final item in items) {
-      if (!selecting &&
-          item.kind == 'file' &&
-          (item.status == 'offered' ||
-              item.relayConfirmationPending && item.relayPendingBeforeAccept)) {
-        (batches[item.transferId] ??= []).add(item);
-      } else {
-        cards.add(item);
-      }
+    bool isBatch(DockEntry item) =>
+        !selecting &&
+        item.kind == 'file' &&
+        (item.status == 'offered' ||
+            item.relayConfirmationPending && item.relayPendingBeforeAccept);
+    final cards = items.where((item) => !isBatch(item)).toList();
+    final all =
+        historyQuery[0].trim().isEmpty
+              ? items
+              : historyItems(0, filtered: false)
+          ..sort(compareReceivedNewestFirst);
+    for (final item in all) {
+      if (isBatch(item)) (batches[item.transferId] ??= []).add(item);
     }
+    batches.removeWhere(
+      (_, batch) => !batch.any((item) => visibleIds.contains(item.id)),
+    );
     return Column(
       children: [
         UiContentToolbar(
@@ -3900,6 +4055,7 @@ class _SendScreenState extends State<SendScreen>
                 color: Ui.colors(context).textSecondary,
               ),
             ),
+            if (!historySearchOpen[0]) historySearchControl(0, expanded: false),
             BulkFileDrag(
               key: const ValueKey('receive-drag-all'),
               paths: items
@@ -3950,7 +4106,7 @@ class _SendScreenState extends State<SendScreen>
                 onPressed: selected.isEmpty || working ? null : deleteSelected,
                 child: const Text('删除'),
               ),
-            if (items.isNotEmpty)
+            if (items.isNotEmpty || selecting)
               TextButton(
                 key: const ValueKey('receive-multi-select'),
                 onPressed: () {
@@ -3964,6 +4120,7 @@ class _SendScreenState extends State<SendScreen>
               ),
           ],
         ),
+        if (historySearchOpen[0]) historySearchField(0),
         Expanded(
           child: RefreshIndicator(
             onRefresh: c.safeReconcile,
@@ -3979,13 +4136,15 @@ class _SendScreenState extends State<SendScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           AppIcon(
-                            Icons.inbox_outlined,
+                            historyQuery[0].trim().isEmpty
+                                ? Icons.inbox_outlined
+                                : Icons.search,
                             size: 44,
                             color: Ui.colors(context).textSecondary,
                           ),
                           SizedBox(height: Ui.space2),
                           Text(
-                            '暂无接收',
+                            historyQuery[0].trim().isEmpty ? '暂无接收' : '没有匹配的内容',
                             style: TextStyle(
                               color: Ui.colors(context).textSecondary,
                             ),
@@ -4010,12 +4169,7 @@ class _SendScreenState extends State<SendScreen>
                   ),
                   sliver: SliverGrid(
                     key: const ValueKey('receive-grid'),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      mainAxisExtent: cardExtent(),
-                    ),
+                    gridDelegate: AdaptiveContentGrid(context),
                     delegate: SliverChildBuilderDelegate(
                       (context, index) => entryCard(cards[index]),
                       childCount: cards.length,
@@ -4229,14 +4383,15 @@ class _SendScreenState extends State<SendScreen>
             ? selected.remove(item.id)
             : selected.add(item.id),
       ),
-      menu: PopupMenuButton<String>(
+      menuBuilder: (_, image) => PopupMenuButton<String>(
         tooltip: '更多',
         padding: EdgeInsets.zero,
         iconSize: 20,
         constraints: const BoxConstraints(minWidth: 140),
         icon: const AppIcon(Icons.more_horiz),
-        onSelected: (action) => fileAction(action, item),
-        itemBuilder: (_) => entryMenu(item),
+        onSelected: (action) =>
+            fileAction(action, item, fromHistory: selectionEnabled),
+        itemBuilder: (_) => entryMenu(item, image: image),
       ),
       status: item.status == 'failed'
           ? '传输失败'
@@ -4281,6 +4436,7 @@ class _SendScreenState extends State<SendScreen>
       card,
       key: ValueKey('${draggable ? 'drag' : 'entry'}-${item.id}'),
       contextual: false,
+      fromHistory: selectionEnabled,
       onExport: android && selectionEnabled
           ? (kind) => dragContentSelection(item)
           : null,
@@ -4293,17 +4449,14 @@ class _SendScreenState extends State<SendScreen>
   }
 
   Future<void> dragContentSelection(DockEntry item) => performExport(() async {
-    final entries =
-        mergeContentCards(
-              c.historyDock.where((entry) => entry.outgoing == item.outgoing),
-            )
-            .where(
-              (entry) =>
-                  selecting &&
-                  selected.contains(entry.id) &&
-                  (entry.kind == 'text' || entry.localPath.isNotEmpty),
-            )
-            .toList();
+    final entries = historyItems(item.outgoing ? 1 : 0)
+        .where(
+          (entry) =>
+              selecting &&
+              selected.contains(entry.id) &&
+              (entry.kind == 'text' || entry.localPath.isNotEmpty),
+        )
+        .toList();
     // An empty selection can still drag its held source without selecting it.
     if (entries.isEmpty) entries.add(item);
     await DockPlatform.startDrag(
@@ -4321,8 +4474,15 @@ class _SendScreenState extends State<SendScreen>
     );
   });
 
-  List<PopupMenuEntry<String>> entryMenu(DockEntry item) {
+  List<PopupMenuEntry<String>> entryMenu(
+    DockEntry item, {
+    required bool image,
+  }) {
     final directory = item.sourceReference.isNotEmpty;
+    final local = item.localPath.isNotEmpty;
+    final primaryIsDetails = directory || (item.kind != 'text' && !local);
+    final distinctExternal =
+        local && (primaryIsDetails || image || isTextPreviewFile(item.title));
     final localHistory = c.isLocalHistory(item);
     final cancelable =
         !localHistory &&
@@ -4335,17 +4495,13 @@ class _SendScreenState extends State<SendScreen>
           'expired',
         ].contains(item.status);
     return [
-      if (item.kind == 'text') ...[
-        PopupMenuItem(
-          value: 'view',
-          child: Text(item.outgoing ? '编辑文本' : '查看文本'),
-        ),
-        const PopupMenuItem(value: 'copy', child: Text('复制')),
-      ],
-      if (item.localPath.isNotEmpty)
-        const PopupMenuItem(value: 'openExternal', child: Text('打开')),
-      if (item.localPath.isNotEmpty && Platform.isWindows)
+      if (distinctExternal)
+        const PopupMenuItem(value: 'openExternal', child: Text('用其他应用打开')),
+      if (local && Theme.of(context).platform == TargetPlatform.windows)
         const PopupMenuItem(value: 'locate', child: Text('定位文件')),
+      if (item.kind == 'text' ||
+          image && FileShareBridge.canWriteImageClipboard)
+        const PopupMenuItem(value: 'copy', child: Text('复制')),
       if (item.kind == 'text' || item.localPath.isNotEmpty || directory)
         const PopupMenuItem(value: 'requeue', child: Text('加入待发送')),
       if (FileShareBridge.supported &&
@@ -4364,22 +4520,29 @@ class _SendScreenState extends State<SendScreen>
         const PopupMenuItem(value: 'auto', child: Text('自动重试')),
       if (cancelable) const PopupMenuItem(value: 'cancel', child: Text('取消传输')),
       const PopupMenuItem(value: 'delete', child: Text('删除')),
-      const PopupMenuItem(value: 'details', child: Text('详情')),
+      if (!primaryIsDetails)
+        const PopupMenuItem(value: 'details', child: Text('详情')),
     ];
   }
 
-  Future<void> showEntryMenu(DockEntry item, Offset position) async {
-    final overlay =
-        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
-    final result = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(
-        Rect.fromLTWH(position.dx, position.dy, 0, 0),
-        Offset.zero & overlay.size,
-      ),
-      items: entryMenu(item),
+  Future<void> showEntryMenu(
+    DockEntry item,
+    Offset position, {
+    required bool fromHistory,
+  }) async {
+    final image =
+        item.kind == 'file' &&
+        !item.isDirectory &&
+        item.localPath.isNotEmpty &&
+        await imageAtLocation(item.localPath, item.title);
+    if (!mounted) return;
+    final result = await showContentMenuAt(
+      context,
+      position,
+      entryMenu(item, image: image),
     );
-    if (result != null && mounted) await fileAction(result, item);
+    if (result != null && mounted)
+      await fileAction(result, item, fromHistory: fromHistory);
   }
 
   Widget dragSurface(
@@ -4387,6 +4550,7 @@ class _SendScreenState extends State<SendScreen>
     Widget child, {
     Key? key,
     bool contextual = true,
+    bool fromHistory = false,
     Future<void> Function(String kind)? onExport,
   }) {
     final windows = Theme.of(context).platform == TargetPlatform.windows;
@@ -4422,7 +4586,11 @@ class _SendScreenState extends State<SendScreen>
               details.globalPosition,
               View.of(context).viewId,
             )) {
-              showEntryMenu(item, details.globalPosition);
+              showEntryMenu(
+                item,
+                details.globalPosition,
+                fromHistory: fromHistory,
+              );
             }
           },
           child: child,
@@ -4448,7 +4616,7 @@ class _SendScreenState extends State<SendScreen>
   }
 
   Future<void> copySelected() => perform(() async {
-    final values = mergeContentCards(c.historyDock).reversed
+    final values = historyItems(contentTab).reversed
         .where((item) => item.kind == 'text' && selected.contains(item.id))
         .map((item) => item.text)
         .toList();
@@ -4460,14 +4628,11 @@ class _SendScreenState extends State<SendScreen>
     scheduleReceipt();
   }, done: '已复制');
   Future<void> deleteSelected() => perform(() async {
-    final items = c.historyDock
-        .where(
-          (item) =>
-              item.outgoing == (contentTab == 1) && selected.contains(item.id),
-        )
+    final items = historyItems(contentTab)
+        .where((item) => selected.contains(item.id))
         .toList();
+    await c.removeHistoryEntries(items, matches: historyMatch(contentTab));
     for (final item in items) {
-      await c.removeHistoryEntries([item]);
       c.dismissReceipts([item.id]);
       ui.pendingReceipts.remove(item.id);
     }
@@ -4514,7 +4679,7 @@ class _SendScreenState extends State<SendScreen>
     scheduleReceipt();
   }
 
-  Future<void> openFile(DockEntry item) async {
+  Future<void> openFile(DockEntry item, {bool canQueue = true}) async {
     if (item.isDirectory) {
       await ReceivedFileAccess.openExternal(item.localPath);
       return;
@@ -4523,6 +4688,7 @@ class _SendScreenState extends State<SendScreen>
       context,
       path: item.localPath,
       title: item.title,
+      onQueue: canQueue ? () => c.stageHistoryEntry(item) : null,
     )) {
       return;
     }
@@ -4546,7 +4712,11 @@ class _SendScreenState extends State<SendScreen>
     await ReceivedFileAccess.openExternal(item.localPath);
   }
 
-  Future<void> fileAction(String action, DockEntry item) async {
+  Future<void> fileAction(
+    String action,
+    DockEntry item, {
+    bool fromHistory = false,
+  }) async {
     if (['pause', 'resume', 'cancel'].contains(action)) {
       await transferControl(action, item);
       return;
@@ -4556,12 +4726,13 @@ class _SendScreenState extends State<SendScreen>
       if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
       return;
     }
-    if (action == 'view') {
-      await readText(item);
-      return;
-    }
     if (action == 'copy') {
-      await perform(() => c.copyDockText(item), done: '已复制');
+      await perform(
+        () => item.kind == 'text'
+            ? c.copyDockText(item)
+            : copySavedImage(item.localPath),
+        done: '已复制',
+      );
       return;
     }
     if (action == 'share') {
@@ -4576,7 +4747,11 @@ class _SendScreenState extends State<SendScreen>
       return;
     }
     if (action == 'delete') {
-      await perform(() => c.removeHistoryEntries([item]), done: '已删除');
+      final matches = fromHistory ? historyMatch(item.outgoing ? 1 : 0) : null;
+      await perform(
+        () => c.removeHistoryEntries([item], matches: matches),
+        done: '已删除',
+      );
       if (!c.historyDock.contains(item)) {
         c.dismissReceipts([item.id]);
         ui.pendingReceipts.remove(item.id);
@@ -5465,6 +5640,30 @@ class _SendScreenState extends State<SendScreen>
               ),
             ),
             const SizedBox(height: Ui.space3),
+            UiField(
+              label: '多线程连接',
+              child: DropdownButtonFormField<int>(
+                icon: const AppIcon(Icons.arrow_drop_down),
+                key: ValueKey('transfer-connections-${c.transferConnections}'),
+                initialValue: c.transferConnections,
+                decoration: InputDecoration(
+                  helperText: c.info['features']?['parallelPush'] == true
+                            ? '接收单个局域网大文件'
+                      : '需要更新中心',
+                ),
+                items: List.generate(
+                  16,
+                  (index) => DropdownMenuItem(
+                    value: index + 1,
+                    child: Text(index == 0 ? '1（单连接）' : '${index + 1}'),
+                  ),
+                ),
+                onChanged: working
+                    ? null
+                    : (value) => perform(() => c.setTransferConnections(value!)),
+              ),
+            ),
+            const SizedBox(height: Ui.space3),
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: relayLimit,
               builder: (_, value, child) => UiField(
@@ -5667,35 +5866,8 @@ class _SendScreenState extends State<SendScreen>
                     horizontal: Ui.space3,
                   ),
                   title: Text(group['name'] as String),
-                  leading: Container(
-                    width: 20,
-                    height: 20,
-                    padding: const EdgeInsets.all(Ui.space0),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: group['groupId'] == c.profile!.groupId
-                            ? Ui.colors(context).accent
-                            : Ui.colors(context).textSecondary,
-                        width: 1.5,
-                      ),
-                    ),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: group['groupId'] == c.profile!.groupId
-                            ? Ui.colors(context).accent
-                            : Colors.transparent,
-                      ),
-                    ),
-                  ),
-                  onTap: working
-                      ? null
-                      : () => perform(
-                          () => c.selectSharedGroup(group['groupId'] as String),
-                        ),
                   trailing: IconButton(
-                    tooltip: '退出此组',
+                    tooltip: '退出 ${group['name']}',
                     icon: const AppIcon(Icons.logout_rounded, size: 20),
                     onPressed: working
                         ? null
@@ -5721,7 +5893,13 @@ class _SendScreenState extends State<SendScreen>
               key: const ValueKey('settings-disconnect'),
               contentPadding: const EdgeInsets.symmetric(horizontal: Ui.space3),
               title: Text(c.multiGroupSupported ? '断开服务器' : '退出当前组'),
-              trailing: const AppIcon(Icons.logout_rounded, size: 20),
+              trailing: const SizedBox(
+                width: Ui.rowHeight,
+                child: Center(
+                  heightFactor: 1,
+                  child: AppIcon(Icons.logout_rounded, size: 20),
+                ),
+              ),
               onTap: working ? null : signOut,
             ),
           ]),
@@ -5813,6 +5991,7 @@ class _SendScreenState extends State<SendScreen>
                     context: context,
                     applicationName: 'GlobalSend',
                     applicationVersion: c.updates.build.label,
+                    applicationLegalese: '© 2026 DongLan',
                   ),
                 ),
               ],

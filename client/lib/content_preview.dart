@@ -77,11 +77,14 @@ class _ContentPreviewState extends State<ContentPreview> {
 
   Widget _text(BuildContext context, String value) => LayoutBuilder(
     builder: (context, bounds) {
-      final padding = widget.compact ? 8.0 : 14.0;
-      final font = widget.compact ? 13.0 : 14.0;
-      final available = bounds.maxHeight - padding * 2 - widget.topInset;
+      final padding = widget.compact ? Ui.space1 : Ui.space2;
+      final bottom = Ui.space1;
+      final font = widget.compact ? Ui.textXs : Ui.textSm;
+      final lineHeight =
+          MediaQuery.textScalerOf(context).scale(font) * Ui.leadingNormal;
+      final available = bounds.maxHeight - padding - bottom - widget.topInset;
       final lines = bounds.maxHeight.isFinite
-          ? (available / (MediaQuery.textScalerOf(context).scale(font) * 1.55))
+          ? (available / lineHeight)
                 .floor()
                 .clamp(1, widget.maxTextLines ?? (widget.compact ? 2 : 5))
           : widget.maxTextLines ?? (widget.compact ? 2 : 5);
@@ -90,7 +93,7 @@ class _ContentPreviewState extends State<ContentPreview> {
           padding,
           padding + widget.topInset,
           padding,
-          padding,
+          bottom,
         ),
         child: WebLinkText(
           value,
@@ -98,7 +101,7 @@ class _ContentPreviewState extends State<ContentPreview> {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: font,
-            height: 1.55,
+            height: Ui.leadingNormal,
             color: Ui.colors(context).ink,
           ),
         ),
