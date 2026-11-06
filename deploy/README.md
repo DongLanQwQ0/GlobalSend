@@ -7,11 +7,11 @@
 在项目根目录执行：
 
 ```powershell
-npm --prefix web ci
-npm --prefix web run build
-npm --prefix server ci
-npm --prefix server run build
-npm --prefix server run dev
+pnpm --dir web install --frozen-lockfile
+pnpm --dir web run build
+pnpm --dir server install --frozen-lockfile
+pnpm --dir server run build
+pnpm --dir server run dev
 ```
 
 默认 `http://127.0.0.1:8787/app/`。设备填写同一个至少 **10 位的组密码**，直接加入同组；新密码自动建组。API 继续使用 `groupKey` 字段。服务器仅保存实例专用 HMAC 索引，密码通过 HTTPS 请求体提交。
@@ -152,11 +152,11 @@ curl --fail --silent --show-error https://123.207.180.163/globalsend/api/v1/info
 先手动停止中心，并保持停止直到复制完成，再执行项目内脚本。脚本不替你停进程，也不打开或修改源数据库。**当前暂停验证期间不要执行下面命令**；脚本为新增源码，尚未运行验收。
 
 ```powershell
-# 根 npm start 使用的默认目录；只有实例实际使用这些目录时才照抄。
-npm run backup:local -- --server-stopped --data-dir artifacts/local-center/data --relay-dir artifacts/local-center/relay
+# 根 pnpm start 使用的默认目录；只有实例实际使用这些目录时才照抄。
+pnpm run backup:local -- --server-stopped --data-dir artifacts/local-center/data --relay-dir artifacts/local-center/relay
 
 # 早期直接从 server 启动、且没有指定目录的实例使用下列目录。
-npm run backup:local -- --server-stopped --data-dir server/data --relay-dir server/data/relay
+pnpm run backup:local -- --server-stopped --data-dir server/data --relay-dir server/data/relay
 ```
 
 按实际启动时的 DATA_DIR / RELAY_DIR 选择其中一条，不要把目录不同的空实例当成当前实例。脚本强制显式提供两个目录；`--server-stopped` 是操作者确认，不是服务已停止的检测结果。输出留在项目 `backups/`，包含 data、relay、复制清单和原始绝对目录，SQLite 的 WAL/SHM 若存在也一起保留。内嵌的 relay 只复制到独立 relay 目录一次；遇到符号链接、junction 或特殊文件则中止。失败副本保留 `.incomplete-` 名称，不能用于恢复。

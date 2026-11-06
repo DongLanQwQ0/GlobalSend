@@ -16,7 +16,7 @@ test('Web guide shows one task at a time with accessible topic buttons',()=>{
 
 test('Guides distinguish Android dock, iPad sharing and Web restrictions',()=>{
   const content=(key:keyof typeof userGuides)=>JSON.stringify(userGuides[key]);
-  assert.match(content('android'),/悬停 2 秒/);
+  assert.match(content('android'),/悬停 1 秒/);
   assert.match(content('android'),/3 秒/);
   assert.match(content('android'),/30 秒/);
   assert.match(content('ipad'),/系统决定/);

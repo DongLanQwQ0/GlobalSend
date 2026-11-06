@@ -33,14 +33,16 @@ Android 蜂窝传输默认开启且不限大小，可在设置中关闭。HTTPS 
 ### 构建、更新并重启两端
 
 ```powershell
-npm run release:local
+pnpm run release:local
 ```
+
+该脚本按 Windows 主机编写（PowerShell、`E:\Programs\GlobalSend`、ADB），需要 Node 24.19+（24.x）与 pnpm 11.8。在 macOS 上编译 iOS/iPadOS 或只跑原生测试时，直接使用 `flutter` 命令，前置条件见根目录 [README「五端开发与测试」](../README.md)。
 
 成功后完整 Windows 程序更新至 `E:\Programs\GlobalSend` 并重启，继续使用项目已有状态；旧安装备份留在项目 `backups/windows-installed`。APK 保存在 `artifacts/releases`，向唯一 ADB 实体手机流式执行 `adb install -r`，覆盖安装并启动，不清除数据、不在手机公共目录留下 APK 副本。多台设备时直接运行 `scripts/Release-Local.ps1 -Serial <设备序列号>`。安装包不上服务器。
 
 需要仅交付安装文件时，使用 `-PushOnlyPhone`：APK 放在手机 `Download/GlobalSend/Updates/GlobalSend-latest.apk`，不安装、不启动；这是有意保留的交付文件。无人值守仅重连已提供的地址或复用已授权 USB；安装被系统拒绝时保留失败记录，等待用户确认，不自动反复发起。安装成功和应用启动成功分别记录，其它端继续发布。
 
-设备由另一个已授权任务独占联调时，使用 `npm run release:local -- -DeferPhone` 构建两端并更新Windows，将APK交给设备所有者安装；此选项不访问ADB。Android明确暂停时仍使用 `-WindowsOnly`，不构建APK。
+设备由另一个已授权任务独占联调时，使用 `pnpm run release:local -- -DeferPhone` 构建两端并更新Windows，将APK交给设备所有者安装；此选项不访问ADB。Android明确暂停时仍使用 `-WindowsOnly`，不构建APK。
 
 发布脚本的手机编排检查：`powershell -NoProfile -NonInteractive -File scripts/test-release-phone.ps1`（从项目根目录运行）。它检查流式安装、显式文件交付与失败状态，不访问 ADB、不运行原生构建。
 

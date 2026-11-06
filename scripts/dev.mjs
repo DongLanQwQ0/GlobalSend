@@ -14,7 +14,7 @@ function stop(code = 0) {
   for (const child of children) {
     if (!child.pid || child.exitCode !== null) continue;
     if (process.platform === 'win32') {
-      // Only terminate process trees started by this launcher (npm + its dev server).
+      // Only terminate process trees started by this launcher (pnpm + its dev server).
       spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
     } else {
       try { process.kill(-child.pid, 'SIGTERM'); } catch (error) {
@@ -26,14 +26,13 @@ function stop(code = 0) {
 }
 
 for (const project of ['server', 'web']) {
-  // shell:true is needed for npm.cmd on Windows. Arguments are fixed, never user input.
-  const child = spawn('npm', ['run', 'dev'], {
+  // shell:true is needed for pnpm.cmd on Windows. Arguments are fixed, never user input.
+  const child = spawn('pnpm', ['run', 'dev'], {
     cwd: resolve(root, project), stdio: 'inherit', shell: process.platform === 'win32',
     detached: process.platform !== 'win32',
     env: {
       ...environment,
       GLOBALSEND_DEV: '1',
-      npm_config_logs_dir: resolve(root, 'artifacts', 'logs', `npm-${project}`),
     },
   });
   children.push(child);

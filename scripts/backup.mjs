@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const help = `Offline local-center backup (Node 24)
 
 Stop the center yourself and keep it stopped until this command finishes.
-  npm run backup:local -- --server-stopped --data-dir <data> --relay-dir <relay>
+  pnpm run backup:local -- --server-stopped --data-dir <data> --relay-dir <relay>
 
 Both source directories must be explicit, to avoid backing up a different
 instance. Relative sources resolve from the project root. A new private

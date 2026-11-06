@@ -13,16 +13,16 @@
 ## 命令
 
 ```
-npm run bus -- status                          # 通道健康、各 agent 未读数、当前租约
-npm run bus -- send --from A --to B --kind question --subject "标题" --body-file note.md
-npm run bus -- inbox --as B [--all]            # 未读 / 全部
-npm run bus -- wait --as B --timeout 60s       # 阻塞等；0 收到 / 3 超时 / 2 用法错
-npm run bus -- watch --as B                    # 持续打印
-npm run bus -- ack --as B [--seq N]
-npm run bus -- log --tail 20 | show m000012
-npm run bus -- lease --owner A path...         # 文件租约，冲突退出码 5
-npm run bus -- leases
-npm run bus -- doctor                          # 全 PASS 退出码 0，异常 4
+pnpm run bus -- status                          # 通道健康、各 agent 未读数、当前租约
+pnpm run bus -- send --from A --to B --kind question --subject "标题" --body-file note.md
+pnpm run bus -- inbox --as B [--all]            # 未读 / 全部
+pnpm run bus -- wait --as B --timeout 60s       # 阻塞等；0 收到 / 3 超时 / 2 用法错
+pnpm run bus -- watch --as B                    # 持续打印
+pnpm run bus -- ack --as B [--seq N]
+pnpm run bus -- log --tail 20 | show m000012
+pnpm run bus -- lease --owner A path...         # 文件租约，冲突退出码 5
+pnpm run bus -- leases
+pnpm run bus -- doctor                          # 全 PASS 退出码 0，异常 4
 ```
 
 也可以 `node scripts/agentbus.mjs <命令>`。`--body-file -` 从 stdin 读，适合管道与多行 Markdown。

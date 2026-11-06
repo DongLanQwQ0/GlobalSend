@@ -33,3 +33,6 @@ key.properties
 docs/Communication/bus/run/
 docs/Communication/bus/ack/
 docs/Communication/bus/lock
+
+# The root package.json holds scripts only; dependency locks live per subproject.
+/pnpm-lock.yaml
